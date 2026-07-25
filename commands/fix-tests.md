@@ -5,7 +5,7 @@ model: opus
 allowed-tools: Task, Bash, Read, Edit, Glob, Grep, TodoWrite
 ---
 
-# Run & Fix Tests
+# Fix Tests
 
 Run the test suite, diagnose failures, and patch code to restore a green build. Edits code only — writes nothing under `docs/`.
 

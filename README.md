@@ -40,7 +40,7 @@ does what the layer below can't:
 | Feedback | when a check fails, its output is fed straight back to Claude mid-turn to fix | ~free |
 | Judgment | an LLM design review runs *only* where linters are blind, and only when a cheap triage says it's worth it | gated |
 
-**2. A doc-first workflow:** **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.**
+**2. A doc-first workflow:** **UNDERSTAND → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.**
 Planners write a short plan doc; `/orchestrate` implements it; `/scrutinise`
 reviews the result; `/sync-docs` keeps the docs honest. Acceptance criteria written
 at plan-time are enforced before a task can finish.
@@ -63,8 +63,7 @@ language is a one-block config edit, never a code change.
 | `/investigate` | root-cause a bug into a fix-ready plan |
 | `/scrutinise` | review what was built (routed, so trivial diffs stay cheap) |
 | `/sync-docs` | reconcile the docs with the code that actually shipped |
-| `/run-fix-tests` | get a red test suite green |
-| `/ultra-think` | deep, structured analysis of a hard decision |
+| `/fix-tests` | get a red test suite green |
 | `/craftsman:baseline` | snapshot pre-existing lint issues (run once per repo) |
 | `/craftsman:stats` | see which gates actually fire — delete the ones that don't earn their keep |
 | `/craftsman:toggle` | turn the gates on/off for this repo |
