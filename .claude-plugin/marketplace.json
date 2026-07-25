@@ -1,0 +1,14 @@
+{
+  "name": "craftsman-marketplace",
+  "owner": {
+    "name": "Kieran"
+  },
+  "plugins": [
+    {
+      "name": "craftsman",
+      "source": "./",
+      "version": "1.0.0",
+      "description": "Stack-agnostic doc-first loop + deterministic quality engine for any language or toolchain."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Rust design checklist
+
+- Data modeling: model closed variants as an `enum` and drive logic with exhaustive `match` (no catch-all `_` that hides new variants). Wrap primitives in newtypes (`struct UserId(u64)`) so units/IDs don't mix. Make illegal states unrepresentable — put data inside the variant that owns it rather than parallel `Option` fields.
+- Error model: return `Result<T, E>` and propagate with `?`. Split libraries vs applications — libraries define concrete typed errors with `thiserror`; binaries/top level use `anyhow` (or `eyre`) for ergonomic context via `.context(...)`. No `unwrap()`/`expect()` in library code paths; reserve `panic!` for genuine invariant violations.
+- Typing/nullability: no null — use `Option<T>` and pattern-match/combinators (`map`, `ok_or`, `?`) instead of unwrapping. Encode invariants in types so the compiler enforces them.
+- Ownership: prefer plain ownership and borrows; reach for `Rc<RefCell<>>`/`Arc<Mutex<>>` only when shared mutable state is genuinely required — treat `RefCell` runtime borrow panics as a design smell. Return owned values or `&`; avoid needless `.clone()` to dodge the borrow checker.
+- Concurrency: types crossing threads must be `Send`/`Sync` — let the compiler guide you. Prefer channels (`std::sync::mpsc`, crossbeam) or `Arc<Mutex<>>` for shared state; async uses `tokio` with `.await`, never block the runtime with sync I/O or CPU (`spawn_blocking` for that).
+- Abstraction/DI: define a `trait` only when there's a real second implementation or a test seam — otherwise use the concrete type. Prefer generics with trait bounds (static dispatch) over `dyn Trait` unless you need heterogeneity. Inject via generics or trait objects passed in.
+- API surface/immutability: bindings are immutable by default — keep it that way; take `&self` over `&mut self` where possible and expose the minimal `pub` surface. Derive `Debug`, `Clone`, `PartialEq` intentionally.
+- Test seams: `#[cfg(test)]` unit tests beside code, integration tests in `tests/`; substitute behavior via traits/generics. Keep pure logic free of I/O for cheap testing.

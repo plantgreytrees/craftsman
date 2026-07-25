@@ -1,0 +1,12 @@
+# craftsman runtime state (per-repo, never committed)
+.craftsman/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Node (the plugin has no npm deps, but just in case)
+node_modules/
+npm-debug.log*

@@ -1,0 +1,177 @@
+{
+  "enabled": true,
+  "timeoutMs": 20000,
+  "maxFeedbackLines": 40,
+  "noisePatterns": [
+    "^Found \\d+ error",
+    "^\\d+ (problems?|errors?|warnings?)",
+    "^\\[\\*\\] \\d+ fixable",
+    "^error(\\[E\\d+\\])?: aborting",
+    "^warning: .* generated \\d+ warning",
+    "^(Compiling|Checking|Finished|Building|Restored) ",
+    "^Build succeeded",
+    "^Build FAILED",
+    "^\\s*\\d+ (Error|Warning)\\(s\\)",
+    "^Time Elapsed",
+    "^Test Run ",
+    "^\\s*Passed!",
+    "^\\s*Failed!",
+    "^All checks passed",
+    "^Success: no issues found",
+    "^\\s*\\|",
+    "^\\s*-->",
+    "^(note|help): ",
+    "^\\s*$"
+  ],
+  "baselineNewOnly": true,
+  "ignore": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/target/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/out/**",
+    "**/bin/**",
+    "**/obj/**",
+    "**/vendor/**",
+    "**/.git/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.output/**",
+    "**/.svelte-kit/**",
+    "**/coverage/**",
+    "**/__pycache__/**",
+    "**/.craftsman/**",
+    "**/*.min.js",
+    "**/*.lock",
+    "**/package-lock.json",
+    "**/yarn.lock",
+    "**/pnpm-lock.yaml",
+    "**/*.pb.go",
+    "**/*_pb2.py",
+    "**/*.generated.*",
+    "**/migrations/**"
+  ],
+  "protectedPaths": [
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/target/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/bin/**",
+    "**/obj/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.output/**",
+    "**/.svelte-kit/**",
+    "**/*.generated.*",
+    "**/*.pb.go",
+    "**/*_pb2.py",
+    "**/*.min.js",
+    "**/package-lock.json",
+    "**/yarn.lock",
+    "**/pnpm-lock.yaml",
+    "**/*.lock",
+    "**/.env",
+    "**/.env.*"
+  ],
+  "learnedRules": {
+    "enabled": true,
+    "max": 10,
+    "minOccurrences": 3
+  },
+  "stopGate": {
+    "enabled": true,
+    "snapshotAtStart": true,
+    "requireAcceptanceCriteria": true,
+    "testTimeoutMs": 300000,
+    "commands": {
+      "package.json": "npm test --silent",
+      "Cargo.toml": "cargo test --quiet",
+      "pyproject.toml": "pytest -q",
+      "requirements.txt": "pytest -q",
+      "go.mod": "go test ./...",
+      "pom.xml": "mvn -q test",
+      "build.gradle": "gradle test -q",
+      "Gemfile": "bundle exec rake",
+      "*.sln": "dotnet test --nologo -v quiet",
+      "composer.json": "composer test"
+    },
+    "extraChecks": []
+  },
+  "security": {
+    "enabled": true,
+    "check": [
+      "gitleaks protect --staged --no-banner --redact"
+    ]
+  },
+  "docWriteGuard": {
+    "enabled": true,
+    "ttlMs": 3600000,
+    "pendingTtlMs": 1800000,
+    "docPaths": ["docs/**"]
+  },
+  "languages": {
+    "python": {
+      "extensions": [".py"],
+      "format": ["ruff format -q {file}"],
+      "check": ["ruff check --output-format=concise {file}"]
+    },
+    "typescript": {
+      "extensions": [".ts", ".tsx"],
+      "format": ["prettier --write --log-level silent {file}"],
+      "check": ["eslint --no-color --format unix {file}"]
+    },
+    "javascript": {
+      "extensions": [".js", ".jsx", ".mjs", ".cjs"],
+      "format": ["prettier --write --log-level silent {file}"],
+      "check": ["eslint --no-color --format unix {file}"]
+    },
+    "vue": {
+      "extensions": [".vue"],
+      "format": ["prettier --write --log-level silent {file}"],
+      "check": ["eslint --no-color --format unix {file}"]
+    },
+    "svelte": {
+      "extensions": [".svelte"],
+      "format": ["prettier --write --log-level silent {file}"],
+      "check": ["eslint --no-color --format unix {file}"]
+    },
+    "go": {
+      "extensions": [".go"],
+      "format": ["gofmt -w {file}", "goimports -w {file}"],
+      "check": ["go vet ./{dir}", "staticcheck ./{dir}"]
+    },
+    "rust": {
+      "extensions": [".rs"],
+      "format": ["rustfmt --edition 2021 {file}"],
+      "check": ["cargo clippy --quiet --message-format short --all-targets"]
+    },
+    "ruby": {
+      "extensions": [".rb"],
+      "format": ["rubocop -a {file}"],
+      "check": ["rubocop --format emacs {file}"]
+    },
+    "php": {
+      "extensions": [".php"],
+      "format": ["php-cs-fixer fix {file} -q"],
+      "check": ["phpstan analyse {file} --no-progress --error-format=raw"]
+    },
+    "shell": {
+      "extensions": [".sh", ".bash"],
+      "format": [],
+      "check": ["shellcheck -f gcc {file}"]
+    },
+    "csharp": {
+      "extensions": [".cs"],
+      "format": [],
+      "check": []
+    },
+    "java": {
+      "extensions": [".java"],
+      "format": [],
+      "check": []
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "craftsman",
+  "version": "1.0.0",
+  "description": "Stack-agnostic doc-first command loop plus a deterministic quality engine — regression-only lint/type gates, acceptance-criteria enforcement, routed review, language-aware planning, and concurrency-safe per-session state — for any language or toolchain. The generalized evolution of craftsman v0.2.",
+  "author": { "name": "Kieran" },
+  "license": "MIT",
+  "keywords": ["quality-gate", "doc-loop", "planning", "code-review", "language-agnostic", "craftsman"],
+  "userConfig": {
+    "PLANS_DIR": {
+      "type": "string",
+      "title": "Plans directory",
+      "description": "Repo-relative directory where plan docs and the tracker live.",
+      "default": "docs/plans"
+    },
+    "DOCS_DIR": {
+      "type": "string",
+      "title": "Docs root",
+      "description": "Repo-relative root of project documentation reconciled by /sync-docs.",
+      "default": "docs"
+    }
+  }
+}

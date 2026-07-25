@@ -1,0 +1,10 @@
+# Python design checklist
+
+- Data modeling: use `@dataclass(frozen=True, slots=True)` for plain records; reach for pydantic `BaseModel` only where you need parsing/validation at a boundary. Model variants as a closed set — a `Union` of frozen dataclasses plus `match`, not a `type` string field with `if/elif`.
+- Make illegal states unrepresentable: prefer distinct types per variant over a bag of `Optional` fields; use `enum.Enum`/`StrEnum` for closed choices instead of raw strings.
+- Error model: pick ONE strategy — raise a small tree of custom exceptions rooted at a package `Error` base. Never `except:` or `except Exception:` to swallow; catch the narrowest type and re-raise with `raise ... from e`. Don't return `None`/sentinels to signal errors.
+- Typing/nullability: annotate every public signature; run `mypy --strict` (or pyright) in CI. Make `Optional[T]` explicit and narrow it before use; avoid `Any` — use `object` + narrowing or a `Protocol`.
+- Async/concurrency: `asyncio` with `httpx.AsyncClient` for I/O; never call blocking code (requests, time.sleep, heavy CPU) on the loop — offload via `asyncio.to_thread`/`run_in_executor`. Use `TaskGroup` for structured concurrency; always set timeouts; guard shared state, don't assume the GIL protects compound ops.
+- Abstraction/DI: prefer a `typing.Protocol` (structural) over an `ABC` — no forced inheritance, easy fakes. Introduce the Protocol only when a second implementation or a test seam actually exists; pass collaborators as constructor/function args, don't reach for globals or import-time singletons.
+- API surface/immutability: prefer pure functions and frozen dataclasses; return new values instead of mutating arguments. Keep `__init__` cheap and side-effect free. Use keyword-only args (`*`) for wide signatures; avoid mutable default arguments.
+- Test seams: `pytest` with fixtures for setup and dependency substitution; inject fakes via the Protocol rather than monkeypatching internals. Parametrize with `@pytest.mark.parametrize`; keep unit tests off the network.

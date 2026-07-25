@@ -1,0 +1,10 @@
+# Java design checklist
+
+- Data modeling: use `record` for immutable data carriers and a `sealed interface` (with `permits`) implemented by records to form a sum type; `switch` over it with pattern matching so a new variant is a compile error. Use `enum` for closed constant sets.
+- Make illegal states unrepresentable: validate invariants in the record's compact constructor; prefer distinct types over flag fields; keep constructors that reject bad input rather than allowing half-built objects.
+- Error model: throw exceptions, but keep discipline — checked exceptions for recoverable, caller-actionable conditions; unchecked (`RuntimeException` subtypes) for programmer errors/invariant breaches. Don't catch-and-swallow, don't catch broad `Exception` to ignore, don't use exceptions for normal control flow. Wrap-and-rethrow with cause preserved.
+- Typing/nullability: use `Optional<T>` as a return type at boundaries to signal absence — never as a field or method parameter. Annotate with `@Nullable`/`@NonNull` (or JSpecify) and fail fast with `Objects.requireNonNull` on constructor args.
+- Concurrency: prefer immutable objects and higher-level tools (`ExecutorService`, `CompletableFuture`, `java.util.concurrent` collections, virtual threads) over raw `synchronized`/`wait`/`notify`. Guard shared mutable state; avoid shared-mutable-plus-locks when an immutable value would do. Don't block in async pipelines.
+- Abstraction/DI: constructor injection of dependencies (final fields set once); avoid field injection and setter injection. Define an interface only when a second implementation or a test double warrants it. Avoid God/"Manager" services — split by responsibility.
+- API surface/immutability: make fields `final` and classes effectively immutable by default; return unmodifiable collections (`List.copyOf`); expose the minimal public surface. Favor composition over inheritance.
+- Test seams: JUnit 5 with AssertJ fluent assertions; inject fakes through constructor-provided interfaces. Mock only true external collaborators (Mockito) — don't mock value objects or the class under test.

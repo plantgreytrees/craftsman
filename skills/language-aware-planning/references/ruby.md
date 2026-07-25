@@ -1,0 +1,10 @@
+# Ruby design checklist
+
+- Data modeling: small POROs with a single responsibility; immutable value objects via `Data.define(...)` (or a frozen `Struct`) for records that shouldn't change. Give value objects meaningful equality and no setters.
+- Make illegal states hard: validate invariants in `initialize` and raise on bad input rather than allowing partially-valid objects; use symbols/constants for closed choice sets; keep an explicit `type`/status rather than several boolean flags.
+- Error model: `raise` specific `StandardError` subclasses (an app-specific hierarchy), not bare `raise "string"` everywhere. Rescue the narrowest class; never `rescue => e` (or bare `rescue`) to swallow silently — re-raise or handle deliberately. Don't rescue `Exception`.
+- Typing/nullability: duck typing internally, but validate/coerce at boundaries (params, external data) before trusting — check for `nil` and `respond_to?` where it matters. Prefer `&.` and guard clauses over deep nil-checking; consider RBS/Sorbet on critical paths.
+- API surface: use keyword arguments for anything beyond one or two params (clarity, safe reordering); freeze constants and string literals (`# frozen_string_literal: true`); return new objects instead of mutating arguments in place.
+- Abstraction/DI: favor service objects (one public `call`) over fat models with sprawling responsibilities; inject collaborators as constructor/keyword args so they can be swapped. Introduce a module/interface abstraction only when a real second implementation exists — Ruby's duck typing means you rarely need a formal one.
+- Concurrency: remember the GIL protects Ruby-level ops but not I/O interleaving — guard shared mutable state with a `Mutex`; prefer immutable value objects and message passing. Don't share mutable globals across threads.
+- Test seams: RSpec with real objects and constructor-injected fakes; minimal mocking — stub external boundaries (HTTP, time, DB), not the object under test. Prefer `instance_double` (verifying) over loose `double` to catch drift.
