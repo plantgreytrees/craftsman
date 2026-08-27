@@ -43,7 +43,7 @@ if (cfg.security?.enabled) {
 let start = null;
 try { start = JSON.parse(fs.readFileSync(path.join(sdir, "session-start.json"), "utf8")); } catch {}
 let results = [];
-if (start?.results) results = start.results;
+if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
 for (const { cmd, green } of results) {
   if (!green) continue;
