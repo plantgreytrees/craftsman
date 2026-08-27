@@ -60,6 +60,19 @@ own by overriding the matching `languages.*` block in your project's
 With both markers present, both `pnpm -s test` and `go test ./...` run at
 session start and are re-checked at Stop.
 
+`/plan`'s blind-rederivation double-check (an independent second agent
+re-deriving scope from scratch, diffed against the plan) can be tuned in
+config:
+
+```json
+{ "planning": { "blindRederivation": "auto" } }
+```
+
+`"auto"` (default) runs it only for multi-module / shared-contract / migration
+/ security-sensitive requests; `"always"` runs it on every plan; `"never"`
+skips it entirely. Use `/craftsman:stats` to see how often the gate actually
+catches a miss before turning it down to `"never"`.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or
