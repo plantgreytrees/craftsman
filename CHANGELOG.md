@@ -28,12 +28,15 @@ plugin against its own standards.
   user has even approved the step; the resume loop now re-reads a plan doc's
   full task text only at request-resolution, post-compaction, or immediately
   before executing a unit, instead of on every loop iteration.
-- **`/scrutinise` skips review entirely on whitespace-only diffs** — a new
-  `scripts/diff-triviality.mjs` fast path (fails safe to "review as normal" on
-  any error) short-circuits the router + `code-reviewer` + panel for a
-  provably whitespace-only change; the `--deep` exhaustive-audit protocol
-  (Phase D) moved out of the always-loaded command body into
-  `commands/_scrutinise-deep.md`, read only when `--deep` is passed.
+- **`/scrutinise` skips the LLM review panel on whitespace-only diffs** — a
+  new `scripts/diff-triviality.mjs` fast path short-circuits the router +
+  `code-reviewer` + panel for a provably whitespace-only change; it always
+  still runs the mechanical floor (format/lint/typecheck/test), excludes
+  Python/YAML/Makefiles (where `git diff -w` can't be trusted — indentation is
+  semantic there), and fails safe to "review as normal" on any error or an
+  option-like argument. The `--deep` exhaustive-audit protocol (Phase D) moved
+  out of the always-loaded command body into `commands/_scrutinise-deep.md`,
+  read only when `--deep` is passed.
 - **`planning.blindRederivation` config knob** — `/plan`'s independent
   second-derivation double-check can now be forced `"always"` or turned
   `"never"` off per repo instead of only following the built-in size
