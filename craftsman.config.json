@@ -112,6 +112,9 @@
     "pendingTtlMs": 1800000,
     "docPaths": ["docs/**"]
   },
+  "planning": {
+    "blindRederivation": "auto"
+  },
   "languages": {
     "python": {
       "extensions": [".py"],

@@ -37,6 +37,19 @@ Change a test runner or wire a repo guard the same way:
 fast (seconds), and repo-level. Re-run `/craftsman:baseline` after adding checks
 so pre-existing findings don't surface as new.
 
+`/plan`'s blind-rederivation double-check (an independent second agent
+re-deriving scope from scratch, diffed against the plan) can be tuned in
+config:
+
+```json
+{ "planning": { "blindRederivation": "auto" } }
+```
+
+`"auto"` (default) runs it only for multi-module / shared-contract / migration
+/ security-sensitive requests; `"always"` runs it on every plan; `"never"`
+skips it entirely. Use `/craftsman:stats` to see how often the gate actually
+catches a miss before turning it down to `"never"`.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or
