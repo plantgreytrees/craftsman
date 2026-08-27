@@ -35,6 +35,8 @@ which is what makes the plugin language-agnostic.
 ```bash
 # every script must parse
 for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f" || echo "FAIL $f"; done
+# unit tests for the core engine logic
+node --test scripts/lib/*.test.mjs
 # all JSON must be valid
 for j in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json craftsman.config.json; do
   node -e "JSON.parse(require('fs').readFileSync('$j','utf8'))" || echo "FAIL $j"
