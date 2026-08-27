@@ -37,9 +37,11 @@ Change a test runner or wire a repo guard the same way:
 fast (seconds), and repo-level. Re-run `/craftsman:baseline` after adding checks
 so pre-existing findings don't surface as new.
 
-By default `java` wires to `google-java-format` (format) and `checkstyle`
-(check); swap either binary for your own by overriding the `languages.java`
-block in your project's `craftsman.config.json`.
+By default `csharp` wires to `dotnet format` (format and check), `java` wires
+to `google-java-format` (format) and `checkstyle` (check), and `cpp`/`c` wire
+to `clang-format` (format) and `clang-tidy` (check); swap any of these for your
+own by overriding the matching `languages.*` block in your project's
+`craftsman.config.json`.
 
 `stopGate.commands` runs **every** matched marker's command, not just the first
 — useful for monorepos with more than one test runner:
