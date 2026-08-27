@@ -41,6 +41,23 @@ By default `java` wires to `google-java-format` (format) and `checkstyle`
 (check); swap either binary for your own by overriding the `languages.java`
 block in your project's `craftsman.config.json`.
 
+`stopGate.commands` runs **every** matched marker's command, not just the first
+— useful for monorepos with more than one test runner:
+
+```json
+{
+  "stopGate": {
+    "commands": {
+      "package.json": "pnpm -s test",
+      "go.mod": "go test ./..."
+    }
+  }
+}
+```
+
+With both markers present, both `pnpm -s test` and `go test ./...` run at
+session start and are re-checked at Stop.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or
