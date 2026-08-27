@@ -2,9 +2,9 @@
 // /craftsman:stats — cost/benefit report. Shows how often each gate blocks
 // and how long it takes, so you can delete the layers that don't earn their
 // tokens. This is the empirical answer to "which tools pay for themselves?".
-import { loadConfig, readEvents } from "./lib/core.mjs";
+import { loadConfig, readEvents, topRules } from "./lib/core.mjs";
 
-loadConfig();
+const cfg = loadConfig();
 const events = readEvents();
 if (!events.length) { console.log("No craftsman events yet. Do some work, then re-run."); process.exit(0); }
 
@@ -39,5 +39,24 @@ console.log(`  cache hit rate: ${cacheRate}%\n`);
 console.log(`PreToolUse protected-path blocks: ${pre.length}`);
 console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);
 console.log(`SessionStart injections: ${ss.length}`);
+
+const router = events.filter((e) => e.ev === "router");
+console.log(`\nReview router: ${router.length} decisions`);
+if (!router.length) {
+  console.log("  No review-router events yet.");
+} else {
+  const rr = byResult(router);
+  for (const [k, v] of Object.entries(rr)) console.log(`  ${k.padEnd(16)} ${v}  (${Math.round((100 * v) / router.length)}%)`);
+  const escalateRate = router.length ? Math.round((100 * (rr.ESCALATE || 0)) / router.length) : 0;
+  console.log(`  escalate rate: ${escalateRate}%`);
+}
+
+const rules = topRules(cfg);
+console.log(`\nLearned rules: ${rules.length}`);
+if (!rules.length) {
+  console.log("  No learned rules yet.");
+} else {
+  for (const r of rules) console.log(`  ${r.lang}/${r.tool} (${r.n} occurrences): ${r.sample}`);
+}
 
 console.log(`\nRead: a layer with ~0% block rate but non-trivial latency is a candidate to cut.`);
