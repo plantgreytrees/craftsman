@@ -37,6 +37,10 @@ Change a test runner or wire a repo guard the same way:
 fast (seconds), and repo-level. Re-run `/craftsman:baseline` after adding checks
 so pre-existing findings don't surface as new.
 
+By default `java` wires to `google-java-format` (format) and `checkstyle`
+(check); swap either binary for your own by overriding the `languages.java`
+block in your project's `craftsman.config.json`.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or

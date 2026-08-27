@@ -165,13 +165,18 @@
     },
     "csharp": {
       "extensions": [".cs"],
-      "format": [],
-      "check": []
+      "format": ["dotnet format --include {file} -v quiet"],
+      "check": ["dotnet format --verify-no-changes --severity info --include {file} -v quiet"]
     },
     "java": {
       "extensions": [".java"],
-      "format": [],
-      "check": []
+      "format": ["google-java-format -i {file}"],
+      "check": ["checkstyle -c /google_checks.xml {file}"]
+    },
+    "cpp": {
+      "extensions": [".c", ".h", ".cc", ".cpp", ".hpp", ".hh"],
+      "format": ["clang-format -i {file}"],
+      "check": ["clang-tidy {file} --quiet"]
     }
   }
 }
