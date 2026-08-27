@@ -63,7 +63,7 @@ export function loadConfig() {
   }
 }
 
-function deepMerge(a, b) {
+export function deepMerge(a, b) {
   const out = { ...a };
   for (const [k, v] of Object.entries(b)) {
     out[k] = v && typeof v === "object" && !Array.isArray(v) && a[k]
@@ -186,7 +186,7 @@ export function writeBaseline(file, lines) {
 
 // strip line/col numbers so an unrelated edit that shifts lines doesn't
 // resurrect every pre-existing finding as "new"
-function normLine(l) {
+export function normLine(l) {
   return l.replace(/:\d+(:\d+)?/g, ":N").replace(/\s+/g, " ").trim();
 }
 
