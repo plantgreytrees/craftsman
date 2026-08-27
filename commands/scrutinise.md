@@ -22,7 +22,7 @@ Target: `$ARGUMENTS` (a module/directory, a git range, or a plan slug whose merg
 
 ## Phase 1 — Rigorous review (parallel, read-only)
 
-**Routing first (cheap).** Before spending the full panel, delegate `review-router` (haiku) on the diff — it returns ESCALATE or SKIP in one word. On **SKIP** for a small, low-risk change (no new API/endpoint, no auth/permissions/migration/concurrency/contract change, ≤~120 lines): run only the mechanical floor + `code-reviewer` and stop; don't fan out the panel. On **ESCALATE**: proceed to the full dispatch. This keeps trivial diffs cheap and reserves the expensive reviewers for changes that warrant them.
+**Routing first (cheap).** Before spending the full panel, delegate `review-router` (haiku) on the diff — it returns ESCALATE or SKIP in one word. Immediately log the verdict by running `node "${CLAUDE_PLUGIN_ROOT}/scripts/log-router.mjs" <verdict> "<reason>"` via Bash, before acting on it. On **SKIP** for a small, low-risk change (no new API/endpoint, no auth/permissions/migration/concurrency/contract change, ≤~120 lines): run only the mechanical floor + `code-reviewer` and stop; don't fan out the panel. On **ESCALATE**: proceed to the full dispatch. This keeps trivial diffs cheap and reserves the expensive reviewers for changes that warrant them.
 
 Dispatch, briefing each with the *governing doc* so review is against the standard, not taste:
 - `code-reviewer`: correctness, security, maintainability **against** the family `docs/standards/*` standard, the architecture/exception rules (fail-closed), and the plan's acceptance gates. context7 (if available) to confirm any claimed library-API usage is actually correct.
