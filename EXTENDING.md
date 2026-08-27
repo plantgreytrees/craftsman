@@ -37,6 +37,23 @@ Change a test runner or wire a repo guard the same way:
 fast (seconds), and repo-level. Re-run `/craftsman:baseline` after adding checks
 so pre-existing findings don't surface as new.
 
+`stopGate.commands` runs **every** matched marker's command, not just the first
+— useful for monorepos with more than one test runner:
+
+```json
+{
+  "stopGate": {
+    "commands": {
+      "package.json": "pnpm -s test",
+      "go.mod": "go test ./..."
+    }
+  }
+}
+```
+
+With both markers present, both `pnpm -s test` and `go test ./...` run at
+session start and are re-checked at Stop.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or

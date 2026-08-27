@@ -42,12 +42,16 @@ if (cfg.security?.enabled) {
 // 2. Tests — only if they were green when THIS session began.
 let start = null;
 try { start = JSON.parse(fs.readFileSync(path.join(sdir, "session-start.json"), "utf8")); } catch {}
-if (start?.testsGreenAtStart && start.cmd) {
-  const [bin, ...args] = start.cmd.split(" ");
+let results = [];
+if (start?.results) results = start.results;
+else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
+for (const { cmd, green } of results) {
+  if (!green) continue;
+  const [bin, ...args] = cmd.split(" ");
   try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 300000, maxBuffer: 8e6 }); }
   catch (e) {
     const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
-    problems.push(`REGRESSION: tests passed at session start but fail now (${start.cmd}):\n${out}`);
+    problems.push(`REGRESSION: tests passed at session start but fail now (${cmd}):\n${out}`);
   }
 }
 

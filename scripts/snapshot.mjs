@@ -25,17 +25,20 @@ function markerPresent(m) {
   return fs.existsSync(m);
 }
 
-const entry = Object.entries(cfg.stopGate?.commands || {}).find(([m]) => markerPresent(m));
-if (!entry) process.exit(0);
+const entries = Object.entries(cfg.stopGate?.commands || {}).filter(([m]) => markerPresent(m));
+if (!entries.length) process.exit(0);
 
-const [, cmd] = entry;
-const [bin, ...args] = cmd.split(" ");
-let green = false;
-try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 180000, maxBuffer: 8e6 }); green = true; } catch {}
+const results = [];
+for (const [, cmd] of entries) {
+  const [bin, ...args] = cmd.split(" ");
+  let green = false;
+  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 180000, maxBuffer: 8e6 }); green = true; } catch {}
+  results.push({ cmd, green });
+}
 
 try {
   const dir = sessionDir(sid);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "session-start.json"),
-    JSON.stringify({ testsGreenAtStart: green, cmd, sid, ts: Date.now() }));
+    JSON.stringify({ results, sid, ts: Date.now() }));
 } catch {}

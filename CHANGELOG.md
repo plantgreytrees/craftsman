@@ -3,6 +3,27 @@
 All notable changes to craftsman are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Self-review of the craftsman engine: closes five gaps found by reviewing the
+plugin against its own standards.
+
+### Added
+- **C#/Java/C++ tooling wired up** — `csharp` now runs `dotnet format`, `java`
+  now runs `google-java-format`/`checkstyle`, and a new `cpp` language block
+  runs `clang-format`/`clang-tidy` (`clang-format` was already probed for but
+  unused).
+- **Review-router visibility in `/craftsman:stats`** — `review-router`'s
+  ESCALATE/SKIP decisions and the learned-rules store are now surfaced as new
+  "Review router" and "Learned rules" sections instead of being invisible.
+- **`scripts/lib/core.mjs` unit tests** — a new `scripts/lib/core.test.mjs`
+  suite (Node's built-in `node:test`) covering `globToRe`, `deepMerge`, and
+  `normLine`, the engine's previously untested hand-rolled logic.
+- **Multi-runner `stopGate.commands`** — a monorepo can list more than one
+  test-runner marker (e.g. `package.json` and `go.mod`) and every matched
+  command now runs at session start and is re-checked at Stop, instead of only
+  the first match.
+
 ## [1.0.0]
 
 The generalized, stack-agnostic evolution of the craftsman v0.2 starter.
