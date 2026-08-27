@@ -23,6 +23,21 @@ plugin against its own standards.
   test-runner marker (e.g. `package.json` and `go.mod`) and every matched
   command now runs at session start and is re-checked at Stop, instead of only
   the first match.
+- **`/orchestrate` reads less per run** — `--step`'s pre-approval plan summary
+  no longer reads the 1,780-word `_shared-machinery.md` protocol before the
+  user has even approved the step; the resume loop now re-reads a plan doc's
+  full task text only at request-resolution, post-compaction, or immediately
+  before executing a unit, instead of on every loop iteration.
+- **`/scrutinise` skips review entirely on whitespace-only diffs** — a new
+  `scripts/diff-triviality.mjs` fast path (fails safe to "review as normal" on
+  any error) short-circuits the router + `code-reviewer` + panel for a
+  provably whitespace-only change; the `--deep` exhaustive-audit protocol
+  (Phase D) moved out of the always-loaded command body into
+  `commands/_scrutinise-deep.md`, read only when `--deep` is passed.
+- **`planning.blindRederivation` config knob** — `/plan`'s independent
+  second-derivation double-check can now be forced `"always"` or turned
+  `"never"` off per repo instead of only following the built-in size
+  heuristic (`"auto"`, the unchanged default).
 
 ## [1.0.0]
 
