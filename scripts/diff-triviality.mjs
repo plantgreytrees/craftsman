@@ -33,6 +33,11 @@ function substantive(reason) {
   process.exit(1);
 }
 
+// A range that looks like a flag (e.g. starts with "-") would be interpreted
+// by git as an option rather than a revision — reject it instead of passing
+// it through.
+if (range && range.startsWith("-")) substantive(`refusing option-like range argument ${JSON.stringify(range)}`);
+
 try {
   const nameArgs = ["diff", "--name-only"];
   if (range) nameArgs.push(range);
