@@ -9,7 +9,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
-  sidOf, sessionDir, pruneSessions, logEvent, git, readStdin, markerPresent,
+  sidOf, sessionDir, pruneSessions, logEvent, git, readStdin, markerPresent, warn,
 } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
@@ -65,7 +65,17 @@ try {
 } catch { /* stale, missing, or scoped to a different tool set */ }
 if (!present) {
   present = [];
-  for (const b of wanted) { try { await pexec("which", [b]); present.push(b); } catch {} }
+  const probeBin = process.platform === "win32" ? "where" : "which";
+  let warnedProbeMissing = false;
+  for (const b of wanted) {
+    try { await pexec(probeBin, [b]); present.push(b); }
+    catch (e) {
+      if (e.code === "ENOENT" && !warnedProbeMissing) {
+        warnedProbeMissing = true;
+        warn(`${probeBin} not found — tool presence checks will report every tool as absent`);
+      }
+    }
+  }
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), wanted, present })); } catch {}
 }
 const missing = wanted.filter((b) => !present.includes(b));

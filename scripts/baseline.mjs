@@ -6,17 +6,18 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, writeBaseline,
-  renderKnownIssuesDoc, logEvent, git, PROJECT_ROOT,
+  renderKnownIssuesDoc, logEvent, gitTrackedFiles, PROJECT_ROOT,
 } from "./lib/core.mjs";
 
 const cfg = loadConfig();
 if (!enabled(cfg)) { console.log("craftsman is off — nothing to baseline."); process.exit(0); }
 
-// Prefer git-tracked files (relative to PROJECT_ROOT); fall back to a shallow
-// walk from PROJECT_ROOT if not a repo. Always resolved to absolute paths —
-// every downstream helper (isIgnored, runChecks) anchors to PROJECT_ROOT too,
-// not wherever this process happened to be invoked from.
-let rels = (await git(["ls-files"])).split("\n").map((s) => s.trim()).filter(Boolean);
+// Prefer the shared tracked-plus-untracked-not-ignored file list (relative to
+// PROJECT_ROOT); fall back to a shallow walk from PROJECT_ROOT if not a repo.
+// Always resolved to absolute paths — every downstream helper (isIgnored,
+// runChecks) anchors to PROJECT_ROOT too, not wherever this process happened
+// to be invoked from.
+let rels = await gitTrackedFiles();
 if (!rels.length) {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(d, e.name);
