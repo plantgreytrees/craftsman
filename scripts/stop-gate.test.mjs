@@ -88,6 +88,184 @@ test("stop-gate: a command killed by the shared budget (cap < timeoutMs) logs st
   }
 });
 
+test("stop-gate: a SECRETS scan killed by the shared budget blocks with SECRETS SCAN INCOMPLETE, unlike test/extra", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ['node -e "setTimeout(()=>{},5000)"'] },
+    stopGate: {
+      totalBudgetMs: 3000,
+      testTimeoutMs: 250000,
+      requireAcceptanceCriteria: false,
+    },
+  });
+  try {
+    const { stdout, events } = await runStopGate(dir, "scenario-a-secret");
+    assert.ok(
+      !events.some((e) => e.ev === "stop-budget-exceeded"),
+      "a budget-truncated secrets scan must not be logged as a silent stop-budget-exceeded skip"
+    );
+    assert.match(stdout, /"decision":"block"/, "an incomplete secrets scan must block Stop");
+    assert.match(stdout, /SECRETS SCAN INCOMPLETE/, "the block reason must use the distinct incomplete-scan wording");
+    assert.doesNotMatch(stdout, /flagged content/, "must not be confused with an actual SECRETS finding");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: CRITICAL regression — a budget-truncated secrets scan never marks itself scanned, so the next Stop re-attempts it instead of silently passing", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ['node -e "setTimeout(()=>{},5000)"'] },
+    stopGate: {
+      totalBudgetMs: 3000,
+      testTimeoutMs: 250000,
+      requireAcceptanceCriteria: false,
+    },
+  });
+  const sid = "scenario-critical-marker";
+  const markerPath = path.join(dir, ".craftsman", "sessions", sid, "secrets-scanned");
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.match(first.stdout, /SECRETS SCAN INCOMPLETE/, "first Stop must block on the incomplete scan");
+    assert.ok(
+      !fs.existsSync(markerPath),
+      "a killed (incomplete) scan must never write the scanned marker — this was the reproduced Critical finding"
+    );
+
+    // The working tree never changed (the fixture never wrote anything), so
+    // if the marker had wrongly been written by the first, killed attempt,
+    // this second same-session Stop would read scannedThisSession=true and
+    // silently SKIP the secrets task entirely — passing Stop having never
+    // once completed a real scan. Re-running proves that gap is closed: the
+    // scan is dispatched again and blocks again, exactly as the first time.
+    const second = await runStopGate(dir, sid);
+    assert.match(
+      second.stdout,
+      /SECRETS SCAN INCOMPLETE/,
+      "the scan must be re-attempted (and still block) on the next Stop in the same session, not silently skipped"
+    );
+    assert.ok(!fs.existsSync(markerPath), "still no marker after a second incomplete attempt");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: CRITICAL regression (multi-command) — a completed sibling secret command must not mark the whole batch scanned while another was killed", async () => {
+  const dir = makeFixture({
+    security: {
+      enabled: true,
+      check: [
+        'node -e "process.exit(0)"',         // fast, completes successfully
+        'node -e "setTimeout(()=>{},5000)"', // killed by the shared budget
+      ],
+    },
+    stopGate: {
+      totalBudgetMs: 3000,
+      testTimeoutMs: 250000,
+      requireAcceptanceCriteria: false,
+    },
+  });
+  // Commit the config so the tree is genuinely clean (see the note in the
+  // "marks the session scanned" test below) — otherwise the fixture's
+  // always-dirty tree would re-attempt the scan on the second Stop
+  // regardless of whether the marker was (buggily) written, masking the
+  // exact regression this test exists to catch.
+  spawnSync("git", ["add", "-A"], { cwd: dir });
+  spawnSync("git", ["commit", "-q", "-m", "config"], { cwd: dir });
+  const sid = "scenario-multi-command-marker";
+  const markerPath = path.join(dir, ".craftsman", "sessions", sid, "secrets-scanned");
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.match(first.stdout, /"decision":"block"/, "the killed sibling must block Stop");
+    assert.match(first.stdout, /SECRETS SCAN INCOMPLETE/, "the killed command's incompleteness must be reported");
+    assert.ok(
+      !fs.existsSync(markerPath),
+      "a completed sibling command must NOT let the whole batch be marked scanned while another command was killed"
+    );
+
+    const second = await runStopGate(dir, sid);
+    assert.match(
+      second.stdout,
+      /SECRETS SCAN INCOMPLETE/,
+      "on an unchanged clean tree, the incomplete command must be re-attempted, not silently passed because a sibling finished"
+    );
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// NOTE on the "own timeoutMs" kill path (cap === t.timeoutMs, as opposed to
+// cap < t.timeoutMs for a shared-budget kill): a "secret" task's timeoutMs is
+// hardcoded to 60000ms in stop-gate.mjs (`tasks.push({ kind: "secret", cmd,
+// timeoutMs: 60000 })`) and is not configurable, so reaching cap ===
+// t.timeoutMs requires a generous totalBudgetMs (the common case — see the
+// comment above `budgetDeadline`) AND a scan that genuinely runs the better
+// part of 60 real seconds before being killed. Exercising that exact branch
+// end-to-end would require a ~60s wait in this suite, which isn't a
+// reasonable trade for an automated repro. Verified instead by direct code
+// inspection of runTask's catch block: `problems.push(cap < t.timeoutMs ? ...
+// "cut short by the Stop-gate time budget" ... : ... "did not finish within
+// its own configured limit" ...)` — when `cap` resolves to the full
+// `t.timeoutMs` (the generous-budget case), `cap < t.timeoutMs` is false, so
+// the second (own-timeout) wording is selected, and the function `return`s
+// immediately after — it can never fall through to the old `SECRETS: ...
+// flagged content` branch below, so a slow-but-genuine tool timeout can never
+// be misreported as an actual finding.
+
+test("stop-gate: a secrets task with the shared budget already exhausted before dispatch (cap <= 0) blocks with SECRETS SCAN INCOMPLETE, not a silent skip", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ['node -e "process.exit(0)"'] },
+    stopGate: {
+      totalBudgetMs: 0,
+      testTimeoutMs: 250000,
+      requireAcceptanceCriteria: false,
+    },
+  });
+  try {
+    const { stdout, events } = await runStopGate(dir, "scenario-predispatch-secret");
+    assert.ok(
+      !events.some((e) => e.ev === "stop-budget-exceeded"),
+      "a pre-dispatch-exhausted secrets task must not be logged as a silent stop-budget-exceeded skip"
+    );
+    assert.match(stdout, /"decision":"block"/, "a secrets scan that never got to start must block Stop");
+    assert.match(
+      stdout,
+      /SECRETS SCAN INCOMPLETE:.*budget was already exhausted before the scan could even start/,
+      "the block reason must explain the scan never started"
+    );
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a secrets scan that runs to completion (clean) marks the session scanned, so a subsequent clean-tree Stop skips re-scanning", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ['node -e "process.exit(0)"'] },
+    stopGate: { requireAcceptanceCriteria: false },
+  });
+  // makeFixture leaves craftsman.config.json uncommitted (untracked), which
+  // would read as a permanently dirty tree and make `shouldScan` true
+  // unconditionally — masking the marker-driven skip this test exists to
+  // prove. Commit it so the tree is genuinely clean (`.craftsman/` itself is
+  // filtered out of dirtiness separately, by isCraftsmanStateLine).
+  spawnSync("git", ["add", "-A"], { cwd: dir });
+  spawnSync("git", ["commit", "-q", "-m", "config"], { cwd: dir });
+  const sid = "scenario-scan-completes";
+  const markerPath = path.join(dir, ".craftsman", "sessions", sid, "secrets-scanned");
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.doesNotMatch(first.stdout, /"decision":"block"/, "a clean, completed scan must not block");
+    assert.ok(fs.existsSync(markerPath), "a scan that ran to completion must write the scanned marker");
+
+    const second = await runStopGate(dir, sid);
+    assert.ok(
+      second.events.some((e) => e.ev === "stop-secrets-skipped"),
+      "a second same-session Stop on an unchanged clean tree must skip re-scanning, using the marker written above"
+    );
+    assert.doesNotMatch(second.stdout, /"decision":"block"/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("stop-gate: a command killed after its own full timeoutMs (budget not binding) still blocks, unchanged", async () => {
   const dir = makeFixture({
     security: { enabled: false },

@@ -124,29 +124,69 @@ for (const cmd of cfg.stopGate?.extraChecks || []) {
 // alongside each other, so the shared budget only ever binds when the *sum
 // of what's actually slow* is large (several genuinely slow test runners),
 // not merely because a mandatory secrets scan happened to run first.
-// Deliberate, disclosed exception, not a silent weakening: a budget-skipped
-// "secret" task is logged only, same as "test"/"extra" — given concurrent
-// dispatch this is practically unreachable except under genuine multi-
-// command time pressure. That's about whether an already time-starved Stop
-// attempt gets to run the scan at all, not about what happens once it runs
-// and finds something — a real hit is still a hard, non-baselined block.
+// Deliberate, disclosed exception, not a silent weakening — but "secret" is
+// no longer treated like "test"/"extra" anywhere in this budget logic: ANY
+// kill of a "secret" task — pre-dispatch (cap <= 0, budget already exhausted
+// before the scan could even start) or mid-run (killed by the shared budget
+// or by its own configured timeoutMs) — is an incomplete scan, and this
+// codebase's "secrets are always a hard block, never baselined" guarantee
+// forbids treating that unknown as a clean pass. So every one of those cases
+// blocks with a SECRETS SCAN INCOMPLETE problem instead of a silent
+// stop-budget-exceeded log. `scannedMarker` reflects this at the BATCH level,
+// not per-task: `cfg.security.check` may configure multiple commands, and one
+// sibling completing while another is killed must not mark the whole batch
+// "scanned" — see `allSecretsCompleted` below. "test"/"extra" keep the
+// original silent-skip behavior in both cases: they have an established
+// safe-skip precedent elsewhere in this file (see the "unfinished snapshot"
+// comment near `isDirty` above) that a security scan does not share.
 const budgetDeadline = Date.now() + (cfg.stopGate?.totalBudgetMs ?? 280000);
+
+let allSecretsCompleted = true; // batch-wide: marker only written if every "secret" task actually finished
 
 async function runTask(t) {
   const cap = Math.min(t.timeoutMs, budgetDeadline - Date.now());
-  if (cap <= 0) { logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd }); return; }
+  if (cap <= 0) {
+    if (t.kind === "secret") {
+      allSecretsCompleted = false;
+      problems.push(
+        `SECRETS SCAN INCOMPLETE: ${t.cmd} — the Stop-gate time budget was already exhausted ` +
+        `before the scan could even start. Increase stopGate.totalBudgetMs or reduce other ` +
+        `configured checks, then retry.`
+      );
+      return;
+    }
+    logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
+    return;
+  }
   const [bin, ...args] = splitCmd(t.cmd);
-  // Only record "a scan happened this session" once the scan is genuinely
-  // about to be dispatched (cap > 0, right here) — not merely queued onto
-  // `tasks`. Writing the marker any earlier would let a budget-skipped
-  // attempt (cap <= 0 above) durably mark the session as scanned, silently
-  // defeating 1.9's "at least one real scan per session" guarantee for every
-  // subsequent clean Stop in that same session.
-  if (t.kind === "secret") { try { atomicWrite(scannedMarker, checkSig); } catch {} }
   try {
     await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: PROJECT_ROOT });
+    // this task completed; allSecretsCompleted only flips false elsewhere —
+    // the actual marker write happens once, after the whole batch resolves
   } catch (e) {
-    if (t.kind !== "test" && e.code === "ENOENT") return; // tool absent: skip silently
+    if (t.kind !== "test" && e.code === "ENOENT") {
+      if (t.kind === "secret") allSecretsCompleted = false; // never ran — don't count as checked
+      return;
+    }
+    if (t.kind === "secret" && e.killed) {
+      // A killed secrets scan — whether cut short by the shared budget or by
+      // its own configured timeoutMs — never finished, so we genuinely don't
+      // know whether it would have found something. This codebase's
+      // "secrets are always a hard block, never baselined" guarantee forbids
+      // treating that unknown as a clean pass (unlike "test"/"extra", which
+      // have an established safe-skip precedent — see the "unfinished
+      // snapshot" comment near `isDirty` above — that a security scan does
+      // not share).
+      allSecretsCompleted = false;
+      problems.push(cap < t.timeoutMs
+        ? `SECRETS SCAN INCOMPLETE: ${bin} was cut short by the Stop-gate time budget before ` +
+          `it could finish (needed up to ${t.timeoutMs}ms, only had ${cap}ms available) — ` +
+          `increase stopGate.totalBudgetMs or reduce other configured checks, then retry.`
+        : `SECRETS SCAN INCOMPLETE: ${bin} did not finish within its own configured limit ` +
+          `(${t.timeoutMs}ms) — the scan itself needs more time on this tree; consider a ` +
+          `faster tool/narrower scope, then retry.`);
+      return;
+    }
     // Narrower than core.mjs's runOne(), which treats ANY kill as a non-
     // finding — that function has no shared budget to weigh a kill against,
     // so `e.killed` alone is sufficient there. Here, `e.killed` reliably
@@ -155,11 +195,14 @@ async function runTask(t) {
     // in this code path sends a kill signal), so `cap < t.timeoutMs` alone
     // cleanly distinguishes "the shared budget cut it short" from "it ran
     // its own full configured allowance."
-    if (e.killed && cap < t.timeoutMs) {
+    if (e.killed && cap < t.timeoutMs) { // t.kind is "test" or "extra" here — unchanged
       logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
       return;
     }
     if (t.kind === "secret") {
+      // Completed (not killed), exited non-zero: a real finding. This task
+      // itself DID finish — allSecretsCompleted is untouched (stays true
+      // unless some OTHER secret task in this batch was incomplete).
       problems.push(`SECRETS: ${bin} flagged content in the working tree:\n${
         ((e.stdout || "") + (e.stderr || "")).split("\n").slice(0, 15).join("\n")}`);
     } else if (t.kind === "test") {
@@ -173,6 +216,15 @@ async function runTask(t) {
 }
 
 await Promise.all(tasks.map(runTask));
+
+// Mark the session scanned only once EVERY secret task in this batch
+// actually ran to completion — if any was killed, ENOENT'd, or never
+// dispatched due to budget exhaustion, the whole batch stays "not yet
+// scanned" so a later clean-tree Stop keeps re-attempting the incomplete
+// scan(s) instead of treating a partial batch as fully checked.
+if (tasks.some((t) => t.kind === "secret") && allSecretsCompleted) {
+  try { atomicWrite(scannedMarker, checkSig); } catch {}
+}
 
 // Only clear once there was something real to check: session-start.json is
 // written by a BACKGROUND snapshot that may still be running on this first
