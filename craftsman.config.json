@@ -88,6 +88,7 @@
     "snapshotAtStart": true,
     "requireAcceptanceCriteria": true,
     "testTimeoutMs": 250000,
+    "totalBudgetMs": 280000,
     "commands": {
       "package.json": "npm test --silent",
       "Cargo.toml": "cargo test --quiet",

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import {
-  globToRe, deepMerge, normLine, tokenize, filterAttributed, extractSig,
+  globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
   renderKnownIssuesDoc,
 } from "./core.mjs";
@@ -90,6 +90,14 @@ test("tokenize: quoted tokens in the template are unquoted before substitution",
   const file = path.join(PROJECT_ROOT, "a.rb");
   const parts = tokenize('rubocop --format "emacs" {file}', file);
   assert.deepEqual(parts, ["rubocop", "--format", "emacs", "a.rb"]);
+});
+
+test("splitCmd: a quoted argument with an embedded space stays one token", () => {
+  assert.deepEqual(splitCmd("pytest -q -k 'test something'"), ["pytest", "-q", "-k", "test something"]);
+});
+
+test("splitCmd: a plain unquoted command still splits on whitespace", () => {
+  assert.deepEqual(splitCmd("gitleaks dir . --no-banner --redact"), ["gitleaks", "dir", ".", "--no-banner", "--redact"]);
 });
 
 test("filterAttributed: keeps only lines whose leading path matches the edited file", () => {

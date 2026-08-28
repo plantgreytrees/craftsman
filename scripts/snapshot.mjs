@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, sessionDir, markerPresent, PROJECT_ROOT } from "./lib/core.mjs";
+import { loadConfig, enabled, sessionDir, markerPresent, PROJECT_ROOT, splitCmd } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
 const sid = (process.argv[2] || "shared").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "shared";
@@ -23,9 +23,9 @@ if (!entries.length) process.exit(0);
 
 const results = [];
 for (const cmd of entries) {
-  const [bin, ...args] = cmd.split(" ");
+  const [bin, ...args] = splitCmd(cmd);
   let green = false;
-  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 180000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); green = true; } catch {}
+  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); green = true; } catch {}
   results.push({ cmd, green });
 }
 

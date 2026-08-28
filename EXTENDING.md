@@ -85,6 +85,18 @@ something you just introduced.
 With both markers present, both `pnpm -s test` and `go test ./...` run at
 session start and are re-checked at Stop.
 
+At Stop, every matched test command, every `extraChecks` entry, and (on a
+dirty working tree) the secrets scan all run **concurrently**, not summed —
+the common single-runner case is unaffected. `stopGate.totalBudgetMs`
+(default `280000`, 20s of headroom under the Stop hook's 300s ceiling in
+`hooks/hooks.json`) is the shared wall-clock deadline across that whole
+batch; a command that would still be running once the budget is exhausted is
+skipped and logged (`stop-budget-exceeded`), never blocked:
+
+```json
+{ "stopGate": { "totalBudgetMs": 280000 } }
+```
+
 `/plan`'s blind-rederivation double-check (an independent second agent
 re-deriving scope from scratch, diffed against the plan) can be tuned in
 config:

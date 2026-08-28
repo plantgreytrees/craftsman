@@ -196,16 +196,30 @@ async function have(bin) {
   return whichCache.get(bin);
 }
 
+// Quote-aware token split shared by tokenize() (per-file {file}/{dir}
+// substitution) and splitCmd() (no per-file template — a plain configured
+// command like a secrets scan or an extraCheck).
+function splitTokens(str) {
+  const raw = str.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  return raw.map((tok) => tok.replace(/^["']|["']$/g, ""));
+}
+
 export function tokenize(cmdTemplate, file) {
   const rel = path.relative(PROJECT_ROOT, file) || file;
   const dir = path.dirname(rel);
   // Substitute per-token so a {file}/{dir} value containing a space still
   // becomes exactly one argument, instead of splitting the path in two.
-  const raw = cmdTemplate.match(/"[^"]*"|'[^']*'|\S+/g) || [];
-  return raw.map((tok) => {
-    const unquoted = tok.replace(/^["']|["']$/g, "");
-    return unquoted.replaceAll("{file}", rel).replaceAll("{dir}", dir);
-  });
+  return splitTokens(cmdTemplate).map((tok) =>
+    tok.replaceAll("{file}", rel).replaceAll("{dir}", dir)
+  );
+}
+
+/** Quote-aware split for a configured command with no per-file template
+ * (stop-gate.mjs's secrets/test/extraChecks commands, snapshot.mjs's test
+ * commands) — same quoting rules as tokenize(), minus the {file}/{dir}
+ * substitution these call sites have no use for. */
+export function splitCmd(str) {
+  return splitTokens(str);
 }
 
 async function runOne(cmdTemplate, file, timeoutMs) {
