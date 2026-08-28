@@ -140,21 +140,29 @@ export function detectLang(file, cfg) {
 }
 
 // ------------------------------------------------------------ repo markers ---
-// Cached whole-repo tracked-file listing, used both for stack-marker presence
-// (any depth — a .csproj two directories down, a go.mod in a monorepo
-// service) and available to any caller that needs the tracked set.
+// Cached whole-repo tracked-plus-untracked-not-ignored file listing, used both
+// for stack-marker presence (any depth — a .csproj two directories down, a
+// go.mod in a monorepo service) and available to any caller that needs the
+// set. `--others --exclude-standard` adds files on disk but not yet
+// staged/committed (a freshly scaffolded package.json/go.mod), while still
+// respecting .gitignore.
 let _gitFiles = null;
 export async function gitTrackedFiles() {
   if (_gitFiles) return _gitFiles;
-  const out = await git(["ls-files"]);
+  const out = await git(["ls-files", "--others", "--cached", "--exclude-standard"]);
   _gitFiles = out.split("\n").map((s) => s.trim()).filter(Boolean);
   return _gitFiles;
 }
 
+// Test-only: reset the memoized file list so a test can exercise the real
+// gitTrackedFiles() against freshly-changed on-disk state within one process.
+export function resetGitTrackedFilesCache() { _gitFiles = null; }
+
 /** Does `marker` (a literal filename or a `*`-glob like "*.csproj") exist
- * anywhere in the repo? Prefers the tracked-file list (works at any depth,
- * respects .gitignore, one process spawn total); falls back to a shallow
- * multi-level directory walk when there's no git repo to ask. */
+ * anywhere in the repo? Prefers the tracked-plus-untracked-not-ignored file
+ * list (works at any depth, respects .gitignore, one process spawn total);
+ * falls back to a shallow multi-level directory walk when there's no git repo
+ * to ask. */
 export async function markerPresent(marker) {
   const files = await gitTrackedFiles();
   if (files.length) {
@@ -185,9 +193,20 @@ export async function markerPresent(marker) {
 
 // --------------------------------------------------------------- runners ---
 
+// Warn only once per process when the probe binary itself (which/where) is
+// missing — distinct from the probe running and simply not finding `bin`.
+let warnedProbeMissing = false;
 async function which(bin) {
   try { await pexec(process.platform === "win32" ? "where" : "which", [bin]); return true; }
-  catch { return false; }
+  catch (e) {
+    if (e.code === "ENOENT") {
+      if (!warnedProbeMissing) {
+        warnedProbeMissing = true;
+        warn(`${process.platform === "win32" ? "where" : "which"} not found — tool presence checks will report every tool as absent`);
+      }
+    }
+    return false;
+  }
 }
 
 const whichCache = new Map();
@@ -353,6 +372,11 @@ export function cacheKey(file, lang, cfg) {
     .update(content)
     .update(lang.name)
     .update(JSON.stringify(lang.check || []))
+    // Deliberate allow-list, not every lang.* field: extensions/ignore don't
+    // affect check/format output, so a future field that does needs a human
+    // decision to add it here, not silent omission.
+    .update(JSON.stringify(lang.format || []))
+    .update(String(!!lang.projectScoped))
     // invalidate the cache whenever config changes, so edits to checks,
     // noise filters or ignore rules take effect immediately
     .update(JSON.stringify({ n: cfg.noisePatterns, i: cfg.ignore, b: cfg.baselineNewOnly }))

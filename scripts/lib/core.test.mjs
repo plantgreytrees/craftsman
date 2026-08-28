@@ -5,11 +5,12 @@
 // Uses Node's built-in test runner (no external dependencies).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import {
   globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
-  renderKnownIssuesDoc,
+  renderKnownIssuesDoc, gitTrackedFiles, resetGitTrackedFilesCache,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -175,6 +176,14 @@ test("cacheKey: identical inputs are deterministic; a changed config busts the k
   const cfgB = { noisePatterns: ["^y"], ignore: [], baselineNewOnly: true };
   assert.equal(cacheKey(file, lang, cfgA), cacheKey(file, lang, cfgA));
   assert.notEqual(cacheKey(file, lang, cfgA), cacheKey(file, lang, cfgB));
+
+  const langFormatA = { name: "python", check: ["ruff check {file}"], format: ["black {file}"] };
+  const langFormatB = { name: "python", check: ["ruff check {file}"], format: ["autopep8 {file}"] };
+  assert.notEqual(cacheKey(file, langFormatA, cfgA), cacheKey(file, langFormatB, cfgA));
+
+  const langScopedA = { name: "python", check: ["ruff check {file}"], projectScoped: true };
+  const langScopedB = { name: "python", check: ["ruff check {file}"], projectScoped: false };
+  assert.notEqual(cacheKey(file, langScopedA, cfgA), cacheKey(file, langScopedB, cfgA));
 });
 
 test("markerPresent: finds a literal marker at the project root via git ls-files", async () => {
@@ -187,6 +196,19 @@ test("markerPresent: a glob marker matches at any depth", async () => {
 
 test("markerPresent: a marker that doesn't exist anywhere in the repo returns false", async () => {
   assert.equal(await markerPresent("this-file-does-not-exist.xyz"), false);
+});
+
+test("gitTrackedFiles: sees an untracked-but-not-ignored scratch file", async () => {
+  const scratch = path.join(PROJECT_ROOT, "craftsman-core-test-scratch.tmp");
+  fs.writeFileSync(scratch, "scratch");
+  try {
+    resetGitTrackedFilesCache();
+    const files = await gitTrackedFiles();
+    assert.ok(files.includes("craftsman-core-test-scratch.tmp"), "untracked scratch file should be listed");
+  } finally {
+    fs.rmSync(scratch, { force: true });
+    resetGitTrackedFilesCache();
+  }
 });
 
 test("renderKnownIssuesDoc: empty entries renders a clean-state message, no table", () => {
