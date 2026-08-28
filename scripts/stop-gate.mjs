@@ -147,6 +147,18 @@ async function runTask(t) {
     await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: PROJECT_ROOT });
   } catch (e) {
     if (t.kind !== "test" && e.code === "ENOENT") return; // tool absent: skip silently
+    // Narrower than core.mjs's runOne(), which treats ANY kill as a non-
+    // finding — that function has no shared budget to weigh a kill against,
+    // so `e.killed` alone is sufficient there. Here, `e.killed` reliably
+    // means Node's own `timeout: cap` fired (verified: a maxBuffer overflow
+    // on execFile produces no `killed` flag on this runtime — nothing else
+    // in this code path sends a kill signal), so `cap < t.timeoutMs` alone
+    // cleanly distinguishes "the shared budget cut it short" from "it ran
+    // its own full configured allowance."
+    if (e.killed && cap < t.timeoutMs) {
+      logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
+      return;
+    }
     if (t.kind === "secret") {
       problems.push(`SECRETS: ${bin} flagged content in the working tree:\n${
         ((e.stdout || "") + (e.stderr || "")).split("\n").slice(0, 15).join("\n")}`);
