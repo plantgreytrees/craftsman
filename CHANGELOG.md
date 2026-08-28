@@ -181,16 +181,25 @@ plugin against its own standards.
   (default `"docs/errors/KNOWN_ISSUES.md"`; set to `false` to disable).
   `/sync-docs --arch` excludes it from reconciliation — it's machine-managed
   by `/craftsman:baseline`, not hand-authored architecture prose.
-- **Stop-gate secrets scan skips a clean tree** — `git status --porcelain
-  --ignored` (not the Write/Edit-only session `dirty` marker, which a
-  Bash-created file never sets) now gates whether the mandatory secrets scan
-  runs on a given Stop, instead of running unconditionally every time. A
-  session-scoped guarantee still forces at least one real scan per session
-  regardless of dirtiness, so an already-committed secret that predates the
-  session can't go permanently unscanned, and the marker is keyed to a
-  signature of `security.check` so a mid-session config change forces a fresh
-  scan too. `.craftsman/`, the plugin's own always-present,
-  constantly-changing runtime-state directory, is now excluded from the dirty
+- **Stop-gate secrets scan skips a clean tree, never silently on an
+  incomplete one** — `git status --porcelain --ignored` (not the
+  Write/Edit-only session `dirty` marker, which a Bash-created file never
+  sets) now gates whether the mandatory secrets scan runs on a given Stop,
+  instead of running unconditionally every time. A session-scoped guarantee
+  still forces at least one real scan per session regardless of dirtiness,
+  so an already-committed secret that predates the session can't go
+  permanently unscanned, and the marker is keyed to a signature of
+  `security.check` so a mid-session config change forces a fresh scan too —
+  and the marker only ever reflects a scan that actually finished (tracked
+  batch-wide across every configured `security.check` command), never one
+  that was cut short. A scan that gets killed for any reason — the shared
+  time budget, its own configured timeout, or never even starting because
+  the budget was already exhausted — hard-blocks with a `SECRETS SCAN
+  INCOMPLETE` message instead of either being silently treated as clean or
+  misreported as a confirmed hit; "secrets are always a hard block, never
+  baselined" now holds for an unfinished scan too, not just a finished one
+  that found something. `.craftsman/`, the plugin's own always-present,
+  constantly-changing runtime-state directory, is excluded from the dirty
   check so it stops making every tree read as dirty.
 - **Stop-gate commands run concurrently under one shared budget** — the
   secrets scan, every matched test runner, and every `extraChecks` entry now
@@ -199,7 +208,10 @@ plugin against its own standards.
   own full timeout, fixing a real case where one test runner's
   `testTimeoutMs` (250000ms) plus the secrets scan (60000ms) could already
   exceed the Stop hook's 300s ceiling in `hooks/hooks.json` with only one
-  configured test command.
+  configured test command. A test/guard command cut short by the shared
+  budget (rather than genuinely failing) is now correctly logged and
+  skipped instead of being misreported as a test regression or guard
+  failure.
 - **Quote-safe command splitting in `stop-gate.mjs`/`snapshot.mjs`** — both
   now use a new `splitCmd` export (`scripts/lib/core.mjs`), sharing the
   quote-aware logic `tokenize()` already had, instead of a naive
