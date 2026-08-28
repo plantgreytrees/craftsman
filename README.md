@@ -113,7 +113,14 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   background); tool detection is scoped to your detected stack and cached;
   lint results are content-hash cached; the Stop-gate's test-regression check
   only re-runs when something was actually edited since the last check, so an
-  answer-only turn doesn't re-run the suite for nothing.
+  answer-only turn doesn't re-run the suite for nothing. At Stop, every test
+  command, `extraChecks` entry, and secrets scan run concurrently against one
+  shared wall-clock budget (`stopGate.totalBudgetMs`) rather than summed —
+  see [EXTENDING.md](EXTENDING.md).
+- **Secrets are a hard block, never silently skipped** — a scan that gets cut
+  off (budget, its own timeout, or a missing scanner binary) fails the Stop
+  gate with a clear message instead of passing quietly; a clean working tree
+  still gets scanned at least once per session.
 
 ---
 
@@ -150,11 +157,11 @@ plugin name. Uninstall v0.2 first (see [INSTALL.md](INSTALL.md), step 0).
 ## Contributing
 
 Issues and PRs welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. The plugin is
-dependency-free; `node --test scripts/lib/core.test.mjs` (the engine's unit
-suite), `node --check` on every script, and `claude plugin validate .` are the
-whole test suite — CI runs all three on every push and PR. Keep it
-stack-agnostic — project-specific behaviour belongs in a project's own
-`.claude/`, not in the plugin.
+dependency-free; `node --test scripts/lib/core.test.mjs scripts/stop-gate.test.mjs`
+(the engine's unit + Stop-gate subprocess suites), `node --check` on every
+script, and `claude plugin validate .` are the whole test suite — CI runs all
+three on every push and PR. Keep it stack-agnostic — project-specific
+behaviour belongs in a project's own `.claude/`, not in the plugin.
 
 ## License
 
