@@ -66,8 +66,17 @@ try {
 // Guarantee at least one scan per session regardless of dirtiness via a
 // session-scoped marker, so "secrets are always a hard block" still holds
 // across a whole session, not just across dirty Stops within it.
+// The marker records WHAT was scanned (a signature of cfg.security.check),
+// not merely THAT a scan happened: if the configured security checks change
+// mid-session — e.g. a new/different tool added to security.check — a
+// session that already scanned the OLD list must not treat itself as
+// "already scanned" for a check that has never actually run. Same principle
+// already applied to cacheKey() in lib/core.mjs — hash the config that
+// affects behavior, not just existence.
 const scannedMarker = path.join(sdir, "secrets-scanned");
-const scannedThisSession = fs.existsSync(scannedMarker);
+const checkSig = sha1(JSON.stringify(cfg.security?.check || []));
+let scannedThisSession = false;
+try { scannedThisSession = fs.readFileSync(scannedMarker, "utf8") === checkSig; } catch {}
 const shouldScan = treeDirty || !scannedThisSession;
 if (!shouldScan) logEvent({ ev: "stop-secrets-skipped", sid, reason: "clean" });
 
@@ -133,7 +142,7 @@ async function runTask(t) {
   // attempt (cap <= 0 above) durably mark the session as scanned, silently
   // defeating 1.9's "at least one real scan per session" guarantee for every
   // subsequent clean Stop in that same session.
-  if (t.kind === "secret") { try { atomicWrite(scannedMarker, String(Date.now())); } catch {} }
+  if (t.kind === "secret") { try { atomicWrite(scannedMarker, checkSig); } catch {} }
   try {
     await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: PROJECT_ROOT });
   } catch (e) {
