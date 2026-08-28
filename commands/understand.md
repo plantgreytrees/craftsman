@@ -15,6 +15,7 @@ Target: `$ARGUMENTS`. Prefer the [deep-research](../skills/deep-research/SKILL.m
 **Two objectives, held together:**
 - **Efficiency** — anchor in the authoritative docs first (don't re-derive what's written), fan out **read-only in parallel**, read *excerpts to locate* not whole files, and stop when the model is complete. `Explore` agents return conclusions + `file:line`, not file dumps. Trace what the target *and its dependents* touch, nothing wider.
 - **Total coverage** — the point of this pass is that the plan **misses nothing**. Trace not just the asked-for code but everything it **depends on and everything that depends on it** (the full blast radius), and pre-enumerate every dependent item so `/plan`'s completeness sweep starts from a filled-in checklist, not a blank one.
+- **Bounded, not unbounded, on a huge target** — full per-bullet tracing (Phase 1's entry points, layers, contracts, state, enforcement, and tests sweep) applies to the target itself and its directly-coupled modules — direct importers and importees, the first ring out. Once the total module count crosses **~15**, everything past that first ring is listed by name only, not traced — and the brief's **Gaps, risks & open questions** section (Phase 2) states this explicitly, so a huge target degrades visibly instead of silently or via unbounded token spend.
 
 ## Phase 0 — Anchor in existing docs (don't re-derive what's written)
 
@@ -40,7 +41,7 @@ Reconcile the traces into one coherent model (skip the ceremony for a small sing
 - **Layer & ownership map** — table: layer → module / file → responsibility.
 - **Contracts & blast radius** — what it produces/consumes and who a change here would affect.
 - **Enforcement, config, state** — the gates / flags / migrations that govern it.
-- **Gaps, risks & open questions** — dead config, weak coverage, stale contracts (route real defects to `/investigate`, not here).
+- **Gaps, risks & open questions** — dead config, weak coverage, stale contracts (route real defects to `/investigate`, not here). If Phase 1's ~15-module cap engaged, say so here: which modules got full per-bullet tracing vs which were listed by name only past the first ring, so the brief's coverage stays auditable rather than silently partial.
 - **Coverage checklist for `/plan` (the payoff)** — pre-fill each completeness dimension with what *this* area touches, so the plan can't silently skip one: **contract ripple** (which consumers a change hits) · **data layer** (tables/migrations) · **config & flags** · **security** (which gates apply) · **tests** (what exists, what a change needs) · **observability** · **UI** (call sites / states) · **docs** (which doc owns it). Each line names the concrete files — the plan turns these into units.
 - **Doc reconciliation note** — if the owning doc drifted, name the drift for `/sync-docs`.
 
