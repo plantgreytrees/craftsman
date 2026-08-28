@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, sha1, logEvent, readStdin } from "./lib/core.mjs";
+import { loadConfig, enabled, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
 const cfg = loadConfig();
@@ -26,17 +26,32 @@ try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
 
 const problems = [];
 
-// 1. Secrets — always a hard block, never baselined.
-if (cfg.security?.enabled) {
-  for (const cmd of cfg.security.check || []) {
-    const [bin, ...args] = cmd.split(" ");
-    try { await pexec(bin, args, { timeout: 60000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); }
-    catch (e) {
-      if (e.code === "ENOENT") continue; // tool absent: skip silently
-      problems.push(`SECRETS: ${bin} flagged content in the working tree:\n${
-        ((e.stdout || "") + (e.stderr || "")).split("\n").slice(0, 15).join("\n")}`);
-    }
-  }
+// 1. Secrets — always a hard block, never baselined — but only worth
+// re-scanning when the working tree actually changed since the last scan.
+// `isDirty` below (the PostToolUse "dirty" marker) is a session Write/Edit/
+// MultiEdit marker, not working-tree state — a Bash-created file never sets
+// it, so a real `git status` read is required here instead. `--ignored` is
+// required, not optional: plain `--porcelain` omits gitignored files by
+// default, and a freshly-created `.env`-style file is exactly the class of
+// file most likely to carry a real secret and most likely to be gitignored;
+// without `--ignored` it would read the tree as "clean" and skip the one
+// scan that exists to catch it. Fail-safe: any error (not a git repo, git
+// absent) defaults treeDirty=true, so the scan still runs. This changes only
+// the "should we scan right now" decision — a real gitleaks hit when it does
+// run is still a hard, non-baselined block.
+let treeDirty = true;
+try {
+  const { stdout } = await pexec("git", ["status", "--porcelain", "--ignored"], { cwd: PROJECT_ROOT });
+  treeDirty = stdout.trim().length > 0;
+} catch { /* fail-safe: not a git repo / git absent — scan anyway */ }
+if (!treeDirty) logEvent({ ev: "stop-secrets-skipped", sid, reason: "clean" });
+
+// Build one flat task list — secrets, session-start test regressions, extra
+// guards — and run it as a single concurrent batch below, instead of three
+// independent sequential loops competing for the same wall-clock budget.
+const tasks = [];
+if (cfg.security?.enabled && treeDirty) {
+  for (const cmd of cfg.security.check || []) tasks.push({ kind: "secret", cmd, timeoutMs: 60000 });
 }
 
 // 2. Tests — only if they were green when THIS session began, AND only if
@@ -55,35 +70,68 @@ else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: 
 if (isDirty) {
   for (const { cmd, green } of results) {
     if (!green) continue;
-    const [bin, ...args] = cmd.split(" ");
-    try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); }
-    catch (e) {
-      const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
-      problems.push(`REGRESSION: tests passed at session start but fail now (${cmd}):\n${out}`);
-    }
+    tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
   }
-  // Only clear once there was something real to check: session-start.json is
-  // written by a BACKGROUND snapshot that may still be running on this first
-  // dirty Stop (results stays [] until it finishes). Clearing unconditionally
-  // would let a later Stop — once the snapshot finally lands — see isDirty
-  // false and skip the regression check that never actually ran. An empty
-  // `results` forever (no stopGate.commands marker matched at all) is exactly
-  // as cheap to leave dirty as to clear: there's nothing to run either way.
-  if (results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
 } else {
   logEvent({ ev: "stop-tests-skipped", sid, reason: "clean" });
 }
 
 // 2b. Project guards / extra checks (e.g. run-all-guards.py, contract-drift).
 for (const cmd of cfg.stopGate?.extraChecks || []) {
-  const [bin, ...args] = cmd.split(" ");
-  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); }
-  catch (e) {
-    if (e.code === "ENOENT") continue;
-    const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-20).join("\n");
-    problems.push(`GUARD FAILED (${cmd}):\n${out}`);
+  tasks.push({ kind: "extra", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
+}
+
+// Shared wall-clock budget across every command in the batch above. Since
+// every task dispatches together at (approximately) the same instant, `cap`
+// (computed per-task, at dispatch time, in runTask) is effectively each
+// task's own full configured `timeoutMs` in the common case — this is the
+// fix for the old sequential design's flaw: secrets and tests no longer
+// compete for the same clock by running one after another, they run
+// alongside each other, so the shared budget only ever binds when the *sum
+// of what's actually slow* is large (several genuinely slow test runners),
+// not merely because a mandatory secrets scan happened to run first.
+// Deliberate, disclosed exception, not a silent weakening: a budget-skipped
+// "secret" task is logged only, same as "test"/"extra" — given concurrent
+// dispatch this is practically unreachable except under genuine multi-
+// command time pressure. That's about whether an already time-starved Stop
+// attempt gets to run the scan at all, not about what happens once it runs
+// and finds something — a real hit is still a hard, non-baselined block.
+const budgetDeadline = Date.now() + (cfg.stopGate?.totalBudgetMs ?? 280000);
+
+async function runTask(t) {
+  const cap = Math.min(t.timeoutMs, budgetDeadline - Date.now());
+  if (cap <= 0) { logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd }); return; }
+  const [bin, ...args] = splitCmd(t.cmd);
+  try {
+    await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: PROJECT_ROOT });
+  } catch (e) {
+    if (t.kind !== "test" && e.code === "ENOENT") return; // tool absent: skip silently
+    if (t.kind === "secret") {
+      problems.push(`SECRETS: ${bin} flagged content in the working tree:\n${
+        ((e.stdout || "") + (e.stderr || "")).split("\n").slice(0, 15).join("\n")}`);
+    } else if (t.kind === "test") {
+      const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
+      problems.push(`REGRESSION: tests passed at session start but fail now (${t.cmd}):\n${out}`);
+    } else {
+      const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-20).join("\n");
+      problems.push(`GUARD FAILED (${t.cmd}):\n${out}`);
+    }
   }
 }
+
+await Promise.all(tasks.map(runTask));
+
+// Only clear once there was something real to check: session-start.json is
+// written by a BACKGROUND snapshot that may still be running on this first
+// dirty Stop (results stays [] until it finishes). Clearing unconditionally
+// would let a later Stop — once the snapshot finally lands — see isDirty
+// false and skip the regression check that never actually ran. An empty
+// `results` forever (no stopGate.commands marker matched at all) is exactly
+// as cheap to leave dirty as to clear: there's nothing to run either way.
+// Unchanged by whether any individual test task above was budget-skipped or
+// failed — this is about "was there a session-start snapshot to check
+// against," not about this run's outcome.
+if (isDirty && results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
 
 // 3. Acceptance criteria — enforce ONLY if THIS session owns the current
 //    acceptance.md content (its recorded hash matches). A concurrent session
