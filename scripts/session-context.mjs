@@ -5,14 +5,12 @@
 // tools from repo markers; everything else is config-driven.
 import fs from "node:fs";
 import path from "node:path";
-import { execFile, spawn } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
-  sidOf, sessionDir, pruneSessions, logEvent, git, readStdin, markerPresent, warn,
+  sidOf, sessionDir, pruneSessions, logEvent, git, readStdin, markerPresent, have,
 } from "./lib/core.mjs";
 
-const pexec = promisify(execFile);
 const cfg = loadConfig();
 if (!enabled(cfg)) process.exit(0);
 
@@ -65,16 +63,8 @@ try {
 } catch { /* stale, missing, or scoped to a different tool set */ }
 if (!present) {
   present = [];
-  const probeBin = process.platform === "win32" ? "where" : "which";
-  let warnedProbeMissing = false;
   for (const b of wanted) {
-    try { await pexec(probeBin, [b]); present.push(b); }
-    catch (e) {
-      if (e.code === "ENOENT" && !warnedProbeMissing) {
-        warnedProbeMissing = true;
-        warn(`${probeBin} not found — tool presence checks will report every tool as absent`);
-      }
-    }
+    if (await have(b)) present.push(b);
   }
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); fs.writeFileSync(CACHE, JSON.stringify({ ts: Date.now(), wanted, present })); } catch {}
 }
