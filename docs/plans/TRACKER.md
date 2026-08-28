@@ -25,3 +25,7 @@ Shared across sessions. Only touch rows you created; never prune or reformat for
 | 19 | audit-fixes | scripts/lib/core.test.mjs, .github/workflows/ci.yml | JS/YAML | normal | MERGED | 2026-08-27T23:40:00Z |
 | 20 | known-issues-doc | scripts/lib/core.mjs, scripts/baseline.mjs, scripts/lib/core.test.mjs | JS (Node ESM, node:test) | normal | MERGED | 2026-08-28T00:00:00Z |
 | 21 | known-issues-doc | craftsman.config.json, commands/baseline.md, commands/sync-docs.md, EXTENDING.md, INSTALL.md, README.md, CHANGELOG.md | JSON/Markdown | normal | MERGED | 2026-08-28T00:00:00Z |
+| 22 | engine-hardening | scripts/stop-gate.mjs, scripts/snapshot.mjs, scripts/lib/core.mjs (splitCmd), craftsman.config.json, EXTENDING.md | JS (Node ESM)/JSON/Markdown | normal | MERGED (0b5557a, +a72da89, +06a2636 — 3 post-merge security-review addenda: 1.9 per-session scan-once-minimum marker, 1.10 .craftsman/ self-dirtying fix, 1.11 config-signature-aware marker; each reject-then-approve or approve on review) | 2026-08-28T00:00:00Z |
+| 23 | engine-hardening | scripts/lib/core.mjs, scripts/session-context.mjs, scripts/baseline.mjs | JS (Node ESM) | normal | MERGED (94bfbc7) — reviewed: approve, 3 non-blocking suggestions | 2026-08-28T00:00:00Z |
+| 24 | engine-hardening | commands/understand.md, commands/investigate.md, commands/sync-docs.md | Markdown | normal | MERGED (0e860db) — router: SKIP | 2026-08-28T00:00:00Z |
+| 25 | engine-hardening | CHANGELOG.md | Markdown | normal | MERGED (42f9265) | 2026-08-28T00:00:00Z |

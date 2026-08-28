@@ -1,6 +1,9 @@
 # craftsman runtime state (per-repo, never committed)
 .craftsman/
 
+# orchestrate's per-unit worktrees (never committed)
+.worktrees/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
