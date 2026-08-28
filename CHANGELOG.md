@@ -5,6 +5,8 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-28
+
 Self-review of the craftsman engine: closes five gaps found by reviewing the
 plugin against its own standards.
 
