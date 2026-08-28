@@ -181,6 +181,52 @@ plugin against its own standards.
   (default `"docs/errors/KNOWN_ISSUES.md"`; set to `false` to disable).
   `/sync-docs --arch` excludes it from reconciliation — it's machine-managed
   by `/craftsman:baseline`, not hand-authored architecture prose.
+- **Stop-gate secrets scan skips a clean tree** — `git status --porcelain
+  --ignored` (not the Write/Edit-only session `dirty` marker, which a
+  Bash-created file never sets) now gates whether the mandatory secrets scan
+  runs on a given Stop, instead of running unconditionally every time. A
+  session-scoped guarantee still forces at least one real scan per session
+  regardless of dirtiness, so an already-committed secret that predates the
+  session can't go permanently unscanned, and the marker is keyed to a
+  signature of `security.check` so a mid-session config change forces a fresh
+  scan too. `.craftsman/`, the plugin's own always-present,
+  constantly-changing runtime-state directory, is now excluded from the dirty
+  check so it stops making every tree read as dirty.
+- **Stop-gate commands run concurrently under one shared budget** — the
+  secrets scan, every matched test runner, and every `extraChecks` entry now
+  dispatch together under a single `stopGate.totalBudgetMs` (default
+  280000ms) instead of three independent sequential loops each getting their
+  own full timeout, fixing a real case where one test runner's
+  `testTimeoutMs` (250000ms) plus the secrets scan (60000ms) could already
+  exceed the Stop hook's 300s ceiling in `hooks/hooks.json` with only one
+  configured test command.
+- **Quote-safe command splitting in `stop-gate.mjs`/`snapshot.mjs`** — both
+  now use a new `splitCmd` export (`scripts/lib/core.mjs`), sharing the
+  quote-aware logic `tokenize()` already had, instead of a naive
+  `cmd.split(" ")` that broke on any quoted or spaced argument.
+  `snapshot.mjs`'s `testTimeoutMs` fallback default also now matches
+  `stop-gate.mjs`'s (`250000`, was `180000`).
+- **Marker detection sees untracked-but-not-ignored files** —
+  `gitTrackedFiles()` (used by stack detection, Stop-gate runner selection,
+  and `/craftsman:baseline`, which now shares this helper instead of its own
+  duplicate implementation) reports a freshly scaffolded `package.json`/
+  `go.mod` immediately instead of only after it's committed.
+- **Tool-presence probing distinguishes "not installed" from "can't
+  check"** — `which()` and `session-context.mjs`'s tool probe no longer
+  silently treat a missing `which`/`where` binary the same as a missing
+  target tool; they now warn once when it's the probe itself that's absent.
+  `session-context.mjs`'s probe also gained the Windows (`win32` →
+  `"where"`) branch it previously lacked entirely, where every tool
+  unconditionally read as absent.
+- **`cacheKey()` covers `format`/`projectScoped`** — a changed formatter
+  config or `projectScoped` setting now busts the check cache the same way a
+  changed `check` config already did, instead of silently leaving
+  already-cached files unformatted under the new rules.
+- **`/understand`, `/investigate`, and `/sync-docs --tracker` fan-out is
+  capped** — bounded to ~15 modules/segments/rows with explicit logging of
+  what's excluded, matching the discipline `/scrutinise --deep` already had,
+  instead of an unbounded fan-out that risked runaway cost on a
+  densely-coupled or monorepo-wide target.
 
 ## [1.0.0]
 
