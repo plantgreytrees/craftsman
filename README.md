@@ -36,12 +36,12 @@ does what the layer below can't:
 
 | Layer | What happens | Cost |
 |---|---|---|
-| Deterministic | on every edit: format → lint → type-check; at "done": secrets scan + test-regression check. **Only newly-introduced issues are reported.** | ~free |
+| Deterministic | on every edit: format → lint → type-check; at "done": secrets scan + test-regression check (skipped when nothing changed since the last check). **Only newly-introduced issues are reported.** | ~free |
 | Feedback | when a check fails, its output is fed straight back to Claude mid-turn to fix | ~free |
-| Judgment | an LLM design review runs *only* where linters are blind, and only when a cheap triage says it's worth it | gated |
+| Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
 
-**2. A doc-first workflow:** **UNDERSTAND → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.**
-Planners write a short plan doc; `/orchestrate` implements it; `/scrutinise`
+**2. A doc-first workflow:** **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.**
+Planners write a short plan doc; `/orchestrate` executes it; `/scrutinise`
 reviews the result; `/sync-docs` keeps the docs honest. Acceptance criteria written
 at plan-time are enforced before a task can finish.
 
@@ -49,6 +49,12 @@ at plan-time are enforced before a task can finish.
 if its tool isn't installed** — so the same plugin lints Python with `ruff`, Go with
 `staticcheck`, Rust with `clippy`, and so on, wherever those tools exist. Adding a
 language is a one-block config edit, never a code change.
+
+**3. Pre-existing issues don't just vanish.** The gate only ever reports issues
+*you* introduce — but `/craftsman:baseline` also writes what it skipped to
+`docs/errors/KNOWN_ISSUES.md` (worst file first, regenerated on every run), so
+a legacy repo's debt stays visible and addressable instead of living only in a
+gitignored local snapshot.
 
 ---
 
@@ -59,7 +65,7 @@ language is a one-block config edit, never a code change.
 | `/craftsman:init` | detect the stack and scaffold a project config + starter `CLAUDE.md` |
 | `/understand` | build a cited understanding of a feature/area before touching it |
 | `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
-| `/orchestrate` | implement a plan doc across the repo |
+| `/orchestrate` | implement a plan doc across the repo (per-unit review is routed too, same reasoning as `/scrutinise`) |
 | `/investigate` | root-cause a bug into a fix-ready plan |
 | `/scrutinise` | review what was built (routed, so trivial diffs stay cheap) |
 | `/sync-docs` | reconcile the docs with the code that actually shipped |
@@ -94,14 +100,20 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
 
 ## Good to know
 
-- **Doc-write authority** — only `/plan`, `/orchestrate`, and `/sync-docs` can edit
-  files under `docs/`; every other command produces analysis and hands off to
-  `/plan`. Enforced deterministically, per session.
+- **Doc-write authority** — only `/plan` and `/orchestrate` can edit plan docs and
+  the tracker (`docs/plans/**` by default — the surface with real concurrency
+  stakes); every other command produces analysis and hands off to `/plan`. The
+  rest of `docs/` is ordinary prose, freely editable; widen the guard back to
+  all of `docs/` in config if you want the stricter default. Enforced
+  deterministically, per session.
 - **Safe with concurrent sessions** — each session's state (test baseline, plan
   criteria, doc authority) is isolated under `.craftsman/sessions/<id>/`; one
   session finishing never blocks another. Separate git worktrees are isolated too.
 - **Fast** — session start never blocks on a build (the baseline runs in the
-  background); tool detection is cached; lint results are content-hash cached.
+  background); tool detection is scoped to your detected stack and cached;
+  lint results are content-hash cached; the Stop-gate's test-regression check
+  only re-runs when something was actually edited since the last check, so an
+  answer-only turn doesn't re-run the suite for nothing.
 
 ---
 
@@ -116,6 +128,7 @@ commands/                                        the workflow + engine commands
 agents/                                          the specialist review/implement agents
 skills/language-aware-planning/                  per-language idiom checklists + plan template
 output-styles/craftsman-terse.md                 an optional terse response style
+.github/workflows/ci.yml                         syntax/test/JSON checks on every push and PR
 ```
 
 ---
@@ -137,9 +150,11 @@ plugin name. Uninstall v0.2 first (see [INSTALL.md](INSTALL.md), step 0).
 ## Contributing
 
 Issues and PRs welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. The plugin is
-dependency-free; `claude plugin validate .` and `node --check scripts/*.mjs` are
-essentially the whole test suite. Keep it stack-agnostic — project-specific
-behaviour belongs in a project's own `.claude/`, not in the plugin.
+dependency-free; `node --test scripts/lib/core.test.mjs` (the engine's unit
+suite), `node --check` on every script, and `claude plugin validate .` are the
+whole test suite — CI runs all three on every push and PR. Keep it
+stack-agnostic — project-specific behaviour belongs in a project's own
+`.claude/`, not in the plugin.
 
 ## License
 

@@ -1,6 +1,6 @@
 ---
-name: design-reviewer
-description: Reviews an implementation PLAN before any code exists for language fit, abstraction budget, illegal-states-unrepresentable, and test seams in the target language's idioms, emitting 3-7 checkable acceptance criteria.
+name: plan-reviewer
+description: Reviews an implementation PLAN before any code exists for language fit, abstraction budget, illegal-states-unrepresentable, and test seams in the target language's idioms, emitting 3-7 checkable acceptance criteria. Not a UI/visual reviewer — plans only, no rendered surfaces.
 tools: Read, Grep, Glob
 model: sonnet
 ---

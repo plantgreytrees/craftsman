@@ -7,7 +7,7 @@
 // concurrent sessions never block or leak into one another.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, globToRe, STATE_DIR, sidOf, sessionDir, logEvent, readStdin } from "./lib/core.mjs";
+import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin } from "./lib/core.mjs";
 
 const cfg = loadConfig();
 if (!enabled(cfg)) process.exit(0);
@@ -16,7 +16,7 @@ let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
 const file = input?.tool_input?.file_path;
 if (!file) process.exit(0);
-const rel = path.relative(process.cwd(), file).split(path.sep).join("/");
+const rel = path.relative(PROJECT_ROOT, file).split(path.sep).join("/");
 
 // 1) Protected paths — generated / vendored / lock / secret.
 const hit = (cfg.protectedPaths || []).find((p) => globToRe(p).test(rel));
@@ -64,9 +64,9 @@ if (g.enabled !== false) {
     } else {
       logEvent({ ev: "docguard", file: rel, sid, result: "blocked" });
       process.stderr.write(
-        `craftsman: "${rel}" is under docs/ — only /plan, /orchestrate and /sync-docs may edit docs. ` +
-        `Do NOT write it directly. Hand the change to /plan (it persists plan docs + tracker rows) or ` +
-        `/sync-docs (architecture/standards). If you ARE running one of those three commands, first run:  ` +
+        `craftsman: "${rel}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths). ` +
+        `Do NOT write it directly. Hand the change to /plan (plan docs + tracker rows) — or whichever ` +
+        `command this repo's config designates for this path. If you ARE that command, first run: ` +
         `node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`
       );
       process.exit(2);

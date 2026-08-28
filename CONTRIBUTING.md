@@ -53,5 +53,9 @@ Please run `claude plugin validate .` and confirm it passes before opening a PR.
 - Keep it stack-agnostic. Anything project-specific belongs in a *project's* own
   `.claude/`, not in this plugin (that's what EXTENDING.md is for).
 - Small, focused PRs. Describe what changed and why; note any new config keys.
+- **Bump `version` in both `.claude-plugin/plugin.json` and
+  `.claude-plugin/marketplace.json` on every PR that merges to `main`.** An
+  installed copy is only ever refreshed when the version changes — a merge
+  that forgets this ships nothing to anyone already running the plugin.
 - By contributing you agree your contributions are licensed under the project's
   [MIT License](LICENSE).

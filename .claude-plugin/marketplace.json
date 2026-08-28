@@ -7,7 +7,7 @@
     {
       "name": "craftsman",
       "source": "./",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "Stack-agnostic doc-first loop + deterministic quality engine for any language or toolchain."
     }
   ]

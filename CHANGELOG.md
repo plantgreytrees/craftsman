@@ -41,6 +41,146 @@ plugin against its own standards.
   second-derivation double-check can now be forced `"always"` or turned
   `"never"` off per repo instead of only following the built-in size
   heuristic (`"auto"`, the unchanged default).
+- **All craftsman state anchors to the actual project root, not `cwd`** —
+  `scripts/lib/core.mjs` now resolves `PROJECT_ROOT` via `git rev-parse
+  --show-toplevel` (falling back to `$CLAUDE_PROJECT_DIR`, then `cwd`) once,
+  and every script, check invocation, and config/marker lookup uses it
+  instead of `process.cwd()`. Fixes a real split where a session opened one
+  directory above a repo wrote hook state to the wrong `.craftsman/`, so the
+  acceptance-criteria gate silently never enforced anything and stack
+  detection reported "unknown" for a fully-recognized repo. Marker detection
+  (`markerPresent`) is also now git-tracked-file based, so a `*.csproj` two
+  directories down or a monorepo's `go.mod` in a service folder is found —
+  previously only the literal repo root was checked.
+- **`plan-reviewer` (renamed from `design-reviewer`) is now actually
+  dispatched** — from `/plan` Phase 1, once per unit (or once for a small
+  plan), where its `ACCEPTANCE CRITERIA:` output is merged into
+  `.craftsman/acceptance.md` instead of being hand-authored a second time.
+  Previously the agent that reviews *plans* was being invoked for *rendered
+  UI conformance* (`/orchestrate`, `/scrutinise`, the `--deep` audit), work
+  its own definition never covered, while the one caller it was built for
+  never called it. All UI-conformance dispatch and the `/design` planner it
+  depended on (referenced in three places but never implemented) are removed
+  rather than half-wired further; a UI-surface request now routes to `/plan`
+  like everything else.
+- **`standards-keeper` is wired into `/scrutinise`'s review panel** (both the
+  default pass and `--deep`), audit mode, scoped to the touched
+  module/family — previously defined but dispatched from nowhere. It now
+  derives a standard inline for one pass when none is persisted, instead of
+  only bouncing back "run derive mode" with no caller for that either.
+- **`protectedPaths` no longer hard-blocks real source** — `**/bin/**` and
+  `**/obj/**` matched `src/bin/main.rs`, `bin/cli.js`, and `bin/rails` and
+  refused edits to them outright. Both stay in `ignore` (skip linting only,
+  no edit block) and are dropped from the hard-block list, which now covers
+  only genuinely unambiguous generated/vendored/lock/secret paths.
+- **Secrets scan targets the working tree, not the index** —
+  `gitleaks protect --staged` scanned whatever was staged, which is normally
+  nothing mid-turn (the implementer never runs `git add`), so the "secrets
+  scanning runs before your turn ends" promise in the session-start prompt
+  was checking an empty set. Now `gitleaks dir .`.
+- **A slow check no longer reports as a finding you wrote** —
+  `runChecks` separates `timedOut` from `failures`; a tool that hits the
+  per-check timeout (e.g. whole-crate `clippy` on a big file) is logged and
+  silently skipped instead of being fed back as "1 new issue introduced."
+  Project/package-scoped checks (`go vet ./{dir}`, `staticcheck`, `cargo
+  clippy --all-targets` — new `languages.*.projectScoped: true` flag) now
+  keep only output lines attributable to the file that was actually edited,
+  so a sibling file's pre-existing issue can't be misattributed as new.
+- **Command frontmatter no longer overrides your chosen model** by default —
+  `/understand`, `/investigate`, and `/fix-tests` dropped their `model: opus`
+  pin (all mechanical fan-out/triage, not reasoning-bound); `/plan` keeps
+  `opus` as the one command where the case is strongest.
+- **Stop gate skips the test suite when nothing changed** — the PostToolUse
+  gate drops a per-session "dirty" marker on every real edit; Stop only
+  re-runs the session-start-green test commands when that marker is present,
+  and clears it once it has (a question-only turn, or a second Stop right
+  after a passing one, no longer re-runs a multi-minute suite for nothing).
+  `stopGate.testTimeoutMs` default lowered 300000→250000ms so a full-length
+  run has headroom inside the Stop hook's own 300s ceiling instead of being
+  killed by it.
+- **Blast-radius tracing runs once, not three times per feature** —
+  `/plan` now persists `consumer-tracer`'s findings into the plan doc's
+  Verification background as a `CONSUMERS:` block; `/orchestrate` Phase B
+  reads that instead of re-deriving the same contract's consumers before a
+  line of code has changed. The post-merge drift check (Phase D, over the
+  *merged* set, genuinely new information) is unchanged.
+- **`/orchestrate`'s per-unit review is routed** — Phase X step 8 now runs
+  `review-router` before `code-reviewer`, the same SKIP/ESCALATE pattern
+  `/scrutinise` already used; a small, low-risk unit that already passed the
+  deterministic gate skips the LLM review pass instead of paying for it on
+  every unit regardless of size. This is the highest-volume review path in
+  the plugin, so it's where routing pays for itself the most.
+- **`_shared-machinery.md` split** — the per-unit execution protocol (Phase
+  L locking, Phase X's 11-step loop, Finalization — the expensive ~1,500
+  words) moved to a new `_shared-execution.md`, read only once `/orchestrate`
+  Phase C is actually about to run it. `_shared-machinery.md` keeps just the
+  Standing constraints, MCP conventions, and the tooling-manifest contract —
+  needed by every execution-adjacent command, cheap enough to read
+  unconditionally. `/scrutinise` and `/sync-docs`, which only ever needed
+  the light half, get smaller for free.
+- **`--deep` audit fan-out is capped** — the defect-class × module matrix
+  now caps at the top 12 modules by changed-line count (logged if any are
+  dropped), and the loop-until-dry re-fan only continues on Warning/Major+
+  findings, with a hard 4-round ceiling regardless of dryness.
+- **C# per-file check dropped** — `dotnet format --verify-no-changes` run
+  immediately after `dotnet format` on the same file can never fail (the
+  format step already fixed it), so it was pure MSBuild latency for a gate
+  that couldn't gate anything. `csharp` now formats only; regression
+  detection is the Stop-gate's `dotnet test`.
+- **Doc-write guard narrowed to `docs/plans/**`** (from all of `docs/`) —
+  that's the surface with real concurrency stakes (the tracker, plan docs);
+  the rest of `docs/` (architecture, README, standards) is now freely
+  editable rather than hard-blocked behind a session grant for routine prose
+  fixes. Widen it back to `["docs/**"]` in config if your project wants the
+  stricter default.
+- **Learned-rules signature extraction is tool-aware, and rules decay by
+  age** — `recordFailure`'s signature regex previously matched only
+  uppercase-code-style identifiers, so every ESLint finding (kebab-case rule
+  ids) collapsed onto one generic signature; it now also recognizes ESLint's
+  trailing `[Error/rule-id]`/`[Warning/rule-id]` (its `--format unix`, this
+  plugin's default), a bare trailing `(rule-id)` some other formatters use,
+  and ruff/mypy-style leading codes. `topRules` now
+  also requires a hit within `learnedRules.maxAgeMs` (default 30 days) —
+  previously a mistake seen 3 times, ever, was narrated in every future
+  session forever.
+- **Session-start tool probing is scoped to the detected stack** — the
+  "not installed" line probed a fixed 22-tool list regardless of what the
+  repo actually uses; it now probes only the tools relevant to the languages
+  actually detected (plus `gitleaks`/`shellcheck`, which apply regardless),
+  fewer subprocess spawns and a line that means something for this repo. The
+  weekly tooling cache is now keyed to the scoped tool list, so it can't
+  serve a stale probe set after langs change.
+- **Path handling fixes** — `tokenize()` substitutes `{file}`/`{dir}` into
+  each already-split argument instead of splitting the filled template
+  afterward, so a path containing a space no longer becomes two arguments.
+  `PLUGIN_ROOT` resolves via `fileURLToPath` instead of a raw `.pathname`
+  read, fixing a leading-slash bug on Windows.
+- **Unused `userConfig` removed** — `PLANS_DIR`/`DOCS_DIR` were prompted for
+  at install but never read anywhere; removed rather than wired to a
+  substitution mechanism speculative enough to risk silently breaking `docs/`
+  resolution if the assumption were wrong.
+- **Cross-file `Read` instructions use `${CLAUDE_PLUGIN_ROOT}`** — several
+  commands pointed at sibling files with a bare relative Markdown link
+  (`[_shared-machinery.md](_shared-machinery.md)`), resolvable by a human
+  reading the repo but not by the model, which doesn't know the command
+  file's own location; the Bash lines in the same files already used
+  `${CLAUDE_PLUGIN_ROOT}` correctly. Now consistent throughout.
+- **`scripts/lib/core.test.mjs` extended** — new coverage for `tokenize`
+  (via `filterAttributed`), `filterAttributed`, `extractSig`, and
+  `markerPresent`, the additions from this pass most likely to regress
+  silently. **`.github/workflows/ci.yml` added** — runs `node --test` and
+  `node --check` on every script, plus a config JSON-parse check, on push/PR.
+- **`/craftsman:baseline` now records what it skips** — pre-existing
+  findings were always excluded from the quality gate, but previously only
+  survived in the gitignored `.craftsman/baseline/` snapshot (opaque,
+  per-file, local-only). It now also writes `docs/errors/KNOWN_ISSUES.md`: a
+  single worst-first table (file, language, tool, finding count, a truncated
+  sample), regenerated wholesale on every baseline run, tracked in git so
+  the whole team — and future sessions — can see and prioritize the debt
+  instead of it silently disappearing. New `baseline.errorsDoc` config key
+  (default `"docs/errors/KNOWN_ISSUES.md"`; set to `false` to disable).
+  `/sync-docs --arch` excludes it from reconciliation — it's machine-managed
+  by `/craftsman:baseline`, not hand-authored architecture prose.
 
 ## [1.0.0]
 
@@ -48,7 +188,7 @@ The generalized, stack-agnostic evolution of the craftsman v0.2 starter.
 
 ### Added
 - **Doc-first command loop** — `understand`, `plan`, `orchestrate`, `investigate`,
-  `scrutinise`, `sync-docs`, `run-fix-tests`, `ultra-think`, plus `_shared-machinery`.
+  `scrutinise`, `sync-docs`, `fix-tests`, plus `_shared-machinery`.
 - **`/craftsman:init`** — fingerprints a repo's stack (languages, real test command,
   package manager, CI, installed vs missing tools) and scaffolds a project config +
   starter `CLAUDE.md`.

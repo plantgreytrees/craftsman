@@ -1,7 +1,6 @@
 ---
 description: Comprehend — read-only deep trace of a feature/area (execution paths, layers, contracts, dependencies, gaps) → an understanding brief that makes the next plan far better-informed. Writes NO code and NO docs.
 argument-hint: "<feature, file, subsystem, or question to understand>"
-model: opus
 allowed-tools: Task, Bash, Read, Glob, Grep, TodoWrite, SlashCommand
 ---
 

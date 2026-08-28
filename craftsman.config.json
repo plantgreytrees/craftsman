@@ -59,8 +59,6 @@
     "**/target/**",
     "**/dist/**",
     "**/build/**",
-    "**/bin/**",
-    "**/obj/**",
     "**/.next/**",
     "**/.nuxt/**",
     "**/.output/**",
@@ -79,13 +77,17 @@
   "learnedRules": {
     "enabled": true,
     "max": 10,
-    "minOccurrences": 3
+    "minOccurrences": 3,
+    "maxAgeMs": 2592000000
+  },
+  "baseline": {
+    "errorsDoc": "docs/errors/KNOWN_ISSUES.md"
   },
   "stopGate": {
     "enabled": true,
     "snapshotAtStart": true,
     "requireAcceptanceCriteria": true,
-    "testTimeoutMs": 300000,
+    "testTimeoutMs": 250000,
     "commands": {
       "package.json": "npm test --silent",
       "Cargo.toml": "cargo test --quiet",
@@ -103,14 +105,14 @@
   "security": {
     "enabled": true,
     "check": [
-      "gitleaks protect --staged --no-banner --redact"
+      "gitleaks dir . --no-banner --redact"
     ]
   },
   "docWriteGuard": {
     "enabled": true,
     "ttlMs": 3600000,
     "pendingTtlMs": 1800000,
-    "docPaths": ["docs/**"]
+    "docPaths": ["docs/plans/**"]
   },
   "planning": {
     "blindRederivation": "auto"
@@ -144,12 +146,14 @@
     "go": {
       "extensions": [".go"],
       "format": ["gofmt -w {file}", "goimports -w {file}"],
-      "check": ["go vet ./{dir}", "staticcheck ./{dir}"]
+      "check": ["go vet ./{dir}", "staticcheck ./{dir}"],
+      "projectScoped": true
     },
     "rust": {
       "extensions": [".rs"],
       "format": ["rustfmt --edition 2021 {file}"],
-      "check": ["cargo clippy --quiet --message-format short --all-targets"]
+      "check": ["cargo clippy --quiet --message-format short --all-targets"],
+      "projectScoped": true
     },
     "ruby": {
       "extensions": [".rb"],
@@ -169,7 +173,7 @@
     "csharp": {
       "extensions": [".cs"],
       "format": ["dotnet format --include {file} -v quiet"],
-      "check": ["dotnet format --verify-no-changes --severity info --include {file} -v quiet"]
+      "check": []
     },
     "java": {
       "extensions": [".java"],

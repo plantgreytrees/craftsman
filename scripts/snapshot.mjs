@@ -8,31 +8,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, sessionDir } from "./lib/core.mjs";
+import { loadConfig, enabled, sessionDir, markerPresent, PROJECT_ROOT } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
 const sid = (process.argv[2] || "shared").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "shared";
 const cfg = loadConfig();
 if (!enabled(cfg) || cfg.stopGate?.enabled === false || cfg.stopGate?.snapshotAtStart === false) process.exit(0);
 
-function markerPresent(m) {
-  if (m.includes("*")) {
-    try {
-      const re = new RegExp("^" + m.replace(/[.]/g, "\\.").replace(/\*/g, ".*") + "$");
-      return fs.readdirSync(process.cwd()).some((f) => re.test(f));
-    } catch { return false; }
-  }
-  return fs.existsSync(m);
+const entries = [];
+for (const [m, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
+  if (await markerPresent(m)) entries.push(cmd);
 }
-
-const entries = Object.entries(cfg.stopGate?.commands || {}).filter(([m]) => markerPresent(m));
 if (!entries.length) process.exit(0);
 
 const results = [];
-for (const [, cmd] of entries) {
+for (const cmd of entries) {
   const [bin, ...args] = cmd.split(" ");
   let green = false;
-  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 180000, maxBuffer: 8e6 }); green = true; } catch {}
+  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 180000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); green = true; } catch {}
   results.push({ cmd, green });
 }
 

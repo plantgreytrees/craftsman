@@ -37,11 +37,36 @@ Change a test runner or wire a repo guard the same way:
 fast (seconds), and repo-level. Re-run `/craftsman:baseline` after adding checks
 so pre-existing findings don't surface as new.
 
-By default `csharp` wires to `dotnet format` (format and check), `java` wires
-to `google-java-format` (format) and `checkstyle` (check), and `cpp`/`c` wire
-to `clang-format` (format) and `clang-tidy` (check); swap any of these for your
+`/craftsman:baseline` also writes what it just excluded to
+`docs/errors/KNOWN_ISSUES.md` (a worst-first table: file, language, tool,
+finding count, a truncated sample), regenerated wholesale on every run — the
+point is visibility, not silent suppression. Change the path or turn it off
+per project:
+
+```json
+{ "baseline": { "errorsDoc": "docs/known-issues.md" } }
+```
+
+```json
+{ "baseline": { "errorsDoc": false } }
+```
+
+By default `csharp` wires to `dotnet format` for formatting only — pairing it
+with `dotnet format --verify-no-changes` as a "check" can never fail (the
+format step already fixed the file), so C# regressions are left to the
+Stop-gate's `dotnet test` instead; add a real per-file check (e.g. a debounced
+`dotnet build` on the owning project) if you want one. `java` wires to
+`google-java-format` (format) and `checkstyle` (check); `cpp`/`c` wire to
+`clang-format` (format) and `clang-tidy` (check). Swap any of these for your
 own by overriding the matching `languages.*` block in your project's
 `craftsman.config.json`.
+
+A language's checks can be marked `"projectScoped": true` (already set for
+`go` and `rust`, whose checks — `go vet`/`staticcheck` on a package, `cargo
+clippy --all-targets` on a crate — inspect more than the one file) so the
+quality gate only reports lines whose leading `path:` actually matches the
+edited file, instead of surfacing a sibling file's pre-existing issue as
+something you just introduced.
 
 `stopGate.commands` runs **every** matched marker's command, not just the first
 — useful for monorepos with more than one test runner:
@@ -73,6 +98,17 @@ config:
 skips it entirely. Use `/craftsman:stats` to see how often the gate actually
 catches a miss before turning it down to `"never"`.
 
+Learned rules (the "recurring mistakes" list injected at session start) decay
+by age as well as by count — a rule needs `minOccurrences` hits *and* a hit
+within `maxAgeMs` (default 30 days) to still surface; a class of mistake the
+project hasn't made in a month stops being narrated every session:
+
+```json
+{ "learnedRules": { "maxAgeMs": 604800000 } }
+```
+
+(one week, shown as an example — the default is 30 days).
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or
@@ -98,12 +134,16 @@ descriptions to one routing sentence (they're always-on context).
 
 ## 4. Tune the doc-write policy
 
-By default only `/plan`, `/orchestrate`, `/sync-docs` may edit `docs/`
-(`docWriteGuard.docPaths: ["docs/**"]`). Widen or narrow the guarded paths, or
-turn it off, in config:
+By default only `/plan` and `/orchestrate` may edit plan docs and the tracker
+(`docWriteGuard.docPaths: ["docs/plans/**"]`) — that's the surface with real
+concurrency stakes (two sessions racing on the same tracker row). The rest of
+`docs/` (architecture, README, standards) is ordinary prose: freely editable,
+`/sync-docs` is just the command that happens to specialize in reconciling it
+against code, not a gatekeeper for it. Widen the guard back to all of `docs/`,
+add other single-owner directories, or turn it off, in config:
 
 ```json
-{ "docWriteGuard": { "docPaths": ["docs/**", "adr/**"], "enabled": true } }
+{ "docWriteGuard": { "docPaths": ["docs/plans/**", "adr/**"], "enabled": true } }
 ```
 
 ## The always-on budget

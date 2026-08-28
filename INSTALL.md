@@ -79,7 +79,10 @@ Review what it wrote before committing.
 
 This records the lint/type issues that already exist, so from now on the gate
 only flags issues **you** introduce — not the pile of pre-existing warnings in a
-legacy codebase. Re-run it after any big intentional cleanup.
+legacy codebase. Re-run it after any big intentional cleanup. It also writes
+`docs/errors/KNOWN_ISSUES.md`, a worst-first table of what got excluded, so
+that debt is visible in the repo instead of only in a local, gitignored
+snapshot — commit it so the team sees it too.
 
 ---
 

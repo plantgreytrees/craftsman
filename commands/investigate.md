@@ -1,7 +1,6 @@
 ---
 description: Diagnostician — root-cause a reported bug/problem across the codebase, verify every hypothesis, inventory root-cause + contributing + latent defects into a fix-ready analysis. Diagnoses only; writes NO fixes and NO docs.
 argument-hint: "<the error, symptom, or problem you noticed>"
-model: opus
 allowed-tools: Task, Bash, Read, Glob, Grep, TodoWrite, SlashCommand
 ---
 

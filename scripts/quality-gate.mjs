@@ -6,8 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
-  cacheKey, cacheHit, cacheStore, logEvent, recordFailure, readStdin,
-  sidOf, sessionDir, sha1, atomicWrite,
+  filterAttributed, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
+  readStdin, sidOf, sessionDir, sha1, atomicWrite, PROJECT_ROOT,
 } from "./lib/core.mjs";
 
 const t0 = Date.now();
@@ -21,7 +21,7 @@ if (!file || !fs.existsSync(file)) process.exit(0);
 
 // Record per-session acceptance-criteria ownership (see stop-gate). The
 // acceptance file is per-session state, not lintable source, so short-circuit.
-const rel0 = path.relative(process.cwd(), file).split(path.sep).join("/");
+const rel0 = path.relative(PROJECT_ROOT, file).split(path.sep).join("/");
 if (rel0.endsWith(".craftsman/acceptance.md")) {
   try {
     const ac = fs.readFileSync(file, "utf8");
@@ -31,6 +31,14 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
   process.exit(0);
 }
 
+// Mark this session dirty for the Stop gate: any real edit means the
+// session-start test snapshot can no longer be trusted as still-current, so
+// Stop must re-verify. Set unconditionally (before any language/ignore
+// filtering) so a false negative here — silently skipping a real regression
+// check — can't happen; the cost of an occasional unnecessary re-run is cheap
+// by comparison.
+try { atomicWrite(path.join(sessionDir(sidOf(input)), "dirty"), String(Date.now())); } catch {}
+
 const lang = detectLang(file, cfg);
 if (!lang || isIgnored(file, cfg, lang)) process.exit(0);
 
@@ -38,20 +46,26 @@ if (!lang || isIgnored(file, cfg, lang)) process.exit(0);
 const key = cacheKey(file, lang, cfg);
 if (cacheHit(key)) { logEvent({ ev: "gate", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
 
-const { failures, skipped, ms } = await runChecks(file, lang, cfg);
+const { failures, timedOut, skipped, ms } = await runChecks(file, lang, cfg);
 
 if (failures.length === 0) {
   cacheStore(key);
-  logEvent({ ev: "gate", file, lang: lang.name, result: "pass", ms, skipped });
-  process.exit(0);
+  logEvent({ ev: "gate", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
+  process.exit(0); // a timeout is never a finding you wrote — never blocks, never shown
 }
 
 // Split into lines and drop anything already present at baseline.
 const noise = (cfg.noisePatterns || []).map((p) => new RegExp(p));
-const rawLines = failures
+let rawLines = failures
   .flatMap((f) => f.out.split("\n"))
   .filter((l) => l.trim())
   .filter((l) => !noise.some((re) => re.test(l)));
+
+// Project/package-scoped checks (whole-crate clippy, `go vet ./pkg`,
+// staticcheck) can legitimately report on a sibling file, not the one that
+// was just edited — keep only lines this file's own baseline can own.
+if (lang.projectScoped) rawLines = filterAttributed(rawLines, rel0);
+
 const newLines = cfg.baselineNewOnly ? filterBaseline(file, rawLines) : rawLines;
 
 if (newLines.length === 0) {

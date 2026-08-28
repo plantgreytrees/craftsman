@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, STATE_DIR, sidOf, sessionDir, sha1, logEvent, readStdin } from "./lib/core.mjs";
+import { loadConfig, enabled, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, sha1, logEvent, readStdin } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
 const cfg = loadConfig();
@@ -30,7 +30,7 @@ const problems = [];
 if (cfg.security?.enabled) {
   for (const cmd of cfg.security.check || []) {
     const [bin, ...args] = cmd.split(" ");
-    try { await pexec(bin, args, { timeout: 60000, maxBuffer: 8e6 }); }
+    try { await pexec(bin, args, { timeout: 60000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); }
     catch (e) {
       if (e.code === "ENOENT") continue; // tool absent: skip silently
       problems.push(`SECRETS: ${bin} flagged content in the working tree:\n${
@@ -39,26 +39,45 @@ if (cfg.security?.enabled) {
   }
 }
 
-// 2. Tests — only if they were green when THIS session began.
+// 2. Tests — only if they were green when THIS session began, AND only if
+//    this session actually touched a real source file since then (the
+//    PostToolUse gate drops a "dirty" marker on every edit). A Stop with no
+//    edits since start — or since the last Stop already re-verified — has
+//    nothing new to regress; re-running a multi-minute suite on every
+//    question-answering turn is pure waste.
+const dirtyPath = path.join(sdir, "dirty");
+const isDirty = fs.existsSync(dirtyPath);
 let start = null;
 try { start = JSON.parse(fs.readFileSync(path.join(sdir, "session-start.json"), "utf8")); } catch {}
 let results = [];
 if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
-for (const { cmd, green } of results) {
-  if (!green) continue;
-  const [bin, ...args] = cmd.split(" ");
-  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 300000, maxBuffer: 8e6 }); }
-  catch (e) {
-    const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
-    problems.push(`REGRESSION: tests passed at session start but fail now (${cmd}):\n${out}`);
+if (isDirty) {
+  for (const { cmd, green } of results) {
+    if (!green) continue;
+    const [bin, ...args] = cmd.split(" ");
+    try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); }
+    catch (e) {
+      const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
+      problems.push(`REGRESSION: tests passed at session start but fail now (${cmd}):\n${out}`);
+    }
   }
+  // Only clear once there was something real to check: session-start.json is
+  // written by a BACKGROUND snapshot that may still be running on this first
+  // dirty Stop (results stays [] until it finishes). Clearing unconditionally
+  // would let a later Stop — once the snapshot finally lands — see isDirty
+  // false and skip the regression check that never actually ran. An empty
+  // `results` forever (no stopGate.commands marker matched at all) is exactly
+  // as cheap to leave dirty as to clear: there's nothing to run either way.
+  if (results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
+} else {
+  logEvent({ ev: "stop-tests-skipped", sid, reason: "clean" });
 }
 
 // 2b. Project guards / extra checks (e.g. run-all-guards.py, contract-drift).
 for (const cmd of cfg.stopGate?.extraChecks || []) {
   const [bin, ...args] = cmd.split(" ");
-  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 300000, maxBuffer: 8e6 }); }
+  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: PROJECT_ROOT }); }
   catch (e) {
     if (e.code === "ENOENT") continue;
     const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-20).join("\n");

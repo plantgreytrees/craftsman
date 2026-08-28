@@ -1,5 +1,5 @@
 ---
-description: Executor — implement an existing plan doc (from /plan, /investigate, /design, or a tracker slug); gate, review, and merge each unit to the base branch. Does NOT plan.
+description: Executor — implement an existing plan doc (from /plan, /investigate, or a tracker slug); gate, review, and merge each unit to the base branch. Does NOT plan.
 argument-hint: "<plan-doc path | tracker slug | feature request> [--step <tracker-id>]"
 model: sonnet
 allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand
@@ -9,33 +9,31 @@ allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashComman
 
 > Doc authority: /orchestrate is one of the two commands allowed to write under docs/ (tracker rows). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
-You **execute a documented plan**. You do not decide *what* to build — a plan doc already did (single-purpose: planning is `/plan`, `/investigate`, `/design`; you are execution). You plan nothing, delegate implementation to subagents (never write feature code yourself), gate, review, and merge — one unit at a time.
+You **execute a documented plan**. You do not decide *what* to build — a plan doc already did (single-purpose: planning is `/plan`, `/investigate`; you are execution). You plan nothing, delegate implementation to subagents (never write feature code yourself), gate, review, and merge — one unit at a time.
 
-Input `$ARGUMENTS`, resolved in Phase A. Before Phase B, `Read` [_shared-machinery.md](_shared-machinery.md) — the Standing constraints, optional-MCP conventions, Phase L locking, and the Phase X per-unit loop live there and bind every unit below. The one exception is the `--step` branch's pre-approval plan summary, which defers this Read until after the user approves (see Phase A.1). This command adds only intake, cross-cutting review, and whole-request verification.
+Input `$ARGUMENTS`, resolved in Phase A. Before Phase B, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md` — the Standing constraints, optional-MCP conventions, and the tooling-manifest contract live there and bind every unit below (it's deliberately light, so this read is cheap). The per-unit execution protocol (Phase L locking + Phase X loop + Finalization) is a separate, heavier file — `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md` — read only at the start of Phase C, once execution is actually about to happen. The one exception: the `--step` branch's pre-approval plan summary defers **both** reads until after the user approves (see Phase A.1). This command adds only intake, cross-cutting review, and whole-request verification.
 
 ## Phase A — Resolve the plan (no decomposition here)
 
-1. **`--step <tracker-id>`** — single-row, **user-gated** mode. Grep `docs/plans/TRACKER.md` for the row, resolve its linked plan doc, and run Phases B–E for that one row **with a plan-approval stop**. Build the plan summary from the TRACKER.md row + the resolved plan doc **only** — do not `Read` [_shared-machinery.md](_shared-machinery.md) yet. Present the plan summary and WAIT for user approval before any edit. If the row is already done, say so and stop. Only after approval, `Read` [_shared-machinery.md](_shared-machinery.md), then run Phases B–E for that one row.
-2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`design-*`/`scrutinise-*`) → read it; its granular `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously.
+1. **`--step <tracker-id>`** — single-row, **user-gated** mode. Grep `docs/plans/TRACKER.md` for the row, resolve its linked plan doc, and run Phases B–E for that one row **with a plan-approval stop**. Build the plan summary from the TRACKER.md row + the resolved plan doc **only** — do not `Read` either shared-machinery file yet. Present the plan summary and WAIT for user approval before any edit. If the row is already done, say so and stop. Only after approval, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md`, then run Phases B–E for that one row (which reads `_shared-execution.md` itself, per Phase C).
+2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → read it; its granular `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously.
 3. **Tracker slug** with a linked plan doc → as (2).
-4. **Free-form request with no doc** → you have nothing to execute. Pick the right planner first (invoke via SlashCommand), then continue at (2): a **bug/symptom** → `/investigate`; a **UI-surface enhancement** ("make X prettier/cleaner") → `/design` (the UI-aware planner); anything else → `/plan`. A doc always exists before code — this is how "orchestrate only executes documented changes" holds while free-form entry still works.
+4. **Free-form request with no doc** → you have nothing to execute. Pick the right planner first (invoke via SlashCommand), then continue at (2): a **bug/symptom** → `/investigate`; anything else (including a UI-surface enhancement) → `/plan`. A doc always exists before code — this is how "orchestrate only executes documented changes" holds while free-form entry still works.
 
 **Resume rule:** at the start of every loop iteration (and after any compaction), re-read `docs/plans/TRACKER.md`'s execution rows + your lock files — this is the cheap, authoritative status check and it always happens. **Tracker state on disk is the source of truth, not conversation memory.** Skip MERGED units; resume IN_PROGRESS units whose lock you own; treat the rest per Phase L. Re-read the **full plan doc's task text**, by contrast, only when first resolving the request, immediately after a compaction, or immediately before Phase C executes that specific unit's tasks — not on every iteration once a unit's row already reads MERGED. If the plan predates recent merges, verify its Background `file:line` cites still resolve before trusting them. Recall memory for each target area if available.
 
 ## Phase B — Ready the units
 
 1. Confirm the plan's execution rows exist and are current (slug, area, language, security level, status, branch). If a planner emitted the doc but not the rows, register them now.
-2. **Blast-radius confirmation (mechanical, not eyeballed):** for any changed shared type / API / exported contract in the plan, delegate `consumer-tracer` — a changed contract with an un-updated consumer is the #1 missed unit. Anything the tracer finds that the plan lacks → add the unit (or record why out of scope) before executing.
+2. **Blast-radius confirmation.** `/plan` already ran `consumer-tracer` per changed contract and persisted its `CONSUMERS:` block into the plan doc's Verification background — read that first. Re-run `consumer-tracer` only when the plan doc carries no persisted manifest for a contract this run touches, or when the plan predates a merge that could have added a new consumer (Resume rule above). A changed contract with an un-updated consumer is the #1 missed unit either way — anything found (persisted or freshly traced) that the plan lacks → add the unit (or record why out of scope) before executing.
 3. Order units by **dependency** (shared/library → consumers → UI/presentation last); write them to TodoWrite.
-4. **Read each unit's `### Tooling` manifest** (the planner→executor contract in [_shared-machinery.md](_shared-machinery.md)) and treat it as the **allow-list**: use the named implementer, run only the named gates + checks, load only the named skills, make only the named MCP calls. This is why the executor stays lean — no scanning every agent/skill/check per unit. If a unit's diff needs a tool the manifest omits, add it AND note the gap in the tracker. A unit with **no** manifest → fall back to full Phase X routing and flag the gap.
+4. **Read each unit's `### Tooling` manifest** (the planner→executor contract in `_shared-machinery.md`) and treat it as the **allow-list**: use the named implementer, run only the named gates + checks, load only the named skills, make only the named MCP calls. This is why the executor stays lean — no scanning every agent/skill/check per unit. If a unit's diff needs a tool the manifest omits, add it AND note the gap in the tracker. A unit with **no** manifest → fall back to full Phase X routing and flag the gap.
 
 ## Phase C — Per-unit loop
 
-Run **Phase X of [_shared-machinery.md](_shared-machinery.md)** for each unit in order (worktree+branch → language detect → implementer delegation → specialist gates → simplify → GATE with build-doctor triage → review → sync/resolve/merge/cleanup → suite hygiene → close-out). PARK-and-continue; never halt the whole run for one unit.
+`Read` `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md` now (deferred until this point since Phase X is the heavy protocol — no earlier phase needs it). Run its **Phase X** for each unit in order (worktree+branch → language detect → implementer delegation → specialist gates → simplify → GATE with build-doctor triage → routed review → sync/resolve/merge/cleanup → suite hygiene → close-out). PARK-and-continue; never halt the whole run for one unit.
 
-**Doc-type routing (the executor honors what the planner specified):**
-- `investigate-*` doc → **every root-cause fix ships a regression test that fails on the old code** (demonstrate the failure pre-fix where practical).
-- `design-*` doc → after the craft passes gates, run the **see → critique → refine loop**: render/preview the changed surface, hand the actual result back to `design-reviewer` to critique the rendered pixels vs the spec; cap 3 iterations, note if capped. Skip only if the surface isn't renderable here — say so. The design-doc sync gate (Standing constraints) is hard for UI units.
+**Doc-type routing (the executor honors what the planner specified):** `investigate-*` doc → **every root-cause fix ships a regression test that fails on the old code** (demonstrate the failure pre-fix where practical).
 
 ## Phase D — Cross-cutting review & smoke (after a feature's units are MERGED/parked)
 
@@ -46,7 +44,7 @@ Run **Phase X of [_shared-machinery.md](_shared-machinery.md)** for each unit in
 
 ## Phase E — Finalization
 
-Run the **Finalization** block of [_shared-machinery.md](_shared-machinery.md) (worktree sweep — zero survive; integration build if defined; tracker consistency via `phase-tracker`). Then feature rows → COMPLETE.
+Run the **Finalization** block of `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md` (worktree sweep — zero survive; integration build if defined; tracker consistency via `phase-tracker`). Then feature rows → COMPLETE.
 
 ## Phase F — Whole-request verification (mandatory before COMPLETE)
 
