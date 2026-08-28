@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd } from "./lib/core.mjs";
+import { loadConfig, enabled, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
 const cfg = loadConfig();
@@ -39,18 +39,43 @@ const problems = [];
 // absent) defaults treeDirty=true, so the scan still runs. This changes only
 // the "should we scan right now" decision — a real gitleaks hit when it does
 // run is still a hard, non-baselined block.
+// `.craftsman/` is this plugin's own untracked, gitignored runtime-state
+// directory (cache/, events.jsonl, sessions/), and events.jsonl is appended
+// on every hook invocation including this one — so once a project has run
+// any craftsman hook, `.craftsman/` is realistically NEVER absent or
+// unchanged. Git collapses a wholly-ignored directory into a single
+// `!! .craftsman/` (or similarly-prefixed) porcelain line, so left unfiltered
+// this would read treeDirty=true on essentially every Stop regardless of
+// whether the actual project source tree changed, defeating the clean-tree
+// skip entirely. Exclude only `.craftsman` itself, not `--ignored` broadly —
+// a real gitignored file elsewhere (e.g. `.env`) must still count as dirty.
+function isCraftsmanStateLine(line) {
+  const p = line.slice(3); // porcelain v1: "XY PATH" — strip the "XY " prefix
+  return p === ".craftsman" || p.startsWith(".craftsman/");
+}
 let treeDirty = true;
 try {
   const { stdout } = await pexec("git", ["status", "--porcelain", "--ignored"], { cwd: PROJECT_ROOT });
-  treeDirty = stdout.trim().length > 0;
+  const relevant = stdout.split("\n").filter((l) => l.length > 0 && !isCraftsmanStateLine(l));
+  treeDirty = relevant.length > 0;
 } catch { /* fail-safe: not a git repo / git absent — scan anyway */ }
-if (!treeDirty) logEvent({ ev: "stop-secrets-skipped", sid, reason: "clean" });
+
+// Addendum (post-merge security review): a clean-tree skip alone would let an
+// already-committed secret that predates this session — never yet caught by
+// any scan — go permanently unscanned once the tree happens to be clean.
+// Guarantee at least one scan per session regardless of dirtiness via a
+// session-scoped marker, so "secrets are always a hard block" still holds
+// across a whole session, not just across dirty Stops within it.
+const scannedMarker = path.join(sdir, "secrets-scanned");
+const scannedThisSession = fs.existsSync(scannedMarker);
+const shouldScan = treeDirty || !scannedThisSession;
+if (!shouldScan) logEvent({ ev: "stop-secrets-skipped", sid, reason: "clean" });
 
 // Build one flat task list — secrets, session-start test regressions, extra
 // guards — and run it as a single concurrent batch below, instead of three
 // independent sequential loops competing for the same wall-clock budget.
 const tasks = [];
-if (cfg.security?.enabled && treeDirty) {
+if (cfg.security?.enabled && shouldScan) {
   for (const cmd of cfg.security.check || []) tasks.push({ kind: "secret", cmd, timeoutMs: 60000 });
 }
 
@@ -102,6 +127,13 @@ async function runTask(t) {
   const cap = Math.min(t.timeoutMs, budgetDeadline - Date.now());
   if (cap <= 0) { logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd }); return; }
   const [bin, ...args] = splitCmd(t.cmd);
+  // Only record "a scan happened this session" once the scan is genuinely
+  // about to be dispatched (cap > 0, right here) — not merely queued onto
+  // `tasks`. Writing the marker any earlier would let a budget-skipped
+  // attempt (cap <= 0 above) durably mark the session as scanned, silently
+  // defeating 1.9's "at least one real scan per session" guarantee for every
+  // subsequent clean Stop in that same session.
+  if (t.kind === "secret") { try { atomicWrite(scannedMarker, String(Date.now())); } catch {} }
   try {
     await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: PROJECT_ROOT });
   } catch (e) {
