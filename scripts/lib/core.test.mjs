@@ -10,7 +10,7 @@ import path from "node:path";
 import {
   globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
-  renderKnownIssuesDoc, gitTrackedFiles, resetGitTrackedFilesCache,
+  renderKnownIssuesDoc, gitTrackedFiles,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -202,12 +202,11 @@ test("gitTrackedFiles: sees an untracked-but-not-ignored scratch file", async ()
   const scratch = path.join(PROJECT_ROOT, "craftsman-core-test-scratch.tmp");
   fs.writeFileSync(scratch, "scratch");
   try {
-    resetGitTrackedFilesCache();
-    const files = await gitTrackedFiles();
+    const files = await gitTrackedFiles({ fresh: true });
     assert.ok(files.includes("craftsman-core-test-scratch.tmp"), "untracked scratch file should be listed");
   } finally {
     fs.rmSync(scratch, { force: true });
-    resetGitTrackedFilesCache();
+    await gitTrackedFiles({ fresh: true });
   }
 });
 

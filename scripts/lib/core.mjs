@@ -147,16 +147,15 @@ export function detectLang(file, cfg) {
 // staged/committed (a freshly scaffolded package.json/go.mod), while still
 // respecting .gitignore.
 let _gitFiles = null;
-export async function gitTrackedFiles() {
-  if (_gitFiles) return _gitFiles;
+// `{ fresh: true }` forces a recompute (tests exercising freshly-changed
+// on-disk state within one process); every real caller uses the default,
+// memoized read.
+export async function gitTrackedFiles({ fresh = false } = {}) {
+  if (_gitFiles && !fresh) return _gitFiles;
   const out = await git(["ls-files", "--others", "--cached", "--exclude-standard"]);
   _gitFiles = out.split("\n").map((s) => s.trim()).filter(Boolean);
   return _gitFiles;
 }
-
-// Test-only: reset the memoized file list so a test can exercise the real
-// gitTrackedFiles() against freshly-changed on-disk state within one process.
-export function resetGitTrackedFilesCache() { _gitFiles = null; }
 
 /** Does `marker` (a literal filename or a `*`-glob like "*.csproj") exist
  * anywhere in the repo? Prefers the tracked-plus-untracked-not-ignored file
@@ -197,20 +196,24 @@ export async function markerPresent(marker) {
 // missing — distinct from the probe running and simply not finding `bin`.
 let warnedProbeMissing = false;
 async function which(bin) {
-  try { await pexec(process.platform === "win32" ? "where" : "which", [bin]); return true; }
+  const probeBin = process.platform === "win32" ? "where" : "which";
+  try { await pexec(probeBin, [bin]); return true; }
   catch (e) {
     if (e.code === "ENOENT") {
       if (!warnedProbeMissing) {
         warnedProbeMissing = true;
-        warn(`${process.platform === "win32" ? "where" : "which"} not found — tool presence checks will report every tool as absent`);
+        warn(`${probeBin} not found — tool presence checks will report every tool as absent`);
       }
     }
     return false;
   }
 }
 
+// Exported so session-context.mjs's batch tool-probe loop can share this
+// exact presence-check + cache instead of reimplementing the platform-branch
+// and ENOENT-distinction logic above.
 const whichCache = new Map();
-async function have(bin) {
+export async function have(bin) {
   if (!whichCache.has(bin)) whichCache.set(bin, await which(bin));
   return whichCache.get(bin);
 }
