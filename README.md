@@ -1,13 +1,16 @@
 # craftsman
 
+**v2.0.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
+
 A Claude Code plugin that makes code better automatically — in **any language**.
 It runs your formatters, linters, and type-checkers on every edit (flagging only
 the issues *you* introduce), refuses to call a task "done" if it broke the tests
 or left plan criteria unmet, and adds a clean plan → build → review workflow.
 
-Drop it into a Python, Go, Rust, Java, Ruby, JS/TS, or C# repo and run
-`/craftsman:init` — it detects your stack and configures itself. It's the
-generalized evolution of the craftsman v0.2 starter.
+Drop it into a Python, Go, Rust, Java, Ruby, JS/TS, C#, Swift, Kotlin, PHP,
+C++, Terraform, or Kubernetes repo and run `/craftsman:init` — it detects your
+stack and configures itself. It's the generalized evolution of the craftsman
+v0.2 starter.
 
 ---
 
@@ -152,8 +155,9 @@ hooks/hooks.json                                 SessionStart / PreToolUse / Pos
 scripts/                                         the Node engine (no dependencies)
 commands/                                        the workflow + engine commands
 agents/                                          the specialist review/implement agents
-skills/language-aware-planning/                  per-language idiom checklists + plan template
+skills/language-aware-planning/                  19 per-language idiom checklists + plan template
 skills/design-review/                            the UI/UX review checklist ui-ux-reviewer loads
+skills/deep-research/                            forked read-only repo research (/deep-research)
 output-styles/craftsman-terse.md                 an optional terse response style
 .github/workflows/ci.yml                         syntax/test/JSON checks on every push and PR
 ```
@@ -181,7 +185,10 @@ dependency-free; `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` (every
 script's unit/subprocess suite, including claim/handoff/plan-graph/repo-exec/
 scope/toggle/workspace coverage), `node --check` on every script, and
 `claude plugin validate .` are the whole test suite — CI runs all of it plus a
-diff-whitespace check on every push and PR. Keep it stack-agnostic —
+diff-whitespace check on every push and PR. Run `claude plugin validate .` from
+this directory (the repo root is one level up and has no manifest); because
+`plugin.json` and `marketplace.json` share `.claude-plugin/`, the CLI validates
+the marketplace manifest. Keep it stack-agnostic —
 project-specific behaviour belongs in a project's own `.claude/`, not in the
 plugin.
 

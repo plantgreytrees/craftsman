@@ -13,13 +13,13 @@ Change the repo name if you'd prefer something other than `craftsman`.
 cd craftsman                      # this folder
 git init
 git add -A
-git commit -m "craftsman v1.0.0 — stack-agnostic Claude Code plugin"
+git commit -m "craftsman v2.0.0 — stack-agnostic Claude Code plugin"
 git branch -M main
-git tag v1.0.0
+git tag v2.0.0
 
 # creates the repo under your account and pushes in one step
 gh repo create craftsman --public --source=. --remote=origin --push
-git push origin v1.0.0
+git push origin v2.0.0
 ```
 
 (Install gh from https://cli.github.com and run `gh auth login` first if needed.)
@@ -34,12 +34,12 @@ git push origin v1.0.0
 cd craftsman
 git init
 git add -A
-git commit -m "craftsman v1.0.0 — stack-agnostic Claude Code plugin"
+git commit -m "craftsman v2.0.0 — stack-agnostic Claude Code plugin"
 git branch -M main
-git tag v1.0.0
+git tag v2.0.0
 git remote add origin https://github.com/plantgreytrees/craftsman.git
 git push -u origin main
-git push origin v1.0.0
+git push origin v2.0.0
 ```
 
 ## After it's live — how anyone installs it
