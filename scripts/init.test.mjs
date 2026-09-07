@@ -107,8 +107,9 @@ test("init update audits the shipped plugin and refreshes project surfaces", () 
 
   const result = applyInitPlan(plan);
   assert.match(fs.readFileSync(path.join(root, ".claude", "CLAUDE.md"), "utf8"), /Project-owned context/);
-  assert.match(fs.readFileSync(path.join(root, "docs", "plans", "active.md"), "utf8"), /craftsman_version: 1\.2\.0/);
+  const versionRe = new RegExp(`craftsman_version: ${plan.update.pluginVersion.replace(/\./g, "\\.")}`);
+  assert.match(fs.readFileSync(path.join(root, "docs", "plans", "active.md"), "utf8"), versionRe);
   assert.match(fs.readFileSync(path.join(root, "docs", "plans", "active.md"), "utf8"), /pending work/);
-  assert.match(fs.readFileSync(path.join(root, "docs", "plans", "done.md"), "utf8"), /craftsman_version: 1\.2\.0/);
+  assert.match(fs.readFileSync(path.join(root, "docs", "plans", "done.md"), "utf8"), versionRe);
   assert.equal(result.ready, true);
 });

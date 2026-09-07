@@ -5,6 +5,31 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-07
+
+- **Fixed a self-inflicted cost regression** — `performance-reviewer` and
+  `observability-reviewer` had been added as unconditional members of every
+  ESCALATE-routed review panel, re-growing `_shared-execution.md` past the
+  exact word count `docs/plans/token-efficiency.md` had trimmed it from.
+  They're now gated the same way as the other four specialists: dispatched
+  only when `scripts/gate-select.mjs` (or a reviewer's own judgment) actually
+  flags the concern.
+- **`scripts/gate-select.mjs`** — a deterministic backstop for step 5's
+  mandatory specialist gates (`ui`/`migration`/`api`/`dependency`/
+  `performance`/`observability`). Previously these were prose rules the
+  orchestrating turn had to apply correctly, diff by diff, with nothing to
+  catch a missed one; the script reads the actual diff (added-lines DDL/route/
+  loop/outbound-call heuristics plus file-path/manifest matching) and is a
+  floor under the prose rules, not a replacement for them.
+- **Specialist-reviewer telemetry** — `scripts/log-specialist.mjs` + a new
+  `/craftsman:stats` section report dispatch count and finding-rate per
+  specialist agent, closing the gap where the six agents added over the last
+  few rounds were invisible to the plugin's own "delete what doesn't earn its
+  keep" philosophy.
+- **Wiring tests** (`scripts/wiring.test.mjs`) — every
+  `${CLAUDE_PLUGIN_ROOT}/...` path and every agent name referenced across
+  `commands/`/`agents/` is now checked against the real file set, so a typo'd
+  or orphaned reference fails CI instead of silently doing nothing.
 - **React Native coverage** — new `react-native.md` checklist (supplements
   `javascript.md`/`typescript.md`: platform split files, re-render/list-perf,
   native-module/bridge safety, `StyleSheet.create` vs. inline styles,

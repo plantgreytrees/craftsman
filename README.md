@@ -41,8 +41,11 @@ does what the layer below can't:
 | Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
 
 **2. A doc-first workflow:** **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.**
-Planners write a short plan doc; `/orchestrate` executes it (routing UI-touching
-diffs through `ui-ux-reviewer` alongside the usual gates); `/scrutinise`
+Planners write a short plan doc; `/orchestrate` executes it, reading each unit's
+actual diff through `gate-select.mjs` to deterministically route it to the
+specialists that apply — `ui-ux-reviewer`, `migration-reviewer`, `api-reviewer`,
+`dependency-auditor`, `performance-reviewer`, `observability-reviewer` — instead
+of trusting a file-pattern rule to be remembered correctly; `/scrutinise`
 reviews the result; `/sync-docs` keeps the docs honest. Acceptance criteria written
 at plan-time are enforced before a task can finish. `/craftsman:digest` reads the
 same tracker state at any point for a done/decisions/next/%-complete summary.
@@ -131,10 +134,12 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   shared wall-clock budget (`stopGate.totalBudgetMs`) rather than summed —
   see [EXTENDING.md](EXTENDING.md).
 - **Secrets are a hard block, never silently skipped** — a scan that gets cut
-  off (budget, its own timeout, or a missing scanner binary) fails the Stop
-  gate with a clear message instead of passing quietly; a clean working tree
-  still gets scanned at least once per session, and gitignored `.env` files
-  are checked too, not just tracked changes.
+  off (budget or its own timeout) fails the Stop gate with a clear message
+  instead of passing quietly; a clean working tree still gets scanned at least
+  once per session, and gitignored `.env` files are checked too, not just
+  tracked changes. If the configured scanner (`gitleaks` by default) isn't on
+  `PATH`, the gate falls back to a dependency-free built-in scanner instead of
+  just blocking on a missing tool (opt out with `security.builtinFallback: false`).
 
 ---
 
@@ -148,6 +153,7 @@ scripts/                                         the Node engine (no dependencie
 commands/                                        the workflow + engine commands
 agents/                                          the specialist review/implement agents
 skills/language-aware-planning/                  per-language idiom checklists + plan template
+skills/design-review/                            the UI/UX review checklist ui-ux-reviewer loads
 output-styles/craftsman-terse.md                 an optional terse response style
 .github/workflows/ci.yml                         syntax/test/JSON checks on every push and PR
 ```

@@ -7,6 +7,9 @@
 // missed one. This gives the same answer from the diff every time.
 //
 // Usage: node gate-select.mjs <git-range>
+// <git-range> is a two-dot range (e.g. "<merge-base>..HEAD"), same convention
+// as diff-triviality.mjs — a single ref diffs against the working tree, which
+// is usually empty right after a commit and would silently under-report.
 // Prints one gate name per line (a subset of ui, migration, api, dependency,
 // performance, observability), or nothing if none apply. Exit 0 always —
 // this is advisory routing, not a pass/fail check, so a git failure fails

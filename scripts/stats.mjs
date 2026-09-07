@@ -70,4 +70,23 @@ if (!rules.length) {
   for (const r of rules) console.log(`  ${r.lang}/${r.tool} (${r.n} occurrences): ${r.sample}`);
 }
 
+const specialists = events.filter((e) => e.ev === "specialist");
+console.log(`\nSpecialist reviewers: ${specialists.length} dispatches`);
+if (!specialists.length) {
+  console.log("  No specialist-reviewer events yet.");
+} else {
+  const byAgent = new Map();
+  for (const e of specialists) {
+    const bucket = byAgent.get(e.agent) || { dispatches: 0, findings: 0, withFindings: 0 };
+    bucket.dispatches += 1;
+    bucket.findings += e.count || 0;
+    if ((e.count || 0) > 0) bucket.withFindings += 1;
+    byAgent.set(e.agent, bucket);
+  }
+  for (const [agent, b] of [...byAgent.entries()].sort((a, b) => b[1].dispatches - a[1].dispatches)) {
+    const hitRate = Math.round((100 * b.withFindings) / b.dispatches);
+    console.log(`  ${agent.padEnd(22)} ${b.dispatches} dispatches · ${hitRate}% found something · ${b.findings} findings total`);
+  }
+}
+
 console.log(`\nRead: a layer with ~0% block rate but non-trivial latency is a candidate to cut.`);

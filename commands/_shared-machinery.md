@@ -51,7 +51,7 @@ project-isolated.
 
 ## The tooling manifest (planner → executor contract)
 
-Every plan doc a planner emits carries, **per unit**, a `### Tooling` block naming *only* what that unit needs — so the executor loads exactly those and ignores the rest (no scanning every agent/skill/check per unit; less context, faster, fewer wrong turns). The planner resolves this once, at plan time, when it already knows the change shape.
+Every plan doc a planner emits carries, **per unit**, a `### Tooling` block naming *only* what that unit needs — so the executor loads exactly those and ignores the rest (no scanning every agent/skill/check per unit; less context, faster, fewer wrong turns). The planner resolves this once, at plan time, when it already knows the change shape. At execution time, `gate-select.mjs` (`_shared-execution.md` step 5) re-derives the same gates deterministically from the actual diff — a floor under the planner's own listing, not a replacement for it.
 
 ```
 ### Tooling — <unit-slug>
