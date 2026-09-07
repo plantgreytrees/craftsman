@@ -72,7 +72,7 @@ if (!present) {
 const missing = wanted.filter((b) => !present.includes(b));
 
 // Housekeeping: drop stale per-session state (best-effort).
-pruneSessions(undefined, context);
+pruneSessions();
 
 let handoff = null;
 try {

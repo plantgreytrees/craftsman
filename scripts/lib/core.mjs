@@ -168,7 +168,9 @@ export function atomicWrite(file, data) {
 }
 export function sha1(s) { return crypto.createHash("sha1").update(String(s)).digest("hex"); }
 export function pruneSessions(maxAgeMs = 7 * 24 * 3600 * 1000, context = null) {
-  const sessionsDir = path.join(context?.stateDir || STATE_DIR, "sessions");
+  const sessionsDir = context?.stateDir
+    ? path.join(context.stateDir, "sessions")
+    : SESSIONS_DIR;
   try {
     for (const d of fs.readdirSync(sessionsDir)) {
       const p = path.join(sessionsDir, d);

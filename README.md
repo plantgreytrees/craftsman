@@ -41,9 +41,11 @@ does what the layer below can't:
 | Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
 
 **2. A doc-first workflow:** **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.**
-Planners write a short plan doc; `/orchestrate` executes it; `/scrutinise`
+Planners write a short plan doc; `/orchestrate` executes it (routing UI-touching
+diffs through `ui-ux-reviewer` alongside the usual gates); `/scrutinise`
 reviews the result; `/sync-docs` keeps the docs honest. Acceptance criteria written
-at plan-time are enforced before a task can finish.
+at plan-time are enforced before a task can finish. `/craftsman:digest` reads the
+same tracker state at any point for a done/decisions/next/%-complete summary.
 
 **Language-agnostic by design:** every check is a config entry that **silently skips
 if its tool isn't installed** — so the same plugin lints Python with `ruff`, Go with
@@ -71,6 +73,7 @@ gitignored local snapshot.
 | `/scrutinise` | review what was built (routed, so trivial diffs stay cheap) |
 | `/sync-docs` | reconcile the docs with the code that actually shipped |
 | `/fix-tests` | get a red test suite green |
+| `/craftsman:digest` | ADHD-friendly progress digest: done, decisions needed, next, % complete per plan |
 | `/craftsman:baseline` | snapshot pre-existing lint issues (run once per repo) |
 | `/craftsman:stats` | see which gates actually fire — delete the ones that don't earn their keep |
 | `/craftsman:toggle` | turn the gates on/off for this repo |

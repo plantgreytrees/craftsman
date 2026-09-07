@@ -156,6 +156,104 @@ function updateClaudeIgnore(current, patterns) {
 
 function textAt(file) { return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null; }
 
+function pluginFiles() {
+  const roots = ["commands", "agents", "hooks", "scripts", "skills", "craftsman.config.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"];
+  const files = [];
+  const walk = (relative) => {
+    const absolute = path.join(pluginRoot, relative);
+    if (!fs.existsSync(absolute)) return;
+    if (fs.statSync(absolute).isFile()) { files.push(relative); return; }
+    for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === ".craftsman") continue;
+      walk(path.join(relative, entry.name));
+    }
+  };
+  roots.forEach(walk);
+  return files.sort();
+}
+
+function pluginInventory() {
+  const manifest = path.join(pluginRoot, ".claude-plugin", "plugin.json");
+  const version = fs.existsSync(manifest) ? readJson(manifest).version : null;
+  const files = pluginFiles();
+  const required = [
+    "craftsman.config.json", ".claude-plugin/plugin.json", "hooks/hooks.json",
+    "commands/init.md", "scripts/init.mjs", "scripts/lib/core.mjs",
+  ];
+  const missing = required.filter((file) => !files.includes(file));
+  const syntaxErrors = [];
+  const jsonErrors = [];
+  for (const file of files) {
+    const absolute = path.join(pluginRoot, file);
+    if (/\.mjs$/.test(file)) {
+      try { execFileSync(process.execPath, ["--check", absolute], { stdio: "ignore" }); }
+      catch { syntaxErrors.push(file); }
+    } else if (/\.json$/.test(file)) {
+      try { readJson(absolute); } catch { jsonErrors.push(file); }
+    }
+  }
+  return {
+    root: pluginRoot, version, files, missing, syntaxErrors, jsonErrors,
+    healthy: !missing.length && !syntaxErrors.length && !jsonErrors.length,
+  };
+}
+
+function trackerPlanState(root) {
+  const file = path.join(root, "docs", "plans", "TRACKER.md");
+  const states = new Map();
+  if (!fs.existsSync(file)) return states;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const slug = line.match(/\[([^\]]+)\]\([^)]*\.md\)/)?.[1];
+    const status = line.match(/\b(IN_PROGRESS|BLOCKED|PARKED|PENDING|MERGED|COMPLETE)\b/)?.[1];
+    const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\s*\|?\s*$/)?.[1] || "";
+    if (!slug || !status) continue;
+    const state = states.get(slug) || { statuses: new Set(), updated: "" };
+    state.statuses.add(status);
+    if (date > state.updated) state.updated = date;
+    states.set(slug, state);
+  }
+  return states;
+}
+
+function planDocuments(root, version) {
+  const directory = path.join(root, "docs", "plans");
+  if (!fs.existsSync(directory)) return { files: {}, order: [], audit: [] };
+  const states = trackerPlanState(root);
+  const entries = fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "TRACKER.md")
+    .map((entry) => {
+      const file = path.join(directory, entry.name);
+      const text = fs.readFileSync(file, "utf8");
+      const frontmatter = text.match(/^---\n([\s\S]*?)\n---\n/);
+      const slug = frontmatter?.[1].match(/^slug:\s*([^\s#]+)/m)?.[1] || path.basename(entry.name, ".md");
+      const state = states.get(slug) || { statuses: new Set(), updated: "" };
+      const active = [...state.statuses].some((status) => ["IN_PROGRESS", "BLOCKED", "PARKED", "PENDING"].includes(status));
+      const openTasks = (text.match(/^\s*- \[ \]/gm) || []).length;
+      const canonical = Boolean(frontmatter);
+      let updated = text;
+      if (canonical) {
+        const marker = /^craftsman_version:\s*.*$/m;
+        const replacement = `craftsman_version: ${version}`;
+        updated = marker.test(updated)
+          ? updated.replace(marker, replacement)
+          : updated.replace(/^slug:.*$/m, (line) => `${line}\n${replacement}`);
+      }
+      return {
+        file, relative: path.relative(root, file).split(path.sep).join("/"), slug,
+        statuses: [...state.statuses].sort(), active, openTasks, canonical,
+        updated: state.updated, changed: updated !== text, content: updated,
+      };
+    })
+    .sort((a, b) => Number(b.active) - Number(a.active)
+      || Number(b.openTasks > 0) - Number(a.openTasks > 0)
+      || b.updated.localeCompare(a.updated) || a.slug.localeCompare(b.slug));
+  return {
+    files: Object.fromEntries(entries.filter((entry) => entry.changed).map((entry) => [entry.file, entry.content])),
+    order: entries.map((entry) => entry.relative),
+    audit: entries.map(({ file, content, ...entry }) => entry),
+  };
+}
+
 function desiredFiles(plan) {
   const { root, config } = plan;
   const files = {};
@@ -179,7 +277,7 @@ function changedFiles(files) {
   return Object.entries(files).filter(([file, content]) => textAt(file) !== content).map(([file]) => file);
 }
 
-export function buildInitPlan(root, { checkTools = true } = {}) {
+export function buildInitPlan(root, { checkTools = true, auditPlugin = false } = {}) {
   const detected = detectStack(root);
   const existingPath = path.join(root, "craftsman.config.json");
   const existing = fs.existsSync(existingPath) ? readJson(existingPath) : {};
@@ -205,10 +303,35 @@ export function buildInitPlan(root, { checkTools = true } = {}) {
       gitignore: { path: gitignore, present: fs.existsSync(gitignore) && fs.readFileSync(gitignore, "utf8").split(/\r?\n/).includes(".craftsman/") },
     },
     config,
+    plugin: auditPlugin ? pluginInventory() : null,
   };
   plan.files = desiredFiles(plan);
   plan.changes = changedFiles(plan.files);
   plan.ready = plan.changes.length === 0;
+  return plan;
+}
+
+export function buildUpdatePlan(root, options = {}) {
+  const plan = buildInitPlan(root, { ...options, auditPlugin: true });
+  const plans = planDocuments(root, plan.plugin.version);
+  Object.assign(plan.files, plans.files);
+  plan.changes = changedFiles(plan.files);
+  plan.ready = plan.changes.length === 0;
+  plan.mode = "update";
+  plan.update = {
+    scope: ["craftsman.config.json", ".claude/CLAUDE.md", ".claudeignore", ".gitignore"],
+    pluginVersion: plan.plugin.version,
+    pluginFiles: plan.plugin.files.length,
+    pluginFileList: plan.plugin.files,
+    pluginMissing: plan.plugin.missing,
+    pluginSyntaxErrors: plan.plugin.syntaxErrors,
+    pluginJsonErrors: plan.plugin.jsonErrors,
+    pluginHealthy: plan.plugin.healthy,
+    projectChanges: plan.changes,
+    planOrder: plans.order,
+    planAudit: plans.audit,
+    planChanges: Object.keys(plans.files),
+  };
   return plan;
 }
 
@@ -257,12 +380,18 @@ export function applyInitPlan(plan) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const args = new Set(process.argv.slice(2));
-    const modes = ["--check", "--diff", "--write"].filter((mode) => args.has(mode));
-    if (modes.length > 1) throw new Error("choose only one of --check, --diff, or --write");
+    const modes = ["--check", "--diff", "--write", "--update"].filter((mode) => args.has(mode));
+    if (modes.length > 1) throw new Error("choose only one of --check, --diff, --write, or --update");
     const mode = modes[0] ? modes[0].slice(2) : "audit";
-    const plan = buildInitPlan(process.cwd());
+    const plan = mode === "update" ? buildUpdatePlan(process.cwd()) : buildInitPlan(process.cwd());
+    if (mode === "update" && !plan.plugin.healthy) {
+      throw new Error(`plugin health check failed: ${JSON.stringify({ missing: plan.plugin.missing, syntaxErrors: plan.plugin.syntaxErrors, jsonErrors: plan.plugin.jsonErrors })}`);
+    }
     if (mode === "diff") process.stdout.write(renderInitDiff(plan) + (plan.changes.length ? "\n" : ""));
-    else if (mode === "write") process.stdout.write(JSON.stringify({ ...applyInitPlan(plan), mode }, null, 2) + "\n");
+    else if (mode === "write" || mode === "update") {
+      const result = applyInitPlan(plan);
+      process.stdout.write(JSON.stringify({ ...result, ...(plan.update ? { update: plan.update } : {}), mode }, null, 2) + "\n");
+    }
     else {
       process.stdout.write(JSON.stringify({ ...plan, mode }, null, 2) + "\n");
       if (mode === "check" && !plan.ready) process.exitCode = 1;

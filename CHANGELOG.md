@@ -5,6 +5,15 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **`/craftsman:digest`** — an ADHD-friendly progress digest (`scripts/digest.mjs`)
+  that reads the existing tracker ledger and reports only what shipped, what
+  needs a human decision (BLOCKED/PARKED rows), what's next, and % complete per
+  plan. No new state file; it's a read-only projection of `scripts/tracker.mjs`.
+- **`ui-ux-reviewer` agent + `design-review` skill** — closes the UI/UX review
+  gap: a diff touching component/view/template files or styles now gets a
+  mandatory, advisory-only design pass (hierarchy, spacing, accessibility,
+  generic-AI-slop patterns, responsive breakage) alongside the existing
+  `security-auditor` gate in `/orchestrate`, and in `/scrutinise --deep`.
 - **Repeatable `/craftsman:init` upgrades** — init now runs a deterministic audit,
   detects repository-specific test commands and package managers, reports missing
   quality tools, migrates older full-default configs to compact project overrides,
@@ -17,6 +26,15 @@ All notable changes to craftsman are documented here. Format loosely follows
 - **Transactional init modes** — init now supports `--check`, `--diff`, and
   `--write`; writes use temporary files, back up existing managed files, and roll
   back the in-memory originals if a write fails.
+- **Full `/craftsman:init --update` pass** — update refreshes every project-owned
+  Craftsman surface, reports the active plugin version, and inventories shipped
+  commands, agents, hooks, scripts, skills, and defaults so an overhaul cannot
+  silently leave an incomplete installation; every shipped `.mjs` is syntax
+  checked and every shipped `.json` is parsed before changes are applied.
+  - **Plan-aware updates** — `--update` now orders `docs/plans/` from active and
+    unfinished work toward historical plans, audits every plan, and stamps
+    canonical frontmatter with the current Craftsman version without rewriting
+    task prose or tracker state.
 - **Scoped multi-phase execution hardening** — plans now carry per-unit read/docs/write
   manifests enforced by `PreToolUse`; missing dependencies require explicit re-analysis
   and scope activation. Hand-offs and claims are session-scoped and atomic, and resumed

@@ -76,6 +76,11 @@ structure. It writes:
 Use `node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --check` in CI to fail when
 required setup is missing, `--diff` to preview changes, and `--write` to apply
 them. Existing managed files are backed up under `.craftsman/init-backups/`.
+For an existing Craftsman setup after a plugin overhaul, use `--update`; it
+refreshes all managed project surfaces and audits the installed plugin assets
+without overwriting project code or custom context. It also updates canonical
+plan frontmatter in activity order, starting with in-progress and pending work,
+while preserving plan tasks and tracker statuses.
 
 - **`craftsman.config.json`** at the repo root — only your repo's overrides (it
   merges over the defaults): the real test command, extra folders to ignore, and

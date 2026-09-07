@@ -3,7 +3,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite, logEvent, projectContext, readStdin, sidOf } from "./lib/core.mjs";
-import { transition } from "./tracker.mjs";
 
 export function claimPath(plan, unit, project = ".", context = null) {
   const key = `${project}--${plan}--${unit}`.replace(/[^A-Za-z0-9_.-]/g, "_");
@@ -60,12 +59,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       session_id: sidOf(input), plan: input.plan, unit: input.unit, project: input.project || ".",
       claimed_at: new Date().toISOString(), project_root: context.root,
     }, null, 2) + "\n");
-    try {
-      transition({ ...input, status: "IN_PROGRESS", evidence: `claimed by ${sidOf(input)}` }, context);
-    } catch (error) {
-      fs.rmSync(lock, { recursive: true, force: true });
-      throw error;
-    }
     logEvent({ ev: "unit_claimed", sid: sidOf(input), plan: input.plan, unit: input.unit });
     process.stdout.write(`unit claimed: ${input.unit}\n`);
   } catch (error) {

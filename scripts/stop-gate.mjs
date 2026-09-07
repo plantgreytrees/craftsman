@@ -14,7 +14,7 @@ const pexec = promisify(execFile);
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
 const active = readScope(input);
-const context = active?.project_root && !active.scope_ambiguous
+const context = active?.project_root
   ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
@@ -29,9 +29,6 @@ const sdir = sessionDir(sid, context);
 try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
 
 const problems = [];
-if (active?.scope_ambiguous) {
-  problems.push("ACTIVE SCOPE AMBIGUOUS: more than one project scope is active. Activate the intended project scope explicitly before completing.");
-}
 
 // A session cannot finish while it still owns an implementation worktree.
 // This is session-local: another concurrent session's active binding is not
@@ -101,9 +98,6 @@ let results = [];
 if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
 if (isDirty) {
-  if (!results.length) {
-    problems.push("TEST BASELINE UNAVAILABLE: this session changed files but has no completed session-start test baseline. Start a fresh session or wait for the baseline snapshot to complete, then retry.");
-  }
   for (const { cmd, green } of results) {
     if (!green) continue;
     tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });

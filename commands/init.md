@@ -17,8 +17,9 @@ Run the repository-local init engine from the project root:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs"
 ```
 
-Use `--check` for CI/readiness checks, `--diff` to preview generated changes, or
-`--write` to apply them. `--write` creates a timestamped backup under
+Use `--check` for CI/readiness checks, `--diff` to preview generated changes,
+`--write` to apply the normal setup, or `--update` to perform the full Craftsman
+upgrade pass. `--write` and `--update` create a timestamped backup under
 `.craftsman/init-backups/` before replacing an existing managed file.
 
 Read its JSON result and report: detected markers/languages, the test command for
@@ -57,6 +58,23 @@ After the audit, run:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --write
 ```
+
+For an existing installation whose Craftsman track has changed, use:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --update
+```
+
+`--update` refreshes every project-owned Craftsman surface that init manages,
+then reports the plugin version and audits all shipped commands, agents, hooks,
+scripts, skills, default configuration, JavaScript syntax, and JSON validity. It
+also walks `docs/plans/` in activity order, beginning with plans that are
+`IN_PROGRESS`, `BLOCKED`, `PARKED`, or `PENDING`, then unfinished plans, then
+historical plans. Canonical plan frontmatter receives the current
+`craftsman_version`; task prose and tracker statuses are preserved.
+It does not overwrite application source, custom project context, or arbitrary
+files. A missing or invalid shipped asset is reported as an internal plugin
+problem and prevents the update rather than being silently regenerated.
 
 - Migrate an older full/default config to the current override shape while
   preserving unknown project keys and explicit project tuning.

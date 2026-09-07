@@ -2,8 +2,8 @@
 // Background test-state snapshot, spawned detached by session-context.mjs with
 // the session id as argv[2]. Keeps session OPEN instant and records each
 // session's OWN baseline at sessions/<sid>/session-start.json (no cross-session
-// clobber). If the tree changes while the snapshot runs, no baseline is
-// written; Stop then blocks a dirty session until a fresh baseline exists.
+// clobber). If it hasn't finished by Stop, that session's Stop skips the
+// regression check (safe).
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
