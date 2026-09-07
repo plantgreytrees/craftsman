@@ -122,7 +122,13 @@ gates on:
 | Go | `gofmt`, `staticcheck` |
 | Rust | `rustfmt`, `cargo clippy` |
 | Ruby | `rubocop` |
-| Secrets (any stack) | `gitleaks` |
+| PHP | `php-cs-fixer`, `phpstan` |
+| Shell | `shellcheck` |
+| Elixir | `mix format`, `mix credo` |
+| Dart / Flutter | `dart format`, `dart analyze` |
+| Terraform | `terraform fmt`, `tflint` |
+| Dockerfile | `hadolint` |
+| Secrets (any stack) | `gitleaks` (optional — a built-in fallback scanner runs automatically if it's missing) |
 
 C#, Java, and C/C++ have no fast per-file linter wired (their tooling is too slow
 per edit), so they're checked at the "done" build/test instead.

@@ -56,7 +56,7 @@ Every plan doc a planner emits carries, **per unit**, a `### Tooling` block nami
 ```
 ### Tooling — <unit-slug>
 Implementer:  implementer                     # the routing target; language auto-detected at execute time
-Gates:        security-auditor, ui-ux-reviewer, standards-keeper   # illustrative; include only gates this diff triggers (UI gate only for UI changes)
+Gates:        security-auditor, ui-ux-reviewer, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper   # illustrative; include only gates this diff triggers
 Skills:       <1–3 skills relevant to this unit>
 Checks:       <the detected build/lint/typecheck/test commands this diff must pass>
 MCP:          context7 (lib API), memory (recall+record)   # if available; skip-if-trivial

@@ -5,6 +5,53 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **React Native coverage** — new `react-native.md` checklist (supplements
+  `javascript.md`/`typescript.md`: platform split files, re-render/list-perf,
+  native-module/bridge safety, `StyleSheet.create` vs. inline styles,
+  RN-flavored accessibility). Detected via a `react-native`/`expo` dependency
+  in `package.json`; native build dirs (`ios/Pods/`, `android/build/`,
+  `.expo/`, etc.) are added to the generated `.claudeignore`. `ui-ux-reviewer`
+  now loads this checklist and treats RN's accessibility/responsive
+  vocabulary (no DOM) as first-class rather than flagging non-issues.
+- **Path-scoped language detection** — `languages.*` blocks can now match by
+  project-relative path glob (`paths`), not just extension/filename, so a
+  directory-scoped stack like Kubernetes manifests (`k8s/`, `manifests/`,
+  Helm `templates/`) can be linted without colliding with unrelated YAML.
+  `detectLang` takes an optional `context` so the glob resolves against the
+  right project root.
+- **Mobile and data/ML idiom checklists** — new `swift.md` and `kotlin.md`
+  references (plus `craftsman.config.json` format/check wiring and stack
+  detection for both), a `kubernetes.md` checklist for the new path-scoped
+  language, and a `data-science.md` checklist for notebooks/pipelines
+  (data leakage, reproducibility, notebook hygiene) that any Python-heavy
+  ML repo can load alongside `python.md`.
+- **Migration/API/dependency triggers now content-aware, not just file-pattern**
+  — `review-router` escalates on raw schema-altering SQL or an
+  unconventionally-located route/handler even without a migration file or
+  routes-directory match, and `_shared-execution.md` states explicitly that
+  the file-pattern gates are a floor, not a ceiling.
+- **Built-in secrets-scan fallback** — if the configured scanner (`gitleaks` by
+  default) isn't on `PATH`, the Stop gate now falls back to a dependency-free
+  built-in scanner (`scripts/secrets-scan.mjs`, common key/token/private-key
+  patterns) instead of just blocking on a missing tool. Opt out per-repo with
+  `security.builtinFallback: false`.
+- **Five new specialist agents** closing domain gaps beyond code
+  correctness/security/UI: `migration-reviewer` (schema/migration safety —
+  reversibility, data loss, lock risk), `api-reviewer` (REST/GraphQL/gRPC
+  contract design and versioning), `dependency-auditor` (license/vulnerability/
+  maintenance risk on a new or upgraded package), `performance-reviewer`
+  (N+1 queries, unbounded work, missing pagination), and
+  `observability-reviewer` (silent failure paths, missing instrumentation).
+  Migration/API/dependency gates are mandatory-on-trigger like `security-auditor`;
+  performance/observability join the advisory ESCALATE panel alongside
+  `idiom-reviewer`. All five are wired into `/orchestrate` and
+  `/scrutinise --deep`, and `review-router` now escalates on a manifest/lockfile
+  change too.
+- **Wider language coverage** — idiom-aware checklists added for PHP, Shell, and
+  C/C++ (previously linted but falling through to the generic checklist), plus
+  new Terraform and Dockerfile checklists. `craftsman.config.json` now ships
+  format/check commands for Elixir, Dart, Terraform, and Dockerfile (the last
+  via a new filename-based `languages.*.filenames` match, not just extensions).
 - **`/craftsman:digest`** — an ADHD-friendly progress digest (`scripts/digest.mjs`)
   that reads the existing tracker ledger and reports only what shipped, what
   needs a human decision (BLOCKED/PARKED rows), what's next, and % complete per

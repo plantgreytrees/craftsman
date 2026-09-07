@@ -63,12 +63,44 @@ function gitIdentity(context) {
   } catch { return null; }
 }
 
+// Freshness checks re-run per record on every recall/compact; a plan's records
+// overwhelmingly share the same plan/commit/file set, so memoize the git
+// subprocess spawns for the lifetime of this process rather than re-spawning
+// per record.
+const gitCache = new Map();
+function cached(key, compute) {
+  if (gitCache.has(key)) return gitCache.get(key);
+  const value = compute();
+  gitCache.set(key, value);
+  return value;
+}
+
 function planHash(context, plan) {
-  try {
-    return execFileSync("git", ["-C", context.root, "hash-object", "--", plan], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch { return null; }
+  return cached(`hash:${context.root}:${plan}`, () => {
+    try {
+      return execFileSync("git", ["-C", context.root, "hash-object", "--", plan], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch { return null; }
+  });
+}
+
+function isAncestor(context, commit) {
+  return cached(`ancestor:${context.root}:${commit}`, () => {
+    try {
+      execFileSync("git", ["-C", context.root, "merge-base", "--is-ancestor", commit, "HEAD"], { stdio: "ignore" });
+      return true;
+    } catch { return false; }
+  });
+}
+
+function sourceChanged(context, commit, sourceFiles) {
+  return cached(`diff:${context.root}:${commit}:${sourceFiles.join(",")}`, () => {
+    try {
+      execFileSync("git", ["-C", context.root, "diff", "--quiet", commit, "HEAD", "--", ...sourceFiles], { stdio: "ignore" });
+      return false;
+    } catch { return true; }
+  });
 }
 
 function normalizeRecord(input, context) {
@@ -122,17 +154,10 @@ function readRecords(file) {
 }
 
 function freshness(record, context) {
-  if (record.plan_hash && planHash(context, record.plan) && record.plan_hash !== planHash(context, record.plan)) return "plan-changed";
-  if (record.source_commit) {
-    try {
-      execFileSync("git", ["-C", context.root, "merge-base", "--is-ancestor", record.source_commit, "HEAD"], { stdio: "ignore" });
-    } catch { return "commit-unavailable"; }
-  }
-  if (record.source_files?.length && record.source_commit) {
-    try {
-      execFileSync("git", ["-C", context.root, "diff", "--quiet", record.source_commit, "HEAD", "--", ...record.source_files], { stdio: "ignore" });
-    } catch { return "source-changed"; }
-  }
+  const currentHash = planHash(context, record.plan);
+  if (record.plan_hash && currentHash && record.plan_hash !== currentHash) return "plan-changed";
+  if (record.source_commit && !isAncestor(context, record.source_commit)) return "commit-unavailable";
+  if (record.source_files?.length && record.source_commit && sourceChanged(context, record.source_commit, record.source_files)) return "source-changed";
   return null;
 }
 

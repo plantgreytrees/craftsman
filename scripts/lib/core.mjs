@@ -240,10 +240,15 @@ export function isIgnored(file, cfg, lang, context = null) {
   return pats.some((p) => globToRe(p).test(rel) || globToRe(p).test("./" + rel));
 }
 
-export function detectLang(file, cfg) {
+export function detectLang(file, cfg, context = null) {
   const ext = path.extname(file);
+  const base = path.basename(file);
+  const root = context?.root || PROJECT_ROOT;
+  const rel = path.relative(root, file).split(path.sep).join("/");
   for (const [name, spec] of Object.entries(cfg.languages)) {
     if ((spec.extensions || []).includes(ext)) return { name, ...spec };
+    if ((spec.filenames || []).includes(base)) return { name, ...spec };
+    if ((spec.paths || []).some((glob) => globToRe(glob).test(rel))) return { name, ...spec };
   }
   return null;
 }
@@ -512,7 +517,13 @@ export function cacheStore(key, context = null) {
 
 function pruneCache(cacheDir = CACHE_DIR) {
   try {
-    const files = fs.readdirSync(cacheDir)
+    // Runs on every cache write (every gate pass on every file edit) — a
+    // cheap unstated readdir count first means the stat+sort below (the
+    // actually expensive part) only runs once the dir is actually over cap,
+    // not on every single edit in a repo that never gets that large.
+    const names = fs.readdirSync(cacheDir);
+    if (names.length <= 2000) return;
+    const files = names
       .map((f) => ({ f, t: fs.statSync(path.join(cacheDir, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t);
     for (const { f } of files.slice(2000)) fs.unlinkSync(path.join(cacheDir, f));

@@ -48,7 +48,7 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
 // by comparison.
 try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
 
-const lang = detectLang(file, cfg);
+const lang = detectLang(file, cfg, context);
 if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 
 // Content-hash cache: unchanged file + unchanged check set => skip entirely.

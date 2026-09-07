@@ -16,9 +16,14 @@ that then get transliterated badly.
 1. **Name the target language** — detect from repo markers, never assume:
    `package.json`→JS/TS, `pyproject.toml`/`requirements.txt`→Python, `go.mod`→Go,
    `Cargo.toml`→Rust, `pom.xml`/`build.gradle`→Java/Kotlin, `Gemfile`→Ruby,
-   `*.sln`/`*.csproj`→C#, `composer.json`→PHP. Then Grep for two or three modules
-   that already solve a similar problem — **consistency with this codebase
-   outranks textbook patterns.**
+   `*.sln`/`*.csproj`→C#, `composer.json`→PHP, `*.tf`→Terraform, `Dockerfile`→
+   container build, `*.kt`/`build.gradle.kts`→Kotlin, `*.swift`/`Package.swift`→
+   Swift, `.ipynb`/a `train.py`-shaped script→data science/ML, a manifest under
+   `k8s/`/`kubernetes/`/`manifests/`→Kubernetes, a `react-native`/`expo`
+   dependency in `package.json`→React Native (load `react-native.md`
+   alongside `javascript.md`/`typescript.md`, not instead of it). Then Grep
+   for two or three modules that already solve a similar problem —
+   **consistency with this codebase outranks textbook patterns.**
 2. Make these five decisions explicit, in the language's own vocabulary:
    - Error model — one strategy, stated
    - Data model — make illegal states unrepresentable where the language allows
@@ -27,8 +32,11 @@ that then get transliterated badly.
    - Test seams — how this is tested without mocking the world
 3. Read `references/<language>.md` and verify the plan against it. **Load only the
    one language you need** — `python.md`, `typescript.md`, `javascript.md`,
-   `go.md`, `rust.md`, `java.md`, `csharp.md`, `ruby.md`, or `generic.md` for
-   anything else. The emitted plan follows `references/plan-template.md`.
+   `go.md`, `rust.md`, `java.md`, `csharp.md`, `ruby.md`, `php.md`, `shell.md`,
+   `cpp.md`, `terraform.md`, `dockerfile.md`, `swift.md`, `kotlin.md`,
+   `data-science.md`, `kubernetes.md`, `react-native.md`, or `generic.md` for
+   anything else. `react-native.md` supplements `javascript.md`/`typescript.md`
+   rather than replacing it. The emitted plan follows `references/plan-template.md`.
 
 ## Universal constraints
 

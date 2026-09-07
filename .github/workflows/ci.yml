@@ -6,6 +6,69 @@ on:
   pull_request:
 
 jobs:
+  cross-platform:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax-check every script
+        shell: node {0}
+        run: |
+          const fs = require("node:fs");
+          const { execFileSync } = require("node:child_process");
+          function walk(dir) {
+            return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+              const file = `${dir}/${entry.name}`;
+              return entry.isDirectory() ? walk(file) : [file];
+            });
+          }
+          for (const file of walk("scripts")) {
+            if (/\.(mjs|js|cjs)$/.test(file)) {
+              execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
+            }
+          }
+      - name: Unit and integration tests
+        run: node --test scripts/*.test.mjs scripts/lib/*.test.mjs
+      - name: Validate JSON
+        shell: node {0}
+        run: |
+          const fs = require("node:fs");
+          const files = [
+            "craftsman.config.json",
+            ".claude-plugin/plugin.json",
+            ".claude-plugin/marketplace.json",
+          ];
+          for (const file of files) {
+            JSON.parse(fs.readFileSync(file, "utf8"));
+            console.log(`Parsed: ${file}`);
+          }
+      - name: Check PR diff whitespace
+        if: github.event_name == 'pull_request'
+        shell: node {0}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          const { execFileSync } = require("node:child_process");
+          execFileSync("git", ["diff", "--check", `${process.env.BASE_SHA}...${process.env.HEAD_SHA}`], { stdio: "inherit" });
+      - name: Check pushed diff whitespace
+        if: github.event_name == 'push'
+        shell: node {0}
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          const { execFileSync } = require("node:child_process");
+          execFileSync("git", ["diff", "--check", `${process.env.BEFORE_SHA}...${process.env.HEAD_SHA}`], { stdio: "inherit" });
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -27,5 +90,11 @@ jobs:
         run: npm install --global @anthropic-ai/claude-code
       - name: Validate plugin
         run: claude plugin validate .
-      - name: Check diff whitespace
-        run: git diff --check
+      - name: Check PR diff whitespace
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+      - name: Check pushed diff whitespace
+        if: github.event_name == 'push'
+        shell: bash
+        run: git diff --check "${{ github.event.before }}...${{ github.sha }}"

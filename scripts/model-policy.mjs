@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const allowed = new Set(["haiku", "sonnet", "opus", "inherit"]);
+const allowed = new Set(["haiku", "sonnet", "opus", "fable", "inherit"]);
 const targets = ["commands", "agents"];
 const findings = [];
 

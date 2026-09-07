@@ -18,6 +18,9 @@ const qualityTools = {
   javascript: ["eslint", "prettier"], typescript: ["eslint", "prettier"], python: ["ruff"],
   go: ["gofmt", "staticcheck"], rust: ["rustfmt", "cargo"], ruby: ["rubocop"],
   java: ["google-java-format", "checkstyle"], csharp: ["dotnet"], cpp: ["clang-format", "clang-tidy"],
+  php: ["php-cs-fixer", "phpstan"], shell: ["shellcheck"], elixir: ["mix"], dart: ["dart"],
+  terraform: ["terraform", "tflint"], dockerfile: ["hadolint"],
+  kotlin: ["ktlint"], swift: ["swiftformat", "swiftlint"], kubernetes: ["kube-linter"],
 };
 const claudeIgnoreStart = "# Craftsman managed .claudeignore";
 const claudeIgnoreEnd = "# End Craftsman managed .claudeignore";
@@ -91,6 +94,7 @@ function detectStack(root) {
     try { packageData = readJson(path.join(root, "package.json")); } catch {}
     const deps = { ...(packageData.dependencies || {}), ...(packageData.devDependencies || {}) };
     languages.add(Object.keys(deps).some((name) => /typescript|ts-node/.test(name)) ? "typescript" : "javascript");
+    if ("react-native" in deps || "expo" in deps) languages.add("react-native");
   }
   if (markers.some((marker) => ["pyproject.toml", "requirements.txt"].includes(marker))) languages.add("python");
   if (markers.includes("setup.py")) languages.add("python");
@@ -98,10 +102,15 @@ function detectStack(root) {
   if (markers.includes("Cargo.toml")) languages.add("rust");
   if (markers.includes("Gemfile")) languages.add("ruby");
   if (markers.includes("pom.xml") || markers.includes("build.gradle") || markers.includes("build.gradle.kts")) languages.add("java");
+  if (markers.includes("build.gradle.kts") || files.some((file) => /\.kt(s)?$/.test(file))) languages.add("kotlin");
+  if (files.some((file) => /\.swift$/.test(file)) || files.includes("Package.swift") || files.includes("Podfile")) languages.add("swift");
   if (markers.some((marker) => marker.endsWith(".sln") || marker.endsWith(".csproj"))) languages.add("csharp");
   if (markers.includes("mix.exs")) languages.add("elixir");
   if (markers.includes("pubspec.yaml")) languages.add("dart");
   if (files.some((file) => /\.(c|cc|cpp|h|hpp)$/.test(file))) languages.add("cpp");
+  if (files.some((file) => /\.tf(vars)?$/.test(file))) languages.add("terraform");
+  if (files.some((file) => /(^|\/)Dockerfile$/.test(file))) languages.add("dockerfile");
+  if (files.some((file) => /(^|\/)(k8s|kubernetes|manifests)\/.*\.ya?ml$/.test(file) || /(^|\/)charts\/.*\/templates\/.*\.ya?ml$/.test(file))) languages.add("kubernetes");
   const packageManager = files.includes("pnpm-lock.yaml") ? "pnpm"
     : files.includes("yarn.lock") ? "yarn" : files.includes("package-lock.json") ? "npm" : null;
   const ci = files.some((file) => file.startsWith(".github/workflows/") || file === ".gitlab-ci.yml");
@@ -144,6 +153,7 @@ export function claudeIgnorePatterns(detected) {
   if (languages.has("ruby")) patterns.push(".bundle/");
   if (languages.has("csharp")) patterns.push("bin/", "obj/", "TestResults/");
   if (languages.has("cpp")) patterns.push("cmake-build-*/", "CMakeFiles/", "*.o", "*.a");
+  if (languages.has("react-native")) patterns.push("ios/Pods/", "ios/build/", "android/build/", "android/.gradle/", ".expo/", ".expo-shared/");
   return [...new Set(patterns)];
 }
 

@@ -330,9 +330,9 @@ test("stop-gate: a command killed after its own full timeoutMs (budget not bindi
   }
 });
 
-test("stop-gate: a missing secrets scanner blocks visibly and does not mark the session scanned", async () => {
+test("stop-gate: a missing secrets scanner with the built-in fallback disabled blocks visibly and does not mark the session scanned", async () => {
   const dir = makeFixture({
-    security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
+    security: { enabled: true, builtinFallback: false, check: ["craftsman-test-scanner-does-not-exist"] },
     stopGate: { requireAcceptanceCriteria: false },
   });
   const sid = "scenario-missing-secret-scanner";
@@ -345,6 +345,43 @@ test("stop-gate: a missing secrets scanner blocks visibly and does not mark the 
 
     const second = await runStopGate(dir, sid);
     assert.match(second.stdout, /SECRETS SCAN UNAVAILABLE/, "the unavailable scan must be retried");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a missing secrets scanner falls back to the built-in scan and passes a clean tree", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
+    stopGate: { requireAcceptanceCriteria: false },
+  });
+  const sid = "scenario-fallback-clean";
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.doesNotMatch(first.stdout, /"decision":"block"/, "a clean tree via the built-in fallback must not block");
+    assert.doesNotMatch(first.stdout, /SECRETS SCAN UNAVAILABLE/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a missing secrets scanner falls back to the built-in scan and blocks on a real finding", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
+    stopGate: { requireAcceptanceCriteria: false },
+  });
+  fs.writeFileSync(path.join(dir, ".env.local"), `aws_secret_access_key="${"A".repeat(40)}"\n`);
+  const sid = "scenario-fallback-dirty";
+  const markerPath = path.join(dir, ".craftsman", "sessions", sid, "secrets-scanned");
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.match(first.stdout, /"decision":"block"/);
+    assert.match(first.stdout, /SECRETS \(built-in fallback/);
+    assert.ok(!fs.existsSync(markerPath), "a fallback finding must not write the scanned marker");
+
+    fs.rmSync(path.join(dir, ".env.local"));
+    const second = await runStopGate(dir, sid);
+    assert.doesNotMatch(second.events.map((event) => event.ev).join("\n"), /stop-secrets-skipped/, "a finding must force a later clean scan");
   } finally {
     cleanup(dir);
   }

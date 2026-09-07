@@ -105,6 +105,7 @@
   },
   "security": {
     "enabled": true,
+    "builtinFallback": true,
     "check": [
       "gitleaks dir . --no-banner --redact"
     ]
@@ -188,6 +189,48 @@
       "extensions": [".c", ".h", ".cc", ".cpp", ".hpp", ".hh"],
       "format": ["clang-format -i {file}"],
       "check": ["clang-tidy {file} --quiet"]
+    },
+    "elixir": {
+      "extensions": [".ex", ".exs"],
+      "format": ["mix format {file}"],
+      "check": ["mix credo {file}"]
+    },
+    "dart": {
+      "extensions": [".dart"],
+      "format": ["dart format {file}"],
+      "check": ["dart analyze {file}"]
+    },
+    "terraform": {
+      "extensions": [".tf", ".tfvars"],
+      "format": ["terraform fmt {file}"],
+      "check": ["tflint {file}"]
+    },
+    "dockerfile": {
+      "extensions": [],
+      "filenames": ["Dockerfile"],
+      "format": [],
+      "check": ["hadolint {file}"]
+    },
+    "swift": {
+      "extensions": [".swift"],
+      "format": ["swiftformat {file}"],
+      "check": ["swiftlint lint --quiet {file}"]
+    },
+    "kotlin": {
+      "extensions": [".kt", ".kts"],
+      "format": ["ktlint -F {file}"],
+      "check": ["ktlint {file}"]
+    },
+    "kubernetes": {
+      "extensions": [],
+      "paths": [
+        "**/k8s/**/*.yaml", "**/k8s/**/*.yml",
+        "**/kubernetes/**/*.yaml", "**/kubernetes/**/*.yml",
+        "**/manifests/**/*.yaml", "**/manifests/**/*.yml",
+        "**/charts/**/templates/**/*.yaml", "**/charts/**/templates/**/*.yml"
+      ],
+      "format": [],
+      "check": ["kube-linter lint {file}"]
     }
   }
 }

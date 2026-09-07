@@ -35,7 +35,7 @@ const knownIssues = []; // { rel, lang, tools, count, sample } — feeds docs/er
 
 for (const file of files) {
   if (!fs.existsSync(file)) continue;
-  const lang = detectLang(file, cfg);
+  const lang = detectLang(file, cfg, context);
   if (!lang || isIgnored(file, cfg, lang, context)) continue;
   const { failures } = await runChecks(file, lang, cfg, context);
   if (!failures.length) { skipped++; continue; }

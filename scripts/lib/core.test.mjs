@@ -177,6 +177,20 @@ test("detectLang: matches by extension, first language block wins", () => {
   assert.equal(detectLang("/repo/a.rs", cfg), null);
 });
 
+test("detectLang: matches by exact filename for extension-less markers like Dockerfile", () => {
+  const cfg = { languages: { dockerfile: { extensions: [], filenames: ["Dockerfile"] } } };
+  assert.equal(detectLang("/repo/Dockerfile", cfg).name, "dockerfile");
+  assert.equal(detectLang("/repo/services/api/Dockerfile", cfg).name, "dockerfile");
+  assert.equal(detectLang("/repo/Dockerfile.dev", cfg), null);
+});
+
+test("detectLang: matches by project-relative path glob, scoped by context.root", () => {
+  const cfg = { languages: { kubernetes: { extensions: [], paths: ["**/k8s/**/*.yaml", "**/k8s/**/*.yml"] } } };
+  const context = { root: "/repo" };
+  assert.equal(detectLang("/repo/deploy/k8s/service.yaml", cfg, context).name, "kubernetes");
+  assert.equal(detectLang("/repo/docs/notes.yaml", cfg, context), null);
+});
+
 test("isIgnored: matches a project-relative path against an ignore glob", () => {
   const cfg = { ignore: ["**/node_modules/**"] };
   const ignoredFile = path.join(PROJECT_ROOT, "node_modules/foo/bar.js");

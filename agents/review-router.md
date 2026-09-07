@@ -13,7 +13,9 @@ Read the diff you are given. Answer **ESCALATE** if ANY of these hold:
 - persistence, migrations, auth, access control, cryptography, or input parsing is touched
 - a shared contract or module boundary changes
 - more than ~120 changed lines in one logical unit
-- a new external dependency is introduced
+- a new or upgraded entry appears in a package manifest/lockfile
+- raw SQL/DDL that alters schema appears outside the project's normal migration path
+- a route/handler/RPC method is registered somewhere other than the project's usual routing location
 - the error-handling strategy changes, or errors are swallowed
 
 Otherwise answer **SKIP**.

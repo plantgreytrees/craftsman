@@ -9,6 +9,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
+import { scanTree } from "./secrets-scan.mjs";
 
 const pexec = promisify(execFile);
 let input = {};
@@ -144,11 +145,26 @@ async function runTask(t) {
   } catch (e) {
     if (t.kind !== "test" && e.code === "ENOENT") {
       if (t.kind === "secret") {
-        allSecretsCompleted = false; // never ran — don't count as checked
-        problems.push(
-          `SECRETS SCAN UNAVAILABLE: ${bin} was not found. Install the configured scanner ` +
-          `or remove this security check explicitly before completing.`
-        );
+        // No external scanner on PATH — fall back to the built-in scan rather
+        // than just blocking, so a bare machine can still finish work. Opt
+        // out with security.builtinFallback: false if this is unwanted.
+        if (cfg.security?.builtinFallback === false) {
+          allSecretsCompleted = false;
+          problems.push(
+            `SECRETS SCAN UNAVAILABLE: ${bin} was not found. Install the configured scanner ` +
+            `or remove this security check explicitly before completing.`
+          );
+          return;
+        }
+        const findings = scanTree(context.root);
+        if (findings.length) {
+          allSecretsCompleted = false;
+          problems.push(
+            `SECRETS (built-in fallback — ${bin} not found): flagged content in the working tree:\n` +
+            findings.slice(0, 15).map((f) => `${f.file}:${f.line}: ${f.rule} — ${f.redacted}`).join("\n")
+          );
+        }
+        // A clean fallback is complete; findings remain incomplete until resolved.
       }
       return;
     }
