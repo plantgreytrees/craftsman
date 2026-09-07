@@ -8,7 +8,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
-  sidOf, sessionDir, pruneSessions, logEvent, git, readStdin, markerPresent, have, projectContext,
+  sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
 } from "./lib/core.mjs";
 import { recallMemory } from "./plan-memory.mjs";
 
@@ -72,7 +72,7 @@ if (!present) {
 const missing = wanted.filter((b) => !present.includes(b));
 
 // Housekeeping: drop stale per-session state (best-effort).
-pruneSessions();
+pruneSessions(undefined, context);
 
 let handoff = null;
 try {
@@ -112,8 +112,9 @@ for (const m of Object.keys(cfg.stopGate?.commands || {})) {
 }
 if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false && anyStopCommandMarker) {
   try { fs.unlinkSync(path.join(sessionDir(sid, context), "session-start.json")); } catch {}
+  const startingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${await git(["status", "--porcelain", "--untracked-files=all"], context)}`);
   try {
-    spawn(process.execPath, [path.join(PLUGIN_ROOT, "scripts", "snapshot.mjs"), sid, context.id],
+    spawn(process.execPath, [path.join(PLUGIN_ROOT, "scripts", "snapshot.mjs"), sid, context.id, startingTree],
       { detached: true, stdio: "ignore", windowsHide: true, cwd: context.root, env: process.env }).unref();
   } catch { /* snapshot is best-effort */ }
 }

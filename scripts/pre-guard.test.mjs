@@ -166,6 +166,29 @@ test("pre-guard: blocks mutating Git in the primary checkout while a worktree is
   }
 });
 
+test("pre-guard: blocks restore and add mutations outside the bound worktree", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-git-guard-extra-"));
+  try {
+    spawnSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+    const worktree = path.join(dir, ".worktrees", "unit-1");
+    fs.mkdirSync(path.dirname(worktree), { recursive: true });
+    spawnSync("git", ["worktree", "add", "-q", "-b", "feat/unit-1", worktree], { cwd: dir });
+    const sid = "git-guard-extra-test";
+    const bindingContext = { root: dir, stateDir: path.join(dir, ".craftsman") };
+    fs.mkdirSync(path.dirname(worktreeBindingPath({ session_id: sid }, bindingContext)), { recursive: true });
+    fs.writeFileSync(worktreeBindingPath({ session_id: sid }, bindingContext), JSON.stringify({
+      session_id: sid, unit: "unit-1", worktree_path: worktree, branch: "feat/unit-1",
+    }));
+    for (const command of ["git restore README.md", "git add README.md"]) {
+      const blocked = run(GUARD, dir, { session_id: sid, tool_name: "Bash", tool_input: { command } });
+      assert.equal(blocked.status, 2, command);
+      assert.match(blocked.stderr, /Git mutation blocked outside the active worktree/);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pre-guard: allows mutating Git inside the bound worktree", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-git-guard-"));
   try {

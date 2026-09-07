@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite, logEvent, projectContext, readStdin, sidOf } from "./lib/core.mjs";
+import { transition } from "./tracker.mjs";
 
 export function claimPath(plan, unit, project = ".", context = null) {
   const key = `${project}--${plan}--${unit}`.replace(/[^A-Za-z0-9_.-]/g, "_");
@@ -15,6 +16,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!input.plan || !input.unit) throw new Error("claim requires plan and unit");
     const context = projectContext(input.project || ".");
     const lock = claimPath(input.plan, input.unit, input.project || ".", context);
+    if (input.action === "recover") {
+      if (input.confirm !== true) throw new Error("claim recovery requires confirm:true");
+      let owner;
+      try { owner = JSON.parse(fs.readFileSync(path.join(lock, "owner.json"), "utf8")); } catch {}
+      const claimedAt = Date.parse(owner?.claimed_at || "") || 0;
+      const staleAfter = Number(input.stale_after_ms) || 24 * 3600 * 1000;
+      if (!owner || !claimedAt || Date.now() - claimedAt <= staleAfter) {
+        throw new Error("unit claim is missing or not stale enough to recover");
+      }
+      fs.rmSync(lock, { recursive: true, force: true });
+      logEvent({ ev: "unit_recovered", sid: sidOf(input), plan: input.plan, unit: input.unit, previous_session: owner.session_id });
+      process.stdout.write(`stale unit claim recovered: ${input.unit}\n`);
+      process.exit(0);
+    }
     if (input.action === "release") {
       let owner;
       try { owner = JSON.parse(fs.readFileSync(path.join(lock, "owner.json"), "utf8")); } catch {}
@@ -45,6 +60,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       session_id: sidOf(input), plan: input.plan, unit: input.unit, project: input.project || ".",
       claimed_at: new Date().toISOString(), project_root: context.root,
     }, null, 2) + "\n");
+    try {
+      transition({ ...input, status: "IN_PROGRESS", evidence: `claimed by ${sidOf(input)}` }, context);
+    } catch (error) {
+      fs.rmSync(lock, { recursive: true, force: true });
+      throw error;
+    }
     logEvent({ ev: "unit_claimed", sid: sidOf(input), plan: input.plan, unit: input.unit });
     process.stdout.write(`unit claimed: ${input.unit}\n`);
   } catch (error) {

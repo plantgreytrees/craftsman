@@ -30,8 +30,10 @@ For each unit, in **dependency order** (shared/library units → their consumers
 
 1. **Claim** — atomically claim the plan/unit before changing the tracker: pass the
    real session id, plan, and unit to `scripts/claim.mjs`; an existing claim is a
-   BLOCKED/duplicate execution and must not be overwritten. Then tracker row →
-   IN_PROGRESS. Release the claim only after close-out or an explicit PARKED state.
+   BLOCKED/duplicate execution and must not be overwritten. `claim.mjs` records the
+   same transition in the structured tracker ledger (`scripts/tracker.mjs`) and
+   the human-readable row remains a concise projection. Release the claim only
+   after close-out or an explicit PARKED state.
 2. **Worktree + branch** — call `repo-exec.mjs` with `action: "prepare"`, the
    selected `project`, unit, slug, session id, and optional worktree path. It
    discovers the repository's actual base branch, fetches its own remote, and

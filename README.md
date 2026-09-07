@@ -111,7 +111,14 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   criteria, doc authority) is isolated under `.craftsman/sessions/<id>/`; one
   session finishing never blocks another. Each execution unit must activate a
   separate Git worktree with `worktree_path`; mutating Git commands from another
-  checkout are blocked until the binding is released for the locked merge.
+  checkout are blocked until the binding is released for the locked merge. A
+  claim left behind by a crashed session can only be recovered once it's
+  confirmed stale (24h+ by default) — see [EXTENDING.md](EXTENDING.md).
+- **Structured tracker state** — the readable [tracker](docs/plans/TRACKER.md)
+  stays concise and link-first, while `scripts/tracker.mjs` records validated
+  unit identities, legal status transitions, and terse evidence in the local
+  `.craftsman/tracker/events.jsonl` ledger. Claims write `IN_PROGRESS` there
+  automatically; the Markdown tracker remains the human-facing projection.
 - **Fast** — session start never blocks on a build (the baseline runs in the
   background); tool detection is scoped to your detected stack and cached;
   lint results are content-hash cached; the Stop-gate's test-regression check
@@ -123,7 +130,8 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
 - **Secrets are a hard block, never silently skipped** — a scan that gets cut
   off (budget, its own timeout, or a missing scanner binary) fails the Stop
   gate with a clear message instead of passing quietly; a clean working tree
-  still gets scanned at least once per session.
+  still gets scanned at least once per session, and gitignored `.env` files
+  are checked too, not just tracked changes.
 
 ---
 
@@ -160,11 +168,13 @@ plugin name. Uninstall v0.2 first (see [INSTALL.md](INSTALL.md), step 0).
 ## Contributing
 
 Issues and PRs welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. The plugin is
-dependency-free; `node --test scripts/lib/core.test.mjs scripts/stop-gate.test.mjs`
-(the engine's unit + Stop-gate subprocess suites), `node --check` on every
-script, and `claude plugin validate .` are the whole test suite — CI runs all
-three on every push and PR. Keep it stack-agnostic — project-specific
-behaviour belongs in a project's own `.claude/`, not in the plugin.
+dependency-free; `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` (every
+script's unit/subprocess suite, including claim/handoff/plan-graph/repo-exec/
+scope/toggle/workspace coverage), `node --check` on every script, and
+`claude plugin validate .` are the whole test suite — CI runs all of it plus a
+diff-whitespace check on every push and PR. Keep it stack-agnostic —
+project-specific behaviour belongs in a project's own `.claude/`, not in the
+plugin.
 
 ## License
 

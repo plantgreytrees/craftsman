@@ -12,6 +12,7 @@ without re-reading).
 ````markdown
 ---
 slug: <feature-slug>
+goal: <short user-visible outcome; one sentence, easy to scan in the tracker>
 classification: in-scope | deferred | out-of-scope   # cite the deciding line/source
 tracker_rows: [TRACKER#<id>, ...]                     # rows this plan registers
 guards:
@@ -47,7 +48,7 @@ units:
 # Plan: <title>
 
 ## Outcome
-One sentence — the user-visible result when this is done.
+One sentence — the user-visible result when this is done. Keep this identical in meaning to `goal`.
 
 ## Scope Steps (executable core)
 

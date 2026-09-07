@@ -148,24 +148,31 @@ function sync(context, input, info) {
 function merge(context, input, info) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
+  if (run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
+    throw new Error("selected repository already has an in-progress merge");
+  }
   const checkedOutBranch = run(worktree, ["branch", "--show-current"]);
   if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   const branch = checkedOutBranch;
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   const lock = acquireLock(info, input);
   const originalBranch = run(context.root, ["branch", "--show-current"]);
+  let mergeStarted = false;
   try {
     heartbeat(lock);
     run(context.root, ["checkout", info.base_branch]);
     if (info.has_remote && input.pull !== false) { heartbeat(lock); run(context.root, ["pull", "--ff-only", "origin", info.base_branch]); }
     heartbeat(lock);
+    mergeStarted = true;
     run(context.root, ["merge", "--no-ff", branch]);
     heartbeat(lock);
     run(context.root, ["merge-base", "--is-ancestor", branch, info.base_branch]);
     if (info.has_remote && input.push !== false) { heartbeat(lock); run(context.root, ["push", "origin", info.base_branch]); }
     return { ...info, branch, merged: true };
   } catch (error) {
-    try { run(context.root, ["merge", "--abort"], { allowFailure: true }); } catch {}
+    if (mergeStarted) {
+      try { run(context.root, ["merge", "--abort"], { allowFailure: true }); } catch {}
+    }
     throw error;
   } finally {
     if (originalBranch && originalBranch !== info.base_branch) {

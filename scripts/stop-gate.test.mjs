@@ -88,6 +88,25 @@ test("stop-gate: a command killed by the shared budget (cap < timeoutMs) logs st
   }
 });
 
+test("stop-gate: dirty session without a completed test baseline blocks", async () => {
+  const dir = makeFixture({
+    security: { enabled: false },
+    stopGate: { commands: { tests: "node -e 'process.exit(0)'" }, requireAcceptanceCriteria: false },
+  });
+  const sid = "missing-baseline";
+  try {
+    const sessionDir = path.join(dir, ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "dirty"), "1");
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /TEST BASELINE UNAVAILABLE/);
+    assert.match(result.stdout, /"decision":"block"/);
+    assert.ok(fs.existsSync(path.join(sessionDir, "dirty")), "dirty marker must remain until a baseline exists");
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("stop-gate: blocks completion while this session owns an active worktree binding", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
   try {
@@ -280,6 +299,27 @@ test("stop-gate: a secrets scan that runs to completion (clean) marks the sessio
       second.events.some((e) => e.ev === "stop-secrets-skipped"),
       "a second same-session Stop on an unchanged clean tree must skip re-scanning, using the marker written above"
     );
+    assert.doesNotMatch(second.stdout, /"decision":"block"/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: ordinary ignored trees do not force a repeated secrets scan", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ['node -e "process.exit(0)"'] },
+    stopGate: { requireAcceptanceCriteria: false },
+  });
+  fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules/\n");
+  fs.mkdirSync(path.join(dir, "node_modules", "fixture"), { recursive: true });
+  spawnSync("git", ["add", "-A"], { cwd: dir });
+  spawnSync("git", ["commit", "-q", "-m", "config"], { cwd: dir });
+  const sid = "scenario-ignored-tree";
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.doesNotMatch(first.stdout, /"decision":"block"/);
+    const second = await runStopGate(dir, sid);
+    assert.ok(second.events.some((e) => e.ev === "stop-secrets-skipped"));
     assert.doesNotMatch(second.stdout, /"decision":"block"/);
   } finally {
     cleanup(dir);

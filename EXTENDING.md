@@ -37,6 +37,19 @@ Change a test runner or wire a repo guard the same way:
 fast (seconds), and repo-level. Re-run `/craftsman:baseline` after adding checks
 so pre-existing findings don't surface as new.
 
+Unit claims are normally released by the orchestrator. If a crashed session
+leaves a claim behind, recover it only after confirming the previous session is
+gone and the claim is stale:
+
+```sh
+printf '%s' '{"action":"recover","plan":"docs/plans/example.md","unit":"unit-1","confirm":true}' \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/claim.mjs"
+```
+
+Recovery requires an owner claim older than 24 hours by default; use
+`stale_after_ms` only when the repository's recovery policy supports a shorter
+window.
+
 `/craftsman:baseline` also writes what it just excluded to
 `docs/errors/KNOWN_ISSUES.md` (a worst-first table: file, language, tool,
 finding count, a truncated sample), regenerated wholesale on every run — the

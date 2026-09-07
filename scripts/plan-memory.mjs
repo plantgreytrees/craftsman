@@ -4,12 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { atomicWrite, logEvent, projectContext, readStdin } from "./lib/core.mjs";
 
 const MAX_SUMMARY = 1600;
 const MAX_ITEMS = 12;
 const DEFAULT_CHARS = 6000;
 const MAX_READ_BYTES = 256 * 1024;
+const LOCK_WAIT_MS = 2000;
 const CATEGORIES = new Set([
   "decision", "dependency", "contract-consumer", "tooling-gotcha",
   "failed-approach", "review-finding", "acceptance-result", "unresolved-risk",
@@ -25,6 +26,33 @@ function planKey(plan) {
 
 function memoryFile(context, plan) {
   return path.join(context.stateDir, "plans", planKey(plan) + ".memory.jsonl");
+}
+
+function withMemoryLock(file, action) {
+  const lock = `${file}.lock`;
+  const started = Date.now();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  while (true) {
+    try {
+      fs.mkdirSync(lock);
+      fs.writeFileSync(path.join(lock, "owner"), `${process.pid}\n`);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST" || Date.now() - started >= LOCK_WAIT_MS) throw new Error(`memory ledger is busy: ${file}`);
+      try {
+        const owner = Number(fs.readFileSync(path.join(lock, "owner"), "utf8").trim());
+        let alive = false;
+        try { process.kill(owner, 0); alive = true; } catch {}
+        if (!alive && Date.now() - fs.statSync(lock).mtimeMs > LOCK_WAIT_MS * 2) {
+          fs.rmSync(lock, { recursive: true, force: true });
+        }
+      } catch {}
+      const wait = new Int32Array(new SharedArrayBuffer(4));
+      Atomics.wait(wait, 0, 0, 10);
+    }
+  }
+  try { return action(); }
+  finally { try { fs.rmSync(lock, { recursive: true, force: true }); } catch {} }
 }
 
 function gitIdentity(context) {
@@ -133,8 +161,7 @@ export function recordMemory(input) {
   const context = input.context || projectContext(input.project || ".");
   const record = normalizeRecord(input, context);
   const file = memoryFile(context, record.plan);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, JSON.stringify(record) + "\n", { encoding: "utf8" });
+  withMemoryLock(file, () => fs.appendFileSync(file, JSON.stringify(record) + "\n", { encoding: "utf8" }));
   logEvent({ ev: "memory_record", plan: record.plan, unit: record.unit, category: record.category, status: record.status }, context);
   return record;
 }
@@ -173,28 +200,29 @@ export function compactMemory(input) {
   const context = input.context || projectContext(input.project || ".");
   if (typeof input.plan !== "string" || !input.plan.trim()) throw new Error("memory.plan must be a non-empty string");
   const file = memoryFile(context, input.plan);
-  const records = readRecords(file);
-  const groups = new Map();
-  for (const record of records.filter((entry) => entry.status !== "superseded")) {
-    const key = `${record.unit || "phase"}:${record.category}`;
-    const group = groups.get(key) || [];
-    group.push(record);
-    groups.set(key, group);
-  }
-  if (groups.size === records.length) return { plan: input.plan, records_before: records.length, records_after: records.length, entries_superseded: 0 };
-  const summaries = [...groups.values()].map((group) => {
-    const latest = group.at(-1);
-    return normalizeRecord({
-      plan: input.plan, unit: latest.unit, scope_id: latest.scope_id, category: latest.category,
-      summary: group.map((entry) => entry.summary).join(" | ").slice(0, MAX_SUMMARY),
-      source_files: [...new Set(group.flatMap((entry) => entry.source_files || []))].slice(0, 24),
-      source_commit: latest.source_commit, plan_hash: latest.plan_hash, status: latest.status,
-    }, context);
+  return withMemoryLock(file, () => {
+    const records = readRecords(file);
+    const groups = new Map();
+    for (const record of records.filter((entry) => entry.status !== "superseded")) {
+      const key = `${record.unit || "phase"}:${record.category}`;
+      const group = groups.get(key) || [];
+      group.push(record);
+      groups.set(key, group);
+    }
+    if (groups.size === records.length) return { plan: input.plan, records_before: records.length, records_after: records.length, entries_superseded: 0 };
+    const summaries = [...groups.values()].map((group) => {
+      const latest = group.at(-1);
+      return normalizeRecord({
+        plan: input.plan, unit: latest.unit, scope_id: latest.scope_id, category: latest.category,
+        summary: group.map((entry) => entry.summary).join(" | ").slice(0, MAX_SUMMARY),
+        source_files: [...new Set(group.flatMap((entry) => entry.source_files || []))].slice(0, 24),
+        source_commit: latest.source_commit, plan_hash: latest.plan_hash, status: latest.status,
+      }, context);
+    });
+    atomicWrite(file, summaries.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    logEvent({ ev: "memory_compacted", plan: input.plan, records_before: records.length, records_after: summaries.length, entries_superseded: records.length - summaries.length }, context);
+    return { plan: input.plan, records_before: records.length, records_after: summaries.length, entries_superseded: records.length - summaries.length };
   });
-  const compacted = summaries;
-  fs.writeFileSync(file, compacted.map((record) => JSON.stringify(record)).join("\n") + "\n");
-  logEvent({ ev: "memory_compacted", plan: input.plan, records_before: records.length, records_after: compacted.length, entries_superseded: records.length - compacted.length }, context);
-  return { plan: input.plan, records_before: records.length, records_after: compacted.length, entries_superseded: records.length - compacted.length };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -1,5 +1,6 @@
 {
   "name": "craftsman-marketplace",
+  "description": "Craftsman workflow and deterministic quality engine plugins.",
   "owner": {
     "name": "Kieran"
   },

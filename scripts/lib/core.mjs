@@ -167,10 +167,11 @@ export function atomicWrite(file, data) {
   fs.renameSync(tmp, file); // rename is atomic on the same filesystem
 }
 export function sha1(s) { return crypto.createHash("sha1").update(String(s)).digest("hex"); }
-export function pruneSessions(maxAgeMs = 7 * 24 * 3600 * 1000) {
+export function pruneSessions(maxAgeMs = 7 * 24 * 3600 * 1000, context = null) {
+  const sessionsDir = path.join(context?.stateDir || STATE_DIR, "sessions");
   try {
-    for (const d of fs.readdirSync(SESSIONS_DIR)) {
-      const p = path.join(SESSIONS_DIR, d);
+    for (const d of fs.readdirSync(sessionsDir)) {
+      const p = path.join(sessionsDir, d);
       try { if (Date.now() - fs.statSync(p).mtimeMs > maxAgeMs) fs.rmSync(p, { recursive: true, force: true }); } catch {}
     }
   } catch { /* no sessions dir yet */ }
@@ -555,17 +556,34 @@ export function extractSig(tool, sample) {
 
 export function recordFailure(lang, tool, sample, cfg, context = null) {
   const rulesFile = path.join(context?.stateDir || STATE_DIR, "learned-rules.json");
+  const lock = `${rulesFile}.lock`;
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + 10000;
+  while (true) {
+    try {
+      fs.mkdirSync(lock);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST" || Date.now() >= deadline) return;
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > 30000) fs.rmSync(lock, { recursive: true, force: true });
+      } catch {}
+      Atomics.wait(waitBuffer, 0, 0, 10);
+    }
+  }
   const cap = cfg.learnedRules?.max ?? 10;
-  let rules = [];
-  try { rules = JSON.parse(fs.readFileSync(rulesFile, "utf8")); } catch {}
-  const sig = `${lang}:${tool}:${extractSig(tool, sample)}`;
-  const hit = rules.find((r) => r.sig === sig);
-  if (hit) { hit.n++; hit.last = Date.now(); hit.sample = sample.slice(0, 200); }
-  else rules.push({ sig, n: 1, last: Date.now(), lang, tool, sample: sample.slice(0, 200) });
-  rules.sort((a, b) => (b.n - a.n) || (b.last - a.last));
   try {
-    atomicWrite(rulesFile, JSON.stringify(rules.slice(0, cap * 3), null, 0)); // atomic: safe under concurrent sessions
-  } catch {}
+    let rules = [];
+    try { rules = JSON.parse(fs.readFileSync(rulesFile, "utf8")); } catch {}
+    const sig = `${lang}:${tool}:${extractSig(tool, sample)}`;
+    const hit = rules.find((r) => r.sig === sig);
+    if (hit) { hit.n++; hit.last = Date.now(); hit.sample = sample.slice(0, 200); }
+    else rules.push({ sig, n: 1, last: Date.now(), lang, tool, sample: sample.slice(0, 200) });
+    rules.sort((a, b) => (b.n - a.n) || (b.last - a.last));
+    try { atomicWrite(rulesFile, JSON.stringify(rules.slice(0, cap * 3), null, 0)); } catch {}
+  } finally {
+    try { fs.rmSync(lock, { recursive: true, force: true }); } catch {}
+  }
 }
 
 export function topRules(cfg, context = null) {

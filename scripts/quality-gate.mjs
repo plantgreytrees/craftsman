@@ -16,6 +16,10 @@ const t0 = Date.now();
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
 const active = readScope(input);
+if (active?.scope_ambiguous) {
+  process.stderr.write("craftsman: quality gate blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n");
+  process.exit(2);
+}
 const context = active?.project_root
   ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
   : projectContext(input.project || ".");

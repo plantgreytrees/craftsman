@@ -6,11 +6,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
-  renderKnownIssuesDoc, gitTrackedFiles,
+  renderKnownIssuesDoc, gitTrackedFiles, pruneSessions,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -152,6 +153,21 @@ test("sidOf: strips characters outside [A-Za-z0-9_-] and caps length", () => {
 test("sidOf: missing or empty session_id falls back to \"shared\"", () => {
   assert.equal(sidOf({}), "shared");
   assert.equal(sidOf({ session_id: "" }), "shared");
+});
+
+test("pruneSessions: removes stale sessions from the selected project state directory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-prune-"));
+  const context = { stateDir: path.join(root, ".craftsman") };
+  const stale = path.join(context.stateDir, "sessions", "old-session");
+  fs.mkdirSync(stale, { recursive: true });
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(stale, old, old);
+  try {
+    pruneSessions(1_000, context);
+    assert.equal(fs.existsSync(stale), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("detectLang: matches by extension, first language block wins", () => {

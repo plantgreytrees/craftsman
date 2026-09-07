@@ -29,6 +29,8 @@ Target: `$ARGUMENTS`. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md`
 
 ## `--tracker` — TRACKER reconciliation
 
+The human-readable tracker is deliberately concise: keep one direct relative Markdown plan link, one short status, and terse evidence per row. Move implementation prose and review history to the linked plan or archive so the goal and next action remain easy to scan.
+
 The known failure mode: rows already built but still chipped open — trusting the chip wastes a session re-implementing shipped work. Evidence beats chips.
 1. Parse in-scope rows (default: every open row; `$ARGUMENTS` may narrow to a bucket/id): id, claimed status, area, plan link. The linked plan's `[ ]`/`[x]` marks are claims too. Recall only the linked plan's bounded memory entries, when present, and use them to identify decisions, unresolved risks, and prior evidence that the row verifier should check.
 2. **Verify against code (parallel fan-out), capped:** batch by area, dispatch read-only `phase-tracker`/`Explore` verifiers. Each returns **evidence, not vibes**: does the change exist in the named area (Grep the endpoints/classes/migrations/components/flags the plan names)? Verified status `NOT_STARTED`/`PARTIAL`/`IMPLEMENTED`/`IMPLEMENTED+TESTED`, each citing `file:line` (or "searched X,Y,Z — nothing"). Check git: `git log --oneline --all --grep=<row-id>`. Bound each fan-out round to **~15 rows**; a larger in-scope set processes the remainder in subsequent rounds rather than one unbounded fan-out.
