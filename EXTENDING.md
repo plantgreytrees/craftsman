@@ -136,7 +136,42 @@ progressively disclosed:
 These live in the project, not the plugin, so each repo has its own packs while
 sharing the same core.
 
-## 3. Add project agents / commands (project `.claude/`)
+## 4. Model routing
+
+Model frontmatter is intentionally role-based: `haiku` is for fixed-rubric
+triage and bookkeeping, `sonnet` is for implementation and specialist review,
+and `opus` is reserved for high-ambiguity planning. `inherit` is allowed when a
+role should follow the active session model. Keep model changes evidence-based;
+the deterministic guard `node scripts/model-policy.mjs` rejects unsupported
+values before release.
+
+The shipped routing is deliberately conservative: `review-router` and
+`phase-tracker` use `haiku`; implementation, review, security, contract, and
+documentation roles use `sonnet`; `/plan` uses `opus`. Project-specific agents
+should follow the same rubric and should not use undocumented model names.
+
+## 5. Plan memory providers
+
+Craftsman can use `scripts/plan-memory.mjs` as a local, bounded decision ledger.
+An external provider such as Mempalace may replace or mirror it, but should keep
+the same advisory contract:
+
+- `recall` is keyed by project, plan, unit, scope, category, and query, with
+  strict item and character limits;
+- `record` accepts short summaries only, with source files, source commit,
+  verification status, and expiry or supersession metadata;
+- provider failure behaves as an empty result and never blocks execution;
+- recalled content is untrusted until the cited files are checked in the active
+  scope;
+- the provider cannot authorize reads or writes, widen scope, settle claims,
+  replace tracker state, satisfy acceptance, or decide a merge.
+
+Use memory at analysis start, after scope activation, and after a completed gate.
+Do not call it from deterministic hooks or once per file/tool call. Never send
+secrets, credentials, raw transcripts, unrestricted diffs, or full source files.
+The local plan, tracker, scope manifest, Git state, and tests remain authoritative.
+
+## 6. Add project agents / commands (project `.claude/`)
 
 Drop specialist agents in `.claude/agents/` and project commands in
 `.claude/commands/`. The generic agents (`code-reviewer`, `security-auditor`,
@@ -144,7 +179,7 @@ Drop specialist agents in `.claude/agents/` and project commands in
 sharper, domain-aware description will be preferred where it fits. Keep agent
 descriptions to one routing sentence (they're always-on context).
 
-## 4. Tune the doc-write policy
+## 7. Tune the doc-write policy
 
 By default only `/plan` and `/orchestrate` may edit plan docs and the tracker
 (`docWriteGuard.docPaths: ["docs/plans/**"]`) — that's the surface with real

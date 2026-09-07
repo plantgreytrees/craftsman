@@ -7,24 +7,43 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings } from "./lib/core.mjs";
+import { readScope } from "./scope.mjs";
 
 const pexec = promisify(execFile);
-const cfg = loadConfig();
-if (!enabled(cfg) || cfg.stopGate?.enabled === false) process.exit(0);
-
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+const active = readScope(input);
+const context = active?.project_root
+  ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
+  : projectContext(input.project || ".");
+const cfg = loadConfig(context);
+if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) process.exit(0);
 // Loop guard: we already blocked once this turn — let it end.
 if (input.stop_hook_active === true) process.exit(0);
 
 const sid = sidOf(input);
-const sdir = sessionDir(sid);
+const sdir = sessionDir(sid, context);
 
 // Clear THIS session's doc-write authority (never touch another session's).
 try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
 
 const problems = [];
+
+// A session cannot finish while it still owns an implementation worktree.
+// This is session-local: another concurrent session's active binding is not
+// a reason to block this Stop hook.
+for (const binding of readWorktreeBindings(input, {
+  root: context.root,
+  stateDir: context.stateDir,
+  worktreePath: active?.worktree_path || context.root,
+})) {
+  problems.push(
+    `WORKTREE BINDING ACTIVE: unit ${binding.unit || "(unknown)"} still owns ` +
+    `${binding.worktree_path || "an unknown worktree"} on branch ${binding.branch || "(unknown)"}. ` +
+    `Release it with scripts/scope.mjs before completing or entering the locked merge.`
+  );
+}
 
 // 1. Secrets — always a hard block, never baselined — but re-scan only
 // when `git status --ignored` shows real changes (the PostToolUse "dirty"
@@ -37,7 +56,7 @@ function isCraftsmanStateLine(line) {
 }
 let treeDirty = true;
 try {
-  const { stdout } = await pexec("git", ["status", "--porcelain", "--ignored"], { cwd: PROJECT_ROOT });
+  const { stdout } = await pexec("git", ["status", "--porcelain", "--ignored"], { cwd: context.root });
   const relevant = stdout.split("\n").filter((l) => l.length > 0 && !isCraftsmanStateLine(l));
   treeDirty = relevant.length > 0;
 } catch { /* fail-safe: not a git repo / git absent — scan anyway */ }
@@ -113,12 +132,18 @@ async function runTask(t) {
   }
   const [bin, ...args] = splitCmd(t.cmd);
   try {
-    await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: PROJECT_ROOT });
+    await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: context.root });
     // this task completed; allSecretsCompleted only flips false elsewhere —
     // the actual marker write happens once, after the whole batch resolves
   } catch (e) {
     if (t.kind !== "test" && e.code === "ENOENT") {
-      if (t.kind === "secret") allSecretsCompleted = false; // never ran — don't count as checked
+      if (t.kind === "secret") {
+        allSecretsCompleted = false; // never ran — don't count as checked
+        problems.push(
+          `SECRETS SCAN UNAVAILABLE: ${bin} was not found. Install the configured scanner ` +
+          `or remove this security check explicitly before completing.`
+        );
+      }
       return;
     }
     if (t.kind === "secret" && e.killed) {
@@ -138,11 +163,17 @@ async function runTask(t) {
     }
     // Narrower than core.mjs's runOne() (treats ANY kill as non-finding — no
     // shared budget there to weigh against). Here `e.killed` reliably means
-    // `timeout: cap` fired (maxBuffer overflow sets no `killed` flag), so
-    // `cap < t.timeoutMs` alone distinguishes a budget cut-short from a
-    // full run.
-    if (e.killed && cap < t.timeoutMs) { // t.kind is "test" or "extra" here — unchanged
-      logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
+    // `timeout: cap` fired (maxBuffer overflow sets no `killed` flag).
+    if (e.killed) {
+      if (cap < t.timeoutMs) {
+        logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
+        return;
+      }
+      const label = t.kind === "test" ? "TESTS" : "GUARD";
+      problems.push(
+        `${label} INCOMPLETE: ${t.cmd} did not finish within its own configured limit ` +
+        `(${t.timeoutMs}ms) — increase stopGate.testTimeoutMs or make the command faster, then retry.`
+      );
       return;
     }
     if (t.kind === "secret") {
@@ -179,7 +210,7 @@ if (isDirty && results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
 //    acceptance.md content (its recorded hash matches). A concurrent session
 //    that overwrote the file owns it instead, so this session is not blocked by
 //    someone else's criteria.
-const acPath = path.join(STATE_DIR, "acceptance.md");
+const acPath = path.join(context.stateDir, "acceptance.md");
 if (cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync(acPath)) {
   const ac = fs.readFileSync(acPath, "utf8");
   let owns = false;

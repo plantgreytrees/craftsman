@@ -32,6 +32,21 @@ MCP is never ritual — use where it earns tokens, skip otherwise. Each is optio
 - **memory** — at unit start, recall gotchas for the touched area + change-class (tooling quirks, known-flaky tests, past decisions). At close-out, record what was learned (tooling detected, gotcha hit, contract touched → consumers). This is the durability win — each run makes the next smarter.
 - **sequential-thinking** — only for genuinely complex units (multi-contract ripple, ambiguous decomposition). Skip trivial single-file units.
 
+### Plan memory ledger
+
+The local `scripts/plan-memory.mjs` ledger is the durable fallback for optional
+memory providers. Recall only after the active scope is installed, filter by the
+selected project, plan, unit, and scope, and cap results with `max_items` and
+`max_chars`. Treat every result as unverified context until its source files are
+checked. Record only post-gate facts with source files, commit identity,
+verification status, and an expiry where the fact can become stale.
+
+Memory is advisory: it must never authorize a read/write, widen a scope, settle a
+claim, replace tracker state, satisfy acceptance, or decide a merge. Provider
+failure means no memory and must not block execution. External providers such as
+Mempalace may implement the same recall/record shape, but remain optional and
+project-isolated.
+
 ---
 
 ## The tooling manifest (planner → executor contract)
@@ -45,6 +60,45 @@ Gates:        security-auditor, standards-keeper   # ONLY the specialist gates t
 Skills:       <1–3 skills relevant to this unit>
 Checks:       <the detected build/lint/typecheck/test commands this diff must pass>
 MCP:          context7 (lib API), memory (recall+record)   # if available; skip-if-trivial
+Memory:       plan-memory (bounded recall; post-gate record)
 ```
+
+### Scope — <unit-slug>
+
+The plan's machine-readable `scope` is a hard allow-list, separate from tooling:
+
+```
+Scope:
+	project: <selected repository or project root>
+	read:  <specific source, test, config, and contract files>
+	docs:  <specific docs/reference files>
+	write: <specific files the unit may create or edit>
+```
+
+The executor and implementer may read only `read` + `docs` for implementation
+context, plus the tracker row and task text needed to operate the workflow, and
+may write only `write`. A missing scope is a plan defect: pause that unit, add
+the scope from a targeted dependency trace, and record the correction in the
+tracker. Do not compensate with a whole-repository scan.
+
+### Scope steps and workspace boundaries
+
+The planner groups all changes for one coherent project/repository boundary into
+one scope step identified by `scope_id`. Each step declares `project` and
+`depends_on`; the executor validates and topologically orders these ids before
+loading implementation context. A step is the context-reset boundary: all tasks
+in that step share one activated manifest and one hand-off.
+
+For a workspace containing many repositories, `project` is an explicit selected
+root. The planner records only affected roots supported by dependency evidence;
+it must not enumerate or scan the entire workspace. Cross-project consumers are
+represented as dependencies between steps, not by widening one step's read glob.
+
+Workspace discovery is opt-in and deterministic: set `CRAFTSMAN_WORKSPACE_MANIFEST`
+to a manifest path, or place `craftsman.workspace.json` at the current project
+root. The manifest uses `{ "version": 1, "projects": { "id": { "root": "..." } } }`.
+Roots must be relative, unique, existing, and inside the manifest directory.
+Named projects must resolve to Git roots; invalid or missing entries block the
+run. With no manifest, `project: "."` retains the legacy single-repository path.
 
 **Executor rule:** treat the manifest as the allow-list for that unit. Use the named implementer, run the named gates + checks, load the named skills, make the named MCP calls — do **not** invoke gates/skills/agents the manifest omits. If the diff turns out to need one the planner missed, add it AND note the manifest gap in the tracker so the next plan is better. A unit with no manifest → fall back to full Phase X routing (`_shared-execution.md`) and flag the missing manifest.

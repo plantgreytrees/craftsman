@@ -1,16 +1,32 @@
 ---
-description: Fingerprint this repo's stack and tooling, then scaffold craftsman for it — a project craftsman.config.json (real test command + tuning) and a starter .claude/CLAUDE.md. Run once when adding craftsman to a new project.
+description: Audit, migrate, and scaffold craftsman for this repo — including older project configs and missing required structure.
 argument-hint: ""
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---
 
-# Init — fit craftsman to this repo
+# Init — fit or upgrade craftsman in this repo
 
-> This command writes a project `craftsman.config.json` and (if absent) a starter
-> `.claude/CLAUDE.md` — neither is under `docs/`, so no doc-write grant is needed.
-> Change nothing you can't justify from evidence in the repo.
+> Init is deliberately repeatable. It audits first, then writes only the project
+> config and missing scaffolding it can justify from repository evidence.
 
-## 1. Detect the stack
+## 1. Run the deterministic audit
+
+Run the repository-local init engine from the project root:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs"
+```
+
+Use `--check` for CI/readiness checks, `--diff` to preview generated changes, or
+`--write` to apply them. `--write` creates a timestamped backup under
+`.craftsman/init-backups/` before replacing an existing managed file.
+
+Read its JSON result and report: detected markers/languages, the test command for
+each marker, installed and missing quality tools, and each required item marked
+present or missing. A missing tool is a finding, not a reason to invent an install
+command or rewrite application dependencies.
+
+## 2. Detect the stack
 
 - **Languages** — glob for markers: `package.json` (and which of react/vue/svelte/
   next/nuxt/angular is in its deps), `pyproject.toml`/`requirements.txt`/`setup.py`,
@@ -24,32 +40,41 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
   `yarn.lock`→yarn.
 - **Infra / repo shape** — `docker-compose*.yml`, `k8s`/`helm` dirs, CI presence,
   `.gitmodules` (monorepo/submodules).
-- **Installed quality tools** — `which` the linters/formatters the detected
-  languages use (ruff, eslint, prettier, gofmt, staticcheck, clippy, rubocop,
-  gitleaks, …).
+- **Installed quality tools** — the engine probes the linters/formatters for the
+  detected languages and the secrets scanner (for example ruff, eslint, prettier,
+  gofmt, staticcheck, clippy, rubocop, and gitleaks).
 
-## 2. Report
+## 3. Report
 
-Print a short table: languages · real test command · package manager · CI ·
-installed vs missing quality tools. Flag anything ambiguous and ask before
-scaffolding it.
+Print a short table: languages, real test command, package manager, CI, and
+installed versus missing quality tools. Flag an ambiguous command; do not silently
+replace a real project command with a guessed one.
 
-## 3. Scaffold
+## 4. Scaffold or upgrade
 
-- **Project `craftsman.config.json` at the repo root** — it **deep-merges over the
-  plugin defaults**, so include ONLY this repo's overrides, never a restatement of
-  the defaults: the real `stopGate.commands` entry for the detected marker; any
-  extra `ignore`/`protectedPaths` for this repo's generated dirs; and
-  `stopGate.extraChecks` for any repo-local lint/guard scripts you found (e.g. a
-  `scripts/lint` or a `make lint`). If the defaults already fit, write `{}` and say so.
-- **Starter `.claude/CLAUDE.md`** (only if absent) — a lean project entry (< ~30
-  lines, it's always-on context): one line on what the project is, the detected
-  stack, the loop **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS**, where
-  plans live (`docs/plans/`), and that commands/agents/skills come from the
-  craftsman plugin. Do not restate craftsman internals.
-- Add `.craftsman/` to `.gitignore`.
+After the audit, run:
 
-## 4. Next steps
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --write
+```
+
+- Migrate an older full/default config to the current override shape while
+  preserving unknown project keys and explicit project tuning.
+- Refresh test commands from the current package scripts, Makefile, or CI evidence;
+  use a marker default only when no real command is discoverable.
+- Create missing `.claude/CLAUDE.md`, a comprehensive project-aware `.claudeignore`,
+  `craftsman.config.json`, and `.gitignore` coverage for `.craftsman/`; never
+  replace existing user-authored context or ignore rules.
+- Run the audit again after writing and report any remaining missing tools or
+  ambiguous test command. Do not claim the repository is fully ready when a
+  required item remains unavailable.
+
+The engine writes only project overrides in `craftsman.config.json`, preserves
+unknown custom keys, creates a lean `.claude/CLAUDE.md` only when absent, manages
+the stack-specific block in `.claudeignore`, and adds `.craftsman/` to `.gitignore`
+without duplicating the entry.
+
+## 5. Next steps
 
 Tell the user to restart Claude Code (so hooks load), then run
 `/craftsman:baseline` once. List the missing quality tools — their checks skip

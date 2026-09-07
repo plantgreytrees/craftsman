@@ -19,7 +19,7 @@ generalized evolution of the craftsman v0.2 starter.
 /plugin install craftsman@craftsman-marketplace
 
 # 2 — restart Claude Code so the hooks load, then in your repo:
-/craftsman:init        # detect the stack, write a project config + starter CLAUDE.md
+/craftsman:init        # audit, upgrade older setup, and repair required structure
 /craftsman:baseline    # snapshot existing lint issues so only NEW ones get flagged
 ```
 
@@ -62,7 +62,8 @@ gitignored local snapshot.
 
 | Command | What it's for |
 |---|---|
-| `/craftsman:init` | detect the stack and scaffold a project config + starter `CLAUDE.md` |
+| `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair required project structure |
+| `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
 | `/understand` | build a cited understanding of a feature/area before touching it |
 | `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
 | `/orchestrate` | implement a plan doc across the repo (per-unit review is routed too, same reasoning as `/scrutinise`) |
@@ -108,7 +109,9 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   deterministically, per session.
 - **Safe with concurrent sessions** — each session's state (test baseline, plan
   criteria, doc authority) is isolated under `.craftsman/sessions/<id>/`; one
-  session finishing never blocks another. Separate git worktrees are isolated too.
+  session finishing never blocks another. Each execution unit must activate a
+  separate Git worktree with `worktree_path`; mutating Git commands from another
+  checkout are blocked until the binding is released for the locked merge.
 - **Fast** — session start never blocks on a build (the baseline runs in the
   background); tool detection is scoped to your detected stack and cached;
   lint results are content-hash cached; the Stop-gate's test-regression check

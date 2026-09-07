@@ -51,6 +51,17 @@ if (!router.length) {
   console.log(`  escalate rate: ${escalateRate}%`);
 }
 
+const recalls = events.filter((e) => e.ev === "memory_recall");
+const records = events.filter((e) => e.ev === "memory_record");
+const stale = events.filter((e) => e.ev === "memory_stale");
+const compactions = events.filter((e) => e.ev === "memory_compacted");
+console.log(`\nPlan memory: ${recalls.length} recalls · ${records.length} records · ${stale.length} stale · ${compactions.length} compactions`);
+if (recalls.length) {
+  const returned = recalls.reduce((sum, event) => sum + (event.count || 0), 0);
+  const chars = recalls.reduce((sum, event) => sum + (event.chars || 0), 0);
+  console.log(`  recall output: ${returned} records · ${chars} chars`);
+}
+
 const rules = topRules(cfg);
 console.log(`\nLearned rules: ${rules.length}`);
 if (!rules.length) {

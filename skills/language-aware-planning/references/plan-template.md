@@ -30,9 +30,16 @@ coverage:            # every category → the task id that covers it, or N/A(rea
   rollback:      ...
 units:
   - id: 1
+    scope_id: <stable scope-step id>
+    project: <selected repository or project root, relative to the workspace>
+    depends_on: []
     module: <path or component>
     language: <detected>
     security: high | normal
+    scope:
+      read: [<source/test/config files required to understand this unit>]
+      docs: [<specific docs required by this unit>]
+      write: [<files this unit may create or edit>]
     tooling: { implementer: implementer, gates: [<review agents the diff triggers>],
                skills: [<1-3>], guards: [<repo guards>], mcp: [<optional calls>] }
 ---
@@ -42,10 +49,11 @@ units:
 ## Outcome
 One sentence — the user-visible result when this is done.
 
-## Units (executable core)
+## Scope Steps (executable core)
 
-### Unit 1 — <module> (<language>, <security>)
+### Step 1 — <scope_id> (<project>, <language>, <security>)
 Tooling: implementer implementer · gates <…> · skills <…> · guards <…>
+Depends on: <scope_id list, or none>
 - [ ] 1.1 <verb-first: one file / one test / one command> → accept: <inline pass/fail check>
 - [ ] 1.2 …
 
@@ -71,6 +79,18 @@ Tooling: implementer implementer · gates <…> · skills <…> · guards <…>
 - The per-unit `tooling:` block is the executor's **allow-list** (format defined
   in `_shared-machinery.md` → "The tooling manifest") — name only what the unit
   needs so the executor loads nothing extra.
+- The per-unit `scope:` block is the context and write **allow-list**. `read` and
+  `docs` must contain concrete paths or narrow globs; `write` must contain every
+  file the unit may create or edit. Never use a repository-wide glob or a whole
+  directory when a file list can express the scope.
+- A scope step is the smallest context-reset boundary: group all changes that
+  affect the same project/repository and dependency boundary together. Use one
+  `scope_id` per step, list explicit `depends_on` ids, and keep `project` stable.
+  The executor topologically orders steps and activates one manifest for the
+  whole step instead of reloading context for every task.
+- In a multi-repository workspace, `project` is a selected repository boundary,
+  not a license to inspect the workspace. Enumerate only affected projects in
+  the plan; unrelated repositories remain out of scope.
 - Executable core FIRST; citations/background AFTER. The executor acts on
   units+tasks; the reviewer uses the background to verify.
 

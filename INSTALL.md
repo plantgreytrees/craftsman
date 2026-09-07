@@ -57,14 +57,32 @@ you restart.
 /craftsman:init
 ```
 
-This inspects your repo and reports what it found (languages, your real test
-command, package manager, CI, and which quality tools are installed). Then, with
-your OK, it writes:
+For a workspace containing multiple independent repositories, register only the
+projects involved in the current change:
+
+```text
+/craftsman:workspace-init payments=services/payments search=tools/search
+```
+
+Use `--manifest <path>` for a manifest outside the current repository. The command
+does not enumerate the workspace; every project mapping is supplied explicitly.
+
+This audits your repo and reports what it found (languages, your real test
+command, package manager, CI, and which quality tools are installed). It is safe
+to run again on an older setup: it migrates stale full-default configs into the
+current override shape, preserves custom settings, and repairs missing required
+structure. It writes:
+
+Use `node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --check` in CI to fail when
+required setup is missing, `--diff` to preview changes, and `--write` to apply
+them. Existing managed files are backed up under `.craftsman/init-backups/`.
 
 - **`craftsman.config.json`** at the repo root — only your repo's overrides (it
   merges over the defaults): the real test command, extra folders to ignore, and
   any repo-local lint scripts.
 - **`.claude/CLAUDE.md`** — a short project intro, only if you don't already have one.
+- **`.claudeignore`** — a managed, project-aware set of dependency, cache, build,
+  generated, secret, and local-tool exclusions; your custom rules are preserved.
 - a **`.gitignore`** entry for `.craftsman/`.
 
 Review what it wrote before committing.

@@ -10,7 +10,7 @@ You implement one plan unit end to end. Your prompt names that unit, its files, 
 **Detect the stack first.** Read the repo markers before writing code — manifest/lockfiles, build config, and the directory you are editing — to learn the target language, formatter, test runner, and build command. Match the conventions already in the surrounding files; do not import idioms from another language.
 
 **Scope contract**
-- Every file you create or edit lives inside the unit's declared paths. Read anything for reference; write only within scope.
+- Read only the unit's declared `scope.read` and `scope.docs` paths. Every file you create or edit must be inside `scope.write`. If a dependency is missing, stop and report the exact path so the orchestrator can extend the plan; do not scan the rest of the repository.
 - Never run `git commit`, `git merge`, `git push`, or `git checkout`, and never touch files outside the unit. The orchestrator owns version control.
 - Minimal diff: no speculative abstractions, no drive-by refactors, no reformatting untouched code.
 

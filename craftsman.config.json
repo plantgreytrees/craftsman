@@ -118,6 +118,9 @@
   "planning": {
     "blindRederivation": "auto"
   },
+  "sessionContext": {
+    "verbose": false
+  },
   "languages": {
     "python": {
       "extensions": [".py"],

@@ -5,6 +5,29 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+- **Repeatable `/craftsman:init` upgrades** — init now runs a deterministic audit,
+  detects repository-specific test commands and package managers, reports missing
+  quality tools, migrates older full-default configs to compact project overrides,
+  and repairs missing `.claude/CLAUDE.md`/`.gitignore` structure without overwriting
+  user-owned context. The migration is covered by an idempotence test.
+- **Project-aware `.claudeignore` generation** — init now maintains a clearly
+  delimited managed block covering dependencies, secrets, caches, build outputs,
+  generated artifacts, and language-specific noise without overwriting custom
+  ignore rules.
+- **Transactional init modes** — init now supports `--check`, `--diff`, and
+  `--write`; writes use temporary files, back up existing managed files, and roll
+  back the in-memory originals if a write fails.
+- **Scoped multi-phase execution hardening** — plans now carry per-unit read/docs/write
+  manifests enforced by `PreToolUse`; missing dependencies require explicit re-analysis
+  and scope activation. Hand-offs and claims are session-scoped and atomic, and resumed
+  sessions must activate a fresh unit scope before reading implementation context.
+- **Model and fan-out efficiency** — scrutiny now uses a supported model, deterministic
+  bookkeeping runs on `haiku`, deep review uses one comprehensive reviewer per module
+  with a 12-call round cap, and `scripts/model-policy.mjs` rejects unknown model names.
+- **Repository-local workspace execution** — selected projects now get their own
+  base-branch discovery, worktree, merge lock, merge/push, and cleanup lifecycle;
+  cross-repository steps cannot operate on the controller checkout.
+
 ## [1.2.0] - 2026-08-28
 
 Self-review of the craftsman engine: closes five gaps found by reviewing the

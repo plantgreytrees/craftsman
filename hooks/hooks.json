@@ -4,7 +4,7 @@
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-context.mjs\"", "timeout": 60 } ] }
     ],
     "PreToolUse": [
-      { "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+      { "matcher": "Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-guard.mjs\"", "timeout": 10 } ] }
     ],
     "PostToolUse": [

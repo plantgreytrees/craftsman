@@ -7,25 +7,30 @@ import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
   filterAttributed, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
-  readStdin, sidOf, sessionDir, sha1, atomicWrite, PROJECT_ROOT,
+  readStdin, sidOf, sessionDir, sha1, atomicWrite, PROJECT_ROOT, projectContext,
 } from "./lib/core.mjs";
+import { readScope } from "./scope.mjs";
 
 const t0 = Date.now();
-const cfg = loadConfig();
-if (!enabled(cfg)) process.exit(0);
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+const active = readScope(input);
+const context = active?.project_root
+  ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
+  : projectContext(input.project || ".");
+const cfg = loadConfig(context);
+if (!enabled(cfg, context)) process.exit(0);
 const file = input?.tool_input?.file_path;
 if (!file || !fs.existsSync(file)) process.exit(0);
 
 // Record per-session acceptance-criteria ownership (see stop-gate). The
 // acceptance file is per-session state, not lintable source, so short-circuit.
-const rel0 = path.relative(PROJECT_ROOT, file).split(path.sep).join("/");
+const rel0 = path.relative(context.root, file).split(path.sep).join("/");
 if (rel0.endsWith(".craftsman/acceptance.md")) {
   try {
     const ac = fs.readFileSync(file, "utf8");
-    atomicWrite(path.join(sessionDir(sidOf(input)), "acceptance.ref"),
+    atomicWrite(path.join(sessionDir(sidOf(input), context), "acceptance.ref"),
       JSON.stringify({ hash: sha1(ac.trim()), ts: Date.now() }));
   } catch {}
   process.exit(0);
@@ -37,19 +42,19 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
 // filtering) so a false negative here — silently skipping a real regression
 // check — can't happen; the cost of an occasional unnecessary re-run is cheap
 // by comparison.
-try { atomicWrite(path.join(sessionDir(sidOf(input)), "dirty"), String(Date.now())); } catch {}
+try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
 
 const lang = detectLang(file, cfg);
-if (!lang || isIgnored(file, cfg, lang)) process.exit(0);
+if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 
 // Content-hash cache: unchanged file + unchanged check set => skip entirely.
 const key = cacheKey(file, lang, cfg);
-if (cacheHit(key)) { logEvent({ ev: "gate", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
+if (cacheHit(key, context)) { logEvent({ ev: "gate", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
 
-const { failures, timedOut, skipped, ms } = await runChecks(file, lang, cfg);
+const { failures, timedOut, skipped, ms } = await runChecks(file, lang, cfg, context);
 
 if (failures.length === 0) {
-  cacheStore(key);
+  cacheStore(key, context);
   logEvent({ ev: "gate", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
   process.exit(0); // a timeout is never a finding you wrote — never blocks, never shown
 }
@@ -66,16 +71,16 @@ let rawLines = failures
 // was just edited — keep only lines this file's own baseline can own.
 if (lang.projectScoped) rawLines = filterAttributed(rawLines, rel0);
 
-const newLines = cfg.baselineNewOnly ? filterBaseline(file, rawLines) : rawLines;
+const newLines = cfg.baselineNewOnly ? filterBaseline(file, rawLines, context) : rawLines;
 
 if (newLines.length === 0) {
-  cacheStore(key);
+  cacheStore(key, context);
   logEvent({ ev: "gate", file, lang: lang.name, result: "pass-baselined", ms, preexisting: rawLines.length });
   process.exit(0);
 }
 
 for (const f of failures) {
-  if (f.out) recordFailure(lang.name, f.bin, f.out.split("\n")[0], cfg);
+  if (f.out) recordFailure(lang.name, f.bin, f.out.split("\n")[0], cfg, context);
 }
 
 const shown = newLines.slice(0, cfg.maxFeedbackLines ?? 40);

@@ -1,7 +1,7 @@
 // craftsman core engine.
 // Node-only, zero npm dependencies (Claude Code already requires Node).
 // Derived from the craftsman v0.2 engine. Fully stack-agnostic; behaviour is config-driven.
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -30,8 +30,75 @@ async function resolveProjectRoot() {
 }
 export const PROJECT_ROOT = await resolveProjectRoot();
 
-export async function git(args) {
-  try { const { stdout } = await pexec("git", args, { cwd: PROJECT_ROOT, maxBuffer: 8e6 }); return stdout; }
+// Workspace mode is explicit. We never walk parent directories or enumerate
+// sibling repositories looking for projects: that would be both expensive and
+// an accidental context expansion in large workspaces.
+export function workspaceManifestPath() {
+  return process.env.CRAFTSMAN_WORKSPACE_MANIFEST
+    ? path.resolve(process.env.CRAFTSMAN_WORKSPACE_MANIFEST)
+    : path.join(PROJECT_ROOT, "craftsman.workspace.json");
+}
+
+function isInside(root, candidate) {
+  return candidate === root || candidate.startsWith(root + path.sep);
+}
+
+export function loadWorkspaceManifest() {
+  const file = workspaceManifestPath();
+  if (!fs.existsSync(file)) return null;
+  let value;
+  try { value = JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch (error) { throw new Error(`invalid workspace manifest ${file}: ${error.message}`); }
+  if (!value || value.version !== 1 || !value.projects || typeof value.projects !== "object") {
+    throw new Error(`invalid workspace manifest ${file}: expected version 1 and projects`);
+  }
+  const workspaceRoot = fs.realpathSync(path.dirname(file));
+  const projects = {};
+  const roots = new Set();
+  for (const [id, entry] of Object.entries(value.projects)) {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`invalid workspace project id: ${id}`);
+    if (!entry || typeof entry.root !== "string" || !entry.root.trim() || path.isAbsolute(entry.root)) {
+      throw new Error(`workspace project ${id} needs a relative root`);
+    }
+    const lexical = path.resolve(workspaceRoot, entry.root);
+    if (!isInside(workspaceRoot, lexical)) throw new Error(`workspace project ${id} escapes workspace root`);
+    if (!fs.existsSync(lexical)) throw new Error(`workspace project ${id} does not exist: ${entry.root}`);
+    const root = fs.realpathSync(lexical);
+    if (!isInside(workspaceRoot, root)) throw new Error(`workspace project ${id} resolves outside workspace root`);
+    if (!isGitRoot(root)) throw new Error(`workspace project ${id} is not a Git root`);
+    if (roots.has(root)) throw new Error(`workspace projects share a root: ${id}`);
+    roots.add(root);
+    projects[id] = { id, root, relativeRoot: path.relative(workspaceRoot, root).split(path.sep).join("/") };
+  }
+  return { file, workspaceRoot, projects };
+}
+
+export function resolveSelectedProject(project = ".") {
+  const manifest = loadWorkspaceManifest();
+  if (!manifest) {
+    if (project !== ".") throw new Error(`workspace project "${project}" requested but no workspace manifest is configured`);
+    return { id: ".", root: PROJECT_ROOT, workspaceRoot: PROJECT_ROOT, manifest: null };
+  }
+  if (project === ".") return { id: ".", root: PROJECT_ROOT, workspaceRoot: manifest.workspaceRoot, manifest };
+  const selected = manifest.projects[project];
+  if (!selected) throw new Error(`unknown workspace project: ${project}`);
+  return { id: selected.id, root: selected.root, workspaceRoot: manifest.workspaceRoot, manifest };
+}
+
+export function projectContext(project = ".") {
+  const selected = resolveSelectedProject(project);
+  const stateDir = path.join(selected.root, ".craftsman");
+  return { ...selected, stateDir, offFlag: path.join(stateDir, "off") };
+}
+
+export function isGitRoot(root) {
+  try {
+    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() === root;
+  } catch { return false; }
+}
+
+export async function git(args, context = null) {
+  try { const { stdout } = await pexec("git", args, { cwd: context?.root || PROJECT_ROOT, maxBuffer: 8e6 }); return stdout; }
   catch { return ""; }
 }
 
@@ -53,7 +120,46 @@ export function sidOf(input) {
   const raw = (input && input.session_id) || "shared";
   return String(raw).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64) || "shared";
 }
-export function sessionDir(sid) { return path.join(SESSIONS_DIR, sid); }
+export function sessionDir(sid, context = null) {
+  return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
+}
+export function sharedStateDir(context = null) {
+  try {
+    const commonGitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+      cwd: context?.root || PROJECT_ROOT, encoding: "utf8",
+    }).trim();
+      if (commonGitDir) return path.resolve(path.resolve(context?.root || PROJECT_ROOT, commonGitDir), ".craftsman");
+  } catch {}
+  return context?.stateDir || STATE_DIR;
+}
+export function worktreeBindingPath(input, context = null) {
+  const selected = context || (input?.project ? projectContext(input.project) : null);
+  const worktree = input?.worktree_path || selected?.worktreePath || selected?.root || PROJECT_ROOT;
+  const suffix = sha1(path.resolve(worktree)).slice(0, 16);
+  return path.join(sharedStateDir(selected), "sessions", sidOf(input), `${suffix}-worktree-binding.json`);
+}
+export function readWorktreeBinding(input, context = null) {
+  try { return JSON.parse(fs.readFileSync(worktreeBindingPath(input, context), "utf8")); }
+  catch { return null; }
+}
+export function readWorktreeBindings(input, context = null) {
+  const dir = path.dirname(worktreeBindingPath(input, context));
+  try {
+    return fs.readdirSync(dir)
+      .filter((name) => name.endsWith("-worktree-binding.json"))
+      .map((name) => {
+        try { return JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); }
+        catch { return null; }
+      })
+      .filter((binding) => binding?.session_id === sidOf(input));
+  } catch { return []; }
+}
+export function writeWorktreeBinding(input, binding, context = null) {
+  atomicWrite(worktreeBindingPath(input, context), JSON.stringify(binding, null, 2) + "\n");
+}
+export function clearWorktreeBinding(input, context = null) {
+  try { fs.unlinkSync(worktreeBindingPath(input, context)); } catch {}
+}
 export function atomicWrite(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
@@ -72,11 +178,11 @@ export function pruneSessions(maxAgeMs = 7 * 24 * 3600 * 1000) {
 
 // ---------------------------------------------------------------- config ---
 
-export function loadConfig() {
+export function loadConfig(context = null) {
   const defaults = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, "craftsman.config.json"), "utf8")
   );
-  const local = path.join(PROJECT_ROOT, "craftsman.config.json");
+  const local = path.join(context?.root || PROJECT_ROOT, "craftsman.config.json");
   if (!fs.existsSync(local)) return defaults;
   try {
     return deepMerge(defaults, JSON.parse(fs.readFileSync(local, "utf8")));
@@ -98,10 +204,10 @@ export function deepMerge(a, b) {
 
 // ------------------------------------------------------------ kill switch ---
 
-export function enabled(cfg) {
+export function enabled(cfg, context = null) {
   const env = (process.env.CRAFTSMAN || "").toLowerCase();
   if (env === "off" || env === "0" || env === "false") return false;
-  if (fs.existsSync(OFF_FLAG)) return false;
+  if (fs.existsSync(context?.offFlag || OFF_FLAG)) return false;
   return cfg.enabled !== false;
 }
 
@@ -125,8 +231,8 @@ export function globToRe(glob) {
   return new RegExp("^" + re + "$");
 }
 
-export function isIgnored(file, cfg, lang) {
-  const rel = path.relative(PROJECT_ROOT, file).split(path.sep).join("/");
+export function isIgnored(file, cfg, lang, context = null) {
+  const rel = path.relative(context?.root || PROJECT_ROOT, file).split(path.sep).join("/");
   const pats = [...(cfg.ignore || []), ...((lang && lang.ignore) || [])];
   return pats.some((p) => globToRe(p).test(rel) || globToRe(p).test("./" + rel));
 }
@@ -146,15 +252,17 @@ export function detectLang(file, cfg) {
 // set. `--others --exclude-standard` adds files on disk but not yet
 // staged/committed (a freshly scaffolded package.json/go.mod), while still
 // respecting .gitignore.
-let _gitFiles = null;
+const _gitFiles = new Map();
 // `{ fresh: true }` forces a recompute (tests exercising freshly-changed
 // on-disk state within one process); every real caller uses the default,
 // memoized read.
-export async function gitTrackedFiles({ fresh = false } = {}) {
-  if (_gitFiles && !fresh) return _gitFiles;
-  const out = await git(["ls-files", "--others", "--cached", "--exclude-standard"]);
-  _gitFiles = out.split("\n").map((s) => s.trim()).filter(Boolean);
-  return _gitFiles;
+export async function gitTrackedFiles({ fresh = false, context = null } = {}) {
+  const root = context?.root || PROJECT_ROOT;
+  if (_gitFiles.has(root) && !fresh) return _gitFiles.get(root);
+  const out = await git(["ls-files", "--others", "--cached", "--exclude-standard"], context);
+  const files = out.split("\n").map((s) => s.trim()).filter(Boolean);
+  _gitFiles.set(root, files);
+  return files;
 }
 
 /** Does `marker` (a literal filename or a `*`-glob like "*.csproj") exist
@@ -162,8 +270,9 @@ export async function gitTrackedFiles({ fresh = false } = {}) {
  * list (works at any depth, respects .gitignore, one process spawn total);
  * falls back to a shallow multi-level directory walk when there's no git repo
  * to ask. */
-export async function markerPresent(marker) {
-  const files = await gitTrackedFiles();
+export async function markerPresent(marker, context = null) {
+  const root = context?.root || PROJECT_ROOT;
+  const files = await gitTrackedFiles({ context });
   if (files.length) {
     if (marker.includes("*")) {
       const re = globToRe(marker.includes("/") ? marker : "**/" + marker);
@@ -187,7 +296,7 @@ export async function markerPresent(marker) {
     }
     return false;
   };
-  return walk(PROJECT_ROOT, 2);
+  return walk(root, 2);
 }
 
 // --------------------------------------------------------------- runners ---
@@ -226,8 +335,8 @@ function splitTokens(str) {
   return raw.map((tok) => tok.replace(/^["']|["']$/g, ""));
 }
 
-export function tokenize(cmdTemplate, file) {
-  const rel = path.relative(PROJECT_ROOT, file) || file;
+export function tokenize(cmdTemplate, file, context = null) {
+  const rel = path.relative(context?.root || PROJECT_ROOT, file) || file;
   const dir = path.dirname(rel);
   // Substitute per-token so a {file}/{dir} value containing a space still
   // becomes exactly one argument, instead of splitting the path in two.
@@ -244,12 +353,12 @@ export function splitCmd(str) {
   return splitTokens(str);
 }
 
-async function runOne(cmdTemplate, file, timeoutMs) {
-  const [bin, ...args] = tokenize(cmdTemplate, file);
+async function runOne(cmdTemplate, file, timeoutMs, context = null) {
+  const [bin, ...args] = tokenize(cmdTemplate, file, context);
   if (!(await have(bin))) return { skipped: true, bin };
   try {
     const { stdout, stderr } = await pexec(bin, args, {
-      timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, cwd: PROJECT_ROOT,
+      timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, cwd: context?.root || PROJECT_ROOT,
     });
     return { ok: true, out: (stdout + stderr).trim(), bin };
   } catch (e) {
@@ -261,12 +370,12 @@ async function runOne(cmdTemplate, file, timeoutMs) {
 /** Run format commands (best-effort, silent) then checks in parallel.
  * `failures` excludes timeouts — a slow tool on a big file isn't a defect
  * the model introduced, so it's reported separately and never blocks. */
-export async function runChecks(file, lang, cfg) {
+export async function runChecks(file, lang, cfg, context = null) {
   const t0 = Date.now();
-  for (const f of lang.format || []) await runOne(f, file, cfg.timeoutMs ?? 20000);
+  for (const f of lang.format || []) await runOne(f, file, cfg.timeoutMs ?? 20000, context);
 
   const results = await Promise.all(
-    (lang.check || []).map((c) => runOne(c, file, cfg.timeoutMs ?? 20000))
+    (lang.check || []).map((c) => runOne(c, file, cfg.timeoutMs ?? 20000, context))
   );
   const failures = results.filter((r) => r.ok === false && !r.timedOut);
   const timedOut = results.filter((r) => r.timedOut).map((r) => r.bin);
@@ -277,18 +386,19 @@ export async function runChecks(file, lang, cfg) {
 // ----------------------------------------------------------- diff filter ---
 
 /** Keep only findings whose text is new relative to the recorded baseline. */
-export function filterBaseline(file, findings) {
+export function filterBaseline(file, findings, context = null) {
   const key = crypto.createHash("md5").update(path.resolve(file)).digest("hex").slice(0, 12);
-  const bpath = path.join(BASELINE_DIR, key + ".txt");
+  const bpath = path.join(context?.stateDir || STATE_DIR, "baseline", key + ".txt");
   if (!fs.existsSync(bpath)) return findings;
   const base = new Set(fs.readFileSync(bpath, "utf8").split("\n").map(normLine));
   return findings.filter((l) => !base.has(normLine(l)));
 }
 
-export function writeBaseline(file, lines) {
-  fs.mkdirSync(BASELINE_DIR, { recursive: true });
+export function writeBaseline(file, lines, context = null) {
+  const baselineDir = path.join(context?.stateDir || STATE_DIR, "baseline");
+  fs.mkdirSync(baselineDir, { recursive: true });
   const key = crypto.createHash("md5").update(path.resolve(file)).digest("hex").slice(0, 12);
-  fs.writeFileSync(path.join(BASELINE_DIR, key + ".txt"), lines.join("\n"));
+  fs.writeFileSync(path.join(baselineDir, key + ".txt"), lines.join("\n"));
 }
 
 // collapse to one line and cap length for a markdown table cell; escape "|"
@@ -386,31 +496,33 @@ export function cacheKey(file, lang, cfg) {
     .digest("hex");
 }
 
-export function cacheHit(key) {
-  return fs.existsSync(path.join(CACHE_DIR, key));
+export function cacheHit(key, context = null) {
+  return fs.existsSync(path.join(context?.stateDir || STATE_DIR, "cache", key));
 }
 
-export function cacheStore(key) {
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(path.join(CACHE_DIR, key), "");
-  pruneCache();
+export function cacheStore(key, context = null) {
+  const cacheDir = path.join(context?.stateDir || STATE_DIR, "cache");
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.writeFileSync(path.join(cacheDir, key), "");
+  pruneCache(cacheDir);
 }
 
-function pruneCache() {
+function pruneCache(cacheDir = CACHE_DIR) {
   try {
-    const files = fs.readdirSync(CACHE_DIR)
-      .map((f) => ({ f, t: fs.statSync(path.join(CACHE_DIR, f)).mtimeMs }))
+    const files = fs.readdirSync(cacheDir)
+      .map((f) => ({ f, t: fs.statSync(path.join(cacheDir, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t);
-    for (const { f } of files.slice(2000)) fs.unlinkSync(path.join(CACHE_DIR, f));
+    for (const { f } of files.slice(2000)) fs.unlinkSync(path.join(cacheDir, f));
   } catch { /* non-fatal */ }
 }
 
 // --------------------------------------------------------------- logging ---
 
-export function logEvent(ev) {
+export function logEvent(ev, context = null) {
+  const stateDir = context?.stateDir || STATE_DIR;
   try {
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.appendFileSync(LOG_FILE, JSON.stringify({ ts: Date.now(), ...ev }) + "\n");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.appendFileSync(path.join(stateDir, "events.jsonl"), JSON.stringify({ ts: Date.now(), ...ev }) + "\n");
   } catch { /* never break the hook on logging */ }
 }
 
@@ -441,26 +553,27 @@ export function extractSig(tool, sample) {
   return m ? m[0] : "";
 }
 
-export function recordFailure(lang, tool, sample, cfg) {
+export function recordFailure(lang, tool, sample, cfg, context = null) {
+  const rulesFile = path.join(context?.stateDir || STATE_DIR, "learned-rules.json");
   const cap = cfg.learnedRules?.max ?? 10;
   let rules = [];
-  try { rules = JSON.parse(fs.readFileSync(RULES_FILE, "utf8")); } catch {}
+  try { rules = JSON.parse(fs.readFileSync(rulesFile, "utf8")); } catch {}
   const sig = `${lang}:${tool}:${extractSig(tool, sample)}`;
   const hit = rules.find((r) => r.sig === sig);
   if (hit) { hit.n++; hit.last = Date.now(); hit.sample = sample.slice(0, 200); }
   else rules.push({ sig, n: 1, last: Date.now(), lang, tool, sample: sample.slice(0, 200) });
   rules.sort((a, b) => (b.n - a.n) || (b.last - a.last));
   try {
-    atomicWrite(RULES_FILE, JSON.stringify(rules.slice(0, cap * 3), null, 0)); // atomic: safe under concurrent sessions
+    atomicWrite(rulesFile, JSON.stringify(rules.slice(0, cap * 3), null, 0)); // atomic: safe under concurrent sessions
   } catch {}
 }
 
-export function topRules(cfg) {
+export function topRules(cfg, context = null) {
   const cap = cfg.learnedRules?.max ?? 10;
   const minN = cfg.learnedRules?.minOccurrences ?? 3;
   const maxAgeMs = cfg.learnedRules?.maxAgeMs ?? 30 * 24 * 3600 * 1000;
   try {
-    return JSON.parse(fs.readFileSync(RULES_FILE, "utf8"))
+    return JSON.parse(fs.readFileSync(path.join(context?.stateDir || STATE_DIR, "learned-rules.json"), "utf8"))
       .filter((r) => r.n >= minN && Date.now() - r.last < maxAgeMs)
       .slice(0, cap);
   } catch { return []; }

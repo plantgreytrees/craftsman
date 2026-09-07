@@ -16,7 +16,7 @@ jobs:
       - name: Syntax-check every script
         run: for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f"; done
       - name: Unit tests
-        run: node --test scripts/lib/core.test.mjs scripts/stop-gate.test.mjs
+        run: node --test scripts/*.test.mjs scripts/lib/*.test.mjs
       - name: Config is valid JSON
         run: node -e "JSON.parse(require('fs').readFileSync('craftsman.config.json','utf8'))"
       - name: Plugin/marketplace manifests are valid JSON

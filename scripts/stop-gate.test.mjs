@@ -3,7 +3,7 @@
 // git repo fixture, since nothing exercised stop-gate.mjs end-to-end before —
 // exactly the gap that let the original bug survive three review rounds.
 // Uses Node's built-in test runner (no external dependencies).
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -83,6 +83,26 @@ test("stop-gate: a command killed by the shared budget (cap < timeoutMs) logs st
       "expected a stop-budget-exceeded event"
     );
     assert.doesNotMatch(stdout, /"decision":"block"/, "a budget-skipped command must not block");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: blocks completion while this session owns an active worktree binding", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "active-worktree-session";
+    const bindingDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(bindingDir, { recursive: true });
+    fs.writeFileSync(path.join(bindingDir, "worktree-hash-worktree-binding.json"), JSON.stringify({
+      session_id: sid,
+      unit: "unit-1",
+      worktree_path: path.join(dir, ".worktrees", "unit-1"),
+      branch: "feat/unit-1",
+    }));
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /"decision":"block"/);
+    assert.match(result.stdout, /WORKTREE BINDING ACTIVE/);
   } finally {
     cleanup(dir);
   }
@@ -283,7 +303,27 @@ test("stop-gate: a command killed after its own full timeoutMs (budget not bindi
       "cap === timeoutMs is not a budget skip"
     );
     assert.match(stdout, /"decision":"block"/, "a command killed by its own full timeoutMs must still block");
-    assert.match(stdout, /GUARD FAILED/, "the finding should be reported as a normal guard failure");
+    assert.match(stdout, /GUARD INCOMPLETE/, "an own-timeout should not be reported as a guard failure");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a missing secrets scanner blocks visibly and does not mark the session scanned", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
+    stopGate: { requireAcceptanceCriteria: false },
+  });
+  const sid = "scenario-missing-secret-scanner";
+  const markerPath = path.join(dir, ".craftsman", "sessions", sid, "secrets-scanned");
+  try {
+    const first = await runStopGate(dir, sid);
+    assert.match(first.stdout, /"decision":"block"/);
+    assert.match(first.stdout, /SECRETS SCAN UNAVAILABLE/);
+    assert.ok(!fs.existsSync(markerPath), "an unavailable scanner must not write the scanned marker");
+
+    const second = await runStopGate(dir, sid);
+    assert.match(second.stdout, /SECRETS SCAN UNAVAILABLE/, "the unavailable scan must be retried");
   } finally {
     cleanup(dir);
   }
@@ -353,7 +393,7 @@ test("stop-gate: a genuinely failing (non-killed, non-zero exit) command still b
   }
 });
 
-test("stop-gate: no stray temp directories are left behind after the suite runs", () => {
+after("stop-gate: no stray temp directories are left behind after the suite runs", () => {
   const stray = fs.readdirSync(SCRATCH_ROOT).filter((n) => n.startsWith("stop-gate-test-"));
   assert.deepEqual(stray, [], "every fixture temp dir must be cleaned up in its own test's finally block");
 });

@@ -10,7 +10,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, TodoWrite, SlashCommand
 
 You produce the COMPLETE, verified picture of a problem — root cause, every contributing defect, and adjacent subpar code that would resurface it. You **diagnose and document; you do not fix** (the fixes are `/orchestrate investigate-<slug>`). One run, one verified inventory — no re-prompting loops.
 
-Symptom: `$ARGUMENTS`. MCP is optional: if available, `sequential-thinking` for the hypothesis tree, `memory` to recall this bug-class / these modules, `context7` to confirm a suspected library misuse.
+Symptom: `$ARGUMENTS`. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md` for the optional-MCP conventions and the bounded fan-out discipline used below.
 
 ## Phase 0 — Reproduce & scope
 
@@ -24,9 +24,9 @@ Symptom: `$ARGUMENTS`. MCP is optional: if available, `sequential-thinking` for 
 
 **Defect-class completeness — brief each subagent to look for EACH class, not just the obvious one:** logic / contract error · swallowed or mis-handled exception (vs intended fail-closed) · missing input validation · tenancy / authorization gap · auth bypass · race / ordering · N+1 / missing pagination · stale contract between services · dead / mis-set config · stale build artifact vs on-disk code · missing / weak test coverage on the path. A class no subagent was told to find is a class you'll miss.
 
-Dispatch parallel read-only subagents, one per path segment (`Explore` / `general-purpose` for tracing; a security-focused agent if auth/secrets-flavoured). Each gets the observable, its segment's path(s), and must return **evidence with `file:line`** — plus, when the stack runs, **runtime evidence** (log tails with error stacks / correlation IDs / timing; a stale build artifact vs on-disk code is its own CONTRIBUTING finding). Cast wide: the brief is *everything wrong on this path*, not the first plausible cause.
+Dispatch parallel read-only subagents, one per path segment (`Explore` / `general-purpose` for tracing; a security-focused agent if auth/secrets-flavoured). **Cap the initial dispatch at 8 agents.** If more than 8 segments are in scope, combine adjacent low-risk segments into one brief and list the combined paths explicitly; reserve separate agents for the suspected root-cause path, direct contract consumers, persistence/security boundaries, and tests. Each gets the observable, its segment's path(s), and must return **evidence with `file:line`** — plus, when the stack runs, **runtime evidence** (log tails with error stacks / correlation IDs / timing; a stale build artifact vs on-disk code is its own CONTRIBUTING finding). Cast wide: the brief is *everything wrong on this path*, not the first plausible cause.
 
-**Capped, not unbounded:** dispatch is bounded to the path segments actually on the reproduced/suspected route plus their direct neighbors. Once that set crosses **~15 segments**, the remainder is listed by name only — not dispatched-and-traced — and the fix-ready inventory (Phase 3) says so explicitly, so a sprawling path degrades visibly instead of by unbounded fan-out.
+**Capped, not unbounded** (per `_shared-analysis.md`'s bounded fan-out): dispatch is bounded to the path segments actually on the reproduced/suspected route plus their direct neighbors, cap ~15 segments; the fix-ready inventory (Phase 3) names what was fully traced vs. only listed.
 
 ## Phase 2 — Adversarial verification
 
