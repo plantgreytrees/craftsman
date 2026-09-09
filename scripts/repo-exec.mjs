@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { atomicWrite, projectContext, readStdin, sidOf } from "./lib/core.mjs";
+import { atomicWrite, loadConfig, projectContext, readStdin, sidOf, splitCmd } from "./lib/core.mjs";
 
 function run(root, args, options = {}) {
   try {
@@ -145,6 +145,51 @@ function sync(context, input, info) {
   return { ...info, worktree_path: worktree, base_ref: baseRef };
 }
 
+// Finds the project's own detected test command via the SAME cfg.stopGate.commands
+// convention stop-gate.mjs/session-context.mjs already use (marker file → command) —
+// no new config surface, just reused. Fails open (returns null) when nothing is
+// detected, matching this plugin's "no repo check for a dimension → note it, don't
+// invent one" rule elsewhere.
+function findGateCommand(worktree, cfg) {
+  for (const [marker, command] of Object.entries(cfg.stopGate?.commands || {})) {
+    if (marker.includes("*")) {
+      let entries = [];
+      try { entries = fs.readdirSync(worktree); } catch { continue; }
+      const re = new RegExp(`^${marker.replaceAll(".", "\\.").replaceAll("*", ".*")}$`);
+      if (entries.some((entry) => re.test(entry))) return command;
+    } else if (fs.existsSync(path.join(worktree, marker))) {
+      return command;
+    }
+  }
+  return null;
+}
+
+// The one check `merge()` previously had zero awareness of: whether the code
+// being merged actually passes its own tests. _shared-execution.md's Phase X
+// step 7 (GATE) already runs this once during implementation, but that was
+// pure self-report as far as the merge boundary was concerned — nothing here
+// verified it actually happened or actually passed. This re-runs the test
+// command independently, inside the worktree, right before the merge that
+// makes it permanent. Deliberately NOT skippable via any per-call input field
+// — a caller-controlled skip flag would make this exactly as bypassable as
+// the prose it replaces. The only way to disable it is an actual config
+// change: `repoExec.verifyTestsBeforeMerge: false` or `stopGate.enabled: false`
+// in craftsman.config.json — a visible, auditable edit, not a silent runtime flag.
+function verifyGateBeforeMerge(context, worktree) {
+  const cfg = loadConfig(context);
+  if (cfg.stopGate?.enabled === false || cfg.repoExec?.verifyTestsBeforeMerge === false) return;
+  const command = findGateCommand(worktree, cfg);
+  if (!command) return; // no detected test command for this stack — nothing to verify
+  const [bin, ...args] = splitCmd(command);
+  const timeoutMs = cfg.stopGate?.testTimeoutMs ?? 250000;
+  try {
+    execFileSync(bin, args, { cwd: worktree, timeout: timeoutMs, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    const output = ((error.stdout || "") + (error.stderr || "")).toString().split("\n").slice(-30).join("\n");
+    throw new Error(`pre-merge gate failed — "${command}" did not pass in ${worktree}:\n${output}`);
+  }
+}
+
 function merge(context, input, info) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
@@ -155,6 +200,7 @@ function merge(context, input, info) {
   if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   const branch = checkedOutBranch;
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
+  verifyGateBeforeMerge(context, worktree);
   const lock = acquireLock(info, input);
   const originalBranch = run(context.root, ["branch", "--show-current"]);
   let mergeStarted = false;

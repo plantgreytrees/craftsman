@@ -5,7 +5,9 @@
 
 # Phase D — `--deep`: exhaustive whole-run audit
 
-Triggered by `--deep <run-slug>`. The mandate is **completeness, not speed**: find *every* defect across the entire surface an orchestrate run produced. Scale the fan-out to the run; do not stop at the first plausible pass. Uses `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md`'s bounded fan-out pattern, overriding its default cap (this phase's matrix caps at 12 modules, not ~15).
+Triggered by `--deep <run-slug>`. **Check `execution.agentMode` first** (`_shared-analysis.md`): this phase's whole value proposition is a large *parallel* fan-out (up to 12 reviewers/round), which contradicts `root-only` mode. Under `root-only` (the default), refuse: tell the user `--deep` requires `execution.agentMode: "subagents"` in `craftsman.config.json`, and run plain `/scrutinise` (single sequential pass, no fan-out) instead. Only proceed past this line when `agentMode` is explicitly `"subagents"`.
+
+The mandate is **completeness, not speed**: find *every* defect across the entire surface an orchestrate run produced. Scale the fan-out to the run; do not stop at the first plausible pass. Uses `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md`'s bounded fan-out pattern, overriding its default cap (this phase's matrix caps at 12 modules, not ~15).
 
 1. **Resolve the full surface (not a single diff).** From the run's execution rows: every unit, every merge SHA. Build the complete changed-file set (`git diff --name-only <merge-base>..main` per merged unit). Re-read the originating plan doc(s) — the promised user-visible outcomes are the yardstick. Recall memory per area.
 2. **Mechanical floor across the whole surface** — run the full Phase-0 check set over *every* touched module + range, plus any completeness pre-filter over `<run-base>...HEAD`. Every hit seeds the inventory.

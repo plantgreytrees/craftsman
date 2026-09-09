@@ -37,6 +37,10 @@ jobs:
           }
       - name: Unit and integration tests
         run: node --test scripts/*.test.mjs scripts/lib/*.test.mjs
+      - name: Model frontmatter policy
+        run: node scripts/model-policy.mjs
+      - name: Doc size policy
+        run: node scripts/doc-size-policy.mjs
       - name: Validate JSON
         shell: node {0}
         run: |
@@ -80,6 +84,10 @@ jobs:
         run: for f in scripts/*.mjs scripts/lib/*.mjs; do node --check "$f"; done
       - name: Unit tests
         run: node --test scripts/*.test.mjs scripts/lib/*.test.mjs
+      - name: Model frontmatter policy
+        run: node scripts/model-policy.mjs
+      - name: Doc size policy
+        run: node scripts/doc-size-policy.mjs
       - name: Config is valid JSON
         run: node -e "JSON.parse(require('fs').readFileSync('craftsman.config.json','utf8'))"
       - name: Plugin/marketplace manifests are valid JSON

@@ -1,6 +1,6 @@
 # craftsman
 
-**v2.0.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
+**v2.1.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 A Claude Code plugin that makes code better automatically — in **any language**.
 It runs your formatters, linters, and type-checkers on every edit (flagging only
@@ -143,6 +143,20 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   tracked changes. If the configured scanner (`gitleaks` by default) isn't on
   `PATH`, the gate falls back to a dependency-free built-in scanner instead of
   just blocking on a missing tool (opt out with `security.builtinFallback: false`).
+- **Root-only by default, mechanically enforced** — `/orchestrate` and the
+  planners do the work themselves, sequentially, instead of fanning out
+  subagents; `execution.agentMode` (default `root-only`) is enforced by a
+  `PreToolUse` hook that hard-blocks `Task` calls, not just a convention.
+  `/plan`'s one decomposition step is the sole standing exception (runs on
+  `opus`; everything else in `/plan`, and most agents, run cheaper —
+  `implementer`/`security-auditor` stay on `sonnet`). Flip
+  `execution.agentMode` to `"subagents"` to restore real fan-out.
+- **Context stays bounded, mechanically** — a hand-off or a unit reaching a
+  terminal tracker state (merged, blocked, or parked) marks the session
+  compact-required; every other tool call is blocked until a real `/compact`
+  or `/clear` actually runs. Worktrees left behind after a merge, oversized
+  shipped docs, and unbounded plan-memory/tracker growth are all caught the
+  same way — by a hook or a CI check, not by remembering to do it.
 
 ---
 

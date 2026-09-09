@@ -1,0 +1,66 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { sidOf } from "./lib/core.mjs";
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const GUARD = path.join(ROOT, "orchestrate-scope-guard.mjs");
+
+function run(dir, input) {
+  return spawnSync(process.execPath, [GUARD], {
+    cwd: dir,
+    input: JSON.stringify(input),
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+  });
+}
+
+function tmpProject() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-guard-"));
+}
+
+// scope.mjs's requiredFile() resolves PROJECT_ROOT from core.mjs at import
+// time in *this* process, so it can't track a spawned hook's own
+// CLAUDE_PROJECT_DIR — mirror the marker path by hand instead.
+function requiredFile(dir, input) {
+  return path.join(dir, ".craftsman", "sessions", sidOf(input), "scope-required");
+}
+
+test("orchestrate-scope-guard: invoking /orchestrate marks scope required, even if the command forgets to", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/orchestrate docs/plans/example.md" } };
+  try {
+    const result = run(dir, input);
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: the craftsman: namespaced form also marks scope required", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/craftsman:orchestrate docs/plans/example.md" } };
+  try {
+    run(dir, input);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: an unrelated slash command never touches the scope-required marker", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/plan add a feature" } };
+  try {
+    const result = run(dir, input);
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

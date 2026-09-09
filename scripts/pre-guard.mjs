@@ -152,6 +152,22 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
   }
 }
 
+// _shared-machinery.md's Standing constraints: "a hook rejection is fixed in
+// the worktree, never bypassed (--no-verify is forbidden)" — prose only until
+// now. Unconditional (not gated on an active worktree binding): this applies
+// to every git commit/push regardless of whether orchestrate's worktree flow
+// is even in play.
+if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|push)\b/.test(command)
+    && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)) {
+  logEvent({ ev: "verify_bypass_blocked", sid: sidOf(input), command });
+  process.stderr.write(
+    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +
+    `core.hooksPath override). Fix the underlying hook failure instead of skipping it — this is a ` +
+    `hard rule, not a suggestion.\n`
+  );
+  process.exit(2);
+}
+
 if (tool === "Bash" && binding && mutatesGit(command)) {
   const cwd = path.resolve(process.cwd());
   const worktree = path.resolve(binding.worktree_path);

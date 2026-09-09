@@ -1,5 +1,8 @@
 {
   "enabled": true,
+  "execution": {
+    "agentMode": "root-only"
+  },
   "timeoutMs": 20000,
   "maxFeedbackLines": 40,
   "noisePatterns": [
@@ -80,6 +83,16 @@
     "minOccurrences": 3,
     "maxAgeMs": 2592000000
   },
+  "planMemory": {
+    "enabled": true,
+    "maxAgeMs": 3888000000
+  },
+  "tracker": {
+    "nudgeLines": 300
+  },
+  "repoExec": {
+    "verifyTestsBeforeMerge": true
+  },
   "baseline": {
     "errorsDoc": "docs/errors/KNOWN_ISSUES.md"
   },
@@ -117,7 +130,7 @@
     "docPaths": ["docs/plans/**"]
   },
   "planning": {
-    "blindRederivation": "auto"
+    "blindRederivation": "never"
   },
   "sessionContext": {
     "verbose": false

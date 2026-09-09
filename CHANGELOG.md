@@ -5,6 +5,57 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-09
+
+Token-efficiency and mechanical-enforcement pass — every rule below moved from
+prose ("the model should…") to something a hook actually blocks or forces.
+
+- **Root-only agent mode, mechanically enforced.** New `execution.agentMode`
+  config (default `root-only`). `agent-mode-guard.mjs` (`PreToolUse` on
+  `Task`) hard-blocks subagent delegation/fan-out except `/plan`'s single
+  decomposition step (`plan-strategist`, kept on `opus`; everything else in
+  `/plan` runs on `sonnet`). Set `agentMode: "subagents"` to restore fan-out.
+- **Model cost redistribution** — most agents downgraded to `haiku`;
+  `implementer` and `security-auditor` stay on `sonnet`.
+- **Mechanical auto-compact.** A hand-off (`handoff.mjs`) or a terminal
+  tracker transition (`MERGED`/`BLOCKED`/`PARKED`/`COMPLETE`/`CANCELLED`) now
+  marks the session compact-required; `compact-gate.mjs` hard-blocks every
+  other tool call until a real `/compact` or `/clear` fires. Fires at the end
+  of every plan "step"/unit, success or park — not just at final hand-off.
+- **Mechanical worktree sweep.** `stop-gate.mjs` now hard-blocks completion if
+  any non-primary worktree's branch is already fully merged but still present.
+- **Mechanical scope activation for `/orchestrate`.** `orchestrate-scope-guard.mjs`
+  (`PostToolUse` on `SlashCommand`) sets the scope-required flag the instant
+  `/orchestrate` is invoked, so every Read/Write/Edit/Bash call is blocked
+  until a scope is actually activated — no longer dependent on the command
+  remembering to say so.
+- **Gate-before-merge.** `repo-exec.mjs`'s `merge()` independently re-runs the
+  project's own detected test command inside the worktree before allowing a
+  merge (`repoExec.verifyTestsBeforeMerge`, on by default) — closes the gap
+  where git-mechanics passed but nothing had actually re-checked tests.
+- **`--no-verify`/`--no-gpg-sign` commit/push bypass is now a hard block**
+  (`pre-guard.mjs`), not just a convention.
+- **Plan memory is strictly relevance-gated.** `tags` (≥1) are now required on
+  every record, summaries are capped at 220 chars, and `recallMemory` never
+  blanket-dumps — an empty/no-match query returns nothing. Records are
+  auto-pruned (`pruneAllMemory`, rate-limited from `SessionStart`).
+- **Tracker ledger auto-compaction** (`compactLedger`) and a `TRACKER.md`
+  size nudge, both rate-limited from `SessionStart`.
+- **Doc size policy** (`scripts/doc-size-policy.mjs`) — a build-time char
+  budget per file category (shared machinery, per-unit execution loop,
+  commands, agents, skills), wired into `/craftsman:init`'s health check and
+  CI, so an oversized shipped doc fails the same way a broken one would.
+  `_shared-machinery.md`, `_shared-execution.md`, and `orchestrate.md`
+  trimmed under their new budgets.
+- **`SessionStart` injection trimmed** for token efficiency (measured ~327 →
+  ~142 tokens on a test project); CLAUDE.md generation template reduced to a
+  near-empty placeholder.
+- **`docs/errors/KNOWN_ISSUES.md`** (machine-generated, write-only debt log)
+  added to the generated `.claudeignore` — no command ever reads it back.
+- **New regression tests** for the mechanical-enforcement hooks added this
+  pass: `agent-mode-guard.test.mjs`, `orchestrate-scope-guard.test.mjs`,
+  `compact-gate.test.mjs` (covers both `compact-nudge.mjs`/`compact-gate.mjs`).
+
 ## [2.0.0] - 2026-09-07
 
 - **Fixed a self-inflicted cost regression** — `performance-reviewer` and

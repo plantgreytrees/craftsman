@@ -46,6 +46,43 @@ for (const binding of readWorktreeBindings(input, {
   );
 }
 
+// Worktree sweep (mechanical) — _shared-execution.md's Finalization block says
+// "the run doesn't reach COMPLETE while any worktree survives," but nothing
+// ever enforced it; a skipped `repo-exec.mjs cleanup` left a merged unit's
+// worktree on disk purely on trust. Block Stop while ANY other worktree for
+// this repository has a branch already fully merged into the current
+// checkout — there is no legitimate reason (concurrent-session or otherwise)
+// to keep one of those around, unlike an unmerged/parked one, which a
+// concurrent session may still legitimately own, so this never touches those.
+try {
+  const { stdout: listOut } = await pexec("git", ["worktree", "list", "--porcelain"], { cwd: context.root });
+  const primary = path.resolve(context.root);
+  const entries = listOut.split("\n\n").map((block) => {
+    const lines = block.split("\n");
+    const worktreeLine = lines.find((l) => l.startsWith("worktree "));
+    const branchLine = lines.find((l) => l.startsWith("branch "));
+    return {
+      path: worktreeLine ? worktreeLine.slice("worktree ".length).trim() : null,
+      branch: branchLine ? branchLine.slice("branch refs/heads/".length).trim() : null,
+    };
+  }).filter((e) => e.path && path.resolve(e.path) !== primary);
+  for (const entry of entries) {
+    if (!entry.branch) continue; // detached/bare — not this plugin's worktree shape, skip rather than guess
+    let merged = false;
+    try {
+      await pexec("git", ["merge-base", "--is-ancestor", entry.branch, "HEAD"], { cwd: context.root });
+      merged = true;
+    } catch { /* not merged (or error) — fail safe, never block on an unmerged/parked worktree */ }
+    if (merged) {
+      problems.push(
+        `WORKTREE NOT SWEPT: ${entry.path} (branch ${entry.branch}) is already fully merged but still ` +
+        `exists — its cleanup step was skipped. Run: git worktree remove "${entry.path}" && ` +
+        `git branch -d ${entry.branch} && git worktree prune.`
+      );
+    }
+  }
+} catch { /* not a git repo, git absent, or worktree list failed — fail safe, never block on this */ }
+
 // 1. Secrets — always a hard block, never baselined — but re-scan only
 // when `git status --ignored` shows real changes (the PostToolUse "dirty"
 // marker misses Bash-created files). `--ignored` also catches a freshly

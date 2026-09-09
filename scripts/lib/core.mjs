@@ -123,6 +123,14 @@ export function sidOf(input) {
 export function sessionDir(sid, context = null) {
   return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
 }
+// Single source of truth for the mechanical hand-off→/compact gate's marker
+// path — written by compact-nudge.mjs, read by compact-gate.mjs, cleared by
+// session-context.mjs. All three must agree on exactly one path; importing
+// this instead of each hand-rolling sessionDir(sidOf(input), context) removes
+// any chance of the three drifting apart from each other silently.
+export function compactRequiredFile(sid, context = null) {
+  return path.join(sessionDir(sid, context), "compact-required");
+}
 export function sharedStateDir(context = null) {
   try {
     const commonGitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {

@@ -1,104 +1,74 @@
 # Shared execution machinery
 
-> Canonical, single-source protocol for every command that **executes** code changes
-> (`/orchestrate` and the executor half of `/investigate`/`/scrutinise` plan docs). Commands
-> **link here and `Read` this file at the phase that needs it** instead of inlining it — one edit,
-> one source of truth. Not user-invocable on its own.
->
-> This file holds what **every** command that touches execution needs (constraints, MCP
-> conventions, the tooling-manifest contract) — deliberately kept light since it's read
-> unconditionally. The per-unit execution loop itself (worktrees, gates, merge) is the
-> expensive part and lives in `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md`,
-> read only by the command that's actually about to run it.
+> Canonical protocol for every command that **executes** code changes (`/orchestrate`,
+> executed `investigate-*`/`scrutinise-*` plan docs). Link here and `Read` at the phase
+> that needs it, don't inline — one source of truth. Not user-invocable. Kept light
+> since read unconditionally; the expensive per-unit loop is `_shared-execution.md`,
+> read only when execution actually starts.
 
-Referenced by: `${CLAUDE_PLUGIN_ROOT}/commands/orchestrate.md` · executed `investigate-*`/`scrutinise-*` plan docs.
+Referenced by: `orchestrate.md` · executed `investigate-*`/`scrutinise-*` plan docs.
 
 ---
 
-## Standing constraints (non-negotiable, apply to every unit)
+## Standing constraints (non-negotiable)
 
-- **Decide from `docs/`, don't stall.** `docs/` is the standing authority. Resolve design/architecture/security judgement calls by reading the reference and acting, not by pausing for the user: load the relevant `docs/architecture/*`, `docs/standards/*` into the plan's Background with `file:line`, follow it, record the decision. **Only stop the user** for a true product/scope ambiguity or a change to a locked/signed-off invariant — note every such stop in the tracker.
-- **Acceptance is the contract.** `.craftsman/acceptance.md` (if present) lists the gates a unit must pass; a unit is not done until its acceptance items hold. The plan doc's acceptance section refines them per feature.
-- **Plans** live in `docs/plans/`. Never elsewhere. Plan docs are `docs/plans/<slug>.md`.
-- **Shared tracker** — `docs/plans/TRACKER.md` is shared with concurrent sessions. Only touch execution rows you created (this run's slugs). Never prune/reformat foreign rows.
-- **Commit style** — Conventional Commits. Respect the repo's commit hooks / pre-commit checks; a hook rejection is fixed **in the worktree**, never bypassed (`--no-verify` is forbidden).
-- **Deterministic guards are the backstop — run them, don't eyeball.** Blast radius via `consumer-tracer` before touching any exported/shared contract; the project's own checks (format / lint / typecheck / test — detected, never assumed) at each gate. A changed contract with an un-updated consumer is the #1 missed unit; the tracer, not judgement, decides who is affected.
-- **Standards, same change.** If `docs/standards/` carries a standard that governs the touched code, the implementer conforms to it and `code-reviewer` checks it; `standards-keeper` (audit mode) is the deeper consistency pass when a family's conventions matter more than one diff's correctness. Absent standard for a family the unit establishes → note "no standard — run `standards-keeper` (derive mode)".
+- **Agent mode — mechanically enforced.** Check `execution.agentMode` (default `root-only`, also asserted every session). Every "delegate/dispatch/fan out" instruction below means: do it yourself, sequentially, no Task/Agent tool, no parallel. `agent-mode-guard.mjs` (`PreToolUse` on `Task`) hard-blocks any Task call under root-only mode except the one named exception (`_shared-analysis.md`'s Agent mode section — checked by name). Only `agentMode: "subagents"` restores real delegation.
+- **Decide from `docs/`, don't stall.** Resolve design/architecture/security calls by reading `docs/architecture/*`/`docs/standards/*` and acting — cite `file:line`, record the decision. Stop the user only for genuine product/scope ambiguity or a locked-invariant change.
+- **Acceptance is the contract.** `.craftsman/acceptance.md` (if present) gates "done"; the plan's acceptance section refines it per feature.
+- **Plans** live only in `docs/plans/<slug>.md`.
+- **Shared tracker** (`docs/plans/TRACKER.md`) — touch only rows you created; never prune/reformat foreign ones.
+- **Commit style** — Conventional Commits; a hook rejection is fixed in the worktree, never bypassed. `--no-verify`/`--no-gpg-sign`/gpgsign-off is **mechanically blocked** by `pre-guard.mjs`, not just forbidden by convention.
+- **Deterministic guards are the backstop.** `consumer-tracer` before touching any exported/shared contract; the project's own detected format/lint/typecheck/test at each gate. An un-updated consumer is the #1 missed unit.
+- **Standards, same change.** A governing `docs/standards/` entry: implementer conforms, `code-reviewer` checks it; `standards-keeper` (audit mode) for whole-family consistency. No standard for an established family → note it, run `standards-keeper` (derive mode).
 
-## Optional MCP conventions (use if available; skip if trivial)
+## Optional MCP (use if available, skip if trivial)
 
-MCP is never ritual — use where it earns tokens, skip otherwise. Each is optional; degrade gracefully if the server is absent:
-- **context7** — before an implementer writes against an external library API, resolve + query current docs rather than trusting training data. Skip for pure in-repo edits.
-- **memory** — at unit start, recall gotchas for the touched area + change-class (tooling quirks, known-flaky tests, past decisions). At close-out, record what was learned (tooling detected, gotcha hit, contract touched → consumers). This is the durability win — each run makes the next smarter.
-- **sequential-thinking** — only for genuinely complex units (multi-contract ripple, ambiguous decomposition). Skip trivial single-file units.
+- **context7** — resolve external library API docs before an implementer writes against one; skip for pure in-repo edits.
+- **memory** — recall gotchas/decisions for the area at unit start; record what was learned at close-out.
+- **sequential-thinking** — only for genuinely complex units (multi-contract, ambiguous decomposition).
 
 ### Plan memory ledger
 
-The local `scripts/plan-memory.mjs` ledger is the durable fallback for optional
-memory providers. Recall only after the active scope is installed, filter by the
-selected project, plan, unit, and scope, and cap results with `max_items` and
-`max_chars`. Treat every result as unverified context until its source files are
-checked. Record only post-gate facts with source files, commit identity,
-verification status, and an expiry where the fact can become stale.
+`scripts/plan-memory.mjs` is the durable fallback for optional memory providers. Recall only after scope is installed; filter by project/plan/unit/scope; cap with `max_items`/`max_chars`. **Always pass a real, specific `query`** — an empty query returns nothing (no blanket-dump fallback); a real one only surfaces records whose summary/category/tags/source_files actually match. Treat every result as unverified until its source files are checked. Record only post-gate facts: source files, commit identity, verification status, expiry where relevant, **`tags`** (required, ≥1), and a **summary ≤220 chars** — one terse fact, never a paragraph.
 
-Memory is advisory: it must never authorize a read/write, widen a scope, settle a
-claim, replace tracker state, satisfy acceptance, or decide a merge. Provider
-failure means no memory and must not block execution. External providers such as
-Mempalace may implement the same recall/record shape, but remain optional and
-project-isolated.
+Memory is advisory only — never authorizes a read/write, widens scope, settles a claim, or decides a merge. Provider failure = no memory, never a block. External providers may implement the same shape but stay optional and project-isolated.
 
 ---
 
 ## The tooling manifest (planner → executor contract)
 
-Every plan doc a planner emits carries, **per unit**, a `### Tooling` block naming *only* what that unit needs — so the executor loads exactly those and ignores the rest (no scanning every agent/skill/check per unit; less context, faster, fewer wrong turns). The planner resolves this once, at plan time, when it already knows the change shape. At execution time, `gate-select.mjs` (`_shared-execution.md` step 5) re-derives the same gates deterministically from the actual diff — a floor under the planner's own listing, not a replacement for it.
+Every plan doc carries, per unit, a `### Tooling` block naming *only* what that unit needs, resolved once at plan time. `gate-select.mjs` (`_shared-execution.md` step 5) re-derives the same gates from the actual diff at execute time — a floor under the planner's listing, not a replacement.
 
 ```
 ### Tooling — <unit-slug>
-Implementer:  implementer                     # the routing target; language auto-detected at execute time
-Gates:        security-auditor, ui-ux-reviewer, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper   # illustrative; include only gates this diff triggers
-Skills:       <1–3 skills relevant to this unit>
-Checks:       <the detected build/lint/typecheck/test commands this diff must pass>
+Implementer:  implementer                     # language auto-detected at execute time
+Gates:        security-auditor, ui-ux-reviewer, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper   # only ones this diff triggers
+Skills:       <1–3 relevant skills>
+Checks:       <detected build/lint/typecheck/test commands>
 MCP:          context7 (lib API), memory (recall+record)   # if available; skip-if-trivial
 Memory:       plan-memory (bounded recall; post-gate record)
 ```
 
 ### Scope — <unit-slug>
 
-The plan's machine-readable `scope` is a hard allow-list, separate from tooling:
+A hard allow-list, separate from tooling:
 
 ```
 Scope:
 	project: <selected repository or project root>
-	read:  <specific source, test, config, and contract files>
+	read:  <specific source, test, config, contract files>
 	docs:  <specific docs/reference files>
 	write: <specific files the unit may create or edit>
 ```
 
-The executor and implementer may read only `read` + `docs` for implementation
-context, plus the tracker row and task text needed to operate the workflow, and
-may write only `write`. A missing scope is a plan defect: pause that unit, add
-the scope from a targeted dependency trace, and record the correction in the
-tracker. Do not compensate with a whole-repository scan.
+The executor/implementer read only `read`+`docs` (plus tracker row + task text) and write only `write`. Missing scope = plan defect: pause, add the scope from a targeted dependency trace, record the correction. Never compensate with a whole-repo scan.
 
 ### Scope steps and workspace boundaries
 
-The planner groups all changes for one coherent project/repository boundary into
-one scope step identified by `scope_id`. Each step declares `project` and
-`depends_on`; the executor validates and topologically orders these ids before
-loading implementation context. A step is the context-reset boundary: all tasks
-in that step share one activated manifest and one hand-off.
+One `scope_id` per coherent project/repository boundary; each step declares `project` + `depends_on`, validated and topologically ordered before context loads. A step is the context-reset boundary — one activated manifest, one hand-off.
 
-For a workspace containing many repositories, `project` is an explicit selected
-root. The planner records only affected roots supported by dependency evidence;
-it must not enumerate or scan the entire workspace. Cross-project consumers are
-represented as dependencies between steps, not by widening one step's read glob.
+`project` is an explicit selected root in a multi-repo workspace; record only roots with dependency evidence, never enumerate the workspace. Cross-project consumers are step dependencies, not a widened read glob.
 
-Workspace discovery is opt-in and deterministic: set `CRAFTSMAN_WORKSPACE_MANIFEST`
-to a manifest path, or place `craftsman.workspace.json` at the current project
-root. The manifest uses `{ "version": 1, "projects": { "id": { "root": "..." } } }`.
-Roots must be relative, unique, existing, and inside the manifest directory.
-Named projects must resolve to Git roots; invalid or missing entries block the
-run. With no manifest, `project: "."` retains the legacy single-repository path.
+Workspace discovery: `CRAFTSMAN_WORKSPACE_MANIFEST` env path, or `craftsman.workspace.json` at the project root — `{ "version": 1, "projects": { "id": { "root": "..." } } }`, roots relative/unique/existing/inside the manifest dir, resolving to Git roots (invalid/missing entries block the run). No manifest → `project: "."`, legacy single-repo path.
 
-**Executor rule:** treat the manifest as the allow-list for that unit. Use the named implementer, run the named gates + checks, load the named skills, make the named MCP calls — do **not** invoke gates/skills/agents the manifest omits. If the diff turns out to need one the planner missed, add it AND note the manifest gap in the tracker so the next plan is better. A unit with no manifest → fall back to full Phase X routing (`_shared-execution.md`) and flag the missing manifest.
+**Executor rule:** the manifest is the allow-list — use the named implementer, gates, skills, MCP calls; never invoke what it omits. A diff needing one the planner missed → add it AND note the gap in the tracker. No manifest at all → fall back to full Phase X routing (`_shared-execution.md`) and flag it.

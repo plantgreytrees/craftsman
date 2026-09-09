@@ -6,7 +6,8 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { atomicWrite, logEvent, projectContext, readStdin } from "./lib/core.mjs";
 
-const MAX_SUMMARY = 1600;
+const MAX_SUMMARY = 220; // one terse fact, not a paragraph — see normalizeRecord's comment
+const MAX_SOURCE_FILES = 8;
 const MAX_ITEMS = 12;
 const DEFAULT_CHARS = 6000;
 const MAX_READ_BYTES = 256 * 1024;
@@ -103,20 +104,30 @@ function sourceChanged(context, commit, sourceFiles) {
   });
 }
 
+// A memory record is written once and potentially recalled many times across
+// a plan's life, so its cost is paid repeatedly, not once — MAX_SUMMARY (220
+// chars) forces one terse, high-signal fact rather than a paragraph, and
+// `tags` is now REQUIRED rather than optional: recallMemory only ever
+// matches on summary/category/tags/source_files text overlap (see score()),
+// so an untagged, generically-worded record is nearly unfindable by a real
+// query anyway — better to refuse it at write time than let it become dead
+// weight nothing ever retrieves.
 function normalizeRecord(input, context) {
   if (!input || typeof input !== "object") throw new Error("memory record must be an object");
   if (typeof input.plan !== "string" || !input.plan.trim()) throw new Error("memory.plan must be a non-empty string");
   if (!CATEGORIES.has(input.category)) throw new Error(`memory.category must be one of: ${[...CATEGORIES].join(", ")}`);
   if (typeof input.summary !== "string" || !input.summary.trim()) throw new Error("memory.summary must be a non-empty string");
-  if (input.summary.length > MAX_SUMMARY) throw new Error(`memory.summary must be at most ${MAX_SUMMARY} characters`);
+  if (input.summary.length > MAX_SUMMARY) throw new Error(`memory.summary must be at most ${MAX_SUMMARY} characters — one terse fact, not a paragraph`);
   const sourceFiles = Array.isArray(input.source_files) ? input.source_files : [];
-  if (sourceFiles.length > 24 || sourceFiles.some((file) => typeof file !== "string" || !file.trim() || file.length > 240 || path.isAbsolute(file) || file.split(/[\\/]/).includes(".."))) {
-    throw new Error("memory.source_files must contain safe relative paths");
+  if (sourceFiles.length > MAX_SOURCE_FILES || sourceFiles.some((file) => typeof file !== "string" || !file.trim() || file.length > 240 || path.isAbsolute(file) || file.split(/[\\/]/).includes(".."))) {
+    throw new Error(`memory.source_files must contain at most ${MAX_SOURCE_FILES} safe relative paths`);
   }
   const status = input.status || "unproven";
   if (!["verified", "unproven", "superseded"].includes(status)) throw new Error("memory.status is invalid");
   const confidence = input.confidence || (status === "verified" ? "high" : "low");
   if (!["high", "medium", "low"].includes(confidence)) throw new Error("memory.confidence is invalid");
+  const tags = Array.isArray(input.tags) ? [...new Set(input.tags.filter((tag) => typeof tag === "string" && tag.length <= 80).slice(0, 12))] : [];
+  if (tags.length === 0) throw new Error("memory.tags must have at least one tag — untargeted memory can't be retrieved only when needed");
   const record = {
     id: typeof input.id === "string" && input.id ? input.id : null,
     plan: input.plan,
@@ -131,7 +142,7 @@ function normalizeRecord(input, context) {
     status,
     confidence,
     expires_at: typeof input.expires_at === "string" ? input.expires_at : null,
-    tags: Array.isArray(input.tags) ? [...new Set(input.tags.filter((tag) => typeof tag === "string" && tag.length <= 80).slice(0, 12))] : [],
+    tags,
     created_at: new Date().toISOString(),
   };
   record.id ||= crypto.createHash("sha256").update(JSON.stringify({ ...record, created_at: "" })).digest("hex").slice(0, 16);
@@ -177,7 +188,6 @@ function terms(query) {
 }
 
 function score(record, queryTerms) {
-  if (!queryTerms.length) return 1;
   const haystack = [record.summary, record.category, ...(record.tags || []), ...(record.source_files || [])].join(" ").toLowerCase();
   return queryTerms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
 }
@@ -197,6 +207,14 @@ export function recallMemory(input) {
   const queryTerms = terms(input.query);
   const maxItems = Math.min(Math.max(Number(input.max_items) || 6, 1), MAX_ITEMS);
   const maxChars = Math.min(Math.max(Number(input.max_chars) || DEFAULT_CHARS, 500), 12000);
+  // No real query → no recall. A vague/empty query returning "whatever's
+  // there, most recent first" is exactly the blanket-dump behavior memory
+  // must NOT have: every record should surface only when it's actually
+  // relevant to what's being asked, never as a fallback grab-bag.
+  if (!queryTerms.length) {
+    logEvent({ ev: "memory_recall", plan: input.plan, unit: input.unit || null, scope_id: input.scope_id || null, count: 0, chars: 0, reason: "no_query" }, context);
+    return { project: context.id, plan: input.plan, count: 0, records: [] };
+  }
   const now = Date.now();
   const records = readRecords(memoryFile(context, input.plan))
     .filter((record) => active(record, now, context, input.include_stale === true))
@@ -204,7 +222,7 @@ export function recallMemory(input) {
     .filter((record) => !input.scope_id || record.scope_id === input.scope_id)
     .filter((record) => !input.category || record.category === input.category)
     .map((record, index) => ({ record, index, relevance: score(record, queryTerms) }))
-    .filter((entry) => !queryTerms.length || entry.relevance > 0)
+    .filter((entry) => entry.relevance > 0)
     .sort((a, b) => b.relevance - a.relevance || b.record.created_at.localeCompare(a.record.created_at));
   const result = [];
   let chars = 0;
@@ -240,7 +258,8 @@ export function compactMemory(input) {
       return normalizeRecord({
         plan: input.plan, unit: latest.unit, scope_id: latest.scope_id, category: latest.category,
         summary: group.map((entry) => entry.summary).join(" | ").slice(0, MAX_SUMMARY),
-        source_files: [...new Set(group.flatMap((entry) => entry.source_files || []))].slice(0, 24),
+        source_files: [...new Set(group.flatMap((entry) => entry.source_files || []))].slice(0, MAX_SOURCE_FILES),
+        tags: [...new Set(group.flatMap((entry) => entry.tags || []))].slice(0, 12),
         source_commit: latest.source_commit, plan_hash: latest.plan_hash, status: latest.status,
       }, context);
     });
@@ -250,10 +269,68 @@ export function compactMemory(input) {
   });
 }
 
+// Automatic garbage collection — run best-effort, opportunistically (SessionStart),
+// so a ledger never grows unbounded just because no one remembered to run the
+// manual `compact` action from _shared-execution.md's Finalization block.
+// Two things a manual compact alone won't do: (1) compact only fires "when a
+// plan has accumulated more than one entry per unit/category" — a ledger with
+// only superseded/expired singletons never crosses that bar and never shrinks;
+// (2) nothing ever deletes the ledger FILE for a plan that finished long ago.
+export function pruneAllMemory({ maxAgeMs = 45 * 24 * 3600 * 1000, context } = {}) {
+  const ctx = context || projectContext(".");
+  const dir = path.join(ctx.stateDir, "plans");
+  const result = { filesScanned: 0, filesDeleted: 0, recordsDropped: 0 };
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return result; }
+  const now = Date.now();
+  for (const name of entries) {
+    if (!name.endsWith(".memory.jsonl")) continue;
+    const file = path.join(dir, name);
+    result.filesScanned++;
+    let stat;
+    try { stat = fs.statSync(file); } catch { continue; }
+    // Whole-ledger age-out: a plan whose memory hasn't been touched (read or
+    // written) in maxAgeMs is almost certainly long shipped/abandoned — its
+    // hints are stale by construction and worth deleting outright rather than
+    // filtering per-record forever.
+    if (now - stat.mtimeMs > maxAgeMs) {
+      try { fs.unlinkSync(file); result.filesDeleted++; } catch {}
+      continue;
+    }
+    withMemoryLock(file, () => {
+      const records = readAllRecords(file);
+      const kept = records.filter((record) => {
+        if (record.status === "superseded") return false;
+        if (record.expires_at && Date.parse(record.expires_at) <= now) return false;
+        return true;
+      });
+      if (kept.length === records.length) return;
+      result.recordsDropped += records.length - kept.length;
+      if (kept.length === 0) { try { fs.unlinkSync(file); result.filesDeleted++; } catch {} }
+      else atomicWrite(file, kept.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    });
+  }
+  if (result.filesDeleted || result.recordsDropped) {
+    logEvent({ ev: "memory_pruned", ...result }, ctx);
+  }
+  return result;
+}
+
+function readAllRecords(file) {
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).flatMap((line) => {
+    try { return [JSON.parse(line)]; } catch { return []; }
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
-    const output = input.action === "record" ? recordMemory(input) : input.action === "recall" ? recallMemory(input) : input.action === "compact" ? compactMemory(input) : (() => { throw new Error("action must be record, recall, or compact"); })();
+    const output = input.action === "record" ? recordMemory(input)
+      : input.action === "recall" ? recallMemory(input)
+      : input.action === "compact" ? compactMemory(input)
+      : input.action === "prune" ? pruneAllMemory({ maxAgeMs: input.max_age_ms, context: input.context })
+      : (() => { throw new Error("action must be record, recall, compact, or prune"); })();
     process.stdout.write(JSON.stringify(output) + "\n");
   } catch (error) {
     process.stderr.write(`craftsman: plan memory failed: ${error.message}\n`);

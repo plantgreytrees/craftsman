@@ -8,9 +8,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
-  sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
+  sidOf, sessionDir, compactRequiredFile, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
 } from "./lib/core.mjs";
-import { recallMemory } from "./plan-memory.mjs";
+import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
+import { compactLedger } from "./tracker.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
@@ -18,6 +19,13 @@ const sid = sidOf(input);
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context)) process.exit(0);
+
+// SessionStart fires on startup, resume, /clear, AND /compact — the only
+// observable proxy this plugin has for "a compact/clear actually happened."
+// compact-gate.mjs's block only ever needs to survive until one of those
+// fires, so clearing here unconditionally is exactly the mechanical
+// counterpart compact-nudge.mjs's marker-write needs (see its comment).
+try { fs.unlinkSync(compactRequiredFile(sid, context)); } catch {}
 
 const markers = {
   "package.json": "JavaScript/TypeScript", "deno.json": "Deno",
@@ -74,6 +82,42 @@ const missing = wanted.filter((b) => !present.includes(b));
 // Housekeeping: drop stale per-session state (best-effort).
 pruneSessions();
 
+// Plan-memory garbage collection — rate-limited to once/day (cheap fs work,
+// but no reason to re-scan every session start). Physically drops
+// superseded/expired records and deletes whole ledgers for plans untouched
+// for cfg.planMemory.maxAgeMs (default 45 days) — the manual `compact` action
+// alone never does either (see plan-memory.mjs's pruneAllMemory comment).
+if (cfg.planMemory?.enabled !== false) {
+  const pruneMarker = path.join(context.stateDir, "memory-prune-last.json");
+  let lastPrune = 0;
+  try { lastPrune = JSON.parse(fs.readFileSync(pruneMarker, "utf8")).ts || 0; } catch {}
+  if (Date.now() - lastPrune > 24 * 3600 * 1000) {
+    try {
+      pruneAllMemory({ maxAgeMs: cfg.planMemory?.maxAgeMs, context });
+      fs.mkdirSync(context.stateDir, { recursive: true });
+      fs.writeFileSync(pruneMarker, JSON.stringify({ ts: Date.now() }));
+    } catch { /* best-effort */ }
+  }
+}
+
+// Tracker-ledger compaction — same once/day rate limit. The ledger is
+// append-only and replayed in full on every claim/transition/status call for
+// the entire project lifetime; collapsing to one (latest) event per key keeps
+// every future read/write from getting slower forever with no state actually
+// lost (see tracker.mjs's compactLedger comment for why this is safe).
+{
+  const compactMarker = path.join(context.stateDir, "tracker-compact-last.json");
+  let lastCompact = 0;
+  try { lastCompact = JSON.parse(fs.readFileSync(compactMarker, "utf8")).ts || 0; } catch {}
+  if (Date.now() - lastCompact > 24 * 3600 * 1000) {
+    try {
+      compactLedger(context);
+      fs.mkdirSync(context.stateDir, { recursive: true });
+      fs.writeFileSync(compactMarker, JSON.stringify({ ts: Date.now() }));
+    } catch { /* best-effort */ }
+  }
+}
+
 let handoff = null;
 try {
   handoff = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, context), "handoff.json"), "utf8"));
@@ -123,9 +167,14 @@ const branch = (await git(["branch", "--show-current"], context)).trim();
 const rules = topRules(cfg, context);
 
 // Verbose (full prose, one line per rule) is opt-in via sessionContext.verbose
-// — useful the first few sessions on a new project. The compact default
-// carries the same rules in one line: this text repeats on EVERY session
-// start, so its steady-state cost matters far more than its one-time clarity.
+// — useful the first few sessions on a new project. The compact default is
+// deliberately terse: this text repeats on EVERY session start regardless of
+// whether the session ever touches a craftsman command, so its steady-state
+// cost is a tax on every session, not just craftsman ones — every rule here
+// has its full, nuanced explanation in _shared-machinery.md/_shared-analysis.md,
+// read in full at the actual moment a command needs it, so this line only
+// needs to be a pointer (discoverability + a front-of-mind nudge), not the
+// explanation itself.
 const verbose = cfg.sessionContext?.verbose === true;
 const standingRules = verbose
   ? [
@@ -136,22 +185,54 @@ const standingRules = verbose
       `ENFORCEMENT: files you write are auto-formatted, linted and type-checked. Only NEW issues you introduce are reported — never fix pre-existing findings in unrelated code unless asked.`,
     ]
   : [
-      `LOOP: UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS (skip planning ceremony only for a genuinely trivial one-file, no-contract, no-security change). Plan in the target language's own idioms. Abstractions need a second implementor. Written files are auto-formatted/linted/type-checked (new issues only).`,
+      `LOOP: non-trivial change → /plan → /orchestrate → /scrutinise → /sync-docs. One-file, no-contract, no-security change → edit directly (gates below still apply).`,
     ];
 
+const rootOnly = (cfg.execution?.agentMode || "root-only") !== "subagents";
+
+// Cap unbounded unit-name lists before they go into the standing hand-off
+// line — a plan with dozens of units would otherwise grow this line (paid
+// on every session start for the life of the run) linearly with unit count.
+function summarizeUnits(units) {
+  if (!Array.isArray(units) || units.length === 0) return "none";
+  if (units.length <= 5) return units.join(", ");
+  return `${units.length} total (last 5: ${units.slice(-5).join(", ")})`;
+}
+
+// Nudge toward archiving once the tracker has grown enough that re-reading
+// it in full (orchestrate's Resume rule does this every loop iteration) is
+// a real, permanent, ever-growing tax — only /sync-docs --tracker archives
+// shipped rows, and that's prose-only, same gap /compact had before the
+// PostToolUse nudge. Cheap: one line-count, already-read-for-branch context.
+const trackerPath = path.join(context.root, "docs", "plans", "TRACKER.md");
+const trackerNudgeLines = cfg.tracker?.nudgeLines ?? 300;
+let trackerLineCount = 0;
+try { trackerLineCount = fs.readFileSync(trackerPath, "utf8").split("\n").length; } catch {}
+const trackerBloated = trackerNudgeLines > 0 && trackerLineCount > trackerNudgeLines;
+
+// Deliberately terse below (see comment above standingRules): every rule's
+// full explanation lives in the shared docs, read in full at the moment a
+// command actually needs it. This block's only job is to be cheap enough
+// that a session that never touches a craftsman command barely notices it,
+// while still keeping AGENT MODE's directive force — the one line that
+// actually prevents token-costly subagent fan-out, so it stays explicit
+// rather than compressed into vagueness.
 const parts = [
-  `craftsman active. Stack: ${langs.join(", ") || "unknown"}.${branch ? ` Branch: ${branch}.` : ""}`,
-  `Available quality tooling: ${present.join(", ") || "none"}.`,
-  ...standingRules,
-  cfg.security?.enabled ? `Secrets scanning runs before your turn ends.` : "",
-  cfg.stopGate?.requireAcceptanceCriteria ? `A plan's acceptance criteria (.craftsman/acceptance.md) are hard-gated at Stop — tick each only when the code genuinely satisfies it.` : "",
-  handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repository advanced — recheck tracker and plan" : ""}): plan ${handoff.plan}; unit ${handoff.unit || "phase"}; completed ${handoff.completed_units?.join(", ") || "none"}; remaining ${handoff.remaining_units?.join(", ") || "none"}; next action: ${handoff.next_action}` : "",
-  restoredMemory.length ? `PLAN MEMORY (hints; verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}/${entry.confidence}] ${entry.summary}`).join("\n") : "",
-  rules.length
-    ? `RECURRING MISTAKES IN THIS PROJECT (from prior sessions — avoid these):\n` +
-      rules.map((r, i) => `  ${i + 1}. [${r.lang}/${r.tool}] ${r.sample}`).join("\n")
+  `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
+  rootOnly
+    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel.`
     : "",
-  missing.length ? `Not installed (checks silently skipped): ${missing.join(", ")}.` : "",
+  ...standingRules,
+  (cfg.security?.enabled || cfg.stopGate?.requireAcceptanceCriteria)
+    ? `Stop gate: ${[cfg.security?.enabled && "secrets scan", cfg.stopGate?.requireAcceptanceCriteria && "unticked acceptance criteria"].filter(Boolean).join(" + ")} block completion.`
+    : "",
+  handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
+  trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
+  restoredMemory.length ? `PLAN MEMORY (verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}] ${entry.summary}`).join("\n") : "",
+  rules.length
+    ? `RECURRING MISTAKES (avoid):\n` + rules.map((r, i) => `  ${i + 1}. [${r.lang}/${r.tool}] ${r.sample}`).join("\n")
+    : "",
+  missing.length ? `Tooling not installed (checks skip silently): ${missing.join(", ")}.` : "",
 ].filter(Boolean);
 
 logEvent({ ev: "session_start", sid, langs, tools: present.length, rules: rules.length });

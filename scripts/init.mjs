@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { checkDocSizes } from "./doc-size-policy.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(pluginRoot, "craftsman.config.json");
@@ -137,6 +138,9 @@ function removeDefaults(value, defaults) {
 export function claudeIgnorePatterns(detected) {
   const patterns = [
     ".git/", ".craftsman/", ".claude/settings.local.json", ".DS_Store",
+    // Machine-generated, write-only: no command reads this back (see baseline.md /
+    // sync-docs.md's explicit docs/errors/ exclusion) — pure human-visibility debt log.
+    "docs/errors/KNOWN_ISSUES.md",
     "*.log", "*.tmp", "*.swp", ".env", ".env.*", "node_modules/", "**/node_modules/**",
     "coverage/", "**/coverage/**", "dist/", "**/dist/**", "build/", "**/build/**",
     "out/", "**/out/**", "tmp/", "temp/", "*.min.js", "*.map",
@@ -202,9 +206,15 @@ function pluginInventory() {
       try { readJson(absolute); } catch { jsonErrors.push(file); }
     }
   }
+  // Oversized shipped .md is a hard-block dimension of plugin health, same
+  // status as a missing file or a syntax error — not a live runtime check
+  // (command/agent/skill bodies are harness-injected, not Read-tool fetched,
+  // so nothing can intercept "about to load this" mid-turn), but this is the
+  // mechanically-enforceable equivalent: an oversized doc fails --update.
+  const sizeErrors = checkDocSizes(pluginRoot);
   return {
-    root: pluginRoot, version, files, missing, syntaxErrors, jsonErrors,
-    healthy: !missing.length && !syntaxErrors.length && !jsonErrors.length,
+    root: pluginRoot, version, files, missing, syntaxErrors, jsonErrors, sizeErrors,
+    healthy: !missing.length && !syntaxErrors.length && !jsonErrors.length && !sizeErrors.length,
   };
 }
 
@@ -271,8 +281,14 @@ function desiredFiles(plan) {
   const claudeIgnore = path.join(root, ".claudeignore");
   const gitignore = path.join(root, ".gitignore");
   if (!fs.existsSync(claudeContext)) {
-    const stack = plan.detected.languages.join(", ") || "undetected stack";
-    files[claudeContext] = `# ${path.basename(root)}\n\nStack: ${stack}. Use the craftsman workflow: UNDERSTAND -> PLAN -> EXECUTE -> SCRUTINISE -> SYNC-DOCS. Plans live in \`docs/plans/\`.\n`;
+    // Deliberately near-empty: stack detection and the workflow loop are
+    // already injected fresh every session by the SessionStart hook (see
+    // session-context.mjs), computed live from the repo instead of frozen
+    // as prose here. Duplicating them into a static file only adds tokens
+    // to every session (paid on top of the hook's line, not instead of it)
+    // and risks going stale as the stack evolves. This file is yours —
+    // craftsman only claims the placeholder line below, once, when absent.
+    files[claudeContext] = `# ${path.basename(root)}\n\n<!-- Project-specific instructions for Claude go here. Craftsman's own workflow/stack context is injected automatically each session — no need to restate it. -->\n`;
   }
   files[claudeIgnore] = updateClaudeIgnore(textAt(claudeIgnore) || "", claudeIgnorePatterns(plan.detected));
   files[path.join(root, "craftsman.config.json")] = JSON.stringify(config, null, 2) + "\n";
@@ -336,6 +352,7 @@ export function buildUpdatePlan(root, options = {}) {
     pluginMissing: plan.plugin.missing,
     pluginSyntaxErrors: plan.plugin.syntaxErrors,
     pluginJsonErrors: plan.plugin.jsonErrors,
+    pluginSizeErrors: plan.plugin.sizeErrors,
     pluginHealthy: plan.plugin.healthy,
     projectChanges: plan.changes,
     planOrder: plans.order,
@@ -395,7 +412,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const mode = modes[0] ? modes[0].slice(2) : "audit";
     const plan = mode === "update" ? buildUpdatePlan(process.cwd()) : buildInitPlan(process.cwd());
     if (mode === "update" && !plan.plugin.healthy) {
-      throw new Error(`plugin health check failed: ${JSON.stringify({ missing: plan.plugin.missing, syntaxErrors: plan.plugin.syntaxErrors, jsonErrors: plan.plugin.jsonErrors })}`);
+      throw new Error(`plugin health check failed: ${JSON.stringify({ missing: plan.plugin.missing, syntaxErrors: plan.plugin.syntaxErrors, jsonErrors: plan.plugin.jsonErrors, sizeErrors: plan.plugin.sizeErrors })}`);
     }
     if (mode === "diff") process.stdout.write(renderInitDiff(plan) + (plan.changes.length ? "\n" : ""));
     else if (mode === "write" || mode === "update") {

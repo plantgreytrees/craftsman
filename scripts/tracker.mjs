@@ -98,6 +98,29 @@ export function renderState(context = projectContext(".")) {
   return currentState(context).sort((a, b) => a.key.localeCompare(b.key));
 }
 
+// The ledger is append-only and `currentState`/`transition` replay it IN FULL
+// on every single call — every claim, every status change, for the entire
+// life of the project. Only the LATEST event per key is ever actually needed
+// (validateTransition only ever looks at the immediately-preceding status);
+// every earlier event for a key that has since moved on is dead weight that
+// makes every future read/write slower, forever, with nothing to show for it.
+// Safe to compact unconditionally: collapsing to "one event per key, in
+// first-seen key order" cannot change any `currentState()`/`transition()`
+// result, since neither ever consults more than the latest event per key.
+export function compactLedger(context = projectContext(".")) {
+  const file = ledgerPath(context);
+  return withLock(file, () => {
+    const events = readEvents(file);
+    const latest = new Map();
+    for (const event of events) latest.set(event.key, event); // last write wins; file order preserves recency
+    const compacted = [...latest.values()];
+    if (compacted.length === events.length) return { events_before: events.length, events_after: events.length };
+    atomicWrite(file, compacted.length ? compacted.map((e) => JSON.stringify(e)).join("\n") + "\n" : "");
+    logEvent({ ev: "tracker_compacted", events_before: events.length, events_after: compacted.length }, context);
+    return { events_before: events.length, events_after: compacted.length };
+  });
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
@@ -109,7 +132,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const file = ledgerPath(context);
       if (!fs.existsSync(file)) atomicWrite(file, "");
       output = { ledger: file };
-    } else throw new Error("action must be init, transition, status, or list");
+    } else if (input.action === "compact") output = compactLedger(context);
+    else throw new Error("action must be init, transition, status, list, or compact");
     process.stdout.write(JSON.stringify(output) + "\n");
   } catch (error) {
     process.stderr.write(`craftsman: tracker failed: ${error.message}\n`);

@@ -8,6 +8,12 @@
 > Mirrors `_shared-machinery.md`'s split for execution commands: light enough
 > to read unconditionally at the start of Phase 0/1, so this read is cheap.
 
+## Agent mode
+
+Check `craftsman.config.json`'s `execution.agentMode` (also asserted every session by the SessionStart context line). Default `root-only`: perform every "dispatch"/"fan out" below **yourself, sequentially, in this session** — never via Task/Agent, never in parallel — using the named agent's `.md` brief as the spec for what to check. `execution.agentMode: "subagents"` is the only setting that restores literal parallel Task dispatch. **Mechanically enforced:** `agent-mode-guard.mjs` (`PreToolUse` on `Task`) hard-blocks any Task call under root-only mode whose `subagent_type` isn't `plan-strategist` — this isn't a convention the model can accidentally slip past.
+
+**The one standing exception, regardless of `agentMode`:** `/plan`'s Phase 0 step 0 (decomposition) always delegates to `plan-strategist` on `opus` via Task — stated explicitly in `/plan` itself, not inferred here. Root-only mode constrains every *unstated* "delegate/dispatch" in this shared doc and the commands that read it; it does not silently cancel an exception a command names in its own text.
+
 ## Optional MCP conventions (analysis phases)
 
 Use where it earns tokens, skip otherwise; each degrades gracefully if the server is absent:
@@ -33,8 +39,13 @@ Each dimension resolves to either a concrete file/finding or an explicit `N/A(re
 ## Plan memory use
 
 Use `scripts/plan-memory.mjs` for bounded, project- and plan-keyed recall when
-prior decisions or findings can replace repeated discovery. Query by the current
-area, change class, and unit where known; cap the result and verify cited files
-before relying on it. Record only verified findings, rejected hypotheses, and
-unresolved risks at the end of analysis. Memory cannot replace repository
-evidence, broaden the analysis scope, or become a planning authority.
+prior decisions or findings can replace repeated discovery. **Always query by
+the current area, change class, and unit** — never call recall without one:
+an empty query returns nothing (no "grab whatever's there" fallback), and a
+real query only ever surfaces records that actually match its terms. Cap the
+result and verify cited files before relying on it. Record only verified
+findings, rejected hypotheses, and unresolved risks at the end of analysis,
+each with **required `tags`** (at least one) and a **summary capped at 220
+characters** — one terse fact, never a paragraph. Memory cannot replace
+repository evidence, broaden the analysis scope, or become a planning
+authority.
