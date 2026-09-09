@@ -19,13 +19,30 @@ export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
 // resolution and check invocations anchor to the actual project root instead,
 // so a session opened one directory up (or a Bash tool mid-`cd`) can't split
 // state across two ".craftsman/" directories or silently mis-detect the stack.
+//
+// Trusting `git rev-parse --show-toplevel` from bare process.cwd() is not
+// enough on its own: a Bash call earlier in the session may have `cd`'d into
+// an entirely unrelated git checkout (e.g. exploring a plugin's own cached
+// repo) and never `cd`'d back before this hook fired. That still resolves to
+// a real, valid git root — just the wrong one — so every downstream check
+// (including the worktree sweep in stop-gate.mjs) ends up reasoning about a
+// stranger repo's branches and worktrees. CLAUDE_PROJECT_DIR is the harness's
+// own declaration of which project this session belongs to, so cwd-based
+// detection is only trusted when it lands at or inside that project dir (or
+// the project dir sits inside it, covering a session opened one level up).
 async function resolveProjectRoot() {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR ? path.resolve(process.env.CLAUDE_PROJECT_DIR) : null;
   try {
     const { stdout } = await pexec("git", ["rev-parse", "--show-toplevel"], { cwd: process.cwd() });
     const top = stdout.trim();
-    if (top) return path.resolve(top);
+    if (top) {
+      const resolved = path.resolve(top);
+      if (!projectDir || isInside(projectDir, resolved) || isInside(resolved, projectDir)) {
+        return resolved;
+      }
+    }
   } catch { /* not a git repo (or git absent) — fall through */ }
-  if (process.env.CLAUDE_PROJECT_DIR) return path.resolve(process.env.CLAUDE_PROJECT_DIR);
+  if (projectDir) return projectDir;
   return process.cwd();
 }
 export const PROJECT_ROOT = await resolveProjectRoot();
