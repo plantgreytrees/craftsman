@@ -11,14 +11,30 @@ function git(cwd, args) {
 }
 
 test("scanContent: flags a private key block and an AWS access key", () => {
-  const content = "token = AKIAABCDEFGHIJKLMNOP\n-----BEGIN RSA PRIVATE KEY-----\n";
+  const content = "token = AKIAABCDEFGHIJKLMNOP\n-----BEGIN RSA PRIVATE KEY-----\n"; // gitleaks:allow — fixture, not a credential
   const findings = scanContent(content);
   assert.ok(findings.some((f) => f.rule === "AWS access key"));
   assert.ok(findings.some((f) => f.rule === "private key block"));
 });
 
+// Parity with gitleaks's inline escape hatch. Without it this very file blocks
+// every Stop on a machine without gitleaks, since its fixtures must look like
+// real credentials — and a path-level exemption would also hide a genuine
+// secret that later lands here.
+test("scanContent: honours an inline gitleaks:allow marker, per line only", () => {
+  const marked = 'const k = "AKIAABCDEFGHIJKLMNOP"; // gitleaks:allow';
+  assert.deepEqual(scanContent(marked), []);
+  // Assembled, not written literally: an unmarked key on this source line would
+  // (correctly) be flagged by the very scanners this file has to stay clean for.
+  const unmarked = `const other = "AKIA${"ABCDEFGHIJKLMNOQ"}";`;
+  const mixed = `${marked}\n${unmarked}`;
+  const findings = scanContent(mixed);
+  assert.equal(findings.length, 1, "the marker must not exempt neighbouring lines");
+  assert.equal(findings[0].line, 2);
+});
+
 test("scanContent: redacts the matched value, never returns it verbatim", () => {
-  const secret = "AKIAABCDEFGHIJKLMNOP";
+  const secret = "AKIAABCDEFGHIJKLMNOP"; // gitleaks:allow — fixture, not a credential
   const [finding] = scanContent(`key=${secret}`);
   assert.ok(!finding.redacted.includes(secret));
 });

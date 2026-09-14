@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { atomicWrite, loadConfig, projectContext, readStdin, sidOf, splitCmd } from "./lib/core.mjs";
+import { atomicWrite, forgetSessionWorktree, loadConfig, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
 
 function run(root, args, options = {}) {
   try {
@@ -127,12 +127,15 @@ function prepare(context, input, info) {
     if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
     const current = run(worktree, ["branch", "--show-current"], { allowFailure: true });
     if (current !== branch) throw new Error(`worktree already exists on ${current || "detached HEAD"}: ${worktree}`);
+    // Reattaching means this session now owns it, so it joins the ledger too.
+    recordSessionWorktree(input, worktree, context);
     return { ...info, worktree_path: worktree, branch, base_ref: baseRef, reattached: true };
   }
   fs.mkdirSync(path.dirname(worktree), { recursive: true });
   const existing = run(context.root, ["show-ref", "--verify", `refs/heads/${branch}`], { allowFailure: true });
   if (existing) run(context.root, ["worktree", "add", worktree, branch]);
   else run(context.root, ["worktree", "add", "-b", branch, worktree, baseRef]);
+  recordSessionWorktree(input, worktree, context);
   return { ...info, worktree_path: worktree, branch, base_ref: baseRef, reattached: false };
 }
 
@@ -237,6 +240,7 @@ function cleanup(context, input, info) {
   run(context.root, ["worktree", "remove", worktree]);
   run(context.root, ["worktree", "prune"]);
   run(context.root, ["branch", "-d", branch]);
+  forgetSessionWorktree(input, worktree, context);
   return { ...info, cleaned: true };
 }
 

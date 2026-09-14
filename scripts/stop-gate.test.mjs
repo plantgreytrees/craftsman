@@ -108,6 +108,50 @@ test("stop-gate: blocks completion while this session owns an active worktree bi
   }
 });
 
+// The worktree sweep is deliberately session-local: it exists to catch a
+// cleanup step THIS session skipped, not to police the repository. A worktree
+// another session (or a human) created must pass through untouched even when
+// its branch is fully merged — the session that owns it is the only one that
+// can safely remove it.
+function addMergedWorktree(dir, slug) {
+  const worktree = path.join(dir, ".worktrees", slug);
+  const branch = `feat/${slug}`;
+  const r = spawnSync("git", ["worktree", "add", "-q", "-b", branch, worktree], { cwd: dir, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`git worktree add failed: ${r.stderr}`);
+  return { worktree, branch };
+}
+
+test("stop-gate: a merged worktree this session never prepared is not swept", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    addMergedWorktree(dir, "other-session-unit");
+    const result = await runStopGate(dir, "no-ledger-session");
+    assert.doesNotMatch(result.stdout, /WORKTREE NOT SWEPT/);
+    assert.doesNotMatch(result.stdout, /"decision":"block"/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a merged worktree recorded in this session's ledger blocks as NOT SWEPT", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "owning-session";
+    const mine = addMergedWorktree(dir, "my-unit");
+    addMergedWorktree(dir, "their-unit"); // another session's — must stay unmentioned
+    const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /"decision":"block"/);
+    assert.match(result.stdout, /WORKTREE NOT SWEPT/);
+    assert.match(result.stdout, /my-unit/);
+    assert.doesNotMatch(result.stdout, /their-unit/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("stop-gate: a SECRETS scan killed by the shared budget blocks with SECRETS SCAN INCOMPLETE, unlike test/extra", async () => {
   const dir = makeFixture({
     security: { enabled: true, check: ['node -e "setTimeout(()=>{},5000)"'] },

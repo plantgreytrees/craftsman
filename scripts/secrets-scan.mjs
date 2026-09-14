@@ -19,6 +19,13 @@ export const PATTERNS = [
   { name: "generic assigned secret", re: /(api[_-]?key|secret|token|password|passwd|pwd)\s*["']?\s*[:=]\s*["'][A-Za-z0-9_\-/+=]{16,}["']/gi },
 ];
 
+// gitleaks's own inline escape hatch, honoured here too so a file that must
+// contain a fake credential (this scanner's own fixtures, a doc example) is
+// exempted once, at the line, for BOTH scanners — rather than once per tool,
+// or by exempting a whole path, which would also hide a real secret that
+// later lands in the same file.
+const ALLOW_MARKER = "gitleaks:allow";
+
 const SKIP_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".pdf", ".zip", ".gz", ".lock"]);
 const SKIP_DIRS = new Set([".git", ".craftsman", "node_modules", "target", "dist", "build", "out", "coverage", "__pycache__", ".venv", "venv"]);
 const MAX_BYTES = 2_000_000;
@@ -31,6 +38,7 @@ export function scanContent(content, patterns = PATTERNS) {
   const findings = [];
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(ALLOW_MARKER)) continue;
     for (const { name, re } of patterns) {
       re.lastIndex = 0;
       const match = re.exec(lines[i]);

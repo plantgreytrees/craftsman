@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { cleanup, inspectRepo, merge, prepare, sync } from "./repo-exec.mjs";
-import { projectContext } from "./lib/core.mjs";
+import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
 
 function git(root, args) {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -64,6 +64,33 @@ test("repo-exec: prepares, merges, and cleans a selected repository locally", ()
       cleanup(context, { ...prepared, unit: "unit-one", slug: "unit-one" }, info);
       assert.equal(fs.existsSync(prepared.worktree_path), false);
       assert.equal(git(context.root, ["branch", "--list", prepared.branch]), "");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// The session ledger is what makes stop-gate.mjs's worktree sweep session-local:
+// only a worktree this session prepared is ever swept, and cleanup must retract
+// it so a finished unit stops being the session's responsibility.
+test("repo-exec: prepare records the worktree in the session ledger and cleanup forgets it", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const input = { unit: "ledger-unit", slug: "ledger-unit", session_id: "ledger-session", project: "one" };
+      const prepared = prepare(context, input, info);
+      assert.deepEqual(
+        readSessionWorktrees(input, context),
+        [path.resolve(prepared.worktree_path)],
+        "prepare must record the worktree for this session"
+      );
+      assert.deepEqual(
+        readSessionWorktrees({ ...input, session_id: "other-session" }, context),
+        [],
+        "another session must not inherit this session's worktree"
+      );
+      cleanup(context, { ...prepared, ...input }, info);
+      assert.deepEqual(readSessionWorktrees(input, context), []);
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
