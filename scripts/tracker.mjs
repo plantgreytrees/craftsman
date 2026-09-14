@@ -2,9 +2,17 @@
 // Structured tracker ledger. TRACKER.md remains the human-readable projection.
 import fs from "node:fs";
 import path from "node:path";
-import { atomicWrite, logEvent, projectContext, readStdin, sidOf } from "./lib/core.mjs";
+import {
+  atomicWrite, logEvent, projectContext, readStdin, sidOf,
+  requireCompact, COMPACT_REQUIRED_NOTICE,
+} from "./lib/core.mjs";
 
 export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
+// Landing on one of these ends the unit. A normal merge also reaches
+// handoff.mjs, which arms the gate itself; PARK/BLOCKED exits (max-retry or
+// max-round outs — precisely the worst-case-context units) often don't, so the
+// transition arms it too. Both writes are idempotent, so the overlap is free.
+export const TERMINAL_STATUSES = new Set(["MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"]);
 const TRANSITIONS = {
   PENDING: new Set(["IN_PROGRESS", "CANCELLED", "BLOCKED"]),
   IN_PROGRESS: new Set(["MERGED", "BLOCKED", "PARKED", "CANCELLED"]),
@@ -90,6 +98,15 @@ export function transition(input, context = projectContext(input.project || ".")
     };
     fs.appendFileSync(file, JSON.stringify(event) + "\n", "utf8");
     logEvent({ ev: "tracker_transition", key, from: previous?.status || null, to: status, unit: input.unit }, context);
+    // Armed only on an actual move INTO a terminal status — a re-assertion of
+    // the status a unit already holds closed nothing out.
+    if (TERMINAL_STATUSES.has(status) && previous?.status !== status) {
+      requireCompact(sidOf(input), context);
+      // Return-only, deliberately set after the append: the ledger records the
+      // transition, not this run's side effect. It tells the CLI below whether
+      // to print the notice, which only a *new* terminal transition earns.
+      event.compact_required = true;
+    }
     return event;
   });
 }
@@ -135,6 +152,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     } else if (input.action === "compact") output = compactLedger(context);
     else throw new Error("action must be init, transition, status, list, or compact");
     process.stdout.write(JSON.stringify(output) + "\n");
+    if (output?.compact_required) {
+      process.stdout.write(
+        `craftsman: unit closed out (${output.status}). ${COMPACT_REQUIRED_NOTICE}\n`,
+      );
+    }
   } catch (error) {
     process.stderr.write(`craftsman: tracker failed: ${error.message}\n`);
     process.exitCode = 2;

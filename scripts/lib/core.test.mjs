@@ -11,7 +11,7 @@ import path from "node:path";
 import {
   globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
-  renderKnownIssuesDoc, gitTrackedFiles, pruneSessions,
+  renderKnownIssuesDoc, gitTrackedFiles, pruneSessions, recordFailure, topRules,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -279,4 +279,43 @@ test("renderKnownIssuesDoc: reports the total file and finding counts in the sum
     { rel: "b.py", lang: "python", tools: ["ruff"], count: 5, sample: "b" },
   ], "2026-01-01");
   assert.match(doc, /2 file\(s\), 8 finding\(s\) total/);
+});
+
+// craftsman.config.json ships `learnedRules.enabled` and EXTENDING.md documents
+// the block, but both functions used to ignore the flag entirely: turning it
+// off still collected failures and still narrated them at session start.
+test("learnedRules: an absent enabled flag means on, so existing configs are unaffected", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rules-"));
+  try {
+    const context = { stateDir: dir };
+    const cfg = { learnedRules: { minOccurrences: 1 } };
+    recordFailure("ts", "eslint", "a.ts:1:1: oops [Error/no-undef]", cfg, context);
+    assert.equal(topRules(cfg, context).length, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("learnedRules: enabled:false stops recordFailure writing anything at all", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rules-"));
+  try {
+    const context = { stateDir: dir };
+    const cfg = { learnedRules: { enabled: false, minOccurrences: 1 } };
+    recordFailure("ts", "eslint", "a.ts:1:1: oops [Error/no-undef]", cfg, context);
+    assert.equal(fs.existsSync(path.join(dir, "learned-rules.json")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("learnedRules: enabled:false surfaces nothing even when rules were collected earlier", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rules-"));
+  try {
+    const context = { stateDir: dir };
+    recordFailure("ts", "eslint", "a.ts:1:1: oops [Error/no-undef]", { learnedRules: { minOccurrences: 1 } }, context);
+    assert.equal(topRules({ learnedRules: { minOccurrences: 1 } }, context).length, 1);
+    assert.deepEqual(topRules({ learnedRules: { enabled: false, minOccurrences: 1 } }, context), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

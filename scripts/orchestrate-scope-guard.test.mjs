@@ -53,6 +53,30 @@ test("orchestrate-scope-guard: the craftsman: namespaced form also marks scope r
   }
 });
 
+test("orchestrate-scope-guard: a user-typed /orchestrate marks scope required (UserPromptSubmit, no tool call)", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s1", hook_event_name: "UserPromptSubmit", prompt: "/orchestrate docs/plans/example.md" };
+  try {
+    const result = run(dir, input);
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: a prompt that merely mentions /orchestrate does not arm the guard", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s1", hook_event_name: "UserPromptSubmit", prompt: "why did /orchestrate block my edit?" };
+  try {
+    const result = run(dir, input);
+    assert.equal(result.status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("orchestrate-scope-guard: an unrelated slash command never touches the scope-required marker", () => {
   const dir = tmpProject();
   const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/plan add a feature" } };

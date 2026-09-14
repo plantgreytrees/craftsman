@@ -14,10 +14,11 @@
     "PostToolUse": [
       { "matcher": "Write|Edit|MultiEdit",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/quality-gate.mjs\"", "timeout": 60 } ] },
-      { "matcher": "Bash",
-        "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/compact-nudge.mjs\"", "timeout": 10 } ] },
       { "matcher": "SlashCommand",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orchestrate-scope-guard.mjs\"", "timeout": 10 } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orchestrate-scope-guard.mjs\"", "timeout": 10 } ] }
     ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stop-gate.mjs\"", "timeout": 300 } ] }

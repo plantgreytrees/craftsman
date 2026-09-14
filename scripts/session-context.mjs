@@ -24,7 +24,7 @@ if (!enabled(cfg, context)) process.exit(0);
 // observable proxy this plugin has for "a compact/clear actually happened."
 // compact-gate.mjs's block only ever needs to survive until one of those
 // fires, so clearing here unconditionally is exactly the mechanical
-// counterpart compact-nudge.mjs's marker-write needs (see its comment).
+// counterpart requireCompact()'s marker-write needs (see lib/core.mjs).
 try { fs.unlinkSync(compactRequiredFile(sid, context)); } catch {}
 
 const markers = {

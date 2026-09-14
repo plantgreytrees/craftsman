@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// PreToolUse (broad matcher — everything a command can call): the mechanical
-// half of compact-nudge.mjs. Once that hook writes this session's
-// "compact-required" marker (right after handoff.mjs runs), every other tool
-// call is hard-blocked until either a real /compact or /clear happens
+// PreToolUse (broad matcher — everything a command can call): the enforcing
+// half of core.mjs's requireCompact(). Once a close-out script has written
+// this session's "compact-required" marker — handoff.mjs after the hand-off
+// lands, tracker.mjs on a real transition into a terminal per-unit status —
+// every other tool call is hard-blocked until a real /compact or /clear
 // (which fires SessionStart — session-context.mjs clears the marker there)
 // or the model is actively invoking /compact/clear itself via SlashCommand
 // (allowed through so it can actually execute). Fails open (exits 0) if the

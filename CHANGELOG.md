@@ -5,6 +5,70 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The hand-off → `/compact` gate no longer bricks sessions that merely
+  mention the close-out scripts.** `compact-nudge.mjs` was a `PostToolUse`
+  (`Bash`) hook that decided a unit had been closed out by regex-matching the
+  *text* of the command — so `cat handoff.mjs`, `grep -n tracker.mjs`, or
+  running their tests armed a gate that blocks every subsequent tool call and
+  that nothing inside a session can lift. It hard-locked three consecutive
+  sessions, each one trying to fix it. The marker is now written by the scripts
+  that own the event: `handoff.mjs` once the hand-off is actually on disk, and
+  `tracker.mjs` on a real transition *into* a terminal status (which still
+  covers the PARKED/BLOCKED exits that never reach a hand-off). `compact-nudge.mjs`
+  and its hook entry are deleted. `wiring.test.mjs` now asserts that no hook
+  script can arm the gate and that only those two scripts do, so no future hook
+  can reintroduce the failure mode. `handoff.mjs` also warns when a payload
+  carries no `session_id`, which previously armed the gate under `"shared"`
+  while `compact-gate.mjs` looked under the real session and silently failed
+  open.
+- **Three command docs invoked stdin-only scripts as if they took argv.**
+  `orchestrate.md`'s `scope.mjs {"action":"require",…}` and
+  `_shared-execution.md`'s `scope.mjs {"action":"release",…}` /
+  `plan-memory.mjs {"action":"compact",…}` would have hung on an empty stdin
+  and then failed. All three now use the `printf '%s' '<JSON>' | node …` form
+  the rest of the docs already use. (`log-router.mjs`, `log-specialist.mjs`
+  and `doc-write.mjs` genuinely take argv and are unchanged.)
+- **`learnedRules.enabled` is now honoured.** The flag ships in
+  `craftsman.config.json` and is documented in `EXTENDING.md`, but neither
+  `recordFailure` nor `topRules` read it — setting it `false` still collected
+  failures and still narrated them at session start. Absent still means on, so
+  existing configs are unaffected.
+- **`plan.md` ran `plan-reviewer` on a model it doesn't declare.** The prose
+  said `fable`; `agents/plan-reviewer.md` declares `haiku`. Both files were
+  individually valid, so only a human reading the pair could catch it —
+  `model-policy.mjs` now fails when a model named beside an agent reference in
+  a command disagrees with that agent's own frontmatter.
+- **Worktree sweep is now session-local.** `stop-gate.mjs`'s sweep blocked
+  completion for *any* merged-but-surviving worktree in the repository,
+  including ones created by concurrent or earlier sessions that it had no
+  authority to clean up. `repo-exec.mjs` now records each worktree it
+  prepares in a per-session ledger (`<git-common-dir>/.craftsman/sessions/<sid>/worktrees.json`)
+  and retracts it on `cleanup`; the sweep considers only that set. Sessions
+  that prepared no worktree — and pre-ledger sessions — are never blocked by
+  it. The active-binding check above it was already session-scoped and is
+  unchanged.
+- **The secrets gate no longer blocks on its own test fixtures.**
+  `scripts/secrets-scan.test.mjs` must contain a plausible AWS key to assert
+  that the scanner flags and redacts it, so every Stop in this repo was blocked
+  by a false positive. The built-in fallback scanner now honours gitleaks's
+  inline `gitleaks:allow` marker (one convention, both scanners), and the two
+  fixture lines carry it. Deliberately line-scoped, not path-scoped: a real
+  credential landing in that same file is still caught by both scanners.
+
+### Added
+
+- **`/orchestrate` typed by the user now arms the scope guard too.**
+  `orchestrate-scope-guard.mjs` was wired only to `PostToolUse` (`SlashCommand`),
+  which the model's own invocations reach but a user typing `/orchestrate`
+  into the prompt does not — so the session it mattered most for was the one
+  that stayed unguarded. It is now also a `UserPromptSubmit` hook and reads
+  either payload shape. The match stays anchored to the start of the prompt,
+  so a message that merely mentions `/orchestrate` arms nothing.
+- **Tests for `session-context.mjs`'s marker clearing.** SessionStart is the
+  only path in the plugin that releases the compact gate; nothing covered it.
+
 ## [2.1.0] - 2026-09-09
 
 Token-efficiency and mechanical-enforcement pass — every rule below moved from

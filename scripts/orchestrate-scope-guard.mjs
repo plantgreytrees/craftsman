@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// PostToolUse (SlashCommand): the moment /orchestrate (or /craftsman:orchestrate)
-// is invoked, mechanically flip this session to scope-required — instead of
+// PostToolUse (SlashCommand) and UserPromptSubmit: the moment /orchestrate (or
+// /craftsman:orchestrate) is invoked — by the model as a tool call, or typed
+// straight into the prompt by the user, which never reaches SlashCommand at all
+// — mechanically flip this session to scope-required, instead of
 // depending on the model remembering to call scope.mjs {action:"require"}
 // itself (_shared-execution.md Phase B.7). Once required, pre-guard.mjs
 // hard-blocks Read/Write/Edit/etc. until a real, validated Git worktree scope
@@ -14,7 +16,16 @@ import { requiredFile } from "./scope.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
-const command = typeof input?.tool_input?.command === "string" ? input.tool_input.command : "";
+// Two payload shapes, one meaning: PostToolUse carries tool_input.command,
+// UserPromptSubmit carries the raw prompt. Both are idempotent writes of the
+// same marker, so a user-typed /orchestrate that also produces a tool call
+// simply arms it twice.
+const command = typeof input?.tool_input?.command === "string" ? input.tool_input.command
+  : typeof input?.prompt === "string" ? input.prompt
+  : "";
+// Anchored deliberately: this must match an *invocation*, never a mention.
+// compact-nudge.mjs matched /orchestrate-style names anywhere in a command's
+// text and hard-locked sessions that had merely talked about the script.
 if (!/^\/(craftsman:)?orchestrate\b/.test(command.trim())) process.exit(0);
 
 const context = projectContext(input.project || ".");

@@ -141,13 +141,30 @@ export function sessionDir(sid, context = null) {
   return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
 }
 // Single source of truth for the mechanical hand-off→/compact gate's marker
-// path — written by compact-nudge.mjs, read by compact-gate.mjs, cleared by
-// session-context.mjs. All three must agree on exactly one path; importing
+// path — written by requireCompact() below, read by compact-gate.mjs, cleared
+// by session-context.mjs. All three must agree on exactly one path; importing
 // this instead of each hand-rolling sessionDir(sidOf(input), context) removes
 // any chance of the three drifting apart from each other silently.
 export function compactRequiredFile(sid, context = null) {
   return path.join(sessionDir(sid, context), "compact-required");
 }
+// Arm the gate. Called by the close-out scripts THEMSELVES, at the moment they
+// actually do the work — never by a PostToolUse hook pattern-matching the text
+// of a Bash command, which armed the gate for anything that merely *named* the
+// script (`cat handoff.mjs`, `grep -n tracker.mjs`, a doc edit quoting either),
+// hard-blocking a session that had closed nothing out. Best-effort: if the
+// marker never lands, compact-gate.mjs simply fails open.
+export function requireCompact(sid, context = null) {
+  const marker = compactRequiredFile(sid, context);
+  try {
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, new Date().toISOString() + "\n");
+  } catch {}
+  return marker;
+}
+export const COMPACT_REQUIRED_NOTICE =
+  "/compact (or /clear) is now REQUIRED before any further tool use this session — " +
+  "every other tool call will be blocked until you do.";
 export function sharedStateDir(context = null) {
   try {
     const commonGitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
@@ -184,6 +201,43 @@ export function writeWorktreeBinding(input, binding, context = null) {
 }
 export function clearWorktreeBinding(input, context = null) {
   try { fs.unlinkSync(worktreeBindingPath(input, context)); } catch {}
+}
+
+// Session-owned worktree ledger. The binding above is released before the
+// locked merge, so by Stop time it can no longer answer "did THIS session
+// create that worktree?" — and the Stop sweep must never police a worktree
+// belonging to a concurrent session or to the human. repo-exec.mjs records
+// every worktree it prepares for a session here and forgets it on cleanup;
+// the sweep consults this list and ignores everything else. Best-effort by
+// design: a ledger write must never fail a worktree lifecycle step, and a
+// missing ledger simply means "this session owns nothing" — i.e. it fails
+// open, never into a spurious block.
+export function sessionWorktreeLedgerPath(input, context = null) {
+  const selected = context || (input?.project ? projectContext(input.project) : null);
+  return path.join(sharedStateDir(selected), "sessions", sidOf(input), "worktrees.json");
+}
+export function readSessionWorktrees(input, context = null) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(sessionWorktreeLedgerPath(input, context), "utf8"));
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+  } catch { return []; }
+}
+export function recordSessionWorktree(input, worktree, context = null) {
+  try {
+    const resolved = path.resolve(worktree);
+    const current = readSessionWorktrees(input, context);
+    if (current.includes(resolved)) return;
+    atomicWrite(sessionWorktreeLedgerPath(input, context), JSON.stringify([...current, resolved], null, 2) + "\n");
+  } catch { /* best-effort ledger — never break the worktree lifecycle */ }
+}
+export function forgetSessionWorktree(input, worktree, context = null) {
+  try {
+    const resolved = path.resolve(worktree);
+    const current = readSessionWorktrees(input, context);
+    const remaining = current.filter((entry) => entry !== resolved);
+    if (remaining.length === current.length) return;
+    atomicWrite(sessionWorktreeLedgerPath(input, context), JSON.stringify(remaining, null, 2) + "\n");
+  } catch { /* best-effort ledger — never break the worktree lifecycle */ }
 }
 export function atomicWrite(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -592,7 +646,15 @@ export function extractSig(tool, sample) {
   return m ? m[0] : "";
 }
 
+// craftsman.config.json ships `learnedRules.enabled` and EXTENDING.md documents
+// the block, but nothing read the flag — setting it false still collected and
+// still narrated. Absent means on, so existing configs are unaffected.
+export function learnedRulesEnabled(cfg) {
+  return cfg?.learnedRules?.enabled !== false;
+}
+
 export function recordFailure(lang, tool, sample, cfg, context = null) {
+  if (!learnedRulesEnabled(cfg)) return; // opted out: don't even take the lock
   const rulesFile = path.join(context?.stateDir || STATE_DIR, "learned-rules.json");
   const lock = `${rulesFile}.lock`;
   const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
@@ -625,6 +687,7 @@ export function recordFailure(lang, tool, sample, cfg, context = null) {
 }
 
 export function topRules(cfg, context = null) {
+  if (!learnedRulesEnabled(cfg)) return []; // opted out: surface nothing, even if rules were collected earlier
   const cap = cfg.learnedRules?.max ?? 10;
   const minN = cfg.learnedRules?.minOccurrences ?? 3;
   const maxAgeMs = cfg.learnedRules?.maxAgeMs ?? 30 * 24 * 3600 * 1000;
