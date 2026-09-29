@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
   filterAttributed, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
-  readStdin, sidOf, sessionDir, sha1, atomicWrite, PROJECT_ROOT, projectContext,
+  readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership,
 } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 
@@ -32,11 +32,7 @@ if (!file || !fs.existsSync(file)) process.exit(0);
 // acceptance file is per-session state, not lintable source, so short-circuit.
 const rel0 = path.relative(context.root, file).split(path.sep).join("/");
 if (rel0.endsWith(".craftsman/acceptance.md")) {
-  try {
-    const ac = fs.readFileSync(file, "utf8");
-    atomicWrite(path.join(sessionDir(sidOf(input), context), "acceptance.ref"),
-      JSON.stringify({ hash: sha1(ac.trim()), ts: Date.now() }));
-  } catch {}
+  try { recordAcceptanceOwnership(sidOf(input), context); } catch {}
   process.exit(0);
 }
 

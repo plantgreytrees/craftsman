@@ -5,6 +5,7 @@
 // Uses Node's built-in test runner (no external dependencies).
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -490,6 +491,93 @@ test("stop-gate: a genuinely failing (non-killed, non-zero exit) command still b
     );
     assert.match(stdout, /"decision":"block"/);
     assert.match(stdout, /GUARD FAILED/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// merge() restores whatever branch the primary checkout was on, so "merged"
+// judged against HEAD missed every unit merged while the checkout sat on
+// another branch — the sweep went silent on exactly the leftovers it exists for.
+test("stop-gate: a ledger worktree merged into the base while the checkout sits on another branch still blocks", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  const g = (...args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  try {
+    const sid = "off-base-session";
+    const base = g("branch", "--show-current");
+    const mine = addMergedWorktree(dir, "off-base-unit");
+    fs.writeFileSync(path.join(mine.worktree, "unit.txt"), "unit\n");
+    spawnSync("git", ["add", "unit.txt"], { cwd: mine.worktree });
+    spawnSync("git", ["commit", "-q", "-m", "feat: unit"], { cwd: mine.worktree });
+    g("checkout", "-q", "-b", "scratch");
+    g("checkout", "-q", base);
+    g("merge", "-q", "--no-ff", "-m", "merge unit", mine.branch);
+    g("checkout", "-q", "scratch");
+    const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /WORKTREE NOT SWEPT/);
+    assert.match(result.stdout, new RegExp(`merged into ${base}`));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+function writeAcceptance(dir, sid, text, { tracker = [] } = {}) {
+  const state = path.join(dir, ".craftsman");
+  fs.mkdirSync(path.join(state, "sessions", sid), { recursive: true });
+  fs.writeFileSync(path.join(state, "acceptance.md"), text);
+  // Same identity core.mjs's recordAcceptanceOwnership() writes: criteria with
+  // tick state normalised away.
+  const identity = crypto.createHash("sha1").update(
+    text.split("\n").map((l) => l.replace(/^(\s*[-*]\s*)\[[ xX]\]/, "$1[ ]").trimEnd()).join("\n").trim()
+  ).digest("hex");
+  fs.writeFileSync(path.join(state, "sessions", sid, "acceptance.ref"), JSON.stringify({ identity, ts: Date.now() }));
+  if (tracker.length) {
+    fs.mkdirSync(path.join(state, "tracker"), { recursive: true });
+    fs.writeFileSync(path.join(state, "tracker", "events.jsonl"), tracker.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  }
+}
+
+// Ownership used to be a hash of the raw file, so ticking a box by any path the
+// PostToolUse hook never sees (sed, a script) silently disowned the file and the
+// gate stopped enforcing the criteria that were still open.
+test("stop-gate: ticking a criterion outside Edit/Write keeps ownership, so the rest still block", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: true } });
+  try {
+    const sid = "ac-owner";
+    writeAcceptance(dir, sid, "- [ ] first criterion\n- [ ] second criterion\n");
+    const acPath = path.join(dir, ".craftsman", "acceptance.md");
+    fs.writeFileSync(acPath, fs.readFileSync(acPath, "utf8").replace("- [ ] first", "- [x] first"));
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /ACCEPTANCE CRITERIA/);
+    assert.match(result.stdout, /second criterion/);
+    assert.doesNotMatch(result.stdout, /first criterion/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a [unit:<id>] criterion binds only the session that worked that unit", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: true } });
+  try {
+    const sid = "step-session";
+    writeAcceptance(dir, sid, "- [x] [unit:u1] mine, done\n- [ ] [unit:u2] someone else's unit\n", {
+      tracker: [{ key: ".::p::u1", plan: "p", unit: "u1", status: "IN_PROGRESS", evidence: "claimed", session_id: sid }],
+    });
+    const quiet = await runStopGate(dir, sid);
+    assert.doesNotMatch(quiet.stdout, /ACCEPTANCE CRITERIA/, "u2 was never worked here");
+
+    fs.appendFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] [unit:u1] mine, still open\n");
+    writeAcceptance(dir, sid, fs.readFileSync(path.join(dir, ".craftsman", "acceptance.md"), "utf8"));
+    const blocked = await runStopGate(dir, sid);
+    assert.match(blocked.stdout, /mine, still open/);
+    assert.doesNotMatch(blocked.stdout, /someone else's unit/);
   } finally {
     cleanup(dir);
   }

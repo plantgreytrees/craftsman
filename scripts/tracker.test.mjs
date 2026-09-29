@@ -42,3 +42,29 @@ test("tracker: terminal evidence is retained as the latest concise proof", () =>
   transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123; tests pass" }, selected);
   assert.equal(currentState(selected)[0].evidence, "abc123; tests pass");
 });
+
+// The unit's own "am I done?" checkpoint: MERGED names what is still open.
+test("tracker: MERGED is refused while the unit's own tagged acceptance criteria are unticked", () => {
+  const selected = context();
+  const acPath = path.join(selected.stateDir, "acceptance.md");
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(acPath, "- [ ] [unit:unit-1] the endpoint rejects bad input\n- [ ] [unit:unit-2] not this unit\n- [ ] whole-plan criterion\n");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  assert.throws(
+    () => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123" }, selected),
+    (error) => /MERGED refused/.test(error.message) && /rejects bad input/.test(error.message) && !/not this unit/.test(error.message),
+  );
+  fs.writeFileSync(acPath, fs.readFileSync(acPath, "utf8").replace("- [ ] [unit:unit-1]", "- [x] [unit:unit-1]"));
+  assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123" }, selected).status, "MERGED");
+});
+
+test("tracker: criteria tagged with the unit's scope_id also gate MERGED; PARKED never does", () => {
+  const selected = context();
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(selected.stateDir, "acceptance.md"), "- [ ] [unit:S1] scoped criterion\n");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", scope_id: "S1", status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  assert.throws(() => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc" }, selected), /scoped criterion/);
+  assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "gate failed twice" }, selected).status, "PARKED");
+});

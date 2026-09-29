@@ -7,6 +7,37 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **Merged worktrees no longer linger, and a unit can't be closed out with its
+  acceptance criteria still open.**
+  - *Cleanup is no longer a step the model has to remember.* `repo-exec.mjs
+    merge` now removes its own worktree after a successful merge (opt out with
+    `cleanup: false`). `cleanup` used to run `git branch -d`, which judges
+    "merged" against the primary checkout's HEAD. `merge` restores whatever
+    branch was checked out, so `-d` failed *after* the worktree was already
+    gone, stranding the branch and the session ledger entry. It now checks
+    against the base branch, and a parked (unmerged) branch is kept. The Stop
+    sweep had the same HEAD-vs-base blind spot and now checks the base too.
+  - *New `scripts/worktree-sweep.mjs` handles leftovers from other sources.*
+    The Stop sweep only sees worktrees this session prepared, so leftovers
+    from earlier sessions, crashed runs and Claude Code's own
+    `.claude/worktrees/` were invisible to everything. The new script lists
+    every worktree and removes only the ones that are provably safe to remove:
+    merged into the base branch, with no uncommitted or untracked changes, not
+    the caller's cwd, and either unlocked or locked by a `claude session`
+    whose process is gone (pid and start time are both checked). SessionStart
+    reports such worktrees as `LINGERING WORKTREES` and never removes them.
+  - *Acceptance enforcement is now held by the session actually doing the
+    work.* `/plan` writes `acceptance.md`, so only the planning session owned
+    it, and the executing session's Stop gate never enforced a criterion.
+    Invoking `/orchestrate` now takes over ownership. Ownership also used to be
+    a hash of the raw file, so ticking a box with anything but Edit/Write
+    silently disowned it. It now ignores tick state.
+  - *Each unit now has a mechanical definition of done.* Criteria can be
+    tagged `- [ ] [unit:<id>]`. `tracker.mjs` refuses MERGED/COMPLETE while the
+    unit's tagged criteria are unticked and lists what is left. The Stop gate
+    enforces tagged lines only for units the session worked, so a `--step`
+    session isn't held to the rest of the plan.
+
 - **`/plan`'s decomposition step no longer fails with "Agent type
   'plan-strategist' not found".** Plugin agents register under the plugin
   namespace (`craftsman:plan-strategist`), but `/plan` told the model to

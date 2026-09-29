@@ -60,8 +60,9 @@ test("repo-exec: prepares, merges, and cleans a selected repository locally", ()
       assert.equal(synced.project_root, context.root);
       const merged = merge(context, { ...prepared, unit: "unit-one", slug: "unit-one" }, info);
       assert.equal(merged.merged, true);
+      assert.equal(merged.cleaned, true, "a successful merge cleans its own worktree");
+      assert.equal(merged.branch_deleted, true);
       assert.equal(fs.existsSync(path.join(context.root, "feature.txt")), true);
-      cleanup(context, { ...prepared, unit: "unit-one", slug: "unit-one" }, info);
       assert.equal(fs.existsSync(prepared.worktree_path), false);
       assert.equal(git(context.root, ["branch", "--list", prepared.branch]), "");
     });
@@ -138,7 +139,59 @@ test("repo-exec: reclaims an ownerless stale merge lock", () => {
       git(prepared.worktree_path, ["add", "stale.txt"]);
       git(prepared.worktree_path, ["commit", "-q", "-m", "feat: reclaim lock"]);
       assert.equal(merge(context, prepared, info).merged, true);
-      cleanup(context, prepared, info);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// Before, cleanup ran `git branch -d`, which judges "merged" against the
+// primary checkout's HEAD. merge() restores whatever branch was checked out,
+// so with the primary checkout on another branch -d refused AFTER the
+// worktree was removed, stranding the branch and the session ledger entry.
+test("repo-exec: merge cleans up even when the primary checkout is not on the base branch", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      git(context.root, ["checkout", "-q", "-b", "scratch"]);
+      const input = { unit: "off-base", slug: "off-base", session_id: "off-base-session", project: "one" };
+      const prepared = prepare(context, input, info);
+      fs.writeFileSync(path.join(prepared.worktree_path, "off.txt"), "off\n");
+      git(prepared.worktree_path, ["add", "off.txt"]);
+      git(prepared.worktree_path, ["commit", "-q", "-m", "feat: off base"]);
+      const merged = merge(context, { ...prepared, ...input }, info);
+      assert.equal(merged.cleaned, true, merged.cleanup_error);
+      assert.equal(merged.branch_deleted, true);
+      assert.equal(git(context.root, ["branch", "--show-current"]), "scratch");
+      assert.equal(git(context.root, ["branch", "--list", prepared.branch]), "");
+      assert.deepEqual(readSessionWorktrees(input, context), []);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: cleanup:false keeps the worktree; cleanup of an unmerged branch keeps the branch", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const kept = prepare(context, { unit: "kept", slug: "kept" }, info);
+      fs.writeFileSync(path.join(kept.worktree_path, "kept.txt"), "kept\n");
+      git(kept.worktree_path, ["add", "kept.txt"]);
+      git(kept.worktree_path, ["commit", "-q", "-m", "feat: kept"]);
+      const merged = merge(context, { ...kept, cleanup: false }, info);
+      assert.equal(merged.cleaned, false);
+      assert.equal(fs.existsSync(kept.worktree_path), true);
+      cleanup(context, kept, info);
+
+      const parked = prepare(context, { unit: "parked", slug: "parked" }, info);
+      fs.writeFileSync(path.join(parked.worktree_path, "wip.txt"), "wip\n");
+      git(parked.worktree_path, ["add", "wip.txt"]);
+      git(parked.worktree_path, ["commit", "-q", "-m", "wip: parked"]);
+      const cleaned = cleanup(context, parked, info);
+      assert.equal(cleaned.branch_deleted, false, "a parked branch must survive its worktree");
+      assert.equal(fs.existsSync(parked.worktree_path), false);
+      assert.equal(git(context.root, ["branch", "--list", parked.branch]).replace(/^[*+ ]+/, ""), parked.branch);
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { atomicWrite, forgetSessionWorktree, loadConfig, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
+import { mergedInto } from "./worktree-sweep.mjs";
 
 function run(root, args, options = {}) {
   try {
@@ -217,7 +218,6 @@ function merge(context, input, info) {
     heartbeat(lock);
     run(context.root, ["merge-base", "--is-ancestor", branch, info.base_branch]);
     if (info.has_remote && input.push !== false) { heartbeat(lock); run(context.root, ["push", "origin", info.base_branch]); }
-    return { ...info, branch, merged: true };
   } catch (error) {
     if (mergeStarted) {
       try { run(context.root, ["merge", "--abort"], { allowFailure: true }); } catch {}
@@ -229,6 +229,17 @@ function merge(context, input, info) {
     }
     releaseLock(lock);
   }
+  // A merged worktree has nothing left to do. Cleanup used to be a separate
+  // step the model had to remember, and skipping it is exactly how merged
+  // worktrees lingered — so it happens here, after the lock is released.
+  // Opt out only with cleanup:false. A cleanup failure never un-merges: it is
+  // reported, and the session ledger keeps the path so Stop's sweep catches it.
+  if (input.cleanup === false) return { ...info, branch, merged: true, cleaned: false };
+  try {
+    return { ...info, ...cleanup(context, { ...input, branch }, info), branch, merged: true };
+  } catch (error) {
+    return { ...info, branch, merged: true, cleaned: false, cleanup_error: String(error.stderr || error.message).trim() };
+  }
 }
 
 function cleanup(context, input, info) {
@@ -238,10 +249,15 @@ function cleanup(context, input, info) {
   if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   const branch = checkedOutBranch;
   run(context.root, ["worktree", "remove", worktree]);
-  run(context.root, ["worktree", "prune"]);
-  run(context.root, ["branch", "-d", branch]);
   forgetSessionWorktree(input, worktree, context);
-  return { ...info, cleaned: true };
+  run(context.root, ["worktree", "prune"]);
+  // Not `branch -d`: that judges "merged" against the primary checkout's HEAD,
+  // which merge() restores to whatever was checked out before — often not the
+  // base — so it failed after the worktree was already gone. Decide against
+  // the base branch explicitly; an unmerged (parked) branch is kept.
+  const branchDeleted = Boolean(mergedInto(context.root, branch, [info.base_branch]));
+  if (branchDeleted) run(context.root, ["branch", "-D", branch]);
+  return { ...info, cleaned: true, branch, branch_deleted: branchDeleted };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

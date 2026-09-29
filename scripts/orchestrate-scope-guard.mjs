@@ -11,7 +11,7 @@
 // no edits" no longer depends on the model remembering to ask for one.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 
 let input = {};
@@ -40,4 +40,13 @@ try {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, new Date().toISOString() + "\n");
 } catch { /* best-effort — falls back to /orchestrate's own prose-driven require call */ }
+
+// Adopt the plan's acceptance criteria. /plan writes acceptance.md, so only
+// the PLANNING session ever owned it — the session that actually executes the
+// plan (a later one, or after /clear) never did, and the Stop gate's
+// acceptance check stayed silent for the whole run. Invoking /orchestrate is
+// the explicit "I am executing this plan" signal, so ownership moves here.
+if (fs.existsSync(acceptancePath(context))) {
+  try { recordAcceptanceOwnership(sidOf(input), context); } catch { /* best-effort */ }
+}
 process.exit(0);

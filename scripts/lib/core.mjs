@@ -239,6 +239,42 @@ export function forgetSessionWorktree(input, worktree, context = null) {
     atomicWrite(sessionWorktreeLedgerPath(input, context), JSON.stringify(remaining, null, 2) + "\n");
   } catch { /* best-effort ledger — never break the worktree lifecycle */ }
 }
+
+// Acceptance criteria (.craftsman/acceptance.md). A session "owns" the file
+// when its recorded identity matches — the Stop gate then enforces it. The
+// identity covers the criteria, NOT their tick state: hashing the raw content
+// meant ticking a box by any path the PostToolUse hook doesn't see (sed, a
+// script) silently dropped ownership, and the gate went quiet exactly when an
+// agent was claiming to be done. A concurrent session rewriting the criteria
+// still changes the identity, which is what ownership exists to detect.
+const ACCEPTANCE_LINE = /^(\s*[-*]\s*)\[([ xX])\]/;
+export function acceptancePath(context = null) {
+  return path.join((context || projectContext(".")).stateDir, "acceptance.md");
+}
+export function acceptanceIdentity(text) {
+  return sha1(String(text).split("\n").map((l) => l.replace(ACCEPTANCE_LINE, "$1[ ]").trimEnd()).join("\n").trim());
+}
+export function recordAcceptanceOwnership(sid, context = null) {
+  const ac = fs.readFileSync(acceptancePath(context), "utf8");
+  atomicWrite(path.join(sessionDir(sid, context), "acceptance.ref"),
+    JSON.stringify({ hash: sha1(ac.trim()), identity: acceptanceIdentity(ac), ts: Date.now() }));
+}
+export function ownsAcceptance(sid, text, context = null) {
+  try {
+    const ref = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, context), "acceptance.ref"), "utf8"));
+    return ref.identity ? ref.identity === acceptanceIdentity(text) : ref.hash === sha1(String(text).trim());
+  } catch { return false; }
+}
+// Unticked criteria as { line, unit }. `- [ ] [unit:<id>] …` scopes a
+// criterion to one plan unit (its tracker unit or scope_id); untagged lines
+// belong to the whole plan.
+export function uncheckedAcceptance(text) {
+  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.exec(l)?.[2] === " ").map((line) => ({
+    line: line.trim(),
+    unit: /^\s*[-*]\s*\[ \]\s*\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
+  }));
+}
+
 export function atomicWrite(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;

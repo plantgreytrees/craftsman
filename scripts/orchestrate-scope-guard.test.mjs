@@ -88,3 +88,20 @@ test("orchestrate-scope-guard: an unrelated slash command never touches the scop
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// /plan writes acceptance.md, so only the planning session ever owned it and
+// the executing session's Stop gate never enforced a single criterion.
+test("orchestrate-scope-guard: invoking /orchestrate adopts the plan's acceptance criteria for this session", () => {
+  const dir = tmpProject();
+  const input = { session_id: "executor", prompt: "/orchestrate docs/plans/example.md" };
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] [unit:u1] it works\n");
+    const result = run(dir, input);
+    assert.equal(result.status, 0);
+    const ref = JSON.parse(fs.readFileSync(path.join(dir, ".craftsman", "sessions", sidOf(input), "acceptance.ref"), "utf8"));
+    assert.match(ref.identity, /^[0-9a-f]{40}$/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

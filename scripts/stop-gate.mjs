@@ -7,9 +7,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, acceptancePath, ownsAcceptance, uncheckedAcceptance } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
+import { baseRefs, mergedInto } from "./worktree-sweep.mjs";
+import { ledgerPath } from "./tracker.mjs";
 
 const pexec = promisify(execFile);
 let input = {};
@@ -77,18 +79,19 @@ if (ownedWorktrees.size > 0) {
         branch: branchLine ? branchLine.slice("branch refs/heads/".length).trim() : null,
       };
     }).filter((e) => e.path && path.resolve(e.path) !== primary && ownedWorktrees.has(path.resolve(e.path)));
+    // Merged means "in the base branch", not "in whatever the primary
+    // checkout has at HEAD" — merge() restores the pre-merge checkout, so HEAD
+    // alone missed every merge made while the checkout sat on another branch.
+    // HEAD stays last as a fallback for repos with no main/master/origin HEAD.
+    const refs = [...baseRefs(context.root), "HEAD"];
     for (const entry of entries) {
       if (!entry.branch) continue; // detached/bare — not this plugin's worktree shape, skip rather than guess
-      let merged = false;
-      try {
-        await pexec("git", ["merge-base", "--is-ancestor", entry.branch, "HEAD"], { cwd: context.root });
-        merged = true;
-      } catch { /* not merged (or error) — fail safe, never block on an unmerged/parked worktree */ }
-      if (merged) {
+      const mergedRef = mergedInto(context.root, entry.branch, refs); // null = unmerged/parked — never block on it
+      if (mergedRef) {
         problems.push(
           `WORKTREE NOT SWEPT: ${entry.path} (branch ${entry.branch}) was prepared by this session and is ` +
-          `already fully merged but still exists — its cleanup step was skipped. Run: ` +
-          `git worktree remove "${entry.path}" && git branch -d ${entry.branch} && git worktree prune.`
+          `already fully merged into ${mergedRef} but still exists — its cleanup step was skipped. Run: ` +
+          `git worktree remove "${entry.path}" && git worktree prune && git branch -D ${entry.branch}.`
         );
       }
     }
@@ -278,24 +281,32 @@ if (tasks.some((t) => t.kind === "secret") && allSecretsCompleted) {
 if (isDirty && results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
 
 // 3. Acceptance criteria — enforce ONLY if THIS session owns the current
-//    acceptance.md content (its recorded hash matches). A concurrent session
-//    that overwrote the file owns it instead, so this session is not blocked by
-//    someone else's criteria.
-const acPath = path.join(context.stateDir, "acceptance.md");
+//    criteria (ownsAcceptance: written here, or adopted when /orchestrate was
+//    invoked here). A concurrent session that rewrote the criteria owns them
+//    instead, so this session is not blocked by someone else's plan. Within an
+//    owned file, a `[unit:<id>]`-tagged line binds only a session that worked
+//    that unit (any tracker event it wrote for it) — a `--step` session is
+//    accountable for its own unit, not for the rest of the plan.
+const acPath = acceptancePath(context);
 if (cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync(acPath)) {
   const ac = fs.readFileSync(acPath, "utf8");
-  let owns = false;
-  try {
-    const ref = JSON.parse(fs.readFileSync(path.join(sdir, "acceptance.ref"), "utf8"));
-    owns = ref.hash === sha1(ac.trim());
-  } catch {}
-  if (owns) {
-    const unchecked = ac.split("\n").filter((l) => /^\s*[-*]\s*\[ \]/.test(l));
+  if (ownsAcceptance(sid, ac, context)) {
+    const touchedUnits = new Set();
+    try {
+      for (const line of fs.readFileSync(ledgerPath(context), "utf8").split("\n")) {
+        let event = null;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event?.session_id !== sid) continue;
+        if (event.unit) touchedUnits.add(event.unit);
+        if (event.scope_id) touchedUnits.add(event.scope_id);
+      }
+    } catch { /* no tracker ledger — only untagged criteria apply */ }
+    const unchecked = uncheckedAcceptance(ac).filter((c) => !c.unit || touchedUnits.has(c.unit));
     if (unchecked.length) {
       problems.push(
         `ACCEPTANCE CRITERIA not yet satisfied (from the approved plan). Verify each ` +
         `against the code you wrote; tick it in .craftsman/acceptance.md only if the ` +
-        `code genuinely satisfies it, otherwise implement it:\n${unchecked.join("\n")}`
+        `code genuinely satisfies it, otherwise implement it:\n${unchecked.map((c) => c.line).join("\n")}`
       );
     }
   }
