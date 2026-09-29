@@ -43,6 +43,26 @@ test("agent-mode-guard: the plan-strategist decomposition exception passes even 
   }
 });
 
+test("agent-mode-guard: the namespaced craftsman:plan-strategist type (as registered by the plugin) passes under root-only", () => {
+  const dir = tmpProject();
+  try {
+    const result = run(dir, { session_id: "s1", tool_name: "Task", tool_input: { subagent_type: "craftsman:plan-strategist" } });
+    assert.equal(result.status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: other namespaced craftsman agents are still blocked under root-only", () => {
+  const dir = tmpProject();
+  try {
+    const result = run(dir, { session_id: "s1", tool_name: "Task", tool_input: { subagent_type: "craftsman:code-reviewer" } });
+    assert.equal(result.status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("agent-mode-guard: execution.agentMode:'subagents' restores real delegation", () => {
   const dir = tmpProject();
   try {

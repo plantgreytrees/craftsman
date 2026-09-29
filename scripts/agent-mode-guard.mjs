@@ -18,14 +18,16 @@ const agentMode = cfg.execution?.agentMode || "root-only";
 if (agentMode === "subagents") process.exit(0);
 
 const subagentType = input?.tool_input?.subagent_type || "";
-if (subagentType === "plan-strategist") process.exit(0);
+// Plugin agents register namespaced ("craftsman:plan-strategist"); the bare name
+// is accepted too so a stale prompt can't turn the exception into a block.
+if (subagentType === "craftsman:plan-strategist" || subagentType === "plan-strategist") process.exit(0);
 
 logEvent({ ev: "agent_mode_blocked", sid: sidOf(input), subagent_type: subagentType || null }, context);
 process.stderr.write(
   `craftsman: Task/Agent delegation BLOCKED — execution.agentMode is "${agentMode}". ` +
   `Perform this work yourself, in this session, sequentially — do not delegate implementer, ` +
   `specialist, or reviewer roles via Task/Agent, and never run them in parallel. The only standing ` +
-  `exception is /plan's decomposition step (subagent_type: "plan-strategist"). If you genuinely need ` +
+  `exception is /plan's decomposition step (subagent_type: "craftsman:plan-strategist"). If you genuinely need ` +
   `parallel subagent delegation, set execution.agentMode to "subagents" in craftsman.config.json first.\n`
 );
 process.exit(2);

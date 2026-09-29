@@ -7,6 +7,16 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **`/plan`'s decomposition step no longer fails with "Agent type
+  'plan-strategist' not found".** Plugin agents register under the plugin
+  namespace (`craftsman:plan-strategist`), but `/plan` told the model to
+  dispatch the bare `plan-strategist`, and `agent-mode-guard.mjs` only
+  whitelisted the bare name — so even a correctly namespaced call would have
+  been blocked under root-only mode. `/plan` and `_shared-analysis.md` now name
+  `craftsman:plan-strategist` (and state the `craftsman:<agent>` rule for
+  `subagents` mode); the guard accepts the namespaced type (bare name still
+  tolerated), with regression tests for both.
+
 - **The hand-off → `/compact` gate no longer bricks sessions that merely
   mention the close-out scripts.** `compact-nudge.mjs` was a `PostToolUse`
   (`Bash`) hook that decided a unit had been closed out by regex-matching the
