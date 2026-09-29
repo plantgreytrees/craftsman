@@ -29,9 +29,24 @@ All notable changes to craftsman are documented here. Format loosely follows
   - *Acceptance enforcement is now held by the session actually doing the
     work.* `/plan` writes `acceptance.md`, so only the planning session owned
     it, and the executing session's Stop gate never enforced a criterion.
-    Invoking `/orchestrate` now takes over ownership. Ownership also used to be
-    a hash of the raw file, so ticking a box with anything but Edit/Write
-    silently disowned it. It now ignores tick state.
+    Invoking `/orchestrate` or `/scrutinise` now takes over ownership, and
+    `/scrutinise` verifies and ticks the criteria (an unmet one becomes a
+    finding). The guard hook now also matches the `Skill` tool, the model's
+    usual route to a plugin command, not just `SlashCommand`. It also matches
+    command names exactly, so `scrutinise-deep` no longer counts as
+    `scrutinise`. Ownership also used to be a hash of the raw file, so ticking
+    a box with anything but Edit/Write silently disowned it. It now ignores
+    tick state.
+  - *The tracker updates itself when the criteria are met.*
+    `reconcileAcceptance()` in `tracker.mjs` runs when `acceptance.md` is
+    edited, when a unit lands on MERGED, and at Stop (which catches ticks made
+    through Bash):
+    - A MERGED unit whose tagged criteria are all ticked, with every untagged
+      whole-plan criterion also ticked, moves to COMPLETE. The model is told to
+      update the matching `TRACKER.md` chip, since that file is hand-formatted.
+      This bookkeeping transition never arms the compact gate.
+    - An IN_PROGRESS unit whose criteria are all ticked is reported as ready to
+      merge.
   - *Each unit now has a mechanical definition of done.* Criteria can be
     tagged `- [ ] [unit:<id>]`. `tracker.mjs` refuses MERGED/COMPLETE while the
     unit's tagged criteria are unticked and lists what is left. The Stop gate

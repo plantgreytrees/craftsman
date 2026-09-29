@@ -105,3 +105,41 @@ test("orchestrate-scope-guard: invoking /orchestrate adopts the plan's acceptanc
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("orchestrate-scope-guard: /scrutinise adopts the acceptance criteria but never arms scope-required", () => {
+  const dir = tmpProject();
+  const input = { session_id: "verifier", tool_name: "Skill", tool_input: { skill: "craftsman:scrutinise", args: "docs/plans/example.md" } };
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] whole-plan criterion\n");
+    assert.equal(run(dir, input).status, 0);
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", sidOf(input), "acceptance.ref")), true);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), false, "scrutinise is review-only — no worktree scope requirement");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: a model invocation through the Skill tool arms /orchestrate too", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s-skill", tool_name: "Skill", tool_input: { skill: "craftsman:orchestrate", args: "docs/plans/example.md" } };
+  try {
+    assert.equal(run(dir, input).status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: a different command that merely starts with the same name does not adopt", () => {
+  const dir = tmpProject();
+  const input = { session_id: "s-other", tool_name: "Skill", tool_input: { skill: "craftsman:scrutinise-deep" } };
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] c\n");
+    run(dir, input);
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", sidOf(input), "acceptance.ref")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

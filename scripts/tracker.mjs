@@ -5,7 +5,7 @@ import path from "node:path";
 import {
   atomicWrite, logEvent, projectContext, readStdin, sidOf,
   requireCompact, COMPACT_REQUIRED_NOTICE,
-  loadConfig, enabled, acceptancePath, uncheckedAcceptance,
+  loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
 } from "./lib/core.mjs";
 
 export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
@@ -98,7 +98,21 @@ function withLock(file, action) {
   finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
 
-export function transition(input, context = projectContext(input.project || ".")) {
+// armCompact:false is for bookkeeping transitions the model didn't make
+// (reconcileAcceptance's MERGED → COMPLETE): the unit's real close-out already
+// armed the compact gate at MERGED, and a hook must never lock a session.
+export function transition(input, context = projectContext(input.project || "."), { armCompact = true } = {}) {
+  const event = writeTransition(input, context, armCompact);
+  // Order-independent trigger: criteria ticked before the merge are only
+  // "met" for the tracker once the unit is MERGED, so reconcile right here.
+  if (event.status === "MERGED" && event.previous_status !== "MERGED") {
+    try { event.acceptance = reconcileAcceptance(context, input); } catch { /* bookkeeping — never fail the transition */ }
+  }
+  delete event.previous_status;
+  return event;
+}
+
+function writeTransition(input, context, armCompact) {
   validateIdentity(input);
   const file = ledgerPath(context);
   return withLock(file, () => {
@@ -125,15 +139,75 @@ export function transition(input, context = projectContext(input.project || ".")
     logEvent({ ev: "tracker_transition", key, from: previous?.status || null, to: status, unit: input.unit }, context);
     // Armed only on an actual move INTO a terminal status — a re-assertion of
     // the status a unit already holds closed nothing out.
-    if (TERMINAL_STATUSES.has(status) && previous?.status !== status) {
+    if (armCompact && TERMINAL_STATUSES.has(status) && previous?.status !== status) {
       requireCompact(sidOf(input), context);
       // Return-only, deliberately set after the append: the ledger records the
       // transition, not this run's side effect. It tells the CLI below whether
       // to print the notice, which only a *new* terminal transition earns.
       event.compact_required = true;
     }
-    return event;
+    return { ...event, previous_status: previous?.status || null };
   });
+}
+
+// The "all acceptance criteria met → update the tracker" trigger. Runs when
+// acceptance.md is edited (quality-gate), when a unit lands on MERGED (above),
+// and at Stop (catches ticks made through Bash). For every `[unit:<id>]` whose
+// own criteria are all ticked:
+//   - MERGED, and no untagged whole-plan criterion is still open → COMPLETE
+//     (untagged lines are the whole-request checks /orchestrate Phase F and
+//     /scrutinise verify; "all rows MERGED" alone is not done);
+//   - IN_PROGRESS → reported as ready to merge — the model's "you're done
+//     implementing" signal; a merge can't be inferred from ticks.
+// Untagged-only (legacy) files name no units, so nothing is transitioned.
+export function reconcileAcceptance(context = projectContext("."), input = {}) {
+  const cfg = loadConfig(context);
+  if (!enabled(cfg, context) || cfg.stopGate?.enabled === false || cfg.stopGate?.requireAcceptanceCriteria === false) return null;
+  let text;
+  try { text = fs.readFileSync(acceptancePath(context), "utf8"); } catch { return null; }
+  const criteria = acceptanceCriteria(text);
+  if (!criteria.length) return null;
+  const planWideOpen = criteria.some((c) => !c.unit && !c.done);
+  const metUnits = [...new Set(criteria.filter((c) => c.unit).map((c) => c.unit))]
+    .filter((unit) => criteria.every((c) => c.unit !== unit || c.done));
+  const completed = [];
+  const ready = [];
+  for (const row of currentState(context)) {
+    const id = [row.unit, row.scope_id].find((candidate) => candidate && metUnits.includes(candidate));
+    if (!id) continue;
+    if (row.status === "IN_PROGRESS") ready.push({ plan: row.plan, unit: row.unit });
+    if (row.status !== "MERGED" || planWideOpen) continue;
+    const count = criteria.filter((c) => c.unit === id).length;
+    try {
+      // The key's own project segment, not row.project: keyOf() used the
+      // caller's project (often "."), and a different one would mint a new row.
+      writeTransition({
+        project: row.key.split("::")[0], plan: row.plan, unit: row.unit, status: "COMPLETE",
+        evidence: `all ${count} acceptance criteria ticked${row.evidence ? `; ${row.evidence}` : ""}`,
+        session_id: input.session_id,
+      }, context, false);
+      completed.push({ plan: row.plan, unit: row.unit });
+    } catch { /* raced by another writer or refused — leave it for the model */ }
+  }
+  if (completed.length) logEvent({ ev: "tracker_auto_complete", units: completed.map((c) => c.unit) }, context);
+  return { completed, ready, plan_wide_open: planWideOpen, all_met: criteria.every((c) => c.done) };
+}
+
+// One-paragraph notice for the model, or "" when there is nothing to say.
+export function acceptanceNotice(result) {
+  if (!result) return "";
+  const name = (r) => `${r.plan}#${r.unit}`;
+  const parts = [];
+  if (result.completed.length) {
+    parts.push(`craftsman: all acceptance criteria met → tracker ledger moved ${result.completed.map(name).join(", ")} MERGED → COMPLETE. Update those rows' status chips in docs/plans/TRACKER.md to match.`);
+  }
+  if (result.ready.length) {
+    parts.push(`craftsman: every acceptance criterion for ${result.ready.map(name).join(", ")} is ticked — implementation is done; merge it now (Phase X step 9: merge cleans up the worktree), then tracker → MERGED.`);
+  }
+  if (result.all_met && !result.completed.length && !result.ready.length) {
+    parts.push("craftsman: every criterion in .craftsman/acceptance.md is ticked — run the Finalization block (worktree sweep, phase-tracker) before COMPLETE.");
+  }
+  return parts.join("\n");
 }
 
 export function renderState(context = projectContext(".")) {
@@ -177,6 +251,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     } else if (input.action === "compact") output = compactLedger(context);
     else throw new Error("action must be init, transition, status, list, or compact");
     process.stdout.write(JSON.stringify(output) + "\n");
+    const notice = acceptanceNotice(output?.acceptance);
+    if (notice) process.stdout.write(notice + "\n");
     if (output?.compact_required) {
       process.stdout.write(
         `craftsman: unit closed out (${output.status}). ${COMPACT_REQUIRED_NOTICE}\n`,

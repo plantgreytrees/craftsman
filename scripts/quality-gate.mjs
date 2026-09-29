@@ -10,6 +10,7 @@ import {
   readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership,
 } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
+import { acceptanceNotice, reconcileAcceptance } from "./tracker.mjs";
 
 const t0 = Date.now();
 
@@ -33,6 +34,13 @@ if (!file || !fs.existsSync(file)) process.exit(0);
 const rel0 = path.relative(context.root, file).split(path.sep).join("/");
 if (rel0.endsWith(".craftsman/acceptance.md")) {
   try { recordAcceptanceOwnership(sidOf(input), context); } catch {}
+  // Ticking the last criterion is the moment the tracker should move — not
+  // whenever the model next remembers to.
+  let notice = "";
+  try { notice = acceptanceNotice(reconcileAcceptance(context, input)); } catch {}
+  if (notice) {
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: notice } }));
+  }
   process.exit(0);
 }
 

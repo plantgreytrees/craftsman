@@ -11,7 +11,7 @@ import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, s
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { baseRefs, mergedInto } from "./worktree-sweep.mjs";
-import { ledgerPath } from "./tracker.mjs";
+import { ledgerPath, reconcileAcceptance } from "./tracker.mjs";
 
 const pexec = promisify(execFile);
 let input = {};
@@ -288,6 +288,12 @@ if (isDirty && results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
 //    that unit (any tracker event it wrote for it) — a `--step` session is
 //    accountable for its own unit, not for the rest of the plan.
 const acPath = acceptancePath(context);
+// Same trigger as the PostToolUse one, for ticks made where no Edit/Write hook
+// fired (sed, a script): criteria that are all met move the tracker now.
+try {
+  const reconciled = reconcileAcceptance(context, input);
+  if (reconciled?.completed.length) logEvent({ ev: "stop-tracker-auto-complete", sid, units: reconciled.completed.map((c) => c.unit) });
+} catch { /* bookkeeping — never block Stop on it */ }
 if (cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync(acPath)) {
   const ac = fs.readFileSync(acPath, "utf8");
   if (ownsAcceptance(sid, ac, context)) {

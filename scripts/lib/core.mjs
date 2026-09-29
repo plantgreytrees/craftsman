@@ -265,14 +265,18 @@ export function ownsAcceptance(sid, text, context = null) {
     return ref.identity ? ref.identity === acceptanceIdentity(text) : ref.hash === sha1(String(text).trim());
   } catch { return false; }
 }
-// Unticked criteria as { line, unit }. `- [ ] [unit:<id>] …` scopes a
+// Every criterion as { line, unit, done }. `- [ ] [unit:<id>] …` scopes a
 // criterion to one plan unit (its tracker unit or scope_id); untagged lines
 // belong to the whole plan.
-export function uncheckedAcceptance(text) {
-  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.exec(l)?.[2] === " ").map((line) => ({
+export function acceptanceCriteria(text) {
+  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.test(l)).map((line) => ({
     line: line.trim(),
-    unit: /^\s*[-*]\s*\[ \]\s*\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
+    unit: /^\s*[-*]\s*\[[ xX]\]\s*\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
+    done: ACCEPTANCE_LINE.exec(line)[2] !== " ",
   }));
+}
+export function uncheckedAcceptance(text) {
+  return acceptanceCriteria(text).filter((c) => !c.done);
 }
 
 export function atomicWrite(file, data) {
