@@ -18,6 +18,7 @@ Inspect the change first, then walk every dimension the diff touches — not jus
 - **Observability** — structured logs with no sensitive data, correlation propagated, signals for new failure modes.
 - **Testing adequacy** — the change's behaviour is actually asserted, error paths covered, nothing skipped or weakened to pass.
 - **Standards conformance** — check against the repo's documented standards and cite the rule when one applies.
+- **Architecture rules** — when given `docs/architecture/*.rules.md` files (never read the human `<area>.md`), check each cited rule's `check:` against the diff. A broken `[decided]` rule is Critical and cites the ARCH id; a broken `[observed]` rule is a Suggestion.
 
 **Boundary:** you review one concrete diff. Deriving or auditing the repo's conventions across existing code is `standards-keeper`; judging an unwritten plan is `plan-reviewer`.
 

@@ -32,6 +32,6 @@ Code moved; the docs must stay truthful **without laundering violations into rul
    - **ORPHANED** — its governed code was deleted → ask: retire the rule (superseded/removed) or keep for the replacement.
 3. **New unruled patterns** in governed code (≥ 3 consistent sites added since `verified_at`) → propose as `[observed]`, confirm like `--init` step 5.
 4. **Human doc:** regenerate the mermaid diagram and plain-English description from the verified state; update the decisions table to match the rules file exactly (ids, supersessions); fix every broken link.
-5. **Present the report and STOP for confirmation** (table: rule id · verdict · evidence · proposed action), then apply only the confirmed changes. Bump `verified_at` to HEAD and `updated`, **replacing** the old values. `lint` → PASS.
+5. **Present the report and STOP for confirmation** (table: rule id · verdict · evidence · proposed action), then apply only the confirmed changes. A standing pre-approval (e.g. an `/instruction` `/goal`) covers HOLDS and STALE-DESCRIPTIVE fixes only; VIOLATED, SUPERSEDED?, OBSERVED-DRIFT and ORPHANED always stop. Bump `verified_at` to HEAD and `updated`, **replacing** the old values. `lint` → PASS.
 
 Print (both modes): areas created/updated/fresh/skipped-by-cap; rules added/decided/observed/superseded/retired; violations routed (with the recommended `/investigate` or `/plan` command); `UNPROVEN` items; and that `/sync-docs` does not touch these files.

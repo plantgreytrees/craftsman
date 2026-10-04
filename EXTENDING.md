@@ -197,10 +197,14 @@ descriptions to one routing sentence (they're always-on context).
 
 ## 7. Tune the doc-write policy
 
-By default only `/plan` and `/orchestrate` may edit plan docs and the tracker,
-only `/idea` may write `docs/ideas/**`, and only `/architect` may write
-`docs/architecture/**` (`docWriteGuard.docPaths: ["docs/plans/**",
-"docs/ideas/**", "docs/architecture/**"]`). Those are the surfaces with real
+By default three doc paths are guarded (`docWriteGuard.docPaths: ["docs/plans/**",
+"docs/ideas/**", "docs/architecture/**"]`). Writes there are blocked until a
+writer command runs `doc-write.mjs on` for the session. `/plan` writes plans,
+`/orchestrate`, `/scrutinise` and `/sync-docs --tracker` update tracker rows,
+`/idea` writes idea docs (`/architect` sets their `architected` status), and
+`/architect` writes architecture docs. The grant opens every guarded path for
+that session, so the per-command split is a contract the commands keep, not a
+per-path hook. Those are the surfaces with real
 stakes: two sessions racing on one tracker row, or a decision quietly rewritten
 to match code that broke it. The rest of `docs/` (README, standards, feature
 docs) is ordinary prose: freely editable, and `/sync-docs` is just the command
@@ -217,7 +221,9 @@ default — keep the entries you still want:
 
 `/idea` → `/architect` → `/instruction` is the front of the loop: vet the idea,
 decide the architecture with the user, then generate one `/goal` prompt that
-runs `/plan` → `/orchestrate` → `/scrutinise` → `/sync-docs` to completion.
+runs `/plan` → `/orchestrate` → `/scrutinise` → `/sync-docs --all` to
+completion. The idea's slug is reused by the plan, the `scrutinise-<slug>` fix
+round, and `/sync-docs --all <slug>`, which ends in `/architect --update`.
 
 `/architect` writes each area as two files under `architecture.dir` (default
 `docs/architecture`). `<area>.md` is for people and is never loaded by the

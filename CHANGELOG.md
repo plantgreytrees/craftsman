@@ -58,6 +58,26 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Changed
 
+- **The commands now hand off to each other as one loop, idea to sync-docs.**
+  - One slug carries through. `/plan` reuses the idea's slug and links it with
+    `idea:`, so `/instruction`, `/orchestrate`, `/scrutinise` and
+    `/sync-docs` all address the same name. A second `/scrutinise` round
+    extends `scrutinise-<slug>` instead of overwriting it.
+  - `/sync-docs` accepts a plan slug, and `/sync-docs --all <slug>` is the
+    closing step everywhere. It reconciles docs and tracker, then runs
+    `/architect --update`. A pre-approval such as an `/instruction` `/goal`
+    covers doc-stale fixes only. Divergences, violations and decision changes
+    still stop.
+  - Architecture rules are checked at every stage. The per-unit merge gate
+    (and `code-reviewer`) checks each cited ARCH rule, so a broken `decided`
+    rule blocks before merge rather than surfacing in `/scrutinise`.
+    `/understand`, `/investigate`, `/fix-tests` and `/scrutinise --deep`
+    read only the governing `.rules.md`.
+  - `/sync-docs` no longer registers tracker rows. Like every other command,
+    it routes regressions to `/investigate` → `/plan`.
+  - The idea template's `verdict:` only takes real verdicts, and both pursue
+    verdicts hand off to `/architect`.
+
 - **`/scrutinise` now reviews through one isolated, fresh-context reviewer.**
   The session that wrote the code was also the one judging it, so under
   root-only mode the review had no independence at all. The review now runs in
@@ -77,6 +97,12 @@ All notable changes to craftsman are documented here. Format loosely follows
     mode, the parallel fan-out is unchanged.
 
 ### Fixed
+
+- **`/scrutinise` could not write its tracker chips.** It updates
+  `docs/plans/TRACKER.md`, a guarded doc path, but never ran
+  `doc-write.mjs on`, so the guard blocked the write. Also, `SKIPPED(locked)`
+  was not a tracker status. A merge that never gets the lock is now
+  `PARKED(locked)`, which the tracker can record and resume.
 
 - **Logic gaps in `/scrutinise`.**
   - The write policy said "nothing under docs/" while a later step updated

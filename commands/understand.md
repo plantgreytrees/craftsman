@@ -8,7 +8,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, TodoWrite, SlashCommand
 
 > Doc-write policy: this command writes NOTHING under docs/. It produces analysis and hands off to /plan.
 
-You build a **complete, verified understanding** of a specified feature or piece of code, so the plan that follows is informed by how the system *actually* works — not a guess. You **write no code and no plan** (comprehension only; the plan is `/plan`, fix-diagnosis is `/investigate`). Output is a brief the next step consumes. First in the loop: **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS**.
+You build a **complete, verified understanding** of a specified feature or piece of code, so the plan that follows is informed by how the system *actually* works — not a guess. You **write no code and no plan** (comprehension only; the plan is `/plan`, fix-diagnosis is `/investigate`). Output is a brief the next step consumes. Entry point for existing code: **UNDERSTAND → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS** (a new idea enters at `/idea` → `/architect` instead).
 
 Target: `$ARGUMENTS`. Prefer the [deep-research](../skills/deep-research/SKILL.md) skill for the isolated-research discipline. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md` for the optional-MCP conventions, the bounded fan-out cap, and the completeness-dimension checklist referenced below.
 
@@ -19,7 +19,7 @@ Target: `$ARGUMENTS`. Prefer the [deep-research](../skills/deep-research/SKILL.m
 
 ## Phase 0 — Anchor in existing docs (don't re-derive what's written)
 
-1. **Start from the authoritative docs.** Check the repo's `docs/` (README / authority map, architecture docs) — does a doc already own this area? Read it first; it's the intended truth source. `memory` recall for prior understanding of this area, if available.
+1. **Start from the authoritative docs.** Check the repo's `docs/` (README / authority map, feature docs) — does a doc already own this area? Read it first; it's the intended truth source. Architecture: `arch-check.mjs governs <target paths>` → read only the returned `.rules.md` (`_architecture.md`), never the human `<area>.md`; an existing `docs/ideas/` or `docs/plans/` doc on this area is prior context. `memory` recall for prior understanding of this area, if available.
 2. **Trust but verify.** Spot-check the doc's key claims against code. If the doc has drifted, note it as a finding for `/sync-docs` — but keep building your understanding from the **code**, which wins on conflict.
 
 ## Phase 1 — Trace it end to end (read-only fan-out)
@@ -40,7 +40,7 @@ Reconcile the traces into one coherent model (skip the ceremony for a small sing
 - **Execution flow** — an inline ```mermaid``` sequence/flow diagram of the real path + a step list with `file:line`.
 - **Layer & ownership map** — table: layer → module / file → responsibility.
 - **Contracts & blast radius** — what it produces/consumes and who a change here would affect.
-- **Enforcement, config, state** — the gates / flags / migrations that govern it.
+- **Enforcement, config, state** — the gates / flags / migrations that govern it, and the ARCH rule ids `/plan` must cite for it.
 - **Gaps, risks & open questions** — dead config, weak coverage, stale contracts (route real defects to `/investigate`, not here). If Phase 1's ~15-module cap engaged, say so here: which modules got full per-bullet tracing vs which were listed by name only past the first ring, so the brief's coverage stays auditable rather than silently partial.
 - **Coverage checklist for `/plan` (the payoff)** — pre-fill `_shared-analysis.md`'s completeness-dimension checklist with what *this* area touches, so the plan can't silently skip one. Each line names the concrete files — the plan turns these into units.
 - **Doc reconciliation note** — if the owning doc drifted, name the drift for `/sync-docs`.

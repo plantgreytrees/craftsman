@@ -43,7 +43,11 @@ does what the layer below can't:
 | Feedback | when a check fails, its output is fed straight back to Claude mid-turn to fix | ~free |
 | Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
 
-**2. A doc-first workflow:** **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.**
+**2. A doc-first workflow:** **IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.**
+`/idea` vets a new idea, `/architect` turns it into enforced decisions, and
+`/instruction` packs the rest into one `/goal` prompt; `/understand` and
+`/investigate` enter at PLAN for existing code and bugs. One slug names the
+work from idea doc to plan, fix round and sync.
 Planners write a short plan doc; `/orchestrate` executes it, reading each unit's
 actual diff through `gate-select.mjs` to deterministically route it to the
 specialists that apply — `ui-ux-reviewer`, `migration-reviewer`, `api-reviewer`,
@@ -113,13 +117,16 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
 
 ## Good to know
 
-- **Doc-write authority** — only `/plan` and `/orchestrate` can edit plan docs and
-  the tracker (`docs/plans/**` by default — the surface with real concurrency
-  stakes); every other command produces analysis and hands off to `/plan`.
-  `docs/ideas/**` is written by `/idea` and `docs/architecture/**` by
-  `/architect`. The rest of `docs/` is ordinary prose, freely editable; widen
-  the guard back to all of `docs/` in config if you want the stricter default.
-  Enforced deterministically, per session.
+- **Doc-write authority** — the guarded paths (`docs/plans/**`, `docs/ideas/**`,
+  `docs/architecture/**`) are blocked until a writer command grants the
+  session. `/plan` writes plans; `/orchestrate`, `/scrutinise` and
+  `/sync-docs --tracker` update tracker rows; `/idea` writes idea docs
+  (`/architect` marks them `architected`); `/architect` writes
+  architecture docs. `/understand` and `/investigate` write nothing and hand
+  off to `/plan`. The rest of `docs/` is ordinary prose, freely editable;
+  widen the guard in config if you want it stricter. The block is a hook; the
+  grant covers every guarded path for that session, so which command writes
+  which path is the commands' contract.
 - **Architecture decisions are enforced, not just written down** — `/architect`
   writes each area as a pair: `<area>.md` for people (plain English, mermaid,
   rationale), which the loop never loads, and a terse `<area>.rules.md` of

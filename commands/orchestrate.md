@@ -7,7 +7,7 @@ allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashComman
 
 # Orchestrate — the executor
 
-> Doc authority: /orchestrate is one of the two commands allowed to write under docs/ (tracker rows). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
+> Doc authority: /orchestrate is a doc writer (tracker rows only — plans are `/plan`'s). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
 You **execute a documented plan** — a plan doc already decided what to build (planning is `/plan`/`/investigate`; you are execution only). Plan nothing, delegate implementation, gate, review, and merge — one unit at a time.
 
@@ -56,8 +56,8 @@ Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero sur
 1. Re-read the plan's user-visible outcomes. Per feature, delegate a completeness investigation (`general-purpose`, or `code-reviewer` integration-mode with a completeness mandate): the whole path exists end-to-end — every contract consumer updated, every endpoint guarded, every UI call site rendering, tests on the new path, no dangling half-implementation. Hunt for **what the plan didn't mention**.
 2. In-scope gap → loop back to Phase C and close it; out-of-scope adjacent → PENDING row. No COMPLETE while an in-scope gap remains.
 3. **Record memory:** tooling/gotchas learned, contracts touched → consumers, decisions made.
-4. **Recommend the closing pair:** `/scrutinise <slug>` (simplification + doc-conformance) then `/sync-docs` (reconcile docs to shipped reality) — closes PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.
+4. **Recommend the closing pair:** `/scrutinise <slug>` (isolated logic/security/architecture/cross-unit review; its fixes run as `/orchestrate scrutinise-<slug>`) then `/sync-docs --all <slug>` (docs, tracker and architecture reconciled to shipped reality) — closes PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.
 
 ## Summary
 
-Print: features completed (units merged per feature); every BLOCKED/PARKED/SKIPPED unit with reason + branch left behind; partial-shipment warnings; residual confidence (verified end-to-end vs unproven, e.g. smoke skipped because unavailable).
+Print: features completed (units merged per feature); every BLOCKED/PARKED unit with reason + branch left behind; partial-shipment warnings; residual confidence (verified end-to-end vs unproven, e.g. smoke skipped because unavailable).
