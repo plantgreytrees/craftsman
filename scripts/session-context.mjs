@@ -12,7 +12,7 @@ import {
 } from "./lib/core.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger } from "./tracker.mjs";
-import { listWorktrees } from "./worktree-sweep.mjs";
+import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
@@ -211,13 +211,19 @@ let trackerLineCount = 0;
 try { trackerLineCount = fs.readFileSync(trackerPath, "utf8").split("\n").length; } catch {}
 const trackerBloated = trackerNudgeLines > 0 && trackerLineCount > trackerNudgeLines;
 
-// Lingering worktrees. The Stop sweep only sees what THIS session prepared,
-// so merged leftovers from earlier sessions — and Claude Code's own
-// .claude/worktrees/ — were invisible to everything. Report (never remove)
-// the ones worktree-sweep.mjs proves safe: merged, clean, not held by a live
-// session. Removal stays an explicit call.
+// Lingering worktrees. Merged leftovers from earlier sessions — and Claude
+// Code's own .claude/worktrees/ once their session has ended — are removed
+// here, mechanically, whenever worktree-sweep.mjs proves them safe: merged,
+// clean, not held by a live session. Relying on the model to run the sweep
+// meant they lingered whenever it forgot. Anything that failed removal is
+// still reported.
+let swept = [];
 let lingering = [];
-try { lingering = listWorktrees(context.root).filter((entry) => entry.removable); } catch {}
+try {
+  const result = sweep(context.root, { all_merged: true });
+  swept = result.removed;
+  lingering = listWorktrees(context.root).filter((entry) => entry.removable);
+} catch {}
 
 // Deliberately terse below (see comment above standingRules): every rule's
 // full explanation lives in the shared docs, read in full at the moment a
@@ -236,6 +242,7 @@ const parts = [
     ? `Stop gate: ${[cfg.security?.enabled && "secrets scan", cfg.stopGate?.requireAcceptanceCriteria && "unticked acceptance criteria"].filter(Boolean).join(" + ")} block completion.`
     : "",
   handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
+  swept.length ? `WORKTREES SWEPT (merged, clean): ${summarizeUnits(swept.map((e) => path.relative(context.root, e.path)))}.` : "",
   lingering.length ? `LINGERING WORKTREES: ${summarizeUnits(lingering.map((e) => path.relative(context.root, e.path)))} — merged, clean, unowned. Remove: printf '%s' '{"action":"sweep","all_merged":true}' | node "${path.join(PLUGIN_ROOT, "scripts", "worktree-sweep.mjs")}"` : "",
   trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
   restoredMemory.length ? `PLAN MEMORY (verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}] ${entry.summary}`).join("\n") : "",

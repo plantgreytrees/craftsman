@@ -7,10 +7,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, acceptancePath, ownsAcceptance, uncheckedAcceptance } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, acceptancePath, ownsAcceptance, uncheckedAcceptance } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
-import { baseRefs, mergedInto } from "./worktree-sweep.mjs";
+import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
 import { ledgerPath, reconcileAcceptance } from "./tracker.mjs";
 
 const pexec = promisify(execFile);
@@ -22,11 +22,24 @@ const context = active?.project_root
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) process.exit(0);
-// Loop guard: we already blocked once this turn — let it end.
-if (input.stop_hook_active === true) process.exit(0);
-
 const sid = sidOf(input);
 const sdir = sessionDir(sid, context);
+
+// Automatic worktree sweep — removal is the hook's job, not the model's
+// memory. Every Stop removes EVERY worktree in the repository that
+// worktree-sweep.mjs proves safe (merged into the base branch, clean, not the
+// session's cwd, not locked by a live session), whoever created it: a skipped
+// repo-exec cleanup, a hand-run `git merge`, an EnterWorktree/background-job
+// worktree whose session has ended. Runs before the loop guard so even a
+// second Stop in the same turn sweeps. Unsafe ones are never forced.
+try {
+  const swept = sweep(context.root, { all_merged: true });
+  for (const entry of swept.removed) forgetSessionWorktree(input, entry.path, context);
+  if (swept.removed.length) logEvent({ ev: "stop-worktree-swept", sid, worktrees: swept.removed.map((e) => e.path) }, context);
+} catch { /* not a git repo or git absent — nothing to sweep */ }
+
+// Loop guard: we already blocked once this turn — let it end.
+if (input.stop_hook_active === true) process.exit(0);
 
 // Clear THIS session's doc-write authority (never touch another session's).
 try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
@@ -48,52 +61,31 @@ for (const binding of readWorktreeBindings(input, {
   );
 }
 
-// Worktree sweep (mechanical) — _shared-execution.md's Finalization block says
-// "the run doesn't reach COMPLETE while any worktree survives," but nothing
-// ever enforced it; a skipped `repo-exec.mjs cleanup` left a merged unit's
-// worktree on disk purely on trust.
-//
-// Strictly session-local: the only worktrees considered are the ones THIS
-// session prepared via repo-exec.mjs (its session ledger, written on prepare
-// and cleared on cleanup). A worktree created by a concurrent session, an
-// earlier session, or by hand is never this Stop hook's business — blocking
-// on those made the gate fire on work it had no part in and no authority to
-// clean up. No ledger (nothing prepared here, or a pre-ledger session) means
-// nothing to sweep, so the gate stays silent.
-//
-// Within that set, only an already-merged branch blocks: an unmerged/parked
-// worktree is a legitimate state the run itself records as BLOCKED/PARKED.
+// Leftover check. The sweep above already removed every safe merged
+// worktree; a merged worktree THIS session prepared (its repo-exec ledger)
+// that survived it has a concrete reason to stay — uncommitted changes, a
+// lock — and blocks until that reason is resolved. Strictly session-local:
+// other sessions' leftovers are swept when safe, never blocked on. An
+// unmerged/parked worktree is a legitimate state the run records as
+// BLOCKED/PARKED, so it never blocks.
 const ownedWorktrees = new Set(
   readSessionWorktrees(input, context).map((entry) => path.resolve(entry))
 );
 if (ownedWorktrees.size > 0) {
   try {
-    const { stdout: listOut } = await pexec("git", ["worktree", "list", "--porcelain"], { cwd: context.root });
-    const primary = path.resolve(context.root);
-    const entries = listOut.split("\n\n").map((block) => {
-      const lines = block.split("\n");
-      const worktreeLine = lines.find((l) => l.startsWith("worktree "));
-      const branchLine = lines.find((l) => l.startsWith("branch "));
-      return {
-        path: worktreeLine ? worktreeLine.slice("worktree ".length).trim() : null,
-        branch: branchLine ? branchLine.slice("branch refs/heads/".length).trim() : null,
-      };
-    }).filter((e) => e.path && path.resolve(e.path) !== primary && ownedWorktrees.has(path.resolve(e.path)));
-    // Merged means "in the base branch", not "in whatever the primary
-    // checkout has at HEAD" — merge() restores the pre-merge checkout, so HEAD
-    // alone missed every merge made while the checkout sat on another branch.
-    // HEAD stays last as a fallback for repos with no main/master/origin HEAD.
-    const refs = [...baseRefs(context.root), "HEAD"];
-    for (const entry of entries) {
-      if (!entry.branch) continue; // detached/bare — not this plugin's worktree shape, skip rather than guess
-      const mergedRef = mergedInto(context.root, entry.branch, refs); // null = unmerged/parked — never block on it
-      if (mergedRef) {
-        problems.push(
-          `WORKTREE NOT SWEPT: ${entry.path} (branch ${entry.branch}) was prepared by this session and is ` +
-          `already fully merged into ${mergedRef} but still exists — its cleanup step was skipped. Run: ` +
-          `git worktree remove "${entry.path}" && git worktree prune && git branch -D ${entry.branch}.`
-        );
-      }
+    for (const entry of listWorktrees(context.root)) {
+      if (!ownedWorktrees.has(path.resolve(entry.path))) continue;
+      if (entry.missing) { forgetSessionWorktree(input, entry.path, context); continue; }
+      if (!entry.branch) continue; // detached — not this plugin's worktree shape, skip rather than guess
+      // HEAD is a fallback for repos with no main/master/origin HEAD.
+      const mergedRef = entry.merged_into || mergedInto(context.root, entry.branch, ["HEAD"]);
+      if (!mergedRef) continue;
+      problems.push(
+        `WORKTREE NOT SWEPT: ${entry.path} (branch ${entry.branch}) was prepared by this session and is ` +
+        `already fully merged into ${mergedRef} but could not be removed automatically ` +
+        `(${entry.keep_reason || "no base branch to prove the merge against"}). Resolve that, then run: ` +
+        `git worktree remove "${entry.path}" && git worktree prune && git branch -D ${entry.branch}.`
+      );
     }
   } catch { /* not a git repo, git absent, or worktree list failed — fail safe, never block on this */ }
 }
