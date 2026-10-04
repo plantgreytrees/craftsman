@@ -13,6 +13,7 @@ without re-reading).
 ---
 slug: <feature-slug>
 goal: <short user-visible outcome; one sentence, easy to scan in the tracker>
+idea: docs/ideas/<slug>.md                        # when built from an /idea verdict (same slug); omit otherwise
 classification: in-scope | deferred | out-of-scope   # cite the deciding line/source
 tracker_rows: [TRACKER#<id>, ...]                     # rows this plan registers
 guards:
@@ -74,6 +75,8 @@ Depends on: <scope_id list, or none>
 
 ## Rules
 
+- **Slugs carry through the loop.** A plan built from `docs/ideas/<slug>.md` uses that slug, so `/architect`, `/instruction`, `/orchestrate`, `/scrutinise` and `/sync-docs` all address it by one name. Fix plans are `scrutinise-<slug>` / `investigate-<slug>`.
+- **Re-runs extend, never overwrite.** If `docs/plans/<slug>.md` already exists (a second `/scrutinise` round, a follow-up), add new steps with new ids; MERGED units, their rows and their acceptance lines are history.
 - Header fields are mandatory. The `coverage:` map is the completeness sweep made
   checkable — each category maps to a task id or `N/A(reason)`, never silence.
 - Tasks are atomic and self-contained: one file/test/command, verb-first, with an

@@ -2,13 +2,15 @@
 
 The shape of every `docs/ideas/<slug>.md` that `/idea` writes and `/architect`
 consumes. Load only when writing one. A rejected or deferred idea is kept, not
-deleted — it is how the next `/idea` run spots a duplicate.
+deleted — it is how the next `/idea` run spots a duplicate. `architected` is the
+last status an idea doc takes: from there the plan (same slug, `idea:` link) and
+its tracker rows carry progress.
 
 ````markdown
 ---
 slug: <idea-slug>
-status: proposed | pursue | pursue-with-changes | defer | reject | architected
-verdict: <one of the statuses above, as decided by /idea>
+status: pursue | pursue-with-changes | defer | reject | architected   # /idea sets the verdict; /architect sets architected
+verdict: pursue | pursue-with-changes | defer | reject              # /idea's verdict; only an /idea re-evaluation changes it
 confidence: low | medium | high
 depth: standard | deep
 isolation: isolated | NOT ISOLATED
@@ -71,6 +73,6 @@ Concrete improvements to the idea itself, ordered by impact.
 Questions only the user can answer, with their answers once given.
 
 ## Next step
-`/architect <slug>` (pursue) · a narrower `/idea` (pursue-with-changes needing
-rework) · nothing (defer/reject — say what would reopen it).
+`/architect <slug>` (pursue or pursue-with-changes; add `--deep` when high-risk or
+cross-cutting) · nothing (defer/reject — say what evidence would reopen it).
 ````

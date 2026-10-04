@@ -1,5 +1,5 @@
 ---
-description: Prompt generator — turn a vetted, architected idea (or a request) into ONE paste-ready `/goal` prompt that drives the full craftsman loop (/plan → /orchestrate → /scrutinise → /sync-docs → /architect --update) to verified completion under the architecture rules, plus an implementation-weight estimate (quick / medium / long / extra long) shown outside the prompt. Writes NO code and NO docs.
+description: Prompt generator — turn a vetted, architected idea (or a request) into ONE paste-ready `/goal` prompt that drives the full craftsman loop (/plan → /orchestrate → /scrutinise → /sync-docs --all, which ends in /architect --update) to verified completion under the architecture rules, plus an implementation-weight estimate (quick / medium / long / extra long) shown outside the prompt. Writes NO code and NO docs.
 argument-hint: "<idea-slug | plan-slug | request>"
 model: sonnet
 allowed-tools: Bash, Read, Write, Glob, Grep
@@ -45,9 +45,9 @@ Loop, each step to completion before the next:
 1. /plan <neutral request> — per docs/ideas/<slug>.md; each unit cites its ARCH ids in `arch:`.   [omit if the plan exists]
 2. /orchestrate <slug> — every unit MERGED; no PARKED/BLOCKED left unresolved.
 3. /scrutinise <slug> — while it reports any Critical or Warning: /orchestrate scrutinise-<slug>, then /scrutinise <slug> again.
-4. /sync-docs --tracker <slug> and /sync-docs --arch, then /architect --update <areas> — doc-stale fixes are pre-approved; stop for me only on a decision change or a VIOLATED rule.
+4. /sync-docs --all <slug> (docs, tracker, then /architect --update) — doc-stale fixes are pre-approved; stop for me only on a decision change or a VIOLATED rule.
 Constraints: obey <decided ARCH ids>; if a change would break one, stop and report — never work around it. No scope widening, no skipped or weakened tests, no --no-verify. Use /compact at phase boundaries, never /clear (it drops this goal).
-Done when the final turn prints COMPLETION EVIDENCE: every docs/plans/TRACKER.md row for <slug> = COMPLETE (print them); no unticked `- [ ]` line in .craftsman/acceptance.md for <slug>'s units or untagged (print the grep); `<test command>` exit 0; last /scrutinise = 0 Critical, 0 Warning; sync-docs and architect --update applied or "no drift". Or stop after <N> turns and print what remains.
+Done when the final turn prints COMPLETION EVIDENCE: every docs/plans/TRACKER.md row for <slug> = COMPLETE (print them); no unticked `- [ ]` line in .craftsman/acceptance.md for <slug>'s units or untagged (print the grep); `<test command>` exit 0; last /scrutinise = 0 Critical, 0 Warning; /sync-docs --all applied or "no drift". Or stop after <N> turns and print what remains.
 ```
 
 Adapt, don't pad: drop steps that don't apply, add idea-specific acceptance outcomes (from the idea doc's "done" and recommendations) as extra evidence lines. **Measure it:** save to `.craftsman/instructions/<slug>.goal.txt` and run `wc -c` on it — over 4,000 → compress (shorter request text, fewer restated constraints, paths not prose) until it fits; never truncate the evidence clause.

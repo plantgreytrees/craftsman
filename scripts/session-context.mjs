@@ -179,7 +179,7 @@ const rules = topRules(cfg, context);
 const verbose = cfg.sessionContext?.verbose === true;
 const standingRules = verbose
   ? [
-      `LOOP: work the doc-first loop — UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS. Nothing changes code without a plan doc (docs/plans/) describing it first. A new idea goes IDEA → ARCHITECT → INSTRUCTION first; the loop obeys docs/architecture/*.rules.md.`,
+      `LOOP: work the doc-first loop — IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS (/instruction packs it into one /goal; existing code enters at /understand or /investigate → PLAN). Nothing changes code without a plan doc (docs/plans/) describing it first; one slug names the work throughout; the loop obeys docs/architecture/*.rules.md.`,
       `SCOPE: that requirement narrows for a genuinely small change — one file, no shared-contract/exported-type change, no migration, no security-sensitive surface (/plan calls this "trivial" and skips its own decomposition ceremony for it) — edit directly; the deterministic gates below still apply regardless.`,
       `PLANNING: plan every non-trivial change in the idioms of the TARGET LANGUAGE from the outset — error model, data modeling, abstraction mechanism and concurrency model are language decisions, not neutral ones. Do not design in pseudocode and translate.`,
       `ABSTRACTION BUDGET: an interface/base class/layer needs a second concrete implementor or a stated extension requirement. Otherwise omit it.`,

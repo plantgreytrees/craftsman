@@ -36,7 +36,7 @@ Capture all output; read it fully before proceeding.
 
 **Triage every failure before fixing any.** Group all failures first — one shared cause commonly lights up many tests (a changed contract, a broken shared helper, a missing global fixture). Fixing the first red test and re-running blind wastes cycles and hides the shared cause; cluster them, then fix at the shared site.
 
-Trace from the test entry point → the failure line. Read the full stack trace, the test's arrange section, and the production code at the failure line. Verify every dependency the code under test calls has a corresponding mock/stub. **Fix the root cause, not the symptom** — when several tests fail through the same production function, one guard in that shared function beats editing each test; grep its callers so the fix doesn't break a sibling. **Which side is wrong is a `docs/` question, not a guess:** if the test and the code disagree on intended behaviour, the governing contract/architecture doc decides — never weaken a test to match code the docs say is wrong. For a stubborn or multi-cause cluster, delegate `build-doctor` (triage: failing command + full output) and act on its diagnosis.
+Trace from the test entry point → the failure line. Read the full stack trace, the test's arrange section, and the production code at the failure line. Verify every dependency the code under test calls has a corresponding mock/stub. **Fix the root cause, not the symptom** — when several tests fail through the same production function, one guard in that shared function beats editing each test; grep its callers so the fix doesn't break a sibling. **Which side is wrong is a `docs/` question, not a guess:** if the test and the code disagree on intended behaviour, the governing contract doc or `docs/architecture/*.rules.md` rule decides (`arch-check.mjs governs <path>`; never the human `<area>.md`) — never weaken a test to match code the docs say is wrong. A test pinning a superseded rule is updated to its replacement. For a stubborn or multi-cause cluster, delegate `build-doctor` (triage: failing command + full output) and act on its diagnosis.
 
 ### 4. Fix
 
@@ -72,7 +72,7 @@ Final: Pass [N] / Fail [N] / Skipped [N]
 ## Standards
 
 - The testing + development-workflow standards under `docs/standards/` (if present) govern coverage gates and what counts as an honest pass.
-- **Which side is wrong (test vs code) is a `docs/` question** — the governing contract/architecture doc decides; never weaken a test to match code the docs say is wrong.
+- **Which side is wrong (test vs code) is a `docs/` question** — see step 3; never weaken a test to match code the docs say is wrong.
 
 ## After green
 
