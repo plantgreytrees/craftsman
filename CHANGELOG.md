@@ -25,6 +25,14 @@ All notable changes to craftsman are documented here. Format loosely follows
     `Explore` dispatches that `/understand`, `/investigate` and `/plan`
     already call for. `general-purpose` can write, so it stays blocked; set
     `[]` to turn the allowance off.
+  - *New `/craftsman:builtin-check`, to run after `claude update`.* It reads
+    the Claude Code changelog since the last verified version. It checks
+    each wrapped built-in's name, args, read-only status and hook payload
+    fields, and gives each one a verdict: OK, CHANGED, BROKEN or GONE. It
+    also proposes new built-ins to wrap. It changes nothing without
+    approval; approved changes go through `/plan` → `/orchestrate`. It
+    keeps a ledger in `docs/builtins.md` (`--report-only` stops after the
+    report).
 
 - **`/idea`, `/architect` and `/instruction`: a front end for the loop that
   vets an idea, decides its architecture, and drives it to completion.**
