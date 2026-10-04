@@ -179,8 +179,16 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   `/architect --deep` (`architect-analyst`, on Fable). The first three run on
   `opus`; everything else in `/plan`, and most agents, run cheaper —
   `implementer`/`security-auditor` stay on `sonnet`. Each run is granted
-  exactly one such agent, so a second or parallel dispatch is blocked. Flip
+  exactly one such agent, so a second or parallel dispatch is blocked.
+  Claude Code's read-only built-in agents listed in `execution.builtinAgents`
+  (default `["Explore"]`) also pass, since they can't write. Flip
   `execution.agentMode` to `"subagents"` to restore real fan-out.
+- **Built-in skills, craftsman's rules** — `/orchestrate` runs Claude Code's
+  own maintained `simplify` (step 6) and `code-review` (step 8) skills inside
+  the loop. A `PreToolUse` hook on `Skill` hands them the governing standards,
+  ARCH rules and open acceptance criteria. Their output is only a candidate
+  list: `code-reviewer` still owns the verdict, and the scope guard and
+  quality gate cover every edit they make.
 - **Context stays bounded, mechanically** — a hand-off or a unit reaching a
   terminal tracker state (merged, blocked, or parked) marks the session
   compact-required; every other tool call is blocked until a real `/compact`

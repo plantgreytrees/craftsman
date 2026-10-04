@@ -9,6 +9,8 @@
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-guard.mjs\"", "timeout": 10 } ] },
       { "matcher": "Task|Agent",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/agent-mode-guard.mjs\"", "timeout": 10 } ] },
+      { "matcher": "Skill",
+        "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/builtin-skill-context.mjs\"", "timeout": 10 } ] },
       { "matcher": "Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit|Bash|Task|Agent|TodoWrite|SlashCommand",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/compact-gate.mjs\"", "timeout": 10 } ] }
     ],

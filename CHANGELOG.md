@@ -7,6 +7,25 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
+- **Built-in skills and agents under craftsman's rules (pilot).**
+  - *`/orchestrate` step 6 runs Claude Code's built-in `simplify`.* Its edits
+    fall under the same scope guard and quality gate as the implementer's.
+    Anything outside the manifest, or anything that changes behaviour, is
+    reverted.
+  - *Step 8 (ESCALATE) runs the built-in `code-review` at `high` first.* Its
+    findings go into `code-reviewer`'s brief as unverified candidates.
+    `code-reviewer` still owns the verdict.
+  - *New `builtin-skill-context.mjs` (`PreToolUse` on `Skill`).* When
+    `code-review`, `simplify` or `security-review` runs, the hook adds the
+    governing standards, the `*.rules.md` ARCH files and the open acceptance
+    criteria as context. It is advisory only and never blocks.
+  - *`agent-mode-guard.mjs` lets read-only built-in agents through under
+    root-only.* These are the agents in the new `execution.builtinAgents`
+    (default `["Explore"]`). Before this, the guard silently blocked the
+    `Explore` dispatches that `/understand`, `/investigate` and `/plan`
+    already call for. `general-purpose` can write, so it stays blocked; set
+    `[]` to turn the allowance off.
+
 - **`/idea`, `/architect` and `/instruction`: a front end for the loop that
   vets an idea, decides its architecture, and drives it to completion.**
   - *`/idea` (opus) scrutinises an idea before anything is designed.* It

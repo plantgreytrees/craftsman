@@ -182,3 +182,39 @@ test("agent-mode-guard: a prompt that merely mentions /idea grants nothing", () 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("agent-mode-guard: the read-only built-in Explore agent passes under root-only by default", () => {
+  const dir = tmpProject();
+  try {
+    const result = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "Explore" } });
+    assert.equal(result.status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: built-ins outside execution.builtinAgents, or namespaced as craftsman's, stay blocked", () => {
+  const dir = tmpProject();
+  try {
+    const dispatch = (subagent_type) => run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type } });
+    assert.equal(dispatch("general-purpose").status, 2, "general-purpose can write — not read-only");
+    assert.equal(dispatch("craftsman:Explore").status, 2, "namespacing is not a way past the guard");
+    assert.match(dispatch("general-purpose").stderr, /execution\.builtinAgents \(Explore\)/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: execution.builtinAgents: [] turns the built-in allowance off", () => {
+  const dir = tmpProject();
+  try {
+    fs.writeFileSync(
+      path.join(dir, "craftsman.config.json"),
+      JSON.stringify({ execution: { builtinAgents: [] } }) + "\n"
+    );
+    const result = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "Explore" } });
+    assert.equal(result.status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
