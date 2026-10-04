@@ -148,6 +148,13 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **`/craftsman:init --write`/`--update` overwrote a project's stop-gate
+  commands.** It re-detected a command for every marker and replaced what the
+  project had set, including a deliberately empty `{}`. The detected command
+  could also be wrong, such as a CI `dotnet test … --logger` fragment used as
+  the Python test gate. Declared `stopGate.commands` are now kept verbatim, and
+  init detects commands only when the project declares none.
+
 - **`/scrutinise` could not write its tracker chips.** It updates
   `docs/plans/TRACKER.md`, a guarded doc path, but never ran
   `doc-write.mjs on`, so the guard blocked the write. Also, `SKIPPED(locked)`

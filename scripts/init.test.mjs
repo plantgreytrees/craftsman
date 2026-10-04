@@ -30,6 +30,20 @@ test("init preserves project overrides while optimizing legacy defaults", () => 
   assert.equal(plan.required.gitignore.present, false);
 });
 
+test("init keeps declared stop-gate commands verbatim, an empty map included", () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "Makefile"), "test:\n\tpytest\n");
+  fs.writeFileSync(path.join(root, "pyproject.toml"), "");
+  fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ stopGate: { commands: { "pyproject.toml": "scripts/run.sh pytest -q" } } }));
+  assert.deepEqual(buildInitPlan(root, { checkTools: false }).config.stopGate.commands, { "pyproject.toml": "scripts/run.sh pytest -q" });
+
+  fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ stopGate: { commands: {} } }));
+  assert.deepEqual(buildInitPlan(root, { checkTools: false }).config.stopGate.commands, {});
+
+  fs.writeFileSync(path.join(root, "craftsman.config.json"), "{}");
+  assert.equal(buildInitPlan(root, { checkTools: false }).config.stopGate.commands["pyproject.toml"], "make test");
+});
+
 test("init repairs missing structure and is idempotent", () => {
   const root = fixture();
   applyInitPlan(buildInitPlan(root, { checkTools: false }));
