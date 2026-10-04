@@ -147,9 +147,13 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   planners do the work themselves, sequentially, instead of fanning out
   subagents; `execution.agentMode` (default `root-only`) is enforced by a
   `PreToolUse` hook that hard-blocks `Task` calls, not just a convention.
-  `/plan`'s one decomposition step is the sole standing exception (runs on
-  `opus`; everything else in `/plan`, and most agents, run cheaper —
-  `implementer`/`security-auditor` stay on `sonnet`). Flip
+  There are two standing exceptions: `/plan`'s one decomposition step, and
+  `/scrutinise`'s single isolated `scrutineer`, which reviews merged work in a
+  fresh context that never saw the code being written (both run on `opus`;
+  everything else in `/plan`, and most agents, run cheaper —
+  `implementer`/`security-auditor` stay on `sonnet`). Each `/scrutinise` run
+  is granted exactly one scrutineer, so a second or parallel dispatch is
+  blocked. Flip
   `execution.agentMode` to `"subagents"` to restore real fan-out.
 - **Context stays bounded, mechanically** — a hand-off or a unit reaching a
   terminal tracker state (merged, blocked, or parked) marks the session

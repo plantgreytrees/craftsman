@@ -12,7 +12,7 @@ Referenced by: `orchestrate.md` · executed `investigate-*`/`scrutinise-*` plan 
 
 ## Standing constraints (non-negotiable)
 
-- **Agent mode — mechanically enforced.** Check `execution.agentMode` (default `root-only`, also asserted every session). Every "delegate/dispatch/fan out" instruction below means: do it yourself, sequentially, no Task/Agent tool, no parallel. `agent-mode-guard.mjs` (`PreToolUse` on `Task`) hard-blocks any Task call under root-only mode except the one named exception (`_shared-analysis.md`'s Agent mode section — checked by name). Only `agentMode: "subagents"` restores real delegation.
+- **Agent mode — mechanically enforced.** Check `execution.agentMode` (default `root-only`, also asserted every session). Every "delegate/dispatch/fan out" instruction below means: do it yourself, sequentially, no Task/Agent tool, no parallel. `agent-mode-guard.mjs` (`PreToolUse` on `Task|Agent`) hard-blocks any Task call under root-only mode except the two named exceptions (`/plan`'s `plan-strategist`, `/scrutinise`'s single `scrutineer` — `_shared-analysis.md`'s Agent mode section). Only `agentMode: "subagents"` restores real delegation.
 - **Decide from `docs/`, don't stall.** Resolve design/architecture/security calls by reading `docs/architecture/*`/`docs/standards/*` and acting — cite `file:line`, record the decision. Stop the user only for genuine product/scope ambiguity or a locked-invariant change.
 - **Acceptance is the contract.** `.craftsman/acceptance.md` (if present) gates "done"; the plan's acceptance section refines it per feature.
 - **Plans** live only in `docs/plans/<slug>.md`.

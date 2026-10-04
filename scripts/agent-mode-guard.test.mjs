@@ -76,3 +76,64 @@ test("agent-mode-guard: execution.agentMode:'subagents' restores real delegation
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+function invokeScrutinise(dir, sid, payload = { tool_name: "Skill", tool_input: { skill: "craftsman:scrutinise" } }) {
+  return spawnSync(process.execPath, [path.join(ROOT, "orchestrate-scope-guard.mjs")], {
+    cwd: dir,
+    input: JSON.stringify({ session_id: sid, ...payload }),
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+  });
+}
+
+test("agent-mode-guard: scrutineer is blocked under root-only when /scrutinise was never invoked", () => {
+  const dir = tmpProject();
+  try {
+    const result = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /no unspent grant/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: one /scrutinise invocation grants exactly one scrutineer dispatch", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(invokeScrutinise(dir, "s1").status, 0);
+    const first = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } });
+    assert.equal(first.status, 0);
+    const second = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "scrutineer" } });
+    assert.equal(second.status, 2);
+    // A fresh invocation re-arms it — one reviewer per run, not one per session.
+    assert.equal(invokeScrutinise(dir, "s1", { prompt: "/scrutinise src/ --deep run-1" }).status, 0);
+    const third = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } });
+    assert.equal(third.status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: a scrutineer grant is per-session and never unlocks other agents", () => {
+  const dir = tmpProject();
+  try {
+    invokeScrutinise(dir, "s1");
+    const otherSession = run(dir, { session_id: "s2", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } });
+    assert.equal(otherSession.status, 2);
+    const otherAgent = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:code-reviewer" } });
+    assert.equal(otherAgent.status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: /orchestrate does not grant a scrutineer", () => {
+  const dir = tmpProject();
+  try {
+    invokeScrutinise(dir, "s1", { prompt: "/orchestrate my-plan" });
+    const result = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } });
+    assert.equal(result.status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

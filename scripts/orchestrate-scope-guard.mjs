@@ -12,10 +12,12 @@
 // exists, is a real Git root, and is on a named branch) — so "no worktree,
 // no edits" no longer depends on the model remembering to ask for one.
 //
+// /scrutinise: grant exactly one isolated `craftsman:scrutineer` dispatch.
+//
 // Both: adopt the plan's acceptance criteria (see the bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantScrutineer } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 
 let input = {};
@@ -50,6 +52,11 @@ if (invoked === "orchestrate") {
     fs.writeFileSync(file, new Date().toISOString() + "\n");
   } catch { /* best-effort — falls back to /orchestrate's own prose-driven require call */ }
 }
+
+// /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
+// spends it). Re-arming on a repeat invocation is intended — each run of
+// /scrutinise gets its own single fresh-context reviewer, never more.
+if (invoked === "scrutinise") grantScrutineer(sidOf(input), context);
 
 // Adopt the plan's acceptance criteria. /plan writes acceptance.md, so only
 // the PLANNING session ever owned it — the session that actually executes the

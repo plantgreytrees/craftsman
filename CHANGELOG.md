@@ -5,7 +5,50 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`/scrutinise` now reviews through one isolated, fresh-context reviewer.**
+  The session that wrote the code was also the one judging it, so under
+  root-only mode the review had no independence at all. The review now runs in
+  a new `scrutineer` agent (`opus`, read-only, no Task tool). Its brief carries
+  facts only (ranges, floor hits, governing docs, open criteria), never the
+  implementation rationale. This is the second named exception to root-only
+  mode, and it is enforced: invoking `/scrutinise` writes a one-use grant for
+  the session, and `agent-mode-guard.mjs` spends it on dispatch. Spending is
+  an atomic rename, so a second or parallel scrutineer is blocked. If the
+  dispatch is blocked or fails, root runs the same brief and labels the
+  report `NOT ISOLATED`.
+  - *Root can no longer silently discard findings.* It checks each one
+    against its `file:line`. Any finding it drops or downgrades is listed
+    under **Disputed** together with the counter-evidence.
+  - *`--deep` works under root-only mode.* It used to refuse. It now runs the
+    whole audit sequentially inside the one scrutineer. Under `subagents`
+    mode, the parallel fan-out is unchanged.
+
 ### Fixed
+
+- **Logic gaps in `/scrutinise`.**
+  - The write policy said "nothing under docs/" while a later step updated
+    `docs/plans/TRACKER.md`. The policy now names the two writes it
+    sanctions: acceptance ticks and the reviewed plan's own tracker chips.
+  - A router `SKIP` said "stop", which skipped verification, the acceptance
+    verdict and the hand-off. It now only narrows the review.
+  - A whitespace-only (`TRIVIAL`) diff could leave open acceptance criteria
+    unjudged. The scrutineer still issues verdicts on them.
+  - The code-reviewer lens was skipped when `/orchestrate` had just
+    cross-reviewed the same set. That pass ran in the author's context, so
+    the skip is gone.
+  - `<slug>` was undefined for module and range targets. It now has a
+    definition.
+  - Severity labels were mixed (Major/Minor vs Critical/Warning). They are
+    now `Critical`/`Warning`/`Suggestion` throughout.
+  - `--deep` diffed against a hardcoded `main`. It now uses the run's base
+    branch.
+- **The agent-mode guard is also registered on the `Agent` tool name.**
+  Claude Code now calls the delegation tool `Agent`, and the hook matched
+  only `Task`. The matcher is now `Task|Agent`, and the compact gate's
+  matcher is widened the same way. `hooks.json` changes take effect after a
+  session restart.
 
 - **Merged worktrees no longer linger, and a unit can't be closed out with its
   acceptance criteria still open.**
