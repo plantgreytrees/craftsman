@@ -13,6 +13,7 @@ without re-reading).
 ---
 slug: <feature-slug>
 goal: <short user-visible outcome; one sentence, easy to scan in the tracker>
+idea: docs/ideas/<slug>.md                        # when built from an /idea verdict (same slug); omit otherwise
 classification: in-scope | deferred | out-of-scope   # cite the deciding line/source
 tracker_rows: [TRACKER#<id>, ...]                     # rows this plan registers
 guards:
@@ -39,8 +40,9 @@ units:
     security: high | normal
     scope:
       read: [<source/test/config files required to understand this unit>]
-      docs: [<specific docs required by this unit>]
+      docs: [<specific docs required by this unit, incl. every governing docs/architecture/<area>.rules.md>]
       write: [<files this unit may create or edit>]
+    arch: [<ARCH-<AREA>-NN ids this unit must obey — required when scope.write touches a governed path>]
     tooling: { implementer: implementer, gates: [<review agents the diff triggers>],
                skills: [<1-3>], guards: [<repo guards>], mcp: [<optional calls>] }
 ---
@@ -73,6 +75,8 @@ Depends on: <scope_id list, or none>
 
 ## Rules
 
+- **Slugs carry through the loop.** A plan built from `docs/ideas/<slug>.md` uses that slug, so `/architect`, `/instruction`, `/orchestrate`, `/scrutinise` and `/sync-docs` all address it by one name. Fix plans are `scrutinise-<slug>` / `investigate-<slug>`.
+- **Re-runs extend, never overwrite.** If `docs/plans/<slug>.md` already exists (a second `/scrutinise` round, a follow-up), add new steps with new ids; MERGED units, their rows and their acceptance lines are history.
 - Header fields are mandatory. The `coverage:` map is the completeness sweep made
   checkable — each category maps to a task id or `N/A(reason)`, never silence.
 - Tasks are atomic and self-contained: one file/test/command, verb-first, with an
@@ -84,6 +88,11 @@ Depends on: <scope_id list, or none>
   `docs` must contain concrete paths or narrow globs; `write` must contain every
   file the unit may create or edit. Never use a repository-wide glob or a whole
   directory when a file list can express the scope.
+- The per-unit `arch:` list names the architecture rules the unit is bound by
+  (`commands/_architecture.md`). Find them with `scripts/arch-check.mjs governs
+  <scope.write…>`; `scope.mjs` refuses to activate a step that writes a governed
+  path without loading its `.rules.md` and citing one of its live rules. Never
+  list a human `docs/architecture/<area>.md` in `scope.docs`.
 - A scope step is the smallest context-reset boundary: group all changes that
   affect the same project/repository and dependency boundary together. Use one
   `scope_id` per step, list explicit `depends_on` ids, and keep `project` stable.

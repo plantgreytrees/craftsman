@@ -185,29 +185,34 @@ export function requireCompact(sid, context = null) {
   } catch {}
   return marker;
 }
-// /scrutinise's isolated reviewer: one invocation grants exactly one
-// `craftsman:scrutineer` dispatch, even under root-only agent mode. Granted by
-// orchestrate-scope-guard.mjs when /scrutinise is invoked, spent by
+// Isolated fresh-context agents: one command invocation grants exactly one
+// dispatch of its named agent, even under root-only agent mode — /scrutinise →
+// `scrutineer`, /idea → `idea-critic`, /architect --deep → `architect-analyst`.
+// Granted by orchestrate-scope-guard.mjs when the command is invoked, spent by
 // agent-mode-guard.mjs when the dispatch happens. Spending is a rename, which
 // only one caller can win, so two parallel dispatches can't both slip through.
-export function scrutineerGrantFile(sid, context = null) {
-  return path.join(sessionDir(sid, context), "scrutineer-grant");
+export const GRANTED_AGENTS = ["scrutineer", "idea-critic", "architect-analyst"];
+export function agentGrantFile(agent, sid, context = null) {
+  return path.join(sessionDir(sid, context), `${agent}-grant`);
 }
-export function grantScrutineer(sid, context = null) {
-  const grant = scrutineerGrantFile(sid, context);
+export function grantAgent(agent, sid, context = null) {
+  const grant = agentGrantFile(agent, sid, context);
   try {
     fs.mkdirSync(path.dirname(grant), { recursive: true });
     fs.writeFileSync(grant, new Date().toISOString() + "\n");
   } catch {}
   return grant;
 }
-export function spendScrutineerGrant(sid, context = null) {
-  const grant = scrutineerGrantFile(sid, context);
+export function spendAgentGrant(agent, sid, context = null) {
+  const grant = agentGrantFile(agent, sid, context);
   const spent = `${grant}.spent-${process.pid}-${Date.now()}`;
   try { fs.renameSync(grant, spent); } catch { return false; }
   try { fs.unlinkSync(spent); } catch {}
   return true;
 }
+export const scrutineerGrantFile = (sid, context = null) => agentGrantFile("scrutineer", sid, context);
+export const grantScrutineer = (sid, context = null) => grantAgent("scrutineer", sid, context);
+export const spendScrutineerGrant = (sid, context = null) => spendAgentGrant("scrutineer", sid, context);
 export const COMPACT_REQUIRED_NOTICE =
   "/compact (or /clear) is now REQUIRED before any further tool use this session — " +
   "every other tool call will be blocked until you do.";

@@ -2,7 +2,8 @@
 // PreToolUse (Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit): deterministic
 // checks in a SINGLE process (one Node spawn per tool call) —
 //   1. hard-block edits to protected / generated / lock / secret paths
-//   2. enforce that only /plan, /orchestrate, /sync-docs may edit docs/
+//   2. enforce that only the doc-writing commands (/plan, /orchestrate,
+//      /sync-docs, /idea, /architect) may edit the guarded docs/ paths
 // Doc authority is SESSION-SCOPED: each session holds its own grant, so
 // concurrent sessions never block or leak into one another.
 import fs from "node:fs";

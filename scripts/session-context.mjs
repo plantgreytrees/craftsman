@@ -12,7 +12,7 @@ import {
 } from "./lib/core.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
-import { listWorktrees } from "./worktree-sweep.mjs";
+import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
@@ -179,14 +179,14 @@ const rules = topRules(cfg, context);
 const verbose = cfg.sessionContext?.verbose === true;
 const standingRules = verbose
   ? [
-      `LOOP: work the doc-first loop — UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS. Nothing changes code without a plan doc (docs/plans/) describing it first.`,
+      `LOOP: work the doc-first loop — IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS (/instruction packs it into one /goal; existing code enters at /understand or /investigate → PLAN). Nothing changes code without a plan doc (docs/plans/) describing it first; one slug names the work throughout; the loop obeys docs/architecture/*.rules.md.`,
       `SCOPE: that requirement narrows for a genuinely small change — one file, no shared-contract/exported-type change, no migration, no security-sensitive surface (/plan calls this "trivial" and skips its own decomposition ceremony for it) — edit directly; the deterministic gates below still apply regardless.`,
       `PLANNING: plan every non-trivial change in the idioms of the TARGET LANGUAGE from the outset — error model, data modeling, abstraction mechanism and concurrency model are language decisions, not neutral ones. Do not design in pseudocode and translate.`,
       `ABSTRACTION BUDGET: an interface/base class/layer needs a second concrete implementor or a stated extension requirement. Otherwise omit it.`,
       `ENFORCEMENT: files you write are auto-formatted, linted and type-checked. Only NEW issues you introduce are reported — never fix pre-existing findings in unrelated code unless asked.`,
     ]
   : [
-      `LOOP: non-trivial change → /plan → /orchestrate → /scrutinise → /sync-docs. One-file, no-contract, no-security change → edit directly (gates below still apply).`,
+      `LOOP: non-trivial change → /plan → /orchestrate → /scrutinise → /sync-docs. One-file, no-contract, no-security change → edit directly (gates below still apply). New idea → /idea → /architect → /instruction.`,
     ];
 
 const rootOnly = (cfg.execution?.agentMode || "root-only") !== "subagents";
@@ -211,13 +211,19 @@ let trackerLineCount = 0;
 try { trackerLineCount = fs.readFileSync(trackerPath, "utf8").split("\n").length; } catch {}
 const trackerBloated = trackerNudgeLines > 0 && trackerLineCount > trackerNudgeLines;
 
-// Lingering worktrees. The Stop sweep only sees what THIS session prepared,
-// so merged leftovers from earlier sessions — and Claude Code's own
-// .claude/worktrees/ — were invisible to everything. Report (never remove)
-// the ones worktree-sweep.mjs proves safe: merged, clean, not held by a live
-// session. Removal stays an explicit call.
+// Lingering worktrees. Merged leftovers from earlier sessions — and Claude
+// Code's own .claude/worktrees/ once their session has ended — are removed
+// here, mechanically, whenever worktree-sweep.mjs proves them safe: merged,
+// clean, not held by a live session. Relying on the model to run the sweep
+// meant they lingered whenever it forgot. Anything that failed removal is
+// still reported.
+let swept = [];
 let lingering = [];
-try { lingering = listWorktrees(context.root).filter((entry) => entry.removable); } catch {}
+try {
+  const result = sweep(context.root, { all_merged: true });
+  swept = result.removed;
+  lingering = listWorktrees(context.root).filter((entry) => entry.removable);
+} catch {}
 
 // Deliberately terse below (see comment above standingRules): every rule's
 // full explanation lives in the shared docs, read in full at the moment a
@@ -229,13 +235,14 @@ try { lingering = listWorktrees(context.root).filter((entry) => entry.removable)
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
   rootOnly
-    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist and /scrutinise's one isolated scrutineer.`
+    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, and the one isolated agent each of /scrutinise, /idea and /architect --deep.`
     : "",
   ...standingRules,
   (cfg.security?.enabled || cfg.stopGate?.requireAcceptanceCriteria)
     ? `Stop gate: ${[cfg.security?.enabled && "secrets scan", cfg.stopGate?.requireAcceptanceCriteria && "unticked acceptance criteria"].filter(Boolean).join(" + ")} block completion.`
     : "",
   handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
+  swept.length ? `WORKTREES SWEPT (merged, clean): ${summarizeUnits(swept.map((e) => path.relative(context.root, e.path)))}.` : "",
   lingering.length ? `LINGERING WORKTREES: ${summarizeUnits(lingering.map((e) => path.relative(context.root, e.path)))} — merged, clean, unowned. Remove: printf '%s' '{"action":"sweep","all_merged":true}' | node "${path.join(PLUGIN_ROOT, "scripts", "worktree-sweep.mjs")}"` : "",
   trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
   restoredMemory.length ? `PLAN MEMORY (verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}] ${entry.summary}`).join("\n") : "",

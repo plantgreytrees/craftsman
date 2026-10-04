@@ -71,3 +71,25 @@ test("session-context: a session that never armed the gate starts clean and unbl
     assert.equal(fs.existsSync(markerFor(dir, "fresh")), false);
   });
 });
+
+test("session-context: SessionStart removes merged, clean leftover worktrees and keeps dirty ones", () => {
+  withProject((dir) => {
+    const git = (cwd, ...args) => {
+      const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+      assert.equal(r.status, 0, `git ${args.join(" ")}: ${r.stderr}`);
+    };
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+    const clean = path.join(dir, ".worktrees", "clean");
+    const dirty = path.join(dir, ".worktrees", "dirty");
+    git(dir, "worktree", "add", "-q", "-b", "feat/clean", clean);
+    git(dir, "worktree", "add", "-q", "-b", "feat/dirty", dirty);
+    fs.writeFileSync(path.join(dirty, "wip.txt"), "wip\n");
+
+    const result = run(SESSION_CONTEXT, dir, { session_id: "sweeper" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.existsSync(clean), false, "merged clean worktree must be removed at SessionStart");
+    assert.equal(fs.existsSync(dirty), true, "a worktree with uncommitted changes is never removed");
+    assert.match(result.stdout, /WORKTREES SWEPT/);
+  });
+});

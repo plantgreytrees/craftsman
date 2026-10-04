@@ -5,6 +5,57 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **`/idea`, `/architect` and `/instruction`: a front end for the loop that
+  vets an idea, decides its architecture, and drives it to completion.**
+  - *`/idea` (opus) scrutinises an idea before anything is designed.* It
+    restates the idea neutrally, then:
+    - scans for overlap with past ideas (rejected ones included), plans,
+      tracker rows and architecture rules;
+    - maps the impact across all eight completeness dimensions;
+    - researches prior art and pitfalls on the web.
+
+    One isolated `idea-critic` then judges it without having heard the pitch.
+    It must steelman the idea, attack it, and weigh *do nothing* and the
+    smallest useful slice. The result is a scored verdict (pursue / pursue with
+    changes / defer / reject) saved to `docs/ideas/<slug>.md`. `--deep` runs
+    the critic on Fable with a second adversarial round.
+  - *`/architect` (opus) turns a vetted idea into confirmed decisions.* It
+    checks the idea's claims against the code (`CONFIRMED` / `WRONG` /
+    `UNPROVEN`). It inventories decisions across code structure, software
+    design, data, systems, security, observability, testing, compatibility and
+    rollout. Existing rules are inherited, not re-asked. The user confirms every
+    open decision and every amendment through questions. `--deep` hands
+    validation and the decision analysis to one isolated `architect-analyst` on
+    Fable. `--init` builds a baseline from the code, where unconfirmed patterns
+    stay advisory `[observed]` rules. `--update` re-verifies rules and refuses
+    to rewrite a violated decision to match the code.
+  - *Architecture docs are split by reader.* `<area>.md` is plain English plus
+    mermaid, for people, and the loop never loads it. `<area>.rules.md` holds
+    numbered `ARCH-…` rules plus the paths they `govern`, and is what the loop
+    enforces. `/sync-docs` no longer edits `docs/architecture/**`; `/sync-docs
+    --all` hands that to `/architect --update`.
+  - *The loop must obey the rules, mechanically.* `/plan` cites rule ids per
+    unit, `plan-reviewer` checks them, and the scrutineer reports violations
+    under a new **Architecture** finding class. `scope.mjs` refuses to activate
+    a unit that writes a governed path without loading its rules doc and citing
+    a live rule, so `/orchestrate` cannot edit there. The new
+    `scripts/arch-check.mjs` provides `lint`, `governs` and `scope` modes.
+    Disable the gate with `architecture.enforce: false`.
+  - *`/instruction` (sonnet) writes one paste-ready `/goal` prompt.* The prompt
+    runs plan → orchestrate → scrutinise (looping until there are no Critical
+    or Warning findings) → sync-docs → `/architect --update`. It ends on
+    printed completion evidence, because the `/goal` evaluator only sees the
+    transcript. It is checked against `/goal`'s 4,000-character cap. Shown
+    separately, outside the prompt, is an implementation weight
+    (quick / medium / long / extra long) derived from countable drivers.
+  - *Isolated-agent grants are generalized.* `/idea` grants one `idea-critic`
+    and `/architect --deep` grants one `architect-analyst`, alongside
+    `/scrutinise`'s scrutineer. Each grant is spent on use, and every other
+    Task call stays blocked under root-only mode. `docs/ideas/**` and
+    `docs/architecture/**` join the doc-write guard.
+
 ### Changed
 
 - **One tracker, in the main checkout, kept current by hooks.** The ledger
@@ -22,6 +73,26 @@ All notable changes to craftsman are documented here. Format loosely follows
     through the ledger.
   - *Hard guard.* `pre-guard` blocks Write/Edit to a worktree's copy of
     `TRACKER.md` and any edit that changes the generated block.
+
+- **The commands now hand off to each other as one loop, idea to sync-docs.**
+  - One slug carries through. `/plan` reuses the idea's slug and links it with
+    `idea:`, so `/instruction`, `/orchestrate`, `/scrutinise` and
+    `/sync-docs` all address the same name. A second `/scrutinise` round
+    extends `scrutinise-<slug>` instead of overwriting it.
+  - `/sync-docs` accepts a plan slug, and `/sync-docs --all <slug>` is the
+    closing step everywhere. It reconciles docs and tracker, then runs
+    `/architect --update`. A pre-approval such as an `/instruction` `/goal`
+    covers doc-stale fixes only. Divergences, violations and decision changes
+    still stop.
+  - Architecture rules are checked at every stage. The per-unit merge gate
+    (and `code-reviewer`) checks each cited ARCH rule, so a broken `decided`
+    rule blocks before merge rather than surfacing in `/scrutinise`.
+    `/understand`, `/investigate`, `/fix-tests` and `/scrutinise --deep`
+    read only the governing `.rules.md`.
+  - `/sync-docs` no longer registers tracker rows. Like every other command,
+    it routes regressions to `/investigate` → `/plan`.
+  - The idea template's `verdict:` only takes real verdicts, and both pursue
+    verdicts hand off to `/architect`.
 
 - **`/scrutinise` now reviews through one isolated, fresh-context reviewer.**
   The session that wrote the code was also the one judging it, so under
@@ -42,6 +113,12 @@ All notable changes to craftsman are documented here. Format loosely follows
     mode, the parallel fan-out is unchanged.
 
 ### Fixed
+
+- **`/scrutinise` could not write its tracker chips.** It updates
+  `docs/plans/TRACKER.md`, a guarded doc path, but never ran
+  `doc-write.mjs on`, so the guard blocked the write. Also, `SKIPPED(locked)`
+  was not a tracker status. A merge that never gets the lock is now
+  `PARKED(locked)`, which the tracker can record and resume.
 
 - **Logic gaps in `/scrutinise`.**
   - The write policy said "nothing under docs/" while a later step updated
@@ -65,7 +142,18 @@ All notable changes to craftsman are documented here. Format loosely follows
   only `Task`. The matcher is now `Task|Agent`, and the compact gate's
   matcher is widened the same way. `hooks.json` changes take effect after a
   session restart.
-
+- **Worktree removal is enforced by the hooks, not left to memory.** Every Stop
+  and every SessionStart now runs the `worktree-sweep.mjs` `all_merged` sweep
+  over the whole repository. Any worktree that is merged into the base
+  branch, clean, not the session's cwd and not locked by a live session is
+  removed, along with its branch, whoever created it. Previously SessionStart
+  only *reported* such worktrees (`LINGERING WORKTREES`), and Stop only
+  blocked on worktrees this session made through `repo-exec`. Those blocks
+  told the model to run cleanup, so leftovers from a hand-run `git merge`,
+  `EnterWorktree` or a background job depended on it remembering. The Stop
+  block now fires only for a merged worktree from this session that the sweep
+  couldn't safely remove, and it names the reason (e.g. uncommitted changes).
+  Dirty or live-locked worktrees are never forced.
 - **Merged worktrees no longer linger, and a unit can't be closed out with its
   acceptance criteria still open.**
   - *Cleanup is no longer a step the model has to remember.* `repo-exec.mjs

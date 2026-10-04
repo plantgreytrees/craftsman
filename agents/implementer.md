@@ -16,6 +16,8 @@ You implement one plan unit end to end. Your prompt names that unit, its files, 
 
 **Standards.** If the repo documents coding standards (contributor guide, standards doc, lint config), conform to them — deviations will bounce back from review.
 
+**Architecture rules.** Any `docs/architecture/<area>.rules.md` in `scope.docs` is binding: obey every `[decided]` rule the unit cites, follow `[observed]` ones by default. If the unit cannot be done without breaking a `decided` rule, stop and report the rule id — never work around it.
+
 **Verification loop** — use the build/test/format commands the repo actually defines (discover them, do not invent your own):
 1. Build the smallest scope covering your change; it must be clean before you finish.
 2. Format if the repo enforces formatting.

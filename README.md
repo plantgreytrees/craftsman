@@ -43,7 +43,11 @@ does what the layer below can't:
 | Feedback | when a check fails, its output is fed straight back to Claude mid-turn to fix | ~free |
 | Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
 
-**2. A doc-first workflow:** **UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.**
+**2. A doc-first workflow:** **IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.**
+`/idea` vets a new idea, `/architect` turns it into enforced decisions, and
+`/instruction` packs the rest into one `/goal` prompt; `/understand` and
+`/investigate` enter at PLAN for existing code and bugs. One slug names the
+work from idea doc to plan, fix round and sync.
 Planners write a short plan doc; `/orchestrate` executes it, reading each unit's
 actual diff through `gate-select.mjs` to deterministically route it to the
 specialists that apply — `ui-ux-reviewer`, `migration-reviewer`, `api-reviewer`,
@@ -72,6 +76,9 @@ gitignored local snapshot.
 |---|---|
 | `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair required project structure |
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
+| `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
+| `/architect` | turn a vetted idea into confirmed engineering/data/systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`) |
+| `/instruction` | generate one paste-ready `/goal` prompt that drives the whole loop to verified completion, plus an effort estimate |
 | `/understand` | build a cited understanding of a feature/area before touching it |
 | `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
 | `/orchestrate` | implement a plan doc across the repo (per-unit review is routed too, same reasoning as `/scrutinise`) |
@@ -110,12 +117,25 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
 
 ## Good to know
 
-- **Doc-write authority** — only `/plan` and `/orchestrate` can edit plan docs and
-  the tracker (`docs/plans/**` by default — the surface with real concurrency
-  stakes); every other command produces analysis and hands off to `/plan`. The
-  rest of `docs/` is ordinary prose, freely editable; widen the guard back to
-  all of `docs/` in config if you want the stricter default. Enforced
-  deterministically, per session.
+- **Doc-write authority** — the guarded paths (`docs/plans/**`, `docs/ideas/**`,
+  `docs/architecture/**`) are blocked until a writer command grants the
+  session. `/plan` writes plans; `/orchestrate`, `/scrutinise` and
+  `/sync-docs --tracker` update tracker rows; `/idea` writes idea docs
+  (`/architect` marks them `architected`); `/architect` writes
+  architecture docs. `/understand` and `/investigate` write nothing and hand
+  off to `/plan`. The rest of `docs/` is ordinary prose, freely editable;
+  widen the guard in config if you want it stricter. The block is a hook; the
+  grant covers every guarded path for that session, so which command writes
+  which path is the commands' contract.
+- **Architecture decisions are enforced, not just written down** — `/architect`
+  writes each area as a pair: `<area>.md` for people (plain English, mermaid,
+  rationale), which the loop never loads, and a terse `<area>.rules.md` of
+  numbered `ARCH-…` rules plus the paths it `governs`. `/plan` cites the rules
+  per unit, `plan-reviewer` and the scrutineer check them, and `scope.mjs`
+  refuses to activate a unit that writes a governed path without loading and
+  citing its rules — so `/orchestrate` cannot edit there until it does. Breaking
+  a decided rule takes `/architect`, never a workaround. Switch the gate off
+  with `architecture.enforce: false`.
 - **Safe with concurrent sessions** — each session's state (test baseline, plan
   criteria, doc authority) is isolated under `.craftsman/sessions/<id>/`; one
   session finishing never blocks another. Each execution unit must activate a
@@ -152,13 +172,14 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   planners do the work themselves, sequentially, instead of fanning out
   subagents; `execution.agentMode` (default `root-only`) is enforced by a
   `PreToolUse` hook that hard-blocks `Task` calls, not just a convention.
-  There are two standing exceptions: `/plan`'s one decomposition step, and
-  `/scrutinise`'s single isolated `scrutineer`, which reviews merged work in a
-  fresh context that never saw the code being written (both run on `opus`;
-  everything else in `/plan`, and most agents, run cheaper —
-  `implementer`/`security-auditor` stay on `sonnet`). Each `/scrutinise` run
-  is granted exactly one scrutineer, so a second or parallel dispatch is
-  blocked. Flip
+  The standing exceptions are `/plan`'s one decomposition step and one
+  isolated fresh-context agent per run of `/scrutinise` (`scrutineer`, which
+  reviews merged work without having seen it written), `/idea`
+  (`idea-critic`, which judges the idea without hearing the pitch) and
+  `/architect --deep` (`architect-analyst`, on Fable). The first three run on
+  `opus`; everything else in `/plan`, and most agents, run cheaper —
+  `implementer`/`security-auditor` stay on `sonnet`. Each run is granted
+  exactly one such agent, so a second or parallel dispatch is blocked. Flip
   `execution.agentMode` to `"subagents"` to restore real fan-out.
 - **Context stays bounded, mechanically** — a hand-off or a unit reaching a
   terminal tracker state (merged, blocked, or parked) marks the session

@@ -7,7 +7,7 @@ allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashComman
 
 # Orchestrate — the executor
 
-> Doc authority: /orchestrate is one of the two commands allowed to write under docs/ (tracker rows). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
+> Doc authority: /orchestrate is a doc writer (tracker rows only — plans are `/plan`'s). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
 You **execute a documented plan** — a plan doc already decided what to build (planning is `/plan`/`/investigate`; you are execution only). Plan nothing, delegate implementation, gate, review, and merge — one unit at a time.
 
@@ -28,7 +28,7 @@ Input `$ARGUMENTS`, resolved in Phase A. Before Phase B, `Read` `${CLAUDE_PLUGIN
 2. **Blast-radius confirmation.** `/plan` already ran `consumer-tracer` per changed contract and persisted its `CONSUMERS:` block into the plan's Verification background — read that first. Re-run `consumer-tracer` only when no persisted manifest covers a contract this run touches, or the plan predates a merge that could've added a consumer. Anything found (persisted or fresh) the plan lacks → add the unit or record why out of scope.
 3. Validate and topologically order the `scope_id`/`depends_on` graph: `{"steps":[...]}` (id, scope_id, project, depends_on) on stdin to `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-graph.mjs"` — exits non-zero on a missing dependency, cycle, or unknown `project`; fix the plan and re-run, never hand-order by eye. Write the returned order to TodoWrite.
 4. Treat each scope step as one execution packet — read its `project`, task text, `scope`, `### Tooling` manifest once, keep active until all its tasks complete; don't reload per task. Each project runs through its own worktree, base branch, merge lock, remote, cleanup lifecycle.
-5. **Read each step's `scope` manifest** as a hard allow-list — load only `scope.read`+`scope.docs` (plus tracker row + task text) before delegating; `scope.write` is the only writable set. No broad `Glob`/`Grep`, no unselected workspace projects.
+5. **Read each step's `scope` manifest** as a hard allow-list — load only `scope.read`+`scope.docs` (plus tracker row + task text) before delegating; `scope.write` is the only writable set. No broad `Glob`/`Grep`, no unselected workspace projects. **Architecture:** pass the unit's `arch` ids into `scope.mjs` with the manifest — activation is refused when a governed path is written without its `.rules.md` loaded and a live rule cited (`${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md`). A unit that cannot honour a `decided` rule → PARK with the rule id and recommend `/architect`; never work around it.
 6. **Activate the scope before Phase C** — exact step manifest as JSON on stdin to `scripts/scope.mjs`, creating the session-owned allow-list. A blocked tool call = mandatory re-scope: re-analyse the dependency boundary, update the plan's scope, reactivate, retry. Never widen to a repo-wide search.
 7. Before each step: claim via `scripts/claim.mjs`, mark scope-required via `printf '%s' '{"action":"require","session_id":"<real session id>"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/scope.mjs"`, activate the packet. **Mechanical, not just this instruction:** `orchestrate-scope-guard.mjs` (`PostToolUse` on `SlashCommand`, and `UserPromptSubmit` so a user-typed `/orchestrate` arms it too) sets the same flag the instant `/orchestrate` is invoked, so `pre-guard.mjs` hard-blocks every Read/Write/Edit/Bash call before any scope is active — even if this step is skipped. Implementer repeats activation in its worktree before its first tool call; activation failure = no implementation-context tool call, mechanically.
 
@@ -56,8 +56,8 @@ Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero sur
 1. Re-read the plan's user-visible outcomes. Per feature, delegate a completeness investigation (`general-purpose`, or `code-reviewer` integration-mode with a completeness mandate): the whole path exists end-to-end — every contract consumer updated, every endpoint guarded, every UI call site rendering, tests on the new path, no dangling half-implementation. Hunt for **what the plan didn't mention**.
 2. In-scope gap → loop back to Phase C and close it; out-of-scope adjacent → PENDING row. No COMPLETE while an in-scope gap remains.
 3. **Record memory:** tooling/gotchas learned, contracts touched → consumers, decisions made.
-4. **Recommend the closing pair:** `/scrutinise <slug>` (simplification + doc-conformance) then `/sync-docs` (reconcile docs to shipped reality) — closes PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS.
+4. **Recommend the closing pair:** `/scrutinise <slug>` (isolated logic/security/architecture/cross-unit review; its fixes run as `/orchestrate scrutinise-<slug>`) then `/sync-docs --all <slug>` (docs, tracker and architecture reconciled to shipped reality) — closes PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.
 
 ## Summary
 
-Print: features completed (units merged per feature); every BLOCKED/PARKED/SKIPPED unit with reason + branch left behind; partial-shipment warnings; residual confidence (verified end-to-end vs unproven, e.g. smoke skipped because unavailable).
+Print: features completed (units merged per feature); every BLOCKED/PARKED unit with reason + branch left behind; partial-shipment warnings; residual confidence (verified end-to-end vs unproven, e.g. smoke skipped because unavailable).
