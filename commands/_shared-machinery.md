@@ -16,7 +16,7 @@ Referenced by: `orchestrate.md` · executed `investigate-*`/`scrutinise-*` plan 
 - **Decide from `docs/`, don't stall.** Resolve design/architecture/security calls by reading `docs/architecture/*`/`docs/standards/*` and acting — cite `file:line`, record the decision. Stop the user only for genuine product/scope ambiguity or a locked-invariant change.
 - **Acceptance is the contract.** `.craftsman/acceptance.md` (if present) gates "done"; the plan's acceptance section refines it per feature.
 - **Plans** live only in `docs/plans/<slug>.md`.
-- **Shared tracker** (`docs/plans/TRACKER.md`) — touch only rows you created; never prune/reformat foreign ones.
+- **Shared tracker** (`docs/plans/TRACKER.md` in the **main checkout**, never a worktree's copy) — rows change only through `scripts/tracker.mjs`; its generated ledger block re-renders automatically and is hook-protected. In hand-written sections, touch only rows you created; never prune/reformat foreign ones.
 - **Commit style** — Conventional Commits; a hook rejection is fixed in the worktree, never bypassed. `--no-verify`/`--no-gpg-sign`/gpgsign-off is **mechanically blocked** by `pre-guard.mjs`, not just forbidden by convention.
 - **Deterministic guards are the backstop.** `consumer-tracer` before touching any exported/shared contract; the project's own detected format/lint/typecheck/test at each gate. An un-updated consumer is the #1 missed unit.
 - **Standards, same change.** A governing `docs/standards/` entry: implementer conforms, `code-reviewer` checks it; `standards-keeper` (audit mode) for whole-family consistency. No standard for an established family → note it, run `standards-keeper` (derive mode).

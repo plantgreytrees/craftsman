@@ -1,7 +1,8 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-context.mjs\"", "timeout": 60 } ] }
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-context.mjs\"", "timeout": 60 } ] },
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/tracker-sync.mjs\"", "timeout": 10 } ] }
     ],
     "PreToolUse": [
       { "matcher": "Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit|Bash",
@@ -14,6 +15,8 @@
     "PostToolUse": [
       { "matcher": "Write|Edit|MultiEdit",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/quality-gate.mjs\"", "timeout": 60 } ] },
+      { "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/tracker-sync.mjs\"", "timeout": 10 } ] },
       { "matcher": "SlashCommand|Skill",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orchestrate-scope-guard.mjs\"", "timeout": 10 } ] }
     ],
@@ -21,7 +24,8 @@
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orchestrate-scope-guard.mjs\"", "timeout": 10 } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stop-gate.mjs\"", "timeout": 300 } ] }
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/stop-gate.mjs\"", "timeout": 300 } ] },
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/tracker-sync.mjs\"", "timeout": 10 } ] }
     ]
   }
 }

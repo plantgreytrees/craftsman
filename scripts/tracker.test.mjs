@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { acceptanceNotice, currentState, reconcileAcceptance, transition } from "./tracker.mjs";
+import { execFileSync } from "node:child_process";
+import {
+  acceptanceNotice, currentState, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
+  syncTrackerDoc, trackerDocPath, trackerRoot, transition,
+} from "./tracker.mjs";
 
 const fixtures = new Set();
 function context() {
@@ -123,4 +127,61 @@ test("tracker: an IN_PROGRESS unit with every criterion ticked is reported ready
   assert.equal(status(selected, "unit-2"), "IN_PROGRESS");
   assert.match(acceptanceNotice(result), /unit-2[\s\S]*merge it now/);
   assert.doesNotMatch(acceptanceNotice(result), /unit-3/);
+});
+
+const trackerDoc = (selected) => fs.readFileSync(path.join(selected.root, "docs", "plans", "TRACKER.md"), "utf8");
+
+test("tracker: every transition re-renders TRACKER.md's generated block and keeps the hand-written rest", () => {
+  const selected = context();
+  fs.mkdirSync(path.join(selected.root, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(path.join(selected.root, "docs", "plans", "TRACKER.md"), "# Execution tracker\n\nHand-written notes.\n");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", scope_id: "S1", module: "api", status: "PENDING" }, selected);
+  let doc = trackerDoc(selected);
+  assert.match(doc, /^# Execution tracker\n\nHand-written notes\.\n\n## Live ledger\n/);
+  assert.match(doc, /\| \[example\]\(\.\/example\.md\) \| unit-1 \(S1\) \| api \| PENDING \| — \| \d{4}-\d{2}-\d{2} \|/);
+
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed | by me" }, selected);
+  doc = trackerDoc(selected);
+  assert.match(doc, /\| IN_PROGRESS \| claimed \\\| by me \|/);
+  assert.doesNotMatch(doc, /PENDING/);
+  assert.equal(doc.match(/craftsman:ledger:begin/g).length, 1, "the block is replaced, never appended twice");
+  assert.equal(generatedBlock(doc), renderBlock(currentState(selected)));
+});
+
+test("tracker: sync restores a hand-tampered block and is a no-op when it already matches", () => {
+  const selected = context();
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
+  const file = path.join(selected.root, "docs", "plans", "TRACKER.md");
+  const rendered = trackerDoc(selected);
+  assert.equal(syncTrackerDoc(selected).changed, false);
+  fs.writeFileSync(file, rendered.replace("| PENDING |", "| COMPLETE |"));
+  assert.equal(syncTrackerDoc(selected).changed, true);
+  assert.equal(trackerDoc(selected), rendered);
+});
+
+test("tracker: a repo with no ledger rows never grows a generated section", () => {
+  const selected = context();
+  assert.equal(syncTrackerDoc(selected).changed, false);
+  assert.equal(fs.existsSync(path.join(selected.root, "docs", "plans", "TRACKER.md")), false);
+});
+
+test("tracker: a linked worktree writes the ledger and TRACKER.md in the main checkout, not the worktree", () => {
+  const main = context().root;
+  const git = (...args) => execFileSync("git", ["-C", main, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { stdio: "ignore" });
+  git("init", "-q");
+  git("commit", "-q", "--allow-empty", "-m", "init");
+  const worktree = path.join(main, ".claude", "worktrees", "wt");
+  git("worktree", "add", "-q", "-b", "wt", worktree);
+  const selected = { id: ".", root: worktree, stateDir: path.join(worktree, ".craftsman") };
+
+  assert.equal(trackerRoot(selected), fs.realpathSync(main));
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
+  assert.equal(ledgerPath(selected), path.join(fs.realpathSync(main), ".craftsman", "tracker", "events.jsonl"));
+  assert.equal(trackerDocPath(selected), path.join(fs.realpathSync(main), "docs", "plans", "TRACKER.md"));
+  assert.ok(fs.existsSync(ledgerPath(selected)));
+  assert.match(fs.readFileSync(trackerDocPath(selected), "utf8"), /\| unit-1 \| — \| PENDING \|/);
+  assert.equal(fs.existsSync(path.join(worktree, ".craftsman", "tracker")), false);
+  assert.equal(fs.existsSync(path.join(worktree, "docs", "plans", "TRACKER.md")), false);
+  // The main checkout sees the same row the worktree wrote.
+  assert.equal(currentState({ id: ".", root: main, stateDir: path.join(main, ".craftsman") })[0].status, "PENDING");
 });

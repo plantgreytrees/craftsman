@@ -114,6 +114,29 @@ export function isGitRoot(root) {
   } catch { return false; }
 }
 
+// The main checkout that owns `root`, even when `root` is a linked worktree.
+// Shared, cross-session state (the tracker ledger and its TRACKER.md view)
+// lives here: written inside a worktree it is invisible to every other
+// session until a merge, and each worktree's copy drifts. The first entry of
+// `git worktree list` is always the main working tree; a bare main repo, or
+// a root that isn't a git checkout at all, keeps `root` itself.
+const mainRoots = new Map();
+export function mainCheckoutRoot(root = PROJECT_ROOT) {
+  const key = path.resolve(root);
+  if (mainRoots.has(key)) return mainRoots.get(key);
+  let main = key;
+  try {
+    const listing = execFileSync("git", ["-C", key, "worktree", "list", "--porcelain"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    const [first] = listing.split(/\n\n/);
+    const candidate = /^worktree (.+)$/m.exec(first)?.[1];
+    if (candidate && !/^bare$/m.test(first) && fs.existsSync(candidate)) main = path.resolve(candidate);
+  } catch { /* not a git checkout — the root is its own main */ }
+  mainRoots.set(key, main);
+  return main;
+}
+
 export async function git(args, context = null) {
   try { const { stdout } = await pexec("git", args, { cwd: context?.root || PROJECT_ROOT, maxBuffer: 8e6 }); return stdout; }
   catch { return ""; }

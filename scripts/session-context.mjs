@@ -11,7 +11,7 @@ import {
   sidOf, sessionDir, compactRequiredFile, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
 } from "./lib/core.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
-import { compactLedger } from "./tracker.mjs";
+import { compactLedger, trackerDocPath } from "./tracker.mjs";
 import { listWorktrees } from "./worktree-sweep.mjs";
 
 let input = {};
@@ -205,7 +205,7 @@ function summarizeUnits(units) {
 // a real, permanent, ever-growing tax — only /sync-docs --tracker archives
 // shipped rows, and that's prose-only, same gap /compact had before the
 // PostToolUse nudge. Cheap: one line-count, already-read-for-branch context.
-const trackerPath = path.join(context.root, "docs", "plans", "TRACKER.md");
+const trackerPath = trackerDocPath(context); // the main checkout's copy, even from a worktree
 const trackerNudgeLines = cfg.tracker?.nudgeLines ?? 300;
 let trackerLineCount = 0;
 try { trackerLineCount = fs.readFileSync(trackerPath, "utf8").split("\n").length; } catch {}

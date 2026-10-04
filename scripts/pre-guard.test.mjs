@@ -251,3 +251,60 @@ test("pre-guard: blocks a symlinked scope target outside the project", () => {
     fs.rmSync(outside, { recursive: true, force: true });
   }
 });
+
+function gitRepoWithWorktree() {
+  const main = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-guard-")));
+  const git = (...args) => spawnSync("git", ["-C", main, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { encoding: "utf8" });
+  git("init", "-q");
+  git("commit", "-q", "--allow-empty", "-m", "init");
+  const worktree = path.join(main, ".claude", "worktrees", "wt");
+  git("worktree", "add", "-q", "-b", "wt", worktree);
+  const block = "<!-- craftsman:ledger:begin -->\n| plan | status |\n| a | PENDING |\n<!-- craftsman:ledger:end -->";
+  const text = `# Execution tracker\n\nHand notes.\n\n${block}\n`;
+  for (const root of [main, worktree]) {
+    fs.mkdirSync(path.join(root, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(root, "docs", "plans", "TRACKER.md"), text);
+  }
+  return { main, worktree, text };
+}
+
+test("pre-guard: a linked worktree's copy of TRACKER.md is blocked and points at the main checkout's", () => {
+  const { main, worktree } = gitRepoWithWorktree();
+  try {
+    const result = run(GUARD, worktree, {
+      session_id: "tracker-wt", tool_name: "Edit",
+      tool_input: { file_path: path.join(worktree, "docs", "plans", "TRACKER.md"), old_string: "Hand notes.", new_string: "x" },
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /tracker lives only in the main checkout/);
+    assert.ok(result.stderr.includes(path.join(main, "docs", "plans", "TRACKER.md")));
+  } finally {
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: the root TRACKER.md's generated block can't be hand-edited; the hand-written rest can", () => {
+  const { main, text } = gitRepoWithWorktree();
+  try {
+    const file = path.join(main, "docs", "plans", "TRACKER.md");
+    assert.equal(run(DOC_WRITE, main, {}).status, 0);
+    const blocked = run(GUARD, main, {
+      session_id: "tracker-root", tool_name: "Edit",
+      tool_input: { file_path: file, old_string: "| a | PENDING |", new_string: "| a | COMPLETE |" },
+    });
+    assert.equal(blocked.status, 2);
+    assert.match(blocked.stderr, /generated ledger block/);
+    const overwrite = run(GUARD, main, {
+      session_id: "tracker-root", tool_name: "Write", tool_input: { file_path: file, content: "# Execution tracker\n" },
+    });
+    assert.equal(overwrite.status, 2, "a Write that drops the block changes it too");
+    const allowed = run(GUARD, main, {
+      session_id: "tracker-root", tool_name: "Edit",
+      tool_input: { file_path: file, old_string: "Hand notes.", new_string: "Better hand notes." },
+    });
+    assert.equal(allowed.status, 0, allowed.stderr);
+    assert.equal(fs.readFileSync(file, "utf8"), text, "the guard only decides; it never writes");
+  } finally {
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});

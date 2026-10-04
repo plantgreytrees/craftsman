@@ -7,6 +7,22 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Changed
 
+- **One tracker, in the main checkout, kept current by hooks.** The ledger
+  and `TRACKER.md` used to be written inside whichever worktree a session ran
+  in. Other sessions couldn't see a change until it merged, and every
+  worktree's copy drifted apart.
+  - *Where it lives.* The ledger (`.craftsman/tracker/events.jsonl`) and
+    `docs/plans/TRACKER.md` now resolve to the main checkout from any linked
+    worktree (`mainCheckoutRoot` in `lib/core.mjs`).
+  - *Automatic updates.* Every `tracker.mjs` write re-renders a fenced,
+    generated `craftsman:ledger` block in the root `TRACKER.md`. A new
+    `tracker-sync.mjs` hook (SessionStart, PostToolUse, Stop) re-renders it
+    as a backstop. Hand-written sections outside the fence are untouched.
+    Commands no longer "mirror chips" by hand, and `/plan` registers rows
+    through the ledger.
+  - *Hard guard.* `pre-guard` blocks Write/Edit to a worktree's copy of
+    `TRACKER.md` and any edit that changes the generated block.
+
 - **`/scrutinise` now reviews through one isolated, fresh-context reviewer.**
   The session that wrote the code was also the one judging it, so under
   root-only mode the review had no independence at all. The review now runs in

@@ -6,6 +6,7 @@ import {
   atomicWrite, logEvent, projectContext, readStdin, sidOf,
   requireCompact, COMPACT_REQUIRED_NOTICE,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
+  mainCheckoutRoot,
 } from "./lib/core.mjs";
 
 export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
@@ -70,8 +71,94 @@ function assertUnitAcceptance(input, status, context) {
   }
 }
 
+// The ledger and its TRACKER.md view live in the MAIN checkout, never in the
+// linked worktree a session happens to run in: every session (and every
+// worktree) must see one tracker the moment it changes — not after a merge.
+export function trackerRoot(context = projectContext(".")) {
+  return mainCheckoutRoot(context.root);
+}
+
 export function ledgerPath(context = projectContext(".")) {
-  return path.join(context.stateDir, "tracker", "events.jsonl");
+  return path.join(trackerRoot(context), ".craftsman", "tracker", "events.jsonl");
+}
+
+export function trackerDocPath(context = projectContext(".")) {
+  return path.join(trackerRoot(context), "docs", "plans", "TRACKER.md");
+}
+
+// ---------------------------------------------------- TRACKER.md view ---
+// The ledger rows are projected into a fenced, generated block of the root
+// TRACKER.md on every ledger write (and by the tracker-sync hook as a
+// backstop). Everything outside the fence stays hand-written; the fence
+// itself is never hand-edited — pre-guard refuses any edit that changes it.
+export const BLOCK_BEGIN = "<!-- craftsman:ledger:begin -->";
+export const BLOCK_END = "<!-- craftsman:ledger:end -->";
+const BLOCK_RE = new RegExp(`${BLOCK_BEGIN}[\\s\\S]*?${BLOCK_END}`);
+
+// The generated block inside `text`, or null when it has none.
+export function generatedBlock(text) {
+  return BLOCK_RE.exec(String(text))?.[0] ?? null;
+}
+
+function cell(value, max = 0) {
+  let text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (max && text.length > max) text = text.slice(0, max - 1) + "…";
+  return text ? text.replaceAll("|", "\\|") : "—";
+}
+
+export function renderBlock(rows) {
+  const multiProject = rows.some((row) => row.project && row.project !== ".");
+  const header = [...(multiProject ? ["project"] : []), "plan", "unit", "module", "status", "evidence", "updated"];
+  const lines = [
+    BLOCK_BEGIN,
+    "<!-- Generated from the tracker ledger (.craftsman/tracker/events.jsonl) after every transition. " +
+      "Do not edit by hand: change a row with scripts/tracker.mjs. -->",
+    "",
+    `| ${header.join(" | ")} |`,
+    `|${header.map(() => "---").join("|")}|`,
+  ];
+  for (const row of rows) {
+    const plan = row.plan.split(path.sep).join("/");
+    const link = path.posix.relative("docs/plans", plan);
+    const unit = row.scope_id && row.scope_id !== row.unit ? `${row.unit} (${row.scope_id})` : row.unit;
+    lines.push(`| ${[
+      ...(multiProject ? [cell(row.project)] : []),
+      `[${cell(path.posix.basename(plan, ".md"))}](${link.startsWith(".") ? link : `./${link}`})`,
+      cell(unit), cell(row.module), row.status, cell(row.evidence, 80), cell(row.updated_at?.slice(0, 10)),
+    ].join(" | ")} |`);
+  }
+  if (!rows.length) lines.push(`| ${header.map(() => "—").join(" | ")} |`);
+  lines.push("", BLOCK_END);
+  return lines.join("\n");
+}
+
+// Splice a freshly rendered block into `text`: replace the existing fence, or
+// append a "Live ledger" section when the file has none yet.
+export function spliceBlock(text, block) {
+  if (generatedBlock(text) !== null) return text.replace(BLOCK_RE, () => block);
+  const base = text.trimEnd();
+  return `${base ? `${base}\n\n` : "# Execution tracker\n\n"}## Live ledger\n\n${block}\n`;
+}
+
+// Re-render the root TRACKER.md's generated block from the ledger. Writes
+// only on a real change; an empty ledger with no block yet is a no-op, so a
+// repo that never used the ledger never grows the section.
+export function syncTrackerDoc(context = projectContext(".")) {
+  const rows = renderState(context);
+  const file = trackerDocPath(context);
+  let text = "";
+  try { text = fs.readFileSync(file, "utf8"); } catch { /* not created yet */ }
+  if (!rows.length && generatedBlock(text) === null) return { file, changed: false };
+  const next = spliceBlock(text, renderBlock(rows));
+  if (next === text) return { file, changed: false };
+  atomicWrite(file, next);
+  logEvent({ ev: "tracker_doc_synced", rows: rows.length }, context);
+  return { file, changed: true };
+}
+
+// Bookkeeping after a ledger write — must never fail the write itself.
+function syncQuietly(context) {
+  try { return syncTrackerDoc(context); } catch { return null; }
 }
 
 function readEvents(file) {
@@ -109,6 +196,7 @@ export function transition(input, context = projectContext(input.project || ".")
     try { event.acceptance = reconcileAcceptance(context, input); } catch { /* bookkeeping — never fail the transition */ }
   }
   delete event.previous_status;
+  syncQuietly(context);
   return event;
 }
 
@@ -189,7 +277,10 @@ export function reconcileAcceptance(context = projectContext("."), input = {}) {
       completed.push({ plan: row.plan, unit: row.unit });
     } catch { /* raced by another writer or refused — leave it for the model */ }
   }
-  if (completed.length) logEvent({ ev: "tracker_auto_complete", units: completed.map((c) => c.unit) }, context);
+  if (completed.length) {
+    logEvent({ ev: "tracker_auto_complete", units: completed.map((c) => c.unit) }, context);
+    syncQuietly(context);
+  }
   return { completed, ready, plan_wide_open: planWideOpen, all_met: criteria.every((c) => c.done) };
 }
 
@@ -199,7 +290,7 @@ export function acceptanceNotice(result) {
   const name = (r) => `${r.plan}#${r.unit}`;
   const parts = [];
   if (result.completed.length) {
-    parts.push(`craftsman: all acceptance criteria met → tracker ledger moved ${result.completed.map(name).join(", ")} MERGED → COMPLETE. Update those rows' status chips in docs/plans/TRACKER.md to match.`);
+    parts.push(`craftsman: all acceptance criteria met → tracker ledger moved ${result.completed.map(name).join(", ")} MERGED → COMPLETE; the root docs/plans/TRACKER.md ledger block was re-rendered automatically.`);
   }
   if (result.ready.length) {
     parts.push(`craftsman: every acceptance criterion for ${result.ready.map(name).join(", ")} is ticked — implementation is done; merge it now (Phase X step 9: merge cleans up the worktree), then tracker → MERGED.`);
@@ -249,7 +340,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       if (!fs.existsSync(file)) atomicWrite(file, "");
       output = { ledger: file };
     } else if (input.action === "compact") output = compactLedger(context);
-    else throw new Error("action must be init, transition, status, list, or compact");
+    else if (input.action === "sync") output = syncTrackerDoc(context);
+    else throw new Error("action must be init, transition, status, list, compact, or sync");
     process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
