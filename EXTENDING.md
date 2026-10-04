@@ -160,7 +160,10 @@ values before release.
 
 The shipped routing is deliberately conservative: `review-router` and
 `phase-tracker` use `haiku`; implementation, review, security, contract, and
-documentation roles use `sonnet`; `/plan` uses `opus`. Project-specific agents
+documentation roles use `sonnet`; `plan-strategist`, `scrutineer`, `idea-critic`,
+`/idea` and `/architect` use `opus`; `/architect --deep`'s `architect-analyst`
+uses `fable`, and `/idea --deep` runs its critic on `fable` via the dispatch's
+model override. Project-specific agents
 should follow the same rubric and should not use undocumented model names.
 
 ## 5. Plan memory providers
@@ -194,16 +197,53 @@ descriptions to one routing sentence (they're always-on context).
 
 ## 7. Tune the doc-write policy
 
-By default only `/plan` and `/orchestrate` may edit plan docs and the tracker
-(`docWriteGuard.docPaths: ["docs/plans/**"]`) — that's the surface with real
-concurrency stakes (two sessions racing on the same tracker row). The rest of
-`docs/` (architecture, README, standards) is ordinary prose: freely editable,
-`/sync-docs` is just the command that happens to specialize in reconciling it
-against code, not a gatekeeper for it. Widen the guard back to all of `docs/`,
-add other single-owner directories, or turn it off, in config:
+By default only `/plan` and `/orchestrate` may edit plan docs and the tracker,
+only `/idea` may write `docs/ideas/**`, and only `/architect` may write
+`docs/architecture/**` (`docWriteGuard.docPaths: ["docs/plans/**",
+"docs/ideas/**", "docs/architecture/**"]`). Those are the surfaces with real
+stakes: two sessions racing on one tracker row, or a decision quietly rewritten
+to match code that broke it. The rest of `docs/` (README, standards, feature
+docs) is ordinary prose: freely editable, and `/sync-docs` is just the command
+that specializes in reconciling it against code, not a gatekeeper for it. Widen
+the guard back to all of `docs/`, add other single-owner directories, or turn it
+off, in config. `docPaths` is an array, so a project value **replaces** the
+default — keep the entries you still want:
 
 ```json
-{ "docWriteGuard": { "docPaths": ["docs/plans/**", "adr/**"], "enabled": true } }
+{ "docWriteGuard": { "docPaths": ["docs/plans/**", "docs/ideas/**", "docs/architecture/**", "adr/**"], "enabled": true } }
+```
+
+## 8. Architecture rules (`/architect`)
+
+`/idea` → `/architect` → `/instruction` is the front of the loop: vet the idea,
+decide the architecture with the user, then generate one `/goal` prompt that
+runs `/plan` → `/orchestrate` → `/scrutinise` → `/sync-docs` to completion.
+
+`/architect` writes each area as two files under `architecture.dir` (default
+`docs/architecture`). `<area>.md` is for people and is never loaded by the
+loop. `<area>.rules.md` holds the enforced contract: frontmatter `governs:`
+globs, then one `- **ARCH-<AREA>-NN** [decided|observed|superseded by …]` line
+per rule. The format is in
+`skills/language-aware-planning/references/architecture-template.md`, and the
+loop's obligations are in `commands/_architecture.md`.
+
+`scripts/arch-check.mjs` is the deterministic side:
+
+- `lint` validates every rules doc: structure, unique ids, supersession
+  targets, that every `cite: file:line` still resolves, and that each rules
+  file has its human pair.
+- `governs <path>…` names the rules docs that own the given paths, so a
+  command loads only those.
+- `scope < manifest.json` dry-runs the activation check.
+
+`scope.mjs` runs that same check on every scope activation. A step whose
+`scope.write` touches a governed path must list the `.rules.md` in
+`scope.docs` and cite at least one live rule id from it in `arch`. Unknown or
+superseded ids are refused, and a malformed rules doc fails closed. Turn the
+gate off without losing the prose obligations:
+
+```json
+{ "architecture": { "enforce": false } }
 ```
 
 ## The always-on budget

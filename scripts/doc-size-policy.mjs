@@ -23,6 +23,9 @@ const BUDGETS = [
   { name: "shared execution (per-unit loop)", glob: /^commands\/_shared-execution\.md$/, max: 13500 },
   { name: "shared analysis", glob: /^commands\/_shared-analysis\.md$/, max: 6500 },
   { name: "scrutinise --deep protocol", glob: /^commands\/_scrutinise-deep\.md$/, max: 6500 },
+  // Read by every loop command whenever architecture rules exist — kept tight.
+  { name: "architecture contract", glob: /^commands\/_architecture\.md$/, max: 4000 },
+  { name: "architect --init/--update protocol", glob: /^commands\/_architect-maintain\.md$/, max: 6500 },
   { name: "command", glob: /^commands\/[^_].*\.md$/, max: 10000 },
   { name: "agent", glob: /^agents\/.*\.md$/, max: 3800 },
   { name: "skill", glob: /^skills\/.*\/SKILL\.md$/, max: 4200 },

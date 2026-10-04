@@ -18,6 +18,7 @@ Evaluate:
 4. **Illegal states** — can the type system make invalid states unconstructible instead of guarding them at runtime?
 5. **Test seams** — can this be tested without mocking the world? Heavy mocking means the dependencies are wrong.
 6. **Failure modes** — partial failure, retries, concurrent use, resource/lifecycle ownership.
+7. **Architecture fit** — if the plan cites `docs/architecture/*.rules.md`, read only those files (never the human `<area>.md`). Every unit writing a governed path cites the rules it must obey, and its approach satisfies each cited rule's `check:`. Contradicting a `decided` rule → `VERDICT: revise` naming the rule (the fix is a different approach, or `/architect` first — never an exception).
 
 Output:
 - `VERDICT: approve | revise`

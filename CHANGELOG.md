@@ -5,6 +5,57 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **`/idea`, `/architect` and `/instruction`: a front end for the loop that
+  vets an idea, decides its architecture, and drives it to completion.**
+  - *`/idea` (opus) scrutinises an idea before anything is designed.* It
+    restates the idea neutrally, then:
+    - scans for overlap with past ideas (rejected ones included), plans,
+      tracker rows and architecture rules;
+    - maps the impact across all eight completeness dimensions;
+    - researches prior art and pitfalls on the web.
+
+    One isolated `idea-critic` then judges it without having heard the pitch.
+    It must steelman the idea, attack it, and weigh *do nothing* and the
+    smallest useful slice. The result is a scored verdict (pursue / pursue with
+    changes / defer / reject) saved to `docs/ideas/<slug>.md`. `--deep` runs
+    the critic on Fable with a second adversarial round.
+  - *`/architect` (opus) turns a vetted idea into confirmed decisions.* It
+    checks the idea's claims against the code (`CONFIRMED` / `WRONG` /
+    `UNPROVEN`). It inventories decisions across code structure, software
+    design, data, systems, security, observability, testing, compatibility and
+    rollout. Existing rules are inherited, not re-asked. The user confirms every
+    open decision and every amendment through questions. `--deep` hands
+    validation and the decision analysis to one isolated `architect-analyst` on
+    Fable. `--init` builds a baseline from the code, where unconfirmed patterns
+    stay advisory `[observed]` rules. `--update` re-verifies rules and refuses
+    to rewrite a violated decision to match the code.
+  - *Architecture docs are split by reader.* `<area>.md` is plain English plus
+    mermaid, for people, and the loop never loads it. `<area>.rules.md` holds
+    numbered `ARCH-…` rules plus the paths they `govern`, and is what the loop
+    enforces. `/sync-docs` no longer edits `docs/architecture/**`; `/sync-docs
+    --all` hands that to `/architect --update`.
+  - *The loop must obey the rules, mechanically.* `/plan` cites rule ids per
+    unit, `plan-reviewer` checks them, and the scrutineer reports violations
+    under a new **Architecture** finding class. `scope.mjs` refuses to activate
+    a unit that writes a governed path without loading its rules doc and citing
+    a live rule, so `/orchestrate` cannot edit there. The new
+    `scripts/arch-check.mjs` provides `lint`, `governs` and `scope` modes.
+    Disable the gate with `architecture.enforce: false`.
+  - *`/instruction` (sonnet) writes one paste-ready `/goal` prompt.* The prompt
+    runs plan → orchestrate → scrutinise (looping until there are no Critical
+    or Warning findings) → sync-docs → `/architect --update`. It ends on
+    printed completion evidence, because the `/goal` evaluator only sees the
+    transcript. It is checked against `/goal`'s 4,000-character cap. Shown
+    separately, outside the prompt, is an implementation weight
+    (quick / medium / long / extra long) derived from countable drivers.
+  - *Isolated-agent grants are generalized.* `/idea` grants one `idea-critic`
+    and `/architect --deep` grants one `architect-analyst`, alongside
+    `/scrutinise`'s scrutineer. Each grant is spent on use, and every other
+    Task call stays blocked under root-only mode. `docs/ideas/**` and
+    `docs/architecture/**` join the doc-write guard.
+
 ### Changed
 
 - **`/scrutinise` now reviews through one isolated, fresh-context reviewer.**

@@ -9,6 +9,7 @@ import {
   resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
   sessionDir, sidOf, worktreeBindingPath,
 } from "./lib/core.mjs";
+import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
 
 export function normalizeScope(value) {
   if (!value || typeof value !== "object") throw new Error("scope must be a JSON object");
@@ -26,6 +27,9 @@ export function normalizeScope(value) {
       throw new Error(`scope.${key} must be an array of non-empty paths`);
     }
   }
+  if (value.arch !== undefined && (!Array.isArray(value.arch) || value.arch.some((id) => typeof id !== "string" || !id.trim()))) {
+    throw new Error("arch must be an array of ARCH rule ids");
+  }
   return {
     plan: value.plan,
     unit: value.unit,
@@ -37,6 +41,7 @@ export function normalizeScope(value) {
       docs: [...new Set(scope.docs)],
       write: [...new Set(scope.write)],
     },
+    arch: [...new Set(value.arch || [])],
     activated_at: new Date().toISOString(),
   };
 }
@@ -119,6 +124,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         branch,
         activated_at: scope.activated_at,
       }, { ...selectedContext, worktreePath: scope.worktree_path });
+    }
+    // Architecture decisions are enforced here, not just in prose: a step that
+    // writes into a governed area must load its rules doc and cite its rules
+    // (arch-check.mjs). Read from the step's own tree, so a worktree sees the
+    // rules as they stand on its branch.
+    if (cfg.architecture?.enforce !== false) {
+      const violations = checkScope(scope, loadRules(scope.project_root, cfg.architecture?.dir || DEFAULT_DIR));
+      if (violations.length) {
+        throw new Error(`architecture rules not honoured by ${scope.unit}:\n  - ${violations.join("\n  - ")}\n` +
+          `Read the governing .rules.md, add it to scope.docs, cite the ARCH ids this unit must obey in "arch" ` +
+          `(and in the plan unit), then re-activate. A change that must break a decided rule needs /architect first.`);
+      }
     }
     if (scope.project !== "." && !isGitRoot(scope.project_root)) {
       throw new Error(`workspace project is not a Git root: ${scope.project}`);

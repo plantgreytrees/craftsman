@@ -179,14 +179,14 @@ const rules = topRules(cfg, context);
 const verbose = cfg.sessionContext?.verbose === true;
 const standingRules = verbose
   ? [
-      `LOOP: work the doc-first loop — UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS. Nothing changes code without a plan doc (docs/plans/) describing it first.`,
+      `LOOP: work the doc-first loop — UNDERSTAND → PLAN → EXECUTE → SCRUTINISE → SYNC-DOCS. Nothing changes code without a plan doc (docs/plans/) describing it first. A new idea goes IDEA → ARCHITECT → INSTRUCTION first; the loop obeys docs/architecture/*.rules.md.`,
       `SCOPE: that requirement narrows for a genuinely small change — one file, no shared-contract/exported-type change, no migration, no security-sensitive surface (/plan calls this "trivial" and skips its own decomposition ceremony for it) — edit directly; the deterministic gates below still apply regardless.`,
       `PLANNING: plan every non-trivial change in the idioms of the TARGET LANGUAGE from the outset — error model, data modeling, abstraction mechanism and concurrency model are language decisions, not neutral ones. Do not design in pseudocode and translate.`,
       `ABSTRACTION BUDGET: an interface/base class/layer needs a second concrete implementor or a stated extension requirement. Otherwise omit it.`,
       `ENFORCEMENT: files you write are auto-formatted, linted and type-checked. Only NEW issues you introduce are reported — never fix pre-existing findings in unrelated code unless asked.`,
     ]
   : [
-      `LOOP: non-trivial change → /plan → /orchestrate → /scrutinise → /sync-docs. One-file, no-contract, no-security change → edit directly (gates below still apply).`,
+      `LOOP: non-trivial change → /plan → /orchestrate → /scrutinise → /sync-docs. One-file, no-contract, no-security change → edit directly (gates below still apply). New idea → /idea → /architect → /instruction.`,
     ];
 
 const rootOnly = (cfg.execution?.agentMode || "root-only") !== "subagents";
@@ -229,7 +229,7 @@ try { lingering = listWorktrees(context.root).filter((entry) => entry.removable)
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
   rootOnly
-    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist and /scrutinise's one isolated scrutineer.`
+    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, and the one isolated agent each of /scrutinise, /idea and /architect --deep.`
     : "",
   ...standingRules,
   (cfg.security?.enabled || cfg.stopGate?.requireAcceptanceCriteria)
