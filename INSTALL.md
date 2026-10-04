@@ -148,6 +148,31 @@ unchecked plan criterion — it should hold you back.
 
 ---
 
+## Updating
+
+Craftsman has no pinned version: each install tracks the marketplace's git
+commit, so any merge to `main` is an update. To take it:
+
+```text
+/craftsman:upgrade          # refresh the marketplace, update every install (user + each project)
+/reload-plugins             # switch this session's hooks to the new copy
+/craftsman:init             # in each project the upgrade lists: repairs config, re-stamps plans
+```
+
+`/craftsman:upgrade --dry-run` shows what would change. Outside Claude Code, run
+`node <plugin>/scripts/self-update.mjs`. Hooks run from the plugin cache, so
+editing a local clone changes nothing until you upgrade.
+
+To update without asking, turn on auto-update for `craftsman-marketplace` under
+`/plugin` → **Marketplaces**. It refreshes at startup; if a project-scope
+install still shows an older commit in `/plugin`, run `/craftsman:upgrade`.
+
+A project that predates `/architect` (plans but no `*.rules.md`) should run
+`/architect --backfill` once; `/craftsman:init` says so in its architecture
+report.
+
+---
+
 ## Tuning (quick reference)
 
 Everything is in `craftsman.config.json` (your repo-root file overrides the

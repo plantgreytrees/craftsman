@@ -48,7 +48,7 @@ Domain terms used above.
 area: <area>
 governs: ["<path or narrow glob>", "..."]   # what this area owns; keep it tight
 human: docs/architecture/<area>.md
-source: docs/ideas/<slug>.md                # or "init" for an --init baseline
+source: docs/ideas/<slug>.md                # or "init" (--init baseline) or "backfill" (--backfill)
 verified_at: <full commit sha>
 updated: <YYYY-MM-DD>
 ---

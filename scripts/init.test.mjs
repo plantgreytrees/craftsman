@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyInitPlan, buildInitPlan, buildUpdatePlan, claudeIgnorePatterns, renderInitDiff } from "./init.mjs";
+import { applyInitPlan, buildInitPlan, buildUpdatePlan, claudeIgnorePatterns, pluginVersion, renderInitDiff } from "./init.mjs";
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-"));
@@ -101,15 +101,24 @@ test("init update audits the shipped plugin and refreshes project surfaces", () 
   assert.ok(plan.update.pluginFiles > 10);
   assert.ok(plan.update.pluginFileList.includes(".claude-plugin/marketplace.json"));
   assert.ok(plan.update.pluginVersion);
+  assert.deepEqual(plan.update.architecture, { dir: "docs/architecture", rulesDocs: 0, unmanagedDocs: 0, next: "/architect --backfill — create rules from legacy docs, plans and code" });
   assert.ok(plan.update.projectChanges.includes(path.join(root, ".claudeignore")));
   assert.deepEqual(plan.update.planOrder, ["docs/plans/active.md", "docs/plans/done.md"]);
   assert.deepEqual(plan.update.planChanges, [path.join(root, "docs/plans/active.md"), path.join(root, "docs/plans/done.md")]);
 
   const result = applyInitPlan(plan);
   assert.match(fs.readFileSync(path.join(root, ".claude", "CLAUDE.md"), "utf8"), /Project-owned context/);
-  const versionRe = new RegExp(`craftsman_version: ${plan.update.pluginVersion.replace(/\./g, "\\.")}`);
+  const versionRe = new RegExp(`craftsman_version: ${plan.update.pluginVersion.split("+")[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
   assert.match(fs.readFileSync(path.join(root, "docs", "plans", "active.md"), "utf8"), versionRe);
   assert.match(fs.readFileSync(path.join(root, "docs", "plans", "active.md"), "utf8"), /pending work/);
   assert.match(fs.readFileSync(path.join(root, "docs", "plans", "done.md"), "utf8"), versionRe);
   assert.equal(result.ready, true);
+});
+
+test("pluginVersion: release from metadata, plus the cache directory's commit when installed", () => {
+  assert.equal(pluginVersion({ metadata: { release: "2.2.0" } }, "/repo/craftsman"), "2.2.0");
+  assert.equal(pluginVersion({ metadata: { release: "2.2.0" } }, "/cache/craftsman/3f2a9c1d0b4e"), "2.2.0+3f2a9c1d0b4e");
+  assert.equal(pluginVersion({ version: "2.1.0" }, "/cache/craftsman/2.1.0"), "2.1.0");
+  assert.equal(pluginVersion({}, "/cache/craftsman/3f2a9c1d0b4e"), "3f2a9c1d0b4e");
+  assert.equal(pluginVersion({}, "/repo/craftsman"), null);
 });

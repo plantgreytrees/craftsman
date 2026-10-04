@@ -55,8 +55,42 @@ All notable changes to craftsman are documented here. Format loosely follows
     `/scrutinise`'s scrutineer. Each grant is spent on use, and every other
     Task call stays blocked under root-only mode. `docs/ideas/**` and
     `docs/architecture/**` join the doc-write guard.
+- **`/craftsman:upgrade`: one command to take a plugin update everywhere.**
+  `scripts/self-update.mjs` refreshes the marketplace, then runs
+  `claude plugin update` for every Craftsman install (user scope and each
+  project scope, from that project's directory). It prints one row per install
+  (`updated` / `current` / `skipped` / `failed`) and the projects that need
+  `/craftsman:init`. `--dry-run` only lists them. INSTALL.md gains an
+  **Updating** section, including the auto-update toggle.
+- **`/architect --backfill [area]`: architecture rules for a project that
+  predates `/architect`.** It inventories legacy architecture prose and plans,
+  confirms the areas with the user, and mines candidate rules from the prose,
+  the plans (newest first), plan memory and the code. Each candidate is
+  verified against the code (`HOLDS` / `CONTRADICTED` / `UNPROVEN`), and only
+  the ones the user confirms are written, with `source: backfill` and
+  provenance. A legacy `<area>.md` that covers exactly the area is adopted as
+  its human doc. It then lists in-flight plan units the new rules would block,
+  without editing any plan.
+- **`/craftsman:init` audits architecture.** The update report's
+  `architecture` section counts rules docs and unmanaged legacy docs and names
+  the next step, normally `/architect --backfill`.
 
 ### Changed
+
+- **Installs track commits instead of a pinned version.** `plugin.json` and
+  the marketplace entry no longer carry `version`, so each install is versioned
+  by git commit and every merge to `main` is an update. Previously an update
+  shipped only when someone remembered to bump the version, which left the cache
+  stale. The release number moved to `metadata.release`; `/craftsman:init`
+  reports `release+commit` and stamps plans with the release alone, so updating
+  the plugin doesn't rewrite every plan.
+- **Architecture ownership is by pair, not by directory.** `/architect` owns an
+  area's `<area>.rules.md` and its human `<area>.md`. Other prose under
+  `docs/architecture/` is unmanaged: `/sync-docs` keeps maintaining it until
+  `/architect --backfill` pairs it. `arch-check.mjs lint` now reports unmanaged
+  docs instead of failing on them (it fails only for a human doc marked
+  `> **Human reference.**` whose rules file is missing), and
+  `arch-check.mjs unmanaged` lists them.
 
 - **One tracker, in the main checkout, kept current by hooks.** The ledger
   and `TRACKER.md` used to be written inside whichever worktree a session ran

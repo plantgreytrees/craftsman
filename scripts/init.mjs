@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { checkDocSizes } from "./doc-size-policy.mjs";
+import { DEFAULT_DIR, loadRules, unmanagedDocs } from "./arch-check.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(pluginRoot, "craftsman.config.json");
@@ -27,6 +28,30 @@ const claudeIgnoreStart = "# Craftsman managed .claudeignore";
 const claudeIgnoreEnd = "# End Craftsman managed .claudeignore";
 
 function readJson(file) { return JSON.parse(fs.readFileSync(file, "utf8")); }
+
+// plugin.json leaves `version` unset so installs track commits (a pinned
+// version keeps every install on its cached copy until the string changes).
+// The release lives in `metadata.release`; an installed copy also carries the
+// commit Claude Code named its cache directory after: `2.1.0+3f2a9c1d0b4e`.
+export function pluginVersion(manifest, root = pluginRoot) {
+  const release = manifest?.metadata?.release || manifest?.version || null;
+  const build = /^[0-9a-f]{12}$/.test(path.basename(root)) ? path.basename(root) : null;
+  return release && build ? `${release}+${build}` : release || build;
+}
+
+// Rules docs vs legacy prose under the architecture dir, and the command that
+// closes the gap — so `--update` tells an older project how to adopt /architect.
+function architectureAudit(root) {
+  let dir = DEFAULT_DIR;
+  try { dir = readJson(path.join(root, "craftsman.config.json")).architecture?.dir || dir; } catch {}
+  const docs = loadRules(root, dir);
+  const unmanaged = unmanagedDocs(root, docs, dir);
+  const hasPlans = fs.existsSync(path.join(root, "docs", "plans"));
+  const next = docs.length
+    ? (unmanaged.length ? "/architect --backfill <area> — pair the remaining legacy docs" : null)
+    : (unmanaged.length || hasPlans ? "/architect --backfill — create rules from legacy docs, plans and code" : null);
+  return { dir, rulesDocs: docs.length, unmanagedDocs: unmanaged.length, next };
+}
 
 function filesIn(root) {
   try {
@@ -188,7 +213,7 @@ function pluginFiles() {
 
 function pluginInventory() {
   const manifest = path.join(pluginRoot, ".claude-plugin", "plugin.json");
-  const version = fs.existsSync(manifest) ? readJson(manifest).version : null;
+  const version = fs.existsSync(manifest) ? pluginVersion(readJson(manifest)) : null;
   const files = pluginFiles();
   const required = [
     "craftsman.config.json", ".claude-plugin/plugin.json", "hooks/hooks.json",
@@ -339,7 +364,8 @@ export function buildInitPlan(root, { checkTools = true, auditPlugin = false } =
 
 export function buildUpdatePlan(root, options = {}) {
   const plan = buildInitPlan(root, { ...options, auditPlugin: true });
-  const plans = planDocuments(root, plan.plugin.version);
+  // Plans record the format release, not the build: a commit-tracked install must not rewrite every plan on each update.
+  const plans = planDocuments(root, plan.plugin.version?.split("+")[0] ?? null);
   Object.assign(plan.files, plans.files);
   plan.changes = changedFiles(plan.files);
   plan.ready = plan.changes.length === 0;
@@ -358,6 +384,7 @@ export function buildUpdatePlan(root, options = {}) {
     planOrder: plans.order,
     planAudit: plans.audit,
     planChanges: Object.keys(plans.files),
+    architecture: architectureAudit(root),
   };
   return plan;
 }
