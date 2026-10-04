@@ -137,3 +137,48 @@ test("agent-mode-guard: /orchestrate does not grant a scrutineer", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("agent-mode-guard: one /idea invocation grants exactly one idea-critic, and nothing else", () => {
+  const dir = tmpProject();
+  try {
+    const dispatch = (subagent_type) => run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type } });
+    assert.equal(dispatch("craftsman:idea-critic").status, 2, "no grant before /idea is invoked");
+    assert.equal(invokeScrutinise(dir, "s1", { prompt: "/idea cache the tracker in sqlite" }).status, 0);
+    assert.equal(dispatch("craftsman:scrutineer").status, 2, "an idea grant never unlocks the scrutineer");
+    assert.equal(dispatch("craftsman:idea-critic").status, 0);
+    const second = dispatch("idea-critic");
+    assert.equal(second.status, 2);
+    assert.match(second.stderr, /Each \/idea invocation grants exactly ONE isolated idea-critic/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: /architect grants its analyst only under --deep, by prompt or by Skill args", () => {
+  const dir = tmpProject();
+  try {
+    const dispatch = () => run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:architect-analyst" } });
+    invokeScrutinise(dir, "s1", { prompt: "/architect sqlite-tracker" });
+    assert.equal(dispatch().status, 2, "plain /architect runs root-only");
+    invokeScrutinise(dir, "s1", { prompt: "/architect --deep-dive is not the flag" });
+    assert.equal(dispatch().status, 2);
+    invokeScrutinise(dir, "s1", { prompt: "/craftsman:architect sqlite-tracker --deep" });
+    assert.equal(dispatch().status, 0);
+    assert.equal(dispatch().status, 2, "spent on use");
+    invokeScrutinise(dir, "s1", { tool_name: "Skill", tool_input: { skill: "craftsman:architect", args: "--deep sqlite-tracker" } });
+    assert.equal(dispatch().status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: a prompt that merely mentions /idea grants nothing", () => {
+  const dir = tmpProject();
+  try {
+    invokeScrutinise(dir, "s1", { prompt: "what does /idea do?" });
+    const result = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:idea-critic" } });
+    assert.equal(result.status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

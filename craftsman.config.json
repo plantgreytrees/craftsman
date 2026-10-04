@@ -127,10 +127,14 @@
     "enabled": true,
     "ttlMs": 3600000,
     "pendingTtlMs": 1800000,
-    "docPaths": ["docs/plans/**"]
+    "docPaths": ["docs/plans/**", "docs/ideas/**", "docs/architecture/**"]
   },
   "planning": {
     "blindRederivation": "never"
+  },
+  "architecture": {
+    "enforce": true,
+    "dir": "docs/architecture"
   },
   "sessionContext": {
     "verbose": false

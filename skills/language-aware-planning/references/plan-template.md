@@ -39,8 +39,9 @@ units:
     security: high | normal
     scope:
       read: [<source/test/config files required to understand this unit>]
-      docs: [<specific docs required by this unit>]
+      docs: [<specific docs required by this unit, incl. every governing docs/architecture/<area>.rules.md>]
       write: [<files this unit may create or edit>]
+    arch: [<ARCH-<AREA>-NN ids this unit must obey — required when scope.write touches a governed path>]
     tooling: { implementer: implementer, gates: [<review agents the diff triggers>],
                skills: [<1-3>], guards: [<repo guards>], mcp: [<optional calls>] }
 ---
@@ -84,6 +85,11 @@ Depends on: <scope_id list, or none>
   `docs` must contain concrete paths or narrow globs; `write` must contain every
   file the unit may create or edit. Never use a repository-wide glob or a whole
   directory when a file list can express the scope.
+- The per-unit `arch:` list names the architecture rules the unit is bound by
+  (`commands/_architecture.md`). Find them with `scripts/arch-check.mjs governs
+  <scope.write…>`; `scope.mjs` refuses to activate a step that writes a governed
+  path without loading its `.rules.md` and citing one of its live rules. Never
+  list a human `docs/architecture/<area>.md` in `scope.docs`.
 - A scope step is the smallest context-reset boundary: group all changes that
   affect the same project/repository and dependency boundary together. Use one
   `scope_id` per step, list explicit `depends_on` ids, and keep `project` stable.

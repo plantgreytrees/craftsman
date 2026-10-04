@@ -13,11 +13,14 @@
 // no edits" no longer depends on the model remembering to ask for one.
 //
 // /scrutinise: grant exactly one isolated `craftsman:scrutineer` dispatch.
+// /idea: grant exactly one isolated `craftsman:idea-critic` dispatch.
+// /architect --deep: grant exactly one isolated `craftsman:architect-analyst`.
 //
-// Both: adopt the plan's acceptance criteria (see the bottom of this file).
+// /orchestrate and /scrutinise: adopt the plan's acceptance criteria (see the
+// bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantScrutineer } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 
 let input = {};
@@ -29,14 +32,17 @@ try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); 
 // arms it twice.
 const toolInput = input?.tool_input || {};
 const command = typeof toolInput.command === "string" ? toolInput.command
-  : typeof toolInput.skill === "string" ? `/${toolInput.skill.replace(/^\//, "")}`
+  : typeof toolInput.skill === "string"
+    ? `/${toolInput.skill.replace(/^\//, "")} ${typeof toolInput.args === "string" ? toolInput.args : ""}`
   : typeof input?.prompt === "string" ? input.prompt
   : "";
 // Anchored deliberately: this must match an *invocation*, never a mention.
 // compact-nudge.mjs matched /orchestrate-style names anywhere in a command's
 // text and hard-locked sessions that had merely talked about the script.
-const invoked = /^\/(?:craftsman:)?(orchestrate|scrutinise)(?=\s|$)/.exec(command.trim())?.[1];
+const invocation = /^\/(?:craftsman:)?(orchestrate|scrutinise|idea|architect)(?=\s|$)(.*)/s.exec(command.trim());
+const invoked = invocation?.[1];
 if (!invoked) process.exit(0);
+const args = invocation[2] || "";
 
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
@@ -56,7 +62,14 @@ if (invoked === "orchestrate") {
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
 // spends it). Re-arming on a repeat invocation is intended — each run of
 // /scrutinise gets its own single fresh-context reviewer, never more.
-if (invoked === "scrutinise") grantScrutineer(sidOf(input), context);
+if (invoked === "scrutinise") grantAgent("scrutineer", sidOf(input), context);
+
+// /idea always gets its one adversarial critic; /architect only under --deep,
+// where the decision analysis moves to a Fable-pinned fresh context. Neither
+// takes acceptance ownership — they plan nothing and execute nothing.
+if (invoked === "idea") grantAgent("idea-critic", sidOf(input), context);
+if (invoked === "architect" && /(?:^|\s)--deep(?=\s|$)/.test(args)) grantAgent("architect-analyst", sidOf(input), context);
+if (invoked === "idea" || invoked === "architect") process.exit(0);
 
 // Adopt the plan's acceptance criteria. /plan writes acceptance.md, so only
 // the PLANNING session ever owned it — the session that actually executes the
