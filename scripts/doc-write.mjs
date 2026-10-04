@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Grants doc-write authority. Run ONLY by the doc writers — /plan, /orchestrate,
 // /sync-docs, /idea (docs/ideas/) and /architect (docs/architecture/) — as
-// their first action. Writes a short-lived global "grant"; the PreToolUse guard
+// their first action — and by /builtin-check, only just before it writes its
+// ledger (docs/builtins.md). Writes a short-lived global "grant"; the PreToolUse guard
 // (which alone knows the session id) claims it into a per-session marker on that
 // session's first docs/ write. This indirection exists because command-run
 // scripts get no session_id (only hooks do), yet authority must be per-session

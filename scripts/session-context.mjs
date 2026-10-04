@@ -235,7 +235,7 @@ try {
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
   rootOnly
-    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, and the one isolated agent each of /scrutinise, /idea and /architect --deep.`
+    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, the one isolated agent each of /scrutinise, /idea and /architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
     : "",
   ...standingRules,
   (cfg.security?.enabled || cfg.stopGate?.requireAcceptanceCriteria)

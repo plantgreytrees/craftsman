@@ -1,7 +1,8 @@
 {
   "enabled": true,
   "execution": {
-    "agentMode": "root-only"
+    "agentMode": "root-only",
+    "builtinAgents": ["Explore"]
   },
   "timeoutMs": 20000,
   "maxFeedbackLines": 40,

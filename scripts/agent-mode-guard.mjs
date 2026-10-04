@@ -9,6 +9,10 @@
 //      /architect --deep → architect-analyst — and only against a grant that
 //      invoking the command wrote for this session, spent on use, so each run
 //      gets exactly one, never a second or a parallel one.
+//   3. Claude Code's own read-only built-in agents named in
+//      execution.builtinAgents (default ["Explore"]) — they carry no write
+//      tools, so they can't take over the implementer/specialist/reviewer
+//      work root-only mode exists to keep in this session.
 // Every other Task call is hard-blocked, regardless of what any command's
 // prose says to "delegate" or "dispatch".
 import { loadConfig, enabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS } from "./lib/core.mjs";
@@ -34,6 +38,11 @@ const subagentType = input?.tool_input?.subagent_type || "";
 const agent = subagentType.replace(/^craftsman:/, "");
 if (agent === "plan-strategist") process.exit(0);
 
+// Matched against the raw type: a built-in is never plugin-namespaced, so
+// "craftsman:Explore" is not a way past the guard.
+const builtinAgents = Array.isArray(cfg.execution?.builtinAgents) ? cfg.execution.builtinAgents : ["Explore"];
+if (subagentType && builtinAgents.includes(subagentType)) process.exit(0);
+
 const sid = sidOf(input);
 if (GRANTED_AGENTS.includes(agent)) {
   if (spendAgentGrant(agent, sid, context)) {
@@ -58,7 +67,8 @@ process.stderr.write(
   `specialist, or reviewer roles via Task/Agent, and never run them in parallel. The only standing ` +
   `exceptions are /plan's decomposition step (subagent_type: "craftsman:plan-strategist") and the ` +
   `one isolated agent each of /scrutinise ("craftsman:scrutineer"), /idea ("craftsman:idea-critic") ` +
-  `and /architect --deep ("craftsman:architect-analyst") is granted. If you genuinely need ` +
+  `and /architect --deep ("craftsman:architect-analyst") is granted, plus the read-only built-in ` +
+  `agents in execution.builtinAgents (${(builtinAgents.join(", ") || "none")}). If you genuinely need ` +
   `parallel subagent delegation, set execution.agentMode to "subagents" in craftsman.config.json first.\n`
 );
 process.exit(2);
