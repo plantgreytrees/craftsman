@@ -18,6 +18,7 @@
 //   arch-check.mjs lint                 validate every rules doc + its cites
 //   arch-check.mjs governs <path>...    which rules docs govern these paths
 //   arch-check.mjs scope < manifest     dry-run the scope.mjs check for one step
+//   arch-check.mjs unmanaged            list prose under the dir with no rules pair
 // `--root <dir>` overrides the project root (defaults to the current project).
 import fs from "node:fs";
 import path from "node:path";
@@ -179,14 +180,39 @@ export function lintRules(root, docs, dir = DEFAULT_DIR) {
     const human = doc.human || doc.file.replace(/\.rules\.md$/, ".md");
     if (!fs.existsSync(path.join(root, human))) errors.push(`${doc.file}: human doc ${human} is missing`);
   }
-  let names = [];
-  try { names = fs.readdirSync(path.join(root, dir)); } catch {}
-  for (const name of names) {
-    if (!name.endsWith(".md") || name.endsWith(".rules.md") || /^(README|INDEX)\.md$/i.test(name)) continue;
-    const rules = name.replace(/\.md$/, ".rules.md");
-    if (!names.includes(rules)) errors.push(`${norm(path.join(dir, name))}: no matching ${rules} — nothing enforces it`);
+  for (const file of unmanagedDocs(root, docs, dir)) {
+    let text = "";
+    try { text = fs.readFileSync(path.join(root, file), "utf8"); } catch {}
+    if (text.includes(HUMAN_BANNER)) {
+      errors.push(`${file}: human doc whose ${path.basename(file).replace(/\.md$/, ".rules.md")} is missing — restore it or run /architect --update`);
+    }
   }
   return errors;
+}
+
+// The opening line of every human doc /architect writes.
+export const HUMAN_BANNER = "> **Human reference.**";
+
+// Prose under the architecture dir that no rules doc pairs with — usually
+// architecture writing that predates /architect. Ownership is by pair, so it is
+// not an error: /sync-docs keeps maintaining it until /architect --backfill
+// pairs it. Only a file still carrying HUMAN_BANNER (a pair that lost its
+// rules file) fails lint.
+export function unmanagedDocs(root, docs, dir = DEFAULT_DIR) {
+  const paired = new Set(docs.flatMap((d) => [d.file, norm(d.human || d.file.replace(/\.rules\.md$/, ".md"))]));
+  const found = [];
+  const walk = (rel) => {
+    let entries = [];
+    try { entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const child = norm(path.join(rel, entry.name));
+      if (entry.isDirectory()) walk(child);
+      else if (entry.name.endsWith(".md") && !entry.name.endsWith(".rules.md")
+        && !/^(README|INDEX)\.md$/i.test(entry.name) && !paired.has(child)) found.push(child);
+    }
+  };
+  walk(dir);
+  return found.sort();
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -201,6 +227,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (mode === "lint") {
     problems = lintRules(root, docs, dir);
     if (!problems.length) console.log(`arch-check: ${docs.length} rules doc(s), ${docs.reduce((n, d) => n + d.rules.length, 0)} rule(s) — PASS`);
+    const unmanaged = unmanagedDocs(root, docs, dir).length;
+    if (unmanaged) console.log(`arch-check: ${unmanaged} unmanaged doc(s) under ${dir} (no rules pair; /sync-docs maintains them, /architect --backfill pairs them)`);
+  } else if (mode === "unmanaged") {
+    const unmanaged = unmanagedDocs(root, docs, dir);
+    console.log(unmanaged.length ? unmanaged.join("\n") : `arch-check: no unmanaged docs under ${dir}`);
   } else if (mode === "governs") {
     const hits = governingDocs(rest, docs);
     console.log(hits.length ? hits.map((d) => d.file).join("\n") : "arch-check: no architecture rules govern these paths");
@@ -210,7 +241,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (manifest) problems = checkScope(manifest, docs);
     if (!problems.length) console.log("arch-check: scope cites every governing rules doc — PASS");
   } else {
-    problems = ["usage: arch-check.mjs lint | governs <path>... | scope < manifest.json  [--root <dir>]"];
+    problems = ["usage: arch-check.mjs lint | governs <path>... | scope < manifest.json | unmanaged  [--root <dir>]"];
   }
   if (problems.length) {
     process.stderr.write(problems.map((p) => `craftsman: ${p}`).join("\n") + "\n");

@@ -1,8 +1,19 @@
 {
   "name": "craftsman",
-  "version": "2.1.0",
   "description": "Stack-agnostic doc-first command loop plus a deterministic quality engine — regression-only lint/type gates, acceptance-criteria enforcement, routed review, language-aware planning, and concurrency-safe per-session state — for any language or toolchain. The generalized evolution of craftsman v0.2.",
-  "author": { "name": "Kieran" },
+  "author": {
+    "name": "Kieran"
+  },
   "license": "MIT",
-  "keywords": ["quality-gate", "doc-loop", "planning", "code-review", "language-agnostic", "craftsman"]
+  "keywords": [
+    "quality-gate",
+    "doc-loop",
+    "planning",
+    "code-review",
+    "language-agnostic",
+    "craftsman"
+  ],
+  "metadata": {
+    "release": "2.1.0"
+  }
 }

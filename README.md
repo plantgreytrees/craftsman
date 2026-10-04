@@ -75,9 +75,10 @@ gitignored local snapshot.
 | Command | What it's for |
 |---|---|
 | `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair required project structure |
+| `/craftsman:upgrade` | update every Craftsman install (user and per-project) to the latest commit, then tell you what to reload and re-init |
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
 | `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
-| `/architect` | turn a vetted idea into confirmed engineering/data/systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`) |
+| `/architect` | turn a vetted idea into confirmed engineering/data/systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`; `--backfill` derives them for a project with existing plans and legacy docs) |
 | `/instruction` | generate one paste-ready `/goal` prompt that drives the whole loop to verified completion, plus an effort estimate |
 | `/understand` | build a cited understanding of a feature/area before touching it |
 | `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
@@ -121,8 +122,10 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   `docs/architecture/**`) are blocked until a writer command grants the
   session. `/plan` writes plans; `/orchestrate`, `/scrutinise` and
   `/sync-docs --tracker` update tracker rows; `/idea` writes idea docs
-  (`/architect` marks them `architected`); `/architect` writes
-  architecture docs. `/understand` and `/investigate` write nothing and hand
+  (`/architect` marks them `architected`); `/architect` writes paired
+  architecture areas (`<area>.rules.md` + `<area>.md`). Unpaired legacy prose
+  under `docs/architecture/` stays `/sync-docs`' until `/architect --backfill`
+  pairs it. `/understand` and `/investigate` write nothing and hand
   off to `/plan`. The rest of `docs/` is ordinary prose, freely editable;
   widen the guard in config if you want it stricter. The block is a hook; the
   grant covers every guarded path for that session, so which command writes

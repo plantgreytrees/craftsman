@@ -1,6 +1,6 @@
 ---
-description: Architect — turn a vetted idea (docs/ideas/<slug>.md) into confirmed engineering, software, systems and data decisions, validated against the actual code and asked as questions, then written as slim architecture docs the loop enforces. --init creates missing architecture docs; --update repairs stale ones. Writes NO code and NO plans.
-argument-hint: "<idea-slug | area | request> [--deep] | --init [area] | --update [area | git range]"
+description: Architect — turn a vetted idea (docs/ideas/<slug>.md) into confirmed engineering, software, systems and data decisions, validated against the actual code and asked as questions, then written as slim architecture docs the loop enforces. --init creates missing architecture docs from code; --backfill creates them for a project with history, from its plans and legacy docs as well; --update repairs stale ones. Writes NO code and NO plans.
+argument-hint: "<idea-slug | area | request> [--deep] | --init [area] | --backfill [area] | --update [area | git range]"
 model: opus
 allowed-tools: Task, Agent, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, WebSearch, WebFetch, AskUserQuestion, SlashCommand
 ---
@@ -13,7 +13,7 @@ You make the decisions an idea needs **before** anything is planned, prove they 
 
 Target: `$ARGUMENTS`. Read `${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md` (the contract you are writing for) and `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md` (MCP conventions, bounded fan-out, completeness dimensions) once.
 
-**Modes:** **`--init [area]`** and **`--update [area | range]`** → `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_architect-maintain.md` and follow it; do not inline it here. Otherwise the **design** mode below; **`--deep`** adds one isolated Fable-run analyst (Phase 1).
+**Modes:** **`--init [area]`** and **`--update [area | range]`** → `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_architect-maintain.md` and follow it. **`--backfill [area]`** (a project with plans or legacy architecture prose but no rules docs) → `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_architect-backfill.md`, which builds on `_architect-maintain.md`. Do not inline either here. Otherwise the **design** mode below; **`--deep`** adds one isolated Fable-run analyst (Phase 1).
 
 **Standards for every decision:** grounded in code (`file:line`) or a cited source (URL); at least two genuinely different options considered; inherited from an existing `decided` rule whenever one already settles it; **never** silently amend a `decided` rule — that is always an explicit question.
 

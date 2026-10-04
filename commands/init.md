@@ -70,8 +70,11 @@ then reports the plugin version and audits all shipped commands, agents, hooks,
 scripts, skills, default configuration, JavaScript syntax, and JSON validity. It
 also walks `docs/plans/` in activity order, beginning with plans that are
 `IN_PROGRESS`, `BLOCKED`, `PARKED`, or `PENDING`, then unfinished plans, then
-historical plans. Canonical plan frontmatter receives the current
-`craftsman_version`; task prose and tracker statuses are preserved.
+historical plans. Canonical plan frontmatter receives the current release as
+`craftsman_version`; task prose and tracker statuses are preserved. The
+`architecture` section counts rules docs and unmanaged legacy docs; when its
+`next` is set, report it (usually `/architect --backfill`). To pull a newer
+plugin first, run `/craftsman:upgrade`.
 It does not overwrite application source, custom project context, or arbitrary
 files. A missing or invalid shipped asset is reported as an internal plugin
 problem and prevents the update rather than being silently regenerated.

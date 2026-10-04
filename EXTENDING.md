@@ -202,7 +202,9 @@ By default three doc paths are guarded (`docWriteGuard.docPaths: ["docs/plans/**
 writer command runs `doc-write.mjs on` for the session. `/plan` writes plans,
 `/orchestrate`, `/scrutinise` and `/sync-docs --tracker` update tracker rows,
 `/idea` writes idea docs (`/architect` sets their `architected` status), and
-`/architect` writes architecture docs. The grant opens every guarded path for
+`/architect` writes paired architecture areas. Unpaired prose under the
+architecture dir (`arch-check.mjs unmanaged`) is ordinary prose for `/sync-docs`
+until `/architect --backfill` pairs it. The grant opens every guarded path for
 that session, so the per-command split is a contract the commands keep, not a
 per-path hook. Those are the surfaces with real
 stakes: two sessions racing on one tracker row, or a decision quietly rewritten
@@ -232,6 +234,14 @@ globs, then one `- **ARCH-<AREA>-NN** [decided|observed|superseded by …]` line
 per rule. The format is in
 `skills/language-aware-planning/references/architecture-template.md`, and the
 loop's obligations are in `commands/_architecture.md`.
+
+A project that predates `/architect` gets its rules from `/architect --backfill`.
+It mines the legacy architecture prose, the plans and the code for candidate
+rules, verifies each against the code, and writes only the ones the user
+confirms, with `source: backfill` and provenance. It then lists in-flight plan
+units that the new rules would block. Lint treats unpaired `.md` files as
+unmanaged (reported, not an error); only a human doc marked `> **Human
+reference.**` with no rules pair fails.
 
 `scripts/arch-check.mjs` is the deterministic side:
 

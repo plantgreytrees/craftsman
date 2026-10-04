@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs } from "./arch-check.mjs";
+import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs } from "./arch-check.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
@@ -107,7 +107,8 @@ test("lintRules: passes a well-formed pair; catches stale cites, duplicates, mis
 
   const bad = project({
     "src/auth/verify.ts": "one line\n",
-    "docs/architecture/data.md": "# Data\n",
+    "docs/architecture/data.md": "> **Human reference.** The loop never reads this file.\n# Data\n",
+    "docs/architecture/BUILD.md": "# Build\nlegacy prose\n",
     "docs/architecture/auth.md": null,
     "docs/architecture/billing.rules.md":
       "---\narea: billing\ngoverns: [src/billing/**]\n---\n- **ARCH-AUTH-01** [decided] duplicate id, no cite\n",
@@ -118,8 +119,25 @@ test("lintRules: passes a well-formed pair; catches stale cites, duplicates, mis
     assert.ok(errors.some((e) => /duplicate id ARCH-AUTH-01/.test(e)));
     assert.ok(errors.some((e) => /decided rule ARCH-AUTH-01 has no `cite/.test(e)));
     assert.ok(errors.some((e) => /human doc docs\/architecture\/auth\.md is missing/.test(e)));
-    assert.ok(errors.some((e) => /data\.md: no matching data\.rules\.md/.test(e)));
+    assert.ok(errors.some((e) => /data\.md: human doc whose data\.rules\.md is missing/.test(e)));
+    assert.ok(!errors.some((e) => /BUILD\.md/.test(e)), "legacy prose without the banner is not a lint error");
   } finally { fs.rmSync(bad, { recursive: true, force: true }); }
+});
+
+test("unmanagedDocs: lists unpaired prose (nested too), never the pairs, README, or rules files", () => {
+  const dir = project({
+    "docs/architecture/README.md": "# Index\n",
+    "docs/architecture/BUILD.md": "# Build\n",
+    "docs/architecture/contracts/events.md": "# Events\n",
+  });
+  try {
+    assert.deepEqual(unmanagedDocs(dir, loadRules(dir)),
+      ["docs/architecture/BUILD.md", "docs/architecture/contracts/events.md"]);
+    assert.deepEqual(lintRules(dir, loadRules(dir)), []);
+    const cli = spawnSync(process.execPath, [path.join(ROOT, "arch-check.mjs"), "lint", "--root", dir], { encoding: "utf8" });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.match(cli.stdout, /2 unmanaged doc\(s\)/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("governingDocs: returns only the rules docs whose area the paths touch", () => {
