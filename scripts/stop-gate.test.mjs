@@ -122,24 +122,46 @@ function addMergedWorktree(dir, slug) {
   return { worktree, branch };
 }
 
-test("stop-gate: a merged worktree this session never prepared is not swept", async () => {
+// Removal is mechanical: every Stop sweeps every merged, clean, unlocked
+// worktree in the repository, whoever made it, so nothing relies on the model
+// remembering a cleanup step.
+test("stop-gate: a merged, clean worktree another session left is removed automatically without blocking", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
   try {
-    addMergedWorktree(dir, "other-session-unit");
+    const theirs = addMergedWorktree(dir, "other-session-unit");
     const result = await runStopGate(dir, "no-ledger-session");
-    assert.doesNotMatch(result.stdout, /WORKTREE NOT SWEPT/);
     assert.doesNotMatch(result.stdout, /"decision":"block"/);
+    assert.equal(fs.existsSync(theirs.worktree), false, "merged clean worktree must be removed");
+    assert.equal(spawnSync("git", ["rev-parse", "--verify", "--quiet", theirs.branch], { cwd: dir }).status, 1, "merged branch must be deleted");
   } finally {
     cleanup(dir);
   }
 });
 
-test("stop-gate: a merged worktree recorded in this session's ledger blocks as NOT SWEPT", async () => {
+test("stop-gate: a merged, clean worktree in this session's ledger is removed and forgotten, not blocked on", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
   try {
     const sid = "owning-session";
     const mine = addMergedWorktree(dir, "my-unit");
-    addMergedWorktree(dir, "their-unit"); // another session's — must stay unmentioned
+    const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
+    const result = await runStopGate(dir, sid);
+    assert.doesNotMatch(result.stdout, /"decision":"block"/);
+    assert.equal(fs.existsSync(mine.worktree), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sessionDir, "worktrees.json"), "utf8")), []);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a merged ledger worktree with uncommitted changes survives the sweep and blocks as NOT SWEPT", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "owning-session";
+    const mine = addMergedWorktree(dir, "my-unit");
+    const theirs = addMergedWorktree(dir, "their-unit"); // another session's — swept, never mentioned
+    fs.writeFileSync(path.join(mine.worktree, "scratch.txt"), "unsaved\n");
     const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
@@ -147,7 +169,10 @@ test("stop-gate: a merged worktree recorded in this session's ledger blocks as N
     assert.match(result.stdout, /"decision":"block"/);
     assert.match(result.stdout, /WORKTREE NOT SWEPT/);
     assert.match(result.stdout, /my-unit/);
+    assert.match(result.stdout, /uncommitted change/);
     assert.doesNotMatch(result.stdout, /their-unit/);
+    assert.equal(fs.existsSync(mine.worktree), true, "dirty worktree must never be force-removed");
+    assert.equal(fs.existsSync(theirs.worktree), false);
   } finally {
     cleanup(dir);
   }
@@ -517,6 +542,7 @@ test("stop-gate: a ledger worktree merged into the base while the checkout sits 
     g("checkout", "-q", base);
     g("merge", "-q", "--no-ff", "-m", "merge unit", mine.branch);
     g("checkout", "-q", "scratch");
+    fs.writeFileSync(path.join(mine.worktree, "wip.txt"), "wip\n"); // dirty, so the sweep must leave it for the gate
     const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));

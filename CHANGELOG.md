@@ -7,6 +7,18 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **Worktree removal is enforced by the hooks, not left to memory.** Every Stop
+  and every SessionStart now runs the `worktree-sweep.mjs` `all_merged` sweep
+  over the whole repository. Any worktree that is merged into the base
+  branch, clean, not the session's cwd and not locked by a live session is
+  removed, along with its branch, whoever created it. Previously SessionStart
+  only *reported* such worktrees (`LINGERING WORKTREES`), and Stop only
+  blocked on worktrees this session made through `repo-exec`. Those blocks
+  told the model to run cleanup, so leftovers from a hand-run `git merge`,
+  `EnterWorktree` or a background job depended on it remembering. The Stop
+  block now fires only for a merged worktree from this session that the sweep
+  couldn't safely remove, and it names the reason (e.g. uncommitted changes).
+  Dirty or live-locked worktrees are never forced.
 - **Merged worktrees no longer linger, and a unit can't be closed out with its
   acceptance criteria still open.**
   - *Cleanup is no longer a step the model has to remember.* `repo-exec.mjs
