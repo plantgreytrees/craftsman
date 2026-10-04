@@ -334,9 +334,14 @@ export function buildInitPlan(root, { checkTools = true, auditPlugin = false } =
   const existing = fs.existsSync(existingPath) ? readJson(existingPath) : {};
   const config = removeDefaults(existing, readJson(defaultsPath)) || {};
   config.stopGate ||= {};
-  config.stopGate.commands ||= {};
-  for (const marker of detected.markers) config.stopGate.commands[marker] = commandFor(root, marker);
-  if (!Object.keys(config.stopGate.commands).length) delete config.stopGate.commands;
+  // Declared stop-gate commands are project tuning (an empty map included): keep them verbatim. Detect only when none are declared.
+  const declared = existing.stopGate?.commands;
+  if (declared && typeof declared === "object" && !Array.isArray(declared)) config.stopGate.commands = { ...declared };
+  else {
+    config.stopGate.commands = {};
+    for (const marker of detected.markers) config.stopGate.commands[marker] = commandFor(root, marker);
+    if (!Object.keys(config.stopGate.commands).length) delete config.stopGate.commands;
+  }
   if (!Object.keys(config.stopGate).length) delete config.stopGate;
   const tools = [...new Set([...detected.languages.flatMap((language) => qualityTools[language] || []), "gitleaks"])]
   const claudeContext = path.join(root, ".claude", "CLAUDE.md");
