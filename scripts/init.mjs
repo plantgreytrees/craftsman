@@ -432,6 +432,10 @@ export function applyInitPlan(plan) {
     throw new Error(`init write rolled back: ${error.message}`);
   }
   const result = buildInitPlan(plan.root, { checkTools: false });
+  // Writing files can't install a tool, so keep the probe the plan already
+  // ran: the unprobed re-audit lists every tool as missing, which made every
+  // --write/--update report "missing" tools that were installed.
+  result.tools = plan.tools;
   result.backupDir = backups.length ? backupRoot : null;
   return result;
 }

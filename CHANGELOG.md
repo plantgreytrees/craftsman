@@ -184,6 +184,11 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **`/craftsman:init --write`/`--update` reported every quality tool as
+  missing.** After writing, it rebuilt its report without checking the
+  tools again, so installed tools such as `gitleaks` and `ruff` showed as
+  missing. The report now keeps the check made before writing; writing
+  files can't install a tool, so that result still holds.
 - **`/craftsman:init --write`/`--update` overwrote a project's stop-gate
   commands.** It re-detected a command for every marker and replaced what the
   project had set, including a deliberately empty `{}`. The detected command
