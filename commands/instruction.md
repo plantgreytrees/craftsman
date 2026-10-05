@@ -47,10 +47,10 @@ Loop, each step to completion before the next:
 3. /scrutinise <slug> — while it reports any Critical or Warning: /orchestrate scrutinise-<slug>, then /scrutinise <slug> again.
 4. /sync-docs --all <slug> (docs, tracker, then /architect --update) — doc-stale fixes are pre-approved; stop for me only on a decision change or a VIOLATED rule.
 Constraints: obey <decided ARCH ids>; if a change would break one, stop and report — never work around it. No scope widening, no skipped or weakened tests, no --no-verify. Use /compact at phase boundaries, never /clear (it drops this goal).
-Done when the final turn prints COMPLETION EVIDENCE: every docs/plans/TRACKER.md row for <slug> = COMPLETE (print them); no unticked `- [ ]` line in .craftsman/acceptance.md for <slug>'s units or untagged (print the grep); `<test command>` exit 0; last /scrutinise = 0 Critical, 0 Warning; /sync-docs --all applied or "no drift". Or stop after <N> turns and print what remains.
+Done when the final turn prints COMPLETION EVIDENCE: every docs/plans/TRACKER.md row for <slug> = COMPLETE (print them); no unticked `- [ ]` line in .craftsman/acceptance.md for <slug>'s units or untagged (print the grep); `<test command>` exit 0; last /scrutinise = 0 Critical, 0 Warning; /sync-docs --all applied or "no drift". Also done when the final turn prints BLOCKED ON USER: <the one thing only I can do — a decision, access, credentials, an unapproved merge, a live/manual check> + what was tried; that is a met stop, not a failure. Or stop after <N> turns and print what remains — also met.
 ```
 
-Adapt, don't pad: drop steps that don't apply, add idea-specific acceptance outcomes (from the idea doc's "done" and recommendations) as extra evidence lines. **Measure it:** save to `.craftsman/instructions/<slug>.goal.txt` and run `wc -c` on it — over 4,000 → compress (shorter request text, fewer restated constraints, paths not prose) until it fits; never truncate the evidence clause.
+Adapt, don't pad: drop steps that don't apply, add idea-specific acceptance outcomes (from the idea doc's "done" and recommendations) as extra evidence lines. **Measure it:** save to `.craftsman/instructions/<slug>.goal.txt` and run `wc -c` on it — over 4,000 → compress (shorter request text, fewer restated constraints, paths not prose) until it fits; never truncate the evidence clause or its BLOCKED ON USER / turn-cap exits — without them every "stop for me" above reads as unmet, and the goal's Stop hook re-blocks until Claude Code's consecutive-block cap overrides it.
 
 ## Phase 3 — Output
 

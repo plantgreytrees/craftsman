@@ -207,6 +207,13 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **`/goal` prompts from `/instruction` could loop at the Stop hook until
+  Claude Code's cap overrode it.** The prompt told the session to stop and ask
+  on a decision or a violated rule, but its "Done when" clause counted only full
+  completion evidence. A correct stop therefore read as unmet, and the goal's
+  evaluator blocked every Stop ("A hook blocked the turn from ending 9
+  consecutive times"). The clause now also accepts a final `BLOCKED ON USER:
+  <what>` line and says the turn-cap stop is met.
 - **`/craftsman:init --write`/`--update` reported every quality tool as
   missing.** After writing, it rebuilt its report without checking the
   tools again, so installed tools such as `gitleaks` and `ruff` showed as
