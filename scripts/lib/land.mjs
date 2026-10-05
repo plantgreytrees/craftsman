@@ -34,8 +34,10 @@ function hostnameOf(url) {
 }
 
 // Free text (titles, descriptions) is marked so the Windows shell path can
-// sanitise it; everything else must already be shell-safe there.
-const free = (text) => ({ free: String(text) });
+// sanitise it; everything else must already be shell-safe there. It is
+// always joined to its flag (`--title=…`), so a commit subject that starts
+// with "-" can never be parsed as another option.
+const free = (flag, text) => ({ flag, free: String(text) });
 
 function parseJson(stdout, what) {
   try { return JSON.parse(stdout || "null"); }
@@ -57,7 +59,7 @@ const ADAPTERS = {
       const [pr] = parseJson(stdout, "gh pr list") || [];
       return pr ? { url: pr.url, id: String(pr.number) } : null;
     },
-    create: (o) => ["pr", "create", "--head", o.branch, "--base", o.base, "--title", free(o.title), "--body", free(o.body)],
+    create: (o) => ["pr", "create", "--head", o.branch, "--base", o.base, free("--title", o.title), free("--body", o.body)],
     parseCreate: (stdout) => {
       const url = lastUrl(stdout);
       return url ? { url, id: url.match(/\/pull\/(\d+)/)?.[1] || url } : null;
@@ -74,7 +76,7 @@ const ADAPTERS = {
       return mr ? { url: mr.web_url, id: String(mr.iid) } : null;
     },
     create: (o) => ["mr", "create", "--source-branch", o.branch, "--target-branch", o.base,
-      "--title", free(o.title), "--description", free(o.body), "--remove-source-branch", "--yes"],
+      free("--title", o.title), free("--description", o.body), "--remove-source-branch", "--yes"],
     parseCreate: (stdout) => {
       const url = lastUrl(stdout);
       return url ? { url, id: url.match(/\/merge_requests\/(\d+)/)?.[1] || url } : null;
@@ -94,7 +96,7 @@ const ADAPTERS = {
       return pr ? azurePr(pr) : null;
     },
     create: (o) => ["repos", "pr", "create", "--source-branch", o.branch, "--target-branch", o.base,
-      "--title", free(o.title), "--description", free(o.body), "--output", "json"],
+      free("--title", o.title), free("--description", o.body), "--output", "json"],
     parseCreate: (stdout) => azurePr(parseJson(stdout, "az repos pr create")),
     autoMerge: (o) => ["repos", "pr", "update", "--id", o.id, "--auto-complete", "true", "--delete-source-branch", "true",
       ...(o.mergeMethod === "squash" ? ["--squash", "true"] : []), "--output", "none"],
@@ -116,7 +118,7 @@ export function shellArgs(args) {
   return args.map((arg) => {
     if (arg && typeof arg === "object") {
       const text = arg.free.replace(/\s+/g, " ").replace(/[^\w .,:;()/#+@'[\]=-]/g, "").trim();
-      return `"${text}"`;
+      return `${arg.flag}="${text}"`;
     }
     if (!SHELL_PLAIN.test(arg)) throw new Error(`refusing to pass "${arg}" through the Windows shell`);
     return arg;
@@ -124,7 +126,7 @@ export function shellArgs(args) {
 }
 
 export function plainArgs(args) {
-  return args.map((arg) => (arg && typeof arg === "object" ? arg.free : arg));
+  return args.map((arg) => (arg && typeof arg === "object" ? `${arg.flag}=${arg.free}` : arg));
 }
 
 export function defaultRunner(cli, args, { cwd }) {

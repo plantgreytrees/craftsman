@@ -50,21 +50,21 @@ test("land: exact argv per host and merge method for a fresh request", () => {
   const expected = {
     github: {
       merge: ["gh pr list --head feat/unit-one --base main --state open --json url,number --limit 1",
-        "gh pr create --head feat/unit-one --base main --title feat: one --body - feat: one",
+        "gh pr create --head feat/unit-one --base main --title=feat: one --body=- feat: one",
         "gh pr merge 7 --auto --merge"],
       squash: [null, null, "gh pr merge 7 --auto --squash"],
       rebase: [null, null, "gh pr merge 7 --auto --rebase"],
     },
     gitlab: {
       merge: ["glab mr list --source-branch feat/unit-one --target-branch main --output json",
-        "glab mr create --source-branch feat/unit-one --target-branch main --title feat: one --description - feat: one --remove-source-branch --yes",
+        "glab mr create --source-branch feat/unit-one --target-branch main --title=feat: one --description=- feat: one --remove-source-branch --yes",
         "glab mr merge 7 --auto-merge --yes"],
       squash: [null, null, "glab mr merge 7 --auto-merge --yes --squash"],
       rebase: [null, null, "glab mr merge 7 --auto-merge --yes --rebase"],
     },
     azure: {
       merge: ["az repos pr list --source-branch feat/unit-one --target-branch main --status active --output json",
-        "az repos pr create --source-branch feat/unit-one --target-branch main --title feat: one --description - feat: one --output json",
+        "az repos pr create --source-branch feat/unit-one --target-branch main --title=feat: one --description=- feat: one --output json",
         "az repos pr update --id 7 --auto-complete true --delete-source-branch true --output none"],
       squash: [null, null, "az repos pr update --id 7 --auto-complete true --delete-source-branch true --squash true --output none"],
     },
@@ -122,13 +122,20 @@ test("land: preflight names a missing CLI, a logged-out CLI and an unsupported m
   assert.doesNotThrow(() => preflightHost({ ...base, host: "azure", mergeMethod: "squash" }, () => ok()));
 });
 
+test("land: a title starting with a dash stays joined to its flag", () => {
+  const { runner, calls } = fakeRunner([["az repos pr list", ok("[]")],
+    ["az repos pr create", ok(JSON.stringify({ pullRequestId: 2, repository: { webUrl: "https://dev.azure.com/o/p/_git/r" } }))]]);
+  openPullRequest({ ...base, host: "azure", title: "--bypass-policy true" }, runner);
+  assert.match(calls[1], / --title=--bypass-policy true --description=/);
+});
+
 test("land: a failed create surfaces the CLI's error", () => {
   const { runner } = fakeRunner([["gh pr list", ok("[]")], ["gh pr create", fail("GraphQL: base branch not found")]]);
   assert.throws(() => openPullRequest({ ...base, host: "github" }, runner), /gh create failed:\nGraphQL: base branch not found/);
 });
 
 test("land: Windows shell args sanitise free text and refuse unsafe structured values", () => {
-  const args = shellArgs(["repos", "pr", "create", "--source-branch", "feat/x", "--title", { free: 'fix: "quote" & del %PATH% ^| x\nline' }]);
-  assert.deepEqual(args, ["repos", "pr", "create", "--source-branch", "feat/x", "--title", '"fix: quote  del PATH  x line"']);
+  const args = shellArgs(["repos", "pr", "create", "--source-branch", "feat/x", { flag: "--title", free: 'fix: "quote" & del %PATH% ^| x\nline' }]);
+  assert.deepEqual(args, ["repos", "pr", "create", "--source-branch", "feat/x", '--title="fix: quote  del PATH  x line"']);
   assert.throws(() => shellArgs(["--source-branch", "feat/a&calc"]), /refusing to pass/);
 });

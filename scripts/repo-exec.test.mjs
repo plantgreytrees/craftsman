@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { cleanup, inspectRepo, merge, prepare, sync } from "./repo-exec.mjs";
+import { plainArgs } from "./lib/land.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
 
 function git(root, args) {
@@ -60,6 +61,7 @@ test("repo-exec: prepares, merges, and cleans a selected repository locally", ()
       assert.equal(synced.project_root, context.root);
       const merged = merge(context, { ...prepared, unit: "unit-one", slug: "unit-one" }, info);
       assert.equal(merged.merged, true);
+      assert.equal(merged.land, "direct");
       assert.equal(merged.cleaned, true, "a successful merge cleans its own worktree");
       assert.equal(merged.branch_deleted, true);
       assert.equal(fs.existsSync(path.join(context.root, "feature.txt")), true);
@@ -192,6 +194,123 @@ test("repo-exec: cleanup:false keeps the worktree; cleanup of an unmerged branch
       assert.equal(cleaned.branch_deleted, false, "a parked branch must survive its worktree");
       assert.equal(fs.existsSync(parked.worktree_path), false);
       assert.equal(git(context.root, ["branch", "--list", parked.branch]).replace(/^[*+ ]+/, ""), parked.branch);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// repoExec.land:"pr" — for a base branch the host protects against direct
+// pushes. The host CLI is faked; git, the push and the bare origin are real.
+function usePrLanding(root, repoExec = {}) {
+  fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ repoExec: { land: "pr", host: "github", ...repoExec } }));
+}
+
+function addOrigin(workspace, root) {
+  const origin = path.join(workspace, `${path.basename(root)}-origin.git`);
+  git(workspace, ["init", "-q", "--bare", origin]);
+  git(root, ["remote", "add", "origin", origin]);
+  const base = git(root, ["branch", "--show-current"]);
+  git(root, ["push", "-q", "-u", "origin", base]);
+  return { origin, base };
+}
+
+function fakeGh(existing = null) {
+  const calls = [];
+  const runner = (cli, args) => {
+    calls.push([cli, ...plainArgs(args)].join(" "));
+    if (args[0] === "pr" && args[1] === "list") return { status: 0, stdout: JSON.stringify(existing ? [existing] : []), stderr: "" };
+    if (args[0] === "pr" && args[1] === "create") return { status: 0, stdout: "https://github.com/o/r/pull/12\n", stderr: "" };
+    return { status: 0, stdout: "", stderr: "" };
+  };
+  return { runner, calls };
+}
+
+function commitUnit(context, info, slug) {
+  const prepared = prepare(context, { unit: slug, slug }, info);
+  fs.writeFileSync(path.join(prepared.worktree_path, `${slug}.txt`), `${slug}\n`);
+  git(prepared.worktree_path, ["add", `${slug}.txt`]);
+  git(prepared.worktree_path, ["commit", "-q", "-m", `feat: ${slug} through a pull request`]);
+  return prepared;
+}
+
+test("repo-exec: land:pr pushes only the unit branch, opens a PR, and keeps base untouched", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { origin, base } = addOrigin(data.workspace, context.root);
+      usePrLanding(context.root);
+      const info = inspectRepo(context, { base_branch: base });
+      const input = { unit: "pr-unit", slug: "pr-unit", session_id: "pr-session", project: "one" };
+      const prepared = prepare(context, input, info);
+      fs.writeFileSync(path.join(prepared.worktree_path, "pr.txt"), "pr\n");
+      git(prepared.worktree_path, ["add", "pr.txt"]);
+      git(prepared.worktree_path, ["commit", "-q", "-m", "feat: through a pull request"]);
+      const baseBefore = git(origin, ["rev-parse", base]);
+      const localBefore = git(context.root, ["rev-parse", "HEAD"]);
+      const unitHead = git(prepared.worktree_path, ["rev-parse", "HEAD"]);
+      const { runner, calls } = fakeGh();
+
+      const landed = merge(context, { ...prepared, ...input }, info, { runner });
+
+      assert.equal(landed.land, "pr");
+      assert.equal(landed.merged, false, "an open PR is not a merge into base");
+      assert.equal(landed.pushed, true);
+      assert.deepEqual(landed.pr, { host: "github", url: "https://github.com/o/r/pull/12", id: "12", state: "opened" });
+      assert.equal(landed.auto_merge, true);
+      assert.equal(git(origin, ["rev-parse", prepared.branch]), unitHead, "the unit branch reached origin");
+      assert.equal(git(origin, ["rev-parse", base]), baseBefore, "origin's base branch is untouched");
+      assert.equal(git(context.root, ["rev-parse", "HEAD"]), localBefore, "the primary checkout is untouched");
+      assert.equal(fs.existsSync(path.join(context.root, "pr.txt")), false);
+      assert.equal(landed.cleaned, true, landed.cleanup_error);
+      assert.equal(landed.branch_deleted, false, "the branch stays until the host merges it");
+      assert.equal(fs.existsSync(prepared.worktree_path), false);
+      assert.deepEqual(readSessionWorktrees(input, context), []);
+      assert.deepEqual(calls.map((line) => line.split(" ").slice(0, 3).join(" ")),
+        ["gh auth status", "gh pr list", "gh pr create", "gh pr merge"]);
+      assert.match(calls[2], /--title=feat: through a pull request --body=/);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: land:pr reuses an open PR on retry and honours autoMerge:false", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { base } = addOrigin(data.workspace, context.root);
+      usePrLanding(context.root, { autoMerge: false });
+      const info = inspectRepo(context, { base_branch: base });
+      const prepared = commitUnit(context, info, "retry");
+      const { runner, calls } = fakeGh({ url: "https://github.com/o/r/pull/5", number: 5 });
+      const landed = merge(context, prepared, info, { runner });
+      assert.equal(landed.pr.state, "existing");
+      assert.equal(landed.auto_merge, false);
+      assert.ok(!calls.some((line) => line.startsWith("gh pr create") || line.startsWith("gh pr merge")));
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: land:pr refuses before any push without a remote, host or CLI", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      usePrLanding(context.root);
+      const info = inspectRepo(context);
+      const prepared = commitUnit(context, info, "refused");
+      assert.throws(() => merge(context, prepared, info, { runner: fakeGh().runner }), /has no origin remote/);
+      assert.equal(fs.existsSync(prepared.worktree_path), true, "a refused landing keeps the worktree");
+
+      const { origin, base } = addOrigin(data.workspace, context.root);
+      const withRemote = inspectRepo(context, { base_branch: base });
+      usePrLanding(context.root, { host: "auto" });
+      assert.throws(() => merge(context, prepared, withRemote, { runner: fakeGh().runner }), /cannot tell which host/);
+      usePrLanding(context.root);
+      assert.throws(() => merge(context, prepared, withRemote, { runner: () => ({ missing: true }) }), /gh is not installed/);
+      assert.equal(git(origin, ["branch", "--list", prepared.branch]), "", "nothing was pushed");
+
+      fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ repoExec: { land: "rebase-it" } }));
+      assert.throws(() => merge(context, prepared, withRemote), /repoExec.land must be/);
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
