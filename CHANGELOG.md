@@ -7,6 +7,29 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
+- **Units can land through an auto-merging pull/merge request
+  (`repoExec.land: "pr"`).** Use this when GitHub, GitLab or Azure DevOps
+  protects the base branch against the direct push `repo-exec.mjs merge` makes
+  today. The default stays `"direct"`.
+  - *Pr mode never touches the base branch or the primary checkout, so it
+    takes no merge lock.* It pushes the unit's branch, then finds or opens
+    its request with `gh`, `glab` or `az`. Which one comes from the origin
+    URL, or from `repoExec.host` for self-hosted domains. It then requests
+    auto-merge (`repoExec.autoMerge`, `repoExec.mergeMethod`).
+  - *The result reports `merged: false` with `pr: {host, url, id, state}`.*
+    The worktree is cleaned up, and the branch is kept until the host merges
+    it.
+  - *Safe to retry.* A missing or logged-out CLI, no remote, or an unknown
+    host is refused before anything is pushed. A retry reuses the request
+    that is already open.
+  - *Tracker evidence is `pr:<url>`.* A unit that depends on a request that
+    hasn't merged yet is parked until it merges (`_shared-execution.md` step
+    11).
+  - *New `scripts/lib/land.mjs` keeps each host's CLI flags in one table.* It
+    is tested through an injected runner. On Windows, `az`'s `.cmd` shim
+    gets allow-list-sanitised text, and free text is always joined to its
+    flag.
+
 - **Built-in skills and agents under craftsman's rules (pilot).**
   - *`/orchestrate` step 6 runs Claude Code's built-in `simplify`.* Its edits
     fall under the same scope guard and quality gate as the implementer's.

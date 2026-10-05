@@ -119,6 +119,13 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
 
 ## Good to know
 
+- **Protected base branches (GitHub, GitLab, Azure DevOps)** — by default a
+  finished unit is merged locally and the base branch is pushed. If your host
+  rejects direct pushes, set `repoExec.land: "pr"`: each unit's branch is
+  pushed and lands through an auto-merging pull/merge request opened with
+  `gh`, `glab` or `az`, so your branch protection, CI and approvals apply.
+  Worktree isolation is the same either way — see
+  [EXTENDING.md](EXTENDING.md#landing-units-through-pull-requests).
 - **Doc-write authority** — the guarded paths (`docs/plans/**`, `docs/ideas/**`,
   `docs/architecture/**`) are blocked until a writer command grants the
   session. `/plan` writes plans; `/orchestrate`, `/scrutinise` and

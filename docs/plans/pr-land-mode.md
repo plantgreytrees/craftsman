@@ -83,25 +83,25 @@ Finished units can land through an auto-merging PR/MR on GitHub, GitLab or Azure
 ### Step 1 — land-adapter (craftsman, javascript, high)
 Tooling: implementer · gates security-auditor, code-reviewer · guards scope, quality-gate
 Depends on: none
-- [ ] 1.1 Create `scripts/lib/land.mjs` exporting `detectHost(originUrl, override)` → `"github" | "gitlab" | "azure" | null` (github.com; any host containing `gitlab`; dev.azure.com / *.visualstudio.com / ssh.dev.azure.com; an override wins unless `"auto"`) → accept: unit test covers https + ssh forms of each and an unknown host → null.
-- [ ] 1.2 In `land.mjs`, a per-host table of argv builders: `preflight`, `find`, `create`, `autoMerge`, plus a parser for each one's output to `{ url, id }`. GitHub `gh pr view/create/merge --auto`; GitLab `glab mr view -F json` / `mr create --fill --yes --remove-source-branch` / `mr merge --auto-merge --yes`; Azure `az repos pr list --status active -o json` / `pr create --auto-complete --delete-source-branch -o json` / `pr update --auto-complete true` → accept: table-driven test asserts exact argv for each host × mergeMethod.
-- [ ] 1.3 `land.mjs` exports `openPullRequest({ host, cwd, branch, base, title, body, autoMerge, mergeMethod }, runner = defaultRunner)`; `defaultRunner` uses `spawnSync` with `shell:false`, except Azure on win32 (`az.cmd`), where free-text args go through an allow-list sanitiser first. A missing CLI (ENOENT) → a clear `"<cli> is not installed"` error → accept: injected-runner tests cover missing CLI, auth failure, existing PR, fresh create, non-fatal auto-merge failure; no test needs network or a real CLI.
-- [ ] 1.4 Run `node --test scripts/lib/land.test.mjs` → accept: all pass.
+- [x] 1.1 Create `scripts/lib/land.mjs` exporting `detectHost(originUrl, override)` → `"github" | "gitlab" | "azure" | null` (github.com; any host containing `gitlab`; dev.azure.com / *.visualstudio.com / ssh.dev.azure.com; an override wins unless `"auto"`) → accept: unit test covers https + ssh forms of each and an unknown host → null.
+- [x] 1.2 In `land.mjs`, a per-host table of argv builders: `preflight`, `find`, `create`, `autoMerge`, plus a parser for each one's output to `{ url, id }`. GitHub `gh pr view/create/merge --auto`; GitLab `glab mr view -F json` / `mr create --fill --yes --remove-source-branch` / `mr merge --auto-merge --yes`; Azure `az repos pr list --status active -o json` / `pr create --auto-complete --delete-source-branch -o json` / `pr update --auto-complete true` → accept: table-driven test asserts exact argv for each host × mergeMethod.
+- [x] 1.3 `land.mjs` exports `openPullRequest({ host, cwd, branch, base, title, body, autoMerge, mergeMethod }, runner = defaultRunner)`; `defaultRunner` uses `spawnSync` with `shell:false`, except Azure on win32 (`az.cmd`), where free-text args go through an allow-list sanitiser first. A missing CLI (ENOENT) → a clear `"<cli> is not installed"` error → accept: injected-runner tests cover missing CLI, auth failure, existing PR, fresh create, non-fatal auto-merge failure; no test needs network or a real CLI.
+- [x] 1.4 Run `node --test scripts/lib/land.test.mjs` → accept: all pass.
 
 ### Step 2 — repo-exec-land (craftsman, javascript, high)
 Tooling: implementer · gates security-auditor, code-reviewer · guards scope, quality-gate
 Depends on: land-adapter
-- [ ] 2.1 In `scripts/repo-exec.mjs`, keep the direct path (+`land:"direct"`) and add `landPullRequest()` implementing the Contract's pr order; `merge(context, input, info, deps = {})` accepts an injected `runner` for tests only (no stdin JSON field can select it) → accept: existing direct-mode tests pass unchanged.
-- [ ] 2.2 Add `repoExec.land:"direct"`, `host:"auto"`, `autoMerge:true`, `mergeMethod:"merge"` to `craftsman.config.json` → accept: the file parses as JSON.
-- [ ] 2.3 Add tests to `scripts/repo-exec.test.mjs`: pr mode against a local bare `origin` with an injected runner — base branch and primary checkout untouched, feature branch pushed to origin, worktree removed, branch kept, `merged:false`; no remote → throws before any push → accept: `node --test scripts/repo-exec.test.mjs` passes.
-- [ ] 2.4 Run the full suite `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: no new failures.
+- [x] 2.1 In `scripts/repo-exec.mjs`, keep the direct path (+`land:"direct"`) and add `landPullRequest()` implementing the Contract's pr order; `merge(context, input, info, deps = {})` accepts an injected `runner` for tests only (no stdin JSON field can select it) → accept: existing direct-mode tests pass unchanged.
+- [x] 2.2 Add `repoExec.land:"direct"`, `host:"auto"`, `autoMerge:true`, `mergeMethod:"merge"` to `craftsman.config.json` → accept: the file parses as JSON.
+- [x] 2.3 Add tests to `scripts/repo-exec.test.mjs`: pr mode against a local bare `origin` with an injected runner — base branch and primary checkout untouched, feature branch pushed to origin, worktree removed, branch kept, `merged:false`; no remote → throws before any push → accept: `node --test scripts/repo-exec.test.mjs` passes.
+- [x] 2.4 Run the full suite `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: no new failures.
 
 ### Step 3 — land-docs (craftsman, markdown, normal)
 Depends on: repo-exec-land
-- [ ] 3.1 `commands/_shared-execution.md` Phase L + X.9d/e + step 11: describe pr mode (no lock, no base mutation, `merged:false`, branch kept), the tracker evidence rule and the dependent-unit PARK rule → accept: text names `repoExec.land`, `pr.url` evidence, and the PARK rule.
-- [ ] 3.2 `README.md` "Good to know": one bullet on landing via PR/MR on protected branches → accept: bullet present.
-- [ ] 3.3 `EXTENDING.md`: a `repoExec` section documenting land/host/autoMerge/mergeMethod, self-hosted hosts needing `host`, and squash-merged branches surviving locally → accept: section present.
-- [ ] 3.4 `CHANGELOG.md` `[Unreleased] ### Added`: one bullet (LAST task) → accept: one entry, no duplicate.
+- [x] 3.1 `commands/_shared-execution.md` Phase L + X.9d/e + step 11: describe pr mode (no lock, no base mutation, `merged:false`, branch kept), the tracker evidence rule and the dependent-unit PARK rule → accept: text names `repoExec.land`, `pr.url` evidence, and the PARK rule.
+- [x] 3.2 `README.md` "Good to know": one bullet on landing via PR/MR on protected branches → accept: bullet present.
+- [x] 3.3 `EXTENDING.md`: a `repoExec` section documenting land/host/autoMerge/mergeMethod, self-hosted hosts needing `host`, and squash-merged branches surviving locally → accept: section present.
+- [x] 3.4 `CHANGELOG.md` `[Unreleased] ### Added`: one bullet (LAST task) → accept: one entry, no duplicate.
 
 ## Sequencing
 Adapter (pure, injected runner) → merge() integration → docs. CLI flag differences between hosts live in one table, tested before anything calls it.
