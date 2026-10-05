@@ -61,6 +61,13 @@ test("init repairs missing structure and is idempotent", () => {
   assert.match(claudeIgnore, /\.next\//);
 });
 
+test("init's post-write report keeps the plan's tool probe instead of listing every tool missing", () => {
+  const root = fixture();
+  const plan = buildInitPlan(root, { checkTools: false });
+  plan.tools = { installed: ["ruff", "gitleaks"], missing: ["hadolint"] };
+  assert.deepEqual(applyInitPlan(plan).tools, { installed: ["ruff", "gitleaks"], missing: ["hadolint"] });
+});
+
 test("init adds language-specific cache exclusions", () => {
   const patterns = claudeIgnorePatterns({ languages: ["python", "rust", "csharp"] });
   assert.ok(patterns.includes(".ruff_cache/"));
