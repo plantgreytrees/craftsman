@@ -214,6 +214,12 @@ All notable changes to craftsman are documented here. Format loosely follows
   evaluator blocked every Stop ("A hook blocked the turn from ending 9
   consecutive times"). The clause now also accepts a final `BLOCKED ON USER:
   <what>` line and says the turn-cap stop is met.
+- **`/craftsman:init --write`/`--update` could gut the plugin's shipped
+  defaults.** Run inside the craftsman source repo, it treated the root
+  `craftsman.config.json`, which every install reads as its defaults, as a
+  project override and shrank it to a few stop-gate lines. Init now detects
+  its own source (`.claude-plugin/plugin.json` named `craftsman`), still
+  audits it (`pluginSource: true`), and refuses to write.
 - **`/craftsman:init --write`/`--update` reported every quality tool as
   missing.** After writing, it rebuilt its report without checking the
   tools again, so installed tools such as `gitleaks` and `ruff` showed as

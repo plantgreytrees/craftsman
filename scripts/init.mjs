@@ -328,6 +328,13 @@ function changedFiles(files) {
   return Object.entries(files).filter(([file, content]) => textAt(file) !== content).map(([file]) => file);
 }
 
+// The plugin's own source repo: its root craftsman.config.json is the shipped
+// defaults every install reads, not a project override, so init must never
+// rewrite it (that would strip the defaults from every install on next push).
+export function isPluginSource(root) {
+  try { return readJson(path.join(root, ".claude-plugin", "plugin.json")).name === "craftsman"; } catch { return false; }
+}
+
 export function buildInitPlan(root, { checkTools = true, auditPlugin = false } = {}) {
   const detected = detectStack(root);
   const existingPath = path.join(root, "craftsman.config.json");
@@ -349,6 +356,7 @@ export function buildInitPlan(root, { checkTools = true, auditPlugin = false } =
   const gitignore = path.join(root, ".gitignore");
   const plan = {
     root,
+    pluginSource: isPluginSource(root),
     detected: { markers: detected.markers, languages: detected.languages, packageManager: detected.packageManager, ci: detected.ci },
     testCommands: Object.fromEntries(detected.markers.map((marker) => [marker, commandFor(root, marker)])),
     tools: { installed: checkTools ? tools.filter(toolAvailable) : [], missing: checkTools ? tools.filter((tool) => !toolAvailable(tool)) : tools },
@@ -403,6 +411,7 @@ export function renderInitDiff(plan) {
 }
 
 export function applyInitPlan(plan) {
+  if (plan.pluginSource) throw new Error(`${plan.root} is the craftsman plugin's own source; its craftsman.config.json is the shipped defaults, so --write/--update refuse to touch it`);
   const backups = [];
   const originals = new Map(plan.changes.map((file) => [file, textAt(file)]));
   const backupRoot = path.join(plan.root, ".craftsman", "init-backups", new Date().toISOString().replaceAll(/[:.]/g, "-"));

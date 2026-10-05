@@ -68,6 +68,23 @@ test("init's post-write report keeps the plan's tool probe instead of listing ev
   assert.deepEqual(applyInitPlan(plan).tools, { installed: ["ruff", "gitleaks"], missing: ["hadolint"] });
 });
 
+test("init audits but refuses to write inside the plugin's own source repo", () => {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, ".claude-plugin"));
+  fs.writeFileSync(path.join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "craftsman" }));
+  const before = fs.readFileSync(path.join(root, "craftsman.config.json"), "utf8");
+  const plan = buildInitPlan(root, { checkTools: false });
+
+  assert.equal(plan.pluginSource, true);
+  assert.ok(plan.changes.length > 0);
+  assert.throws(() => applyInitPlan(plan), /plugin's own source/);
+  assert.equal(fs.readFileSync(path.join(root, "craftsman.config.json"), "utf8"), before);
+  assert.equal(fs.existsSync(path.join(root, ".craftsman", "init-backups")), false);
+
+  fs.writeFileSync(path.join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "other-plugin" }));
+  assert.equal(buildInitPlan(root, { checkTools: false }).pluginSource, false);
+});
+
 test("init adds language-specific cache exclusions", () => {
   const patterns = claudeIgnorePatterns({ languages: ["python", "rust", "csharp"] });
   assert.ok(patterns.includes(".ruff_cache/"));
