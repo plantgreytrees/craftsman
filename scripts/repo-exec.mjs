@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { atomicWrite, forgetSessionWorktree, loadConfig, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
+import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 
 function run(root, args, options = {}) {
   try {
@@ -194,10 +195,25 @@ function verifyGateBeforeMerge(context, worktree) {
   }
 }
 
-function merge(context, input, info) {
+// How a finished unit reaches the base branch — `repoExec.land` in config,
+// never a per-call input, for the same reason as verifyGateBeforeMerge:
+// "direct" merges locally and pushes base (today's behaviour); "pr" pushes
+// only the unit's branch and hands the merge to the host's own review flow,
+// for base branches protected against direct pushes.
+function landMode(cfg) {
+  const land = cfg.repoExec?.land || "direct";
+  if (land !== "direct" && land !== "pr") throw new Error(`repoExec.land must be "direct" or "pr" (got ${land})`);
+  return land;
+}
+
+// `deps.runner` replaces the host CLI runner in tests; the stdin entry point
+// never passes it.
+function merge(context, input, info, deps = {}) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
-  if (run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
+  const cfg = loadConfig(context);
+  const land = landMode(cfg);
+  if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
   const checkedOutBranch = run(worktree, ["branch", "--show-current"]);
@@ -205,6 +221,7 @@ function merge(context, input, info) {
   const branch = checkedOutBranch;
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   verifyGateBeforeMerge(context, worktree);
+  if (land === "pr") return landPullRequest(context, input, info, { worktree, branch, cfg, runner: deps.runner });
   const lock = acquireLock(info, input);
   const originalBranch = run(context.root, ["branch", "--show-current"]);
   let mergeStarted = false;
@@ -229,16 +246,53 @@ function merge(context, input, info) {
     }
     releaseLock(lock);
   }
-  // A merged worktree has nothing left to do. Cleanup used to be a separate
-  // step the model had to remember, and skipping it is exactly how merged
-  // worktrees lingered — so it happens here, after the lock is released.
-  // Opt out only with cleanup:false. A cleanup failure never un-merges: it is
-  // reported, and the session ledger keeps the path so Stop's sweep catches it.
-  if (input.cleanup === false) return { ...info, branch, merged: true, cleaned: false };
+  return cleanupAfterLanding(context, input, info, { ...info, branch, land: "direct", merged: true });
+}
+
+// The "pr" land mode. It never touches the primary checkout or the base
+// branch, so it needs no merge lock: it pushes the unit's own branch, then
+// finds or opens its pull/merge request and asks the host to auto-merge it.
+// Everything that can refuse (no remote, unknown host, missing or logged-out
+// CLI, unsupported merge method) is checked before the push.
+function landPullRequest(context, input, info, { worktree, branch, cfg, runner }) {
+  if (!info.has_remote) throw new Error(`repoExec.land is "pr" but ${info.project} has no origin remote`);
+  const host = detectHost(info.origin, cfg.repoExec?.host);
+  if (!host) throw new Error(`cannot tell which host ${info.origin} is on; set repoExec.host to github, gitlab or azure`);
+  const options = {
+    host, cwd: worktree, branch, base: info.base_branch,
+    autoMerge: cfg.repoExec?.autoMerge !== false,
+    mergeMethod: cfg.repoExec?.mergeMethod || "merge",
+  };
+  preflightHost(options, runner);
+  if (input.fetch !== false) run(context.root, ["fetch", "origin", info.base_branch]);
+  const subjects = run(worktree, ["log", "--reverse", "--format=%s", `origin/${info.base_branch}..${branch}`]);
+  if (!subjects) throw new Error(`${branch} has no commits beyond origin/${info.base_branch}`);
+  run(worktree, ["push", "-u", "origin", branch]);
+  const lines = subjects.split("\n");
+  const pr = openPullRequest({
+    ...options,
+    title: lines[0],
+    body: `Landed by craftsman (repoExec.land: "pr").\n\n${lines.map((line) => `- ${line}`).join("\n")}`,
+  }, runner);
+  const { auto_merge, auto_merge_error, ...request } = pr;
+  return cleanupAfterLanding(context, input, info, {
+    ...info, branch, land: "pr", merged: false, pushed: true, pr: request, auto_merge,
+    ...(auto_merge_error ? { auto_merge_error } : {}),
+  });
+}
+
+// A landed worktree has nothing left to do. Cleanup used to be a separate
+// step the model had to remember, and skipping it is exactly how merged
+// worktrees lingered — so it happens here, after any lock is released.
+// Opt out only with cleanup:false. A cleanup failure never un-lands: it is
+// reported, and the session ledger keeps the path so Stop's sweep catches it.
+// In "pr" mode the branch is not in base yet, so cleanup keeps it.
+function cleanupAfterLanding(context, input, info, result) {
+  if (input.cleanup === false) return { ...result, cleaned: false };
   try {
-    return { ...info, ...cleanup(context, { ...input, branch }, info), branch, merged: true };
+    return { ...cleanup(context, { ...input, branch: result.branch }, info), ...result };
   } catch (error) {
-    return { ...info, branch, merged: true, cleaned: false, cleanup_error: String(error.stderr || error.message).trim() };
+    return { ...result, cleaned: false, cleanup_error: String(error.stderr || error.message).trim() };
   }
 }
 

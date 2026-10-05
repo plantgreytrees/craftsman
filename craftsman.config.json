@@ -92,7 +92,11 @@
     "nudgeLines": 300
   },
   "repoExec": {
-    "verifyTestsBeforeMerge": true
+    "verifyTestsBeforeMerge": true,
+    "land": "direct",
+    "host": "auto",
+    "autoMerge": true,
+    "mergeMethod": "merge"
   },
   "baseline": {
     "errorsDoc": "docs/errors/KNOWN_ISSUES.md"

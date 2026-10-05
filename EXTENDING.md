@@ -134,6 +134,34 @@ project hasn't made in a month stops being narrated every session:
 
 (one week, shown as an example — the default is 30 days).
 
+### Landing units through pull requests
+
+By default `/orchestrate` lands each finished unit by merging it into the base
+branch locally and pushing that branch (`repoExec.land: "direct"`). A host that
+protects the base branch rejects that push. Switch to `"pr"` and each unit's
+branch is pushed instead, then lands through a pull/merge request that the
+host merges once its checks and approvals pass:
+
+```json
+{ "repoExec": { "land": "pr", "host": "auto", "autoMerge": true, "mergeMethod": "merge" } }
+```
+
+- `host` — `"auto"` reads the origin URL: `github.com` → `gh`, any host with
+  `gitlab` in its name → `glab`, `dev.azure.com` / `*.visualstudio.com` →
+  `az repos` (needs the `azure-devops` CLI extension). Set `"github"`,
+  `"gitlab"` or `"azure"` explicitly for GitHub Enterprise or a self-hosted
+  GitLab on another domain. The CLI must be installed and logged in; craftsman
+  checks both before pushing anything and never handles your tokens.
+- `autoMerge` — `false` only opens the request; you merge it yourself.
+- `mergeMethod` — `"merge"`, `"squash"` or `"rebase"` (`"rebase"` is not
+  available on Azure DevOps; use branch policy there).
+- Worktrees work the same way in both modes. In `"pr"` mode the local branch
+  is kept until the request merges. After a squash or rebase merge the
+  local branch never shows as merged, so delete it yourself
+  (`git branch -D feat/<slug>`); the host deletes the remote branch.
+- A unit that depends on another unit's still-open request is parked until
+  that request merges, because new units branch from `origin/<base>`.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or
