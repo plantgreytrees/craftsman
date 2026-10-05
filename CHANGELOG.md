@@ -33,6 +33,15 @@ All notable changes to craftsman are documented here. Format loosely follows
     approval; approved changes go through `/plan` → `/orchestrate`. It
     keeps a ledger in `docs/builtins.md` (`--report-only` stops after the
     report).
+  - *First `builtin-check` run, against Claude Code 2.1.289.* It wrote the
+    `docs/builtins.md` ledger. Every wrapper is OK, with two corrections:
+    - `Explore` has Bash. It is read-only by design, not by its tool set, so
+      the guard and doc wording now say that instead of "no write tools".
+    - The built-in `code-review` runs as a forked background skill, so step
+      8 now waits for its result before handing the findings on.
+
+    Three opportunities are recorded but not adopted: `security-review` for
+    step 5, `run` at close-out, and a project `verify` skill.
 
 - **`/idea`, `/architect` and `/instruction`: a front end for the loop that
   vets an idea, decides its architecture, and drives it to completion.**

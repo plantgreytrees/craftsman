@@ -10,9 +10,11 @@
 //      invoking the command wrote for this session, spent on use, so each run
 //      gets exactly one, never a second or a parallel one.
 //   3. Claude Code's own read-only built-in agents named in
-//      execution.builtinAgents (default ["Explore"]) — they carry no write
-//      tools, so they can't take over the implementer/specialist/reviewer
-//      work root-only mode exists to keep in this session.
+//      execution.builtinAgents (default ["Explore"]) — read-only by design
+//      (no Edit/Write/NotebookEdit; Explore does have Bash, whose calls still
+//      pass craftsman's PreToolUse guards), so they can't take over the
+//      implementer/specialist/reviewer work root-only mode keeps here.
+//      docs/builtins.md records the verified tool set per Claude Code version.
 // Every other Task call is hard-blocked, regardless of what any command's
 // prose says to "delegate" or "dispatch".
 import { loadConfig, enabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS } from "./lib/core.mjs";

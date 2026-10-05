@@ -185,7 +185,7 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   `implementer`/`security-auditor` stay on `sonnet`. Each run is granted
   exactly one such agent, so a second or parallel dispatch is blocked.
   Claude Code's read-only built-in agents listed in `execution.builtinAgents`
-  (default `["Explore"]`) also pass, since they can't write. Flip
+  (default `["Explore"]`) also pass, since they're read-only by design. Flip
   `execution.agentMode` to `"subagents"` to restore real fan-out.
 - **Built-in skills, craftsman's rules** — `/orchestrate` runs Claude Code's
   own maintained `simplify` (step 6) and `code-review` (step 8) skills inside
