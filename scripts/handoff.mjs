@@ -6,7 +6,6 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   atomicWrite, logEvent, projectContext, readStdin, sessionDir, sidOf,
-  requireCompact, COMPACT_REQUIRED_NOTICE,
 } from "./lib/core.mjs";
 import { recordMemory } from "./plan-memory.mjs";
 
@@ -53,12 +52,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const context = projectContext(input.project || ".");
     const handoff = normalizeHandoff(input, context);
     atomicWrite(handoffFile(input), JSON.stringify(handoff, null, 2) + "\n");
-    // The hand-off is on disk — the unit is closed out, so arm the gate here,
-    // at the event itself. Gate and marker must agree on the session id: both
-    // derive it from sidOf(), so a caller that omits session_id writes to
-    // "shared" while compact-gate.mjs looks under the real one and fails open.
-    // Say so rather than silently under-enforcing.
-    requireCompact(sidOf(input), context);
     for (const entry of handoff.memory_entries) {
       try {
         recordMemory({ ...entry, plan: entry.plan || handoff.plan, unit: entry.unit || handoff.unit,
@@ -69,11 +62,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
     logEvent({ ev: "handoff_written", sid: sidOf(input), plan: handoff.plan, unit: handoff.unit || null });
     process.stdout.write(`handoff written: ${handoffFile(input)}\n`);
-    process.stdout.write(`craftsman: hand-off written. ${COMPACT_REQUIRED_NOTICE}\n`);
     if (!input.session_id) {
       process.stdout.write(
-        "craftsman: WARNING — no session_id in the hand-off payload, so the compact gate " +
-        "was armed under \"shared\" and will not fire for this session. Pass the real session_id.\n",
+        "craftsman: WARNING — no session_id in the hand-off payload, so it was written under " +
+        "\"shared\" and SessionStart will not restore it for this session. Pass the real session_id.\n",
       );
     }
   } catch (error) {

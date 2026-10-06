@@ -4,17 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   atomicWrite, logEvent, projectContext, readStdin, sidOf,
-  requireCompact, COMPACT_REQUIRED_NOTICE,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
   mainCheckoutRoot,
 } from "./lib/core.mjs";
 
 export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
-// Landing on one of these ends the unit. A normal merge also reaches
-// handoff.mjs, which arms the gate itself; PARK/BLOCKED exits (max-retry or
-// max-round outs — precisely the worst-case-context units) often don't, so the
-// transition arms it too. Both writes are idempotent, so the overlap is free.
-export const TERMINAL_STATUSES = new Set(["MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"]);
 const TRANSITIONS = {
   PENDING: new Set(["IN_PROGRESS", "CANCELLED", "BLOCKED"]),
   IN_PROGRESS: new Set(["MERGED", "BLOCKED", "PARKED", "CANCELLED"]),
@@ -185,11 +179,8 @@ function withLock(file, action) {
   finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
 
-// armCompact:false is for bookkeeping transitions the model didn't make
-// (reconcileAcceptance's MERGED → COMPLETE): the unit's real close-out already
-// armed the compact gate at MERGED, and a hook must never lock a session.
-export function transition(input, context = projectContext(input.project || "."), { armCompact = true } = {}) {
-  const event = writeTransition(input, context, armCompact);
+export function transition(input, context = projectContext(input.project || ".")) {
+  const event = writeTransition(input, context);
   // Order-independent trigger: criteria ticked before the merge are only
   // "met" for the tracker once the unit is MERGED, so reconcile right here.
   if (event.status === "MERGED" && event.previous_status !== "MERGED") {
@@ -200,7 +191,7 @@ export function transition(input, context = projectContext(input.project || ".")
   return event;
 }
 
-function writeTransition(input, context, armCompact) {
+function writeTransition(input, context) {
   validateIdentity(input);
   const file = ledgerPath(context);
   return withLock(file, () => {
@@ -225,15 +216,6 @@ function writeTransition(input, context, armCompact) {
     };
     fs.appendFileSync(file, JSON.stringify(event) + "\n", "utf8");
     logEvent({ ev: "tracker_transition", key, from: previous?.status || null, to: status, unit: input.unit }, context);
-    // Armed only on an actual move INTO a terminal status — a re-assertion of
-    // the status a unit already holds closed nothing out.
-    if (armCompact && TERMINAL_STATUSES.has(status) && previous?.status !== status) {
-      requireCompact(sidOf(input), context);
-      // Return-only, deliberately set after the append: the ledger records the
-      // transition, not this run's side effect. It tells the CLI below whether
-      // to print the notice, which only a *new* terminal transition earns.
-      event.compact_required = true;
-    }
     return { ...event, previous_status: previous?.status || null };
   });
 }
@@ -273,7 +255,7 @@ export function reconcileAcceptance(context = projectContext("."), input = {}) {
         project: row.key.split("::")[0], plan: row.plan, unit: row.unit, status: "COMPLETE",
         evidence: `all ${count} acceptance criteria ticked${row.evidence ? `; ${row.evidence}` : ""}`,
         session_id: input.session_id,
-      }, context, false);
+      }, context);
       completed.push({ plan: row.plan, unit: row.unit });
     } catch { /* raced by another writer or refused — leave it for the model */ }
   }
@@ -345,11 +327,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
-    if (output?.compact_required) {
-      process.stdout.write(
-        `craftsman: unit closed out (${output.status}). ${COMPACT_REQUIRED_NOTICE}\n`,
-      );
-    }
   } catch (error) {
     process.stderr.write(`craftsman: tracker failed: ${error.message}\n`);
     process.exitCode = 2;

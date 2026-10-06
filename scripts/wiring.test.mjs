@@ -72,35 +72,18 @@ test("wiring: every script referenced from hooks.json exists", () => {
   assert.deepEqual(missing, []);
 });
 
-// The regression guard for the bug that hard-locked three sessions in a row.
-//
-// compact-gate.mjs blocks EVERY tool call until a real /compact or /clear, and
-// nothing inside a session can lift it. Arming it is therefore only ever safe
-// from a script the model ran deliberately to close a unit out (handoff.mjs,
-// tracker.mjs). A *hook* sees every tool call the session makes and has to
-// infer intent from the payload — compact-nudge.mjs inferred it by regex over
-// the Bash command text, so `cat handoff.mjs` armed the gate and bricked the
-// session. No hook may arm this marker, whatever its heuristic looks like.
-// requireCompact() is the single writer of the marker (compact-gate.mjs reads
-// it, session-context.mjs clears it — neither arms it), so who calls it is the
-// whole invariant.
-const armingScripts = fs.readdirSync(path.join(PLUGIN_ROOT, "scripts"))
-  .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"))
-  .filter((f) => fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", f), "utf8")
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//")) // a comment naming it is not a call
-    .some((line) => /\brequireCompact\s*\(/.test(line)));
-
-test("wiring: no hook script can arm the compact gate", () => {
-  const wired = new Set(hookScripts().map(({ script }) => script));
-  assert.deepEqual(
-    armingScripts.filter((f) => wired.has(f)), [],
-    "a hook must never arm the session-wide compact gate",
-  );
-});
-
-test("wiring: only the deliberate close-out scripts arm the compact gate", () => {
-  assert.deepEqual(armingScripts.sort(), ["handoff.mjs", "tracker.mjs"]);
+// /compact and /clear are built-in CLI commands: the model cannot invoke them
+// (SlashCommand/Skill only reach custom commands) and no hook can trigger a
+// compaction. A gate that blocks tool use "until /compact runs" therefore always
+// ends with the session stopped, waiting for the user to type it — which the
+// old compact-gate.mjs did after every unit. Context resets are left to Claude
+// Code's own auto-compact; SessionStart restores the hand-off afterwards.
+test("wiring: no script blocks tool use pending a /compact the model cannot run", () => {
+  const offenders = fs.readdirSync(path.join(PLUGIN_ROOT, "scripts"))
+    .filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"))
+    .filter((f) => /compact-required|requireCompact\s*\(/.test(
+      fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", f), "utf8")));
+  assert.deepEqual(offenders, []);
 });
 
 test("wiring: every agent file is referenced by name from at least one command", () => {

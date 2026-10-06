@@ -163,28 +163,6 @@ export function sidOf(input) {
 export function sessionDir(sid, context = null) {
   return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
 }
-// Single source of truth for the mechanical hand-off→/compact gate's marker
-// path — written by requireCompact() below, read by compact-gate.mjs, cleared
-// by session-context.mjs. All three must agree on exactly one path; importing
-// this instead of each hand-rolling sessionDir(sidOf(input), context) removes
-// any chance of the three drifting apart from each other silently.
-export function compactRequiredFile(sid, context = null) {
-  return path.join(sessionDir(sid, context), "compact-required");
-}
-// Arm the gate. Called by the close-out scripts THEMSELVES, at the moment they
-// actually do the work — never by a PostToolUse hook pattern-matching the text
-// of a Bash command, which armed the gate for anything that merely *named* the
-// script (`cat handoff.mjs`, `grep -n tracker.mjs`, a doc edit quoting either),
-// hard-blocking a session that had closed nothing out. Best-effort: if the
-// marker never lands, compact-gate.mjs simply fails open.
-export function requireCompact(sid, context = null) {
-  const marker = compactRequiredFile(sid, context);
-  try {
-    fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(marker, new Date().toISOString() + "\n");
-  } catch {}
-  return marker;
-}
 // Isolated fresh-context agents: one command invocation grants exactly one
 // dispatch of its named agent, even under root-only agent mode — /scrutinise →
 // `scrutineer`, /idea → `idea-critic`, /architect --deep → `architect-analyst`.
@@ -213,9 +191,6 @@ export function spendAgentGrant(agent, sid, context = null) {
 export const scrutineerGrantFile = (sid, context = null) => agentGrantFile("scrutineer", sid, context);
 export const grantScrutineer = (sid, context = null) => grantAgent("scrutineer", sid, context);
 export const spendScrutineerGrant = (sid, context = null) => spendAgentGrant("scrutineer", sid, context);
-export const COMPACT_REQUIRED_NOTICE =
-  "/compact (or /clear) is now REQUIRED before any further tool use this session — " +
-  "every other tool call will be blocked until you do.";
 export function sharedStateDir(context = null) {
   try {
     const commonGitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {

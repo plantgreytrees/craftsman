@@ -207,6 +207,22 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **Runs no longer stop after every unit waiting for a manual `/compact`.**
+  The compact gate blocked every tool call after each hand-off or terminal
+  tracker transition until `/compact` ran. But `/compact` is a built-in CLI
+  command: the model can't invoke it, and no hook can trigger a compaction.
+  So every unit ended with the session halted until the user typed it.
+  - *`compact-gate.mjs` and its hook entry are removed.* `handoff.mjs` and
+    `tracker.mjs` no longer arm a marker, and `requireCompact`,
+    `compactRequiredFile` and `COMPACT_REQUIRED_NOTICE` are gone from
+    `lib/core.mjs`.
+  - *Context is now handled by Claude Code's own auto-compact.* SessionStart
+    still restores the hand-off after any compaction or `/clear`.
+  - *`_shared-execution.md` step 12 and `/orchestrate`'s phase hand-off now
+    say to continue to the next unit.* They no longer ask for `/compact`.
+  - *`wiring.test.mjs` fails if any script reintroduces a compact-required
+    block.*
+
 - **`/goal` prompts from `/instruction` could loop at the Stop hook until
   Claude Code's cap overrode it.** The prompt told the session to stop and ask
   on a decision or a violated rule, but its "Done when" clause counted only full

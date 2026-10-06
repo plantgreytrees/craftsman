@@ -8,7 +8,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
-  sidOf, sessionDir, compactRequiredFile, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
+  sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
 } from "./lib/core.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
@@ -20,13 +20,6 @@ const sid = sidOf(input);
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context)) process.exit(0);
-
-// SessionStart fires on startup, resume, /clear, AND /compact — the only
-// observable proxy this plugin has for "a compact/clear actually happened."
-// compact-gate.mjs's block only ever needs to survive until one of those
-// fires, so clearing here unconditionally is exactly the mechanical
-// counterpart requireCompact()'s marker-write needs (see lib/core.mjs).
-try { fs.unlinkSync(compactRequiredFile(sid, context)); } catch {}
 
 const markers = {
   "package.json": "JavaScript/TypeScript", "deno.json": "Deno",

@@ -99,8 +99,6 @@ test("tracker: reconcile moves a MERGED unit to COMPLETE once its criteria and t
   const row = currentState(selected).find((r) => r.unit === "unit-1");
   assert.equal(row.status, "COMPLETE");
   assert.match(row.evidence, /all 2 acceptance criteria ticked; abc123/);
-  assert.equal(fs.existsSync(path.join(selected.stateDir, "sessions", "s1", "compact-required")), false,
-    "bookkeeping from a hook must never arm the compact gate");
   assert.match(acceptanceNotice(result), /MERGED → COMPLETE[\s\S]*TRACKER\.md/);
   assert.deepEqual(reconcileAcceptance(selected, {}).completed, [], "idempotent — COMPLETE is not re-completed");
 });
@@ -111,7 +109,6 @@ test("tracker: ticking every criterion before the merge completes the unit the m
   fs.writeFileSync(path.join(selected.stateDir, "acceptance.md"), "- [x] [unit:S9] scoped by scope_id\n");
   startUnit(selected, "unit-9", { scope_id: "S9" });
   const merged = transition({ plan: "docs/plans/example.md", unit: "unit-9", status: "MERGED", evidence: "def456" }, selected);
-  assert.equal(merged.compact_required, true, "the real close-out still arms the compact gate");
   assert.deepEqual(merged.acceptance.completed.map((c) => c.unit), ["unit-9"]);
   assert.equal(status(selected, "unit-9"), "COMPLETE");
 });

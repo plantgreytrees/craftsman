@@ -200,10 +200,11 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   ARCH rules and open acceptance criteria. Their output is only a candidate
   list: `code-reviewer` still owns the verdict, and the scope guard and
   quality gate cover every edit they make.
-- **Context stays bounded, mechanically** — a hand-off or a unit reaching a
-  terminal tracker state (merged, blocked, or parked) marks the session
-  compact-required; every other tool call is blocked until a real `/compact`
-  or `/clear` actually runs. Worktrees left behind after a merge, oversized
+- **Context stays bounded without stopping** — every unit ends in a hand-off
+  on disk, and the next unit re-reads only the tracker and its own scope.
+  Claude Code's auto-compact reclaims context when it fills, and SessionStart
+  restores the hand-off afterwards, so runs don't halt waiting for a manual
+  `/compact`. Worktrees left behind after a merge, oversized
   shipped docs, and unbounded plan-memory/tracker growth are all caught the
   same way — by a hook or a CI check, not by remembering to do it.
 
