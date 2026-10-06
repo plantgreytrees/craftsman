@@ -44,6 +44,13 @@ the main checkout: `git -C <main> worktree add .claude/worktrees/<branch> <branc
   commit them with a real message. If not, stop and ask.
 - **The main checkout has uncommitted changes** → stop and report. Never stash or
   discard the user's work.
+- **As the loop's last step, check both contracts first.** Acceptance: no
+  unticked `- [ ]` line in `.craftsman/acceptance.md` for the slug's
+  `[unit:<id>]` lines or untagged ones. Architecture: the last `/architect
+  --update` or `/scrutinise` left no `decided` rule VIOLATED and no open
+  Architecture finding. Either one fails → not landable: go back to
+  `/scrutinise <slug>` and its fix round. Never tick a criterion or edit a rule
+  to get past this.
 
 ## 3. Step out of the worktree
 

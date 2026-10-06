@@ -31,6 +31,13 @@ All notable changes to craftsman are documented here. Format loosely follows
     PR URL, no slug worktree left). A rejected push replaces "an unapproved
     merge" as a BLOCKED ON USER exit, since pasting the prompt approves the
     merge. On the base branch, the command commits and pushes instead.
+  - *Every `/goal` step is bound to the architecture rules (A) and the plan's
+    acceptance criteria (P).* The prompt names the plan, the rules and
+    `.craftsman/acceptance.md` up front. Each step states its (A)/(P) duty, and
+    the idea's "done" outcomes become tagged plan criteria instead of loose
+    evidence lines. Completion evidence adds `/architect --update` HOLDS
+    verdicts and zero Architecture/UNMET findings. `/craftsman:merge` refuses
+    to land while a criterion is unticked or a `decided` rule is VIOLATED.
 
 - **Units can land through an auto-merging pull/merge request
   (`repoExec.land: "pr"`).** Use this when GitHub, GitLab or Azure DevOps
