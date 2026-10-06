@@ -23,6 +23,21 @@ All notable changes to craftsman are documented here. Format loosely follows
     has already landed by then.
   - *Permissions stay with the user.* A plugin can't grant itself push rights,
     so allow `git push` to main in your own settings if auto mode blocks it.
+  - *It is the loop's closing step: … → SYNC-DOCS → MERGE.* `/orchestrate`,
+    `/scrutinise` and `/sync-docs` now name it as the next step, and the
+    SessionStart LOOP line includes it. `/instruction`'s `/goal` prompt gains a
+    step 5 that lands the session's branch (plan, tracker, doc edits) and any
+    unlanded slug branch, plus completion evidence (`origin/<base>` HEAD or the
+    PR URL, no slug worktree left). A rejected push replaces "an unapproved
+    merge" as a BLOCKED ON USER exit, since pasting the prompt approves the
+    merge. On the base branch, the command commits and pushes instead.
+  - *Every `/goal` step is bound to the architecture rules (A) and the plan's
+    acceptance criteria (P).* The prompt names the plan, the rules and
+    `.craftsman/acceptance.md` up front. Each step states its (A)/(P) duty, and
+    the idea's "done" outcomes become tagged plan criteria instead of loose
+    evidence lines. Completion evidence adds `/architect --update` HOLDS
+    verdicts and zero Architecture/UNMET findings. `/craftsman:merge` refuses
+    to land while a criterion is unticked or a `decided` rule is VIOLATED.
 
 - **Units can land through an auto-merging pull/merge request
   (`repoExec.land: "pr"`).** Use this when GitHub, GitLab or Azure DevOps

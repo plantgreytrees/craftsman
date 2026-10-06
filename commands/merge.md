@@ -14,12 +14,25 @@ merges with `--no-ff` and pushes base. It then removes the worktree and deletes
 the branch locally and on `origin`. With `repoExec.land: "pr"` it opens an
 auto-merging PR/MR instead.
 
+**It is also the loop's closing step:** PLAN → ORCHESTRATE → SCRUTINISE →
+SYNC-DOCS → MERGE. `/orchestrate` lands each unit's branch itself; this step
+lands what's left: the session's own branch or worktree, which carries the plan
+doc, tracker and `/scrutinise`/`/sync-docs` edits, and any branch for the slug
+that is still unlanded. A `/goal` prompt from `/instruction` that lists this
+step is the user's go-ahead, the same as saying "merge".
+
 ## 1. Pick the target
 
 - **`$ARGUMENTS` names a branch or worktree path** → that one.
 - **Empty** → the worktree this session is in (`git rev-parse --show-toplevel`
   is a linked worktree). Otherwise use the current branch if it isn't the base.
   If the target is still ambiguous, `git worktree list` and ask which one.
+- **Run as the loop's last step** → the session's worktree or branch, as above,
+  then every worktree or branch named for the slug that isn't merged into base
+  yet (`git branch --no-merged <base>`), one at a time.
+- **Already on the base branch in the main checkout** → there is no branch to
+  land. Commit this session's doc and tracker edits with a real message, then
+  `git pull --ff-only && git push`. Never force-push. Report it and skip to step 6.
 
 Resolve its absolute worktree path, its branch, and the **main checkout**: the
 first entry of `git worktree list`. If the branch has no worktree, add one from
@@ -31,6 +44,13 @@ the main checkout: `git -C <main> worktree add .claude/worktrees/<branch> <branc
   commit them with a real message. If not, stop and ask.
 - **The main checkout has uncommitted changes** → stop and report. Never stash or
   discard the user's work.
+- **As the loop's last step, check both contracts first.** Acceptance: no
+  unticked `- [ ]` line in `.craftsman/acceptance.md` for the slug's
+  `[unit:<id>]` lines or untagged ones. Architecture: the last `/architect
+  --update` or `/scrutinise` left no `decided` rule VIOLATED and no open
+  Architecture finding. Either one fails → not landable: go back to
+  `/scrutinise <slug>` and its fix round. Never tick a criterion or edit a rule
+  to get past this.
 
 ## 3. Step out of the worktree
 

@@ -43,7 +43,7 @@ does what the layer below can't:
 | Feedback | when a check fails, its output is fed straight back to Claude mid-turn to fix | ~free |
 | Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
 
-**2. A doc-first workflow:** **IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS.**
+**2. A doc-first workflow:** **IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE.**
 `/idea` vets a new idea, `/architect` turns it into enforced decisions, and
 `/instruction` packs the rest into one `/goal` prompt; `/understand` and
 `/investigate` enter at PLAN for existing code and bugs. One slug names the
@@ -53,7 +53,8 @@ actual diff through `gate-select.mjs` to deterministically route it to the
 specialists that apply — `ui-ux-reviewer`, `migration-reviewer`, `api-reviewer`,
 `dependency-auditor`, `performance-reviewer`, `observability-reviewer` — instead
 of trusting a file-pattern rule to be remembered correctly; `/scrutinise`
-reviews the result; `/sync-docs` keeps the docs honest. Acceptance criteria written
+reviews the result; `/sync-docs` keeps the docs honest; `/craftsman:merge`
+lands what's left on the base branch and cleans up. Acceptance criteria written
 at plan-time are enforced before a task can finish. `/craftsman:digest` reads the
 same tracker state at any point for a done/decisions/next/%-complete summary.
 
