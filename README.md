@@ -75,6 +75,7 @@ gitignored local snapshot.
 | Command | What it's for |
 |---|---|
 | `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair required project structure |
+| `/craftsman:merge` | land a finished branch or worktree when you say "merge": tests, merge, push, then remove the worktree and the local and remote branch |
 | `/craftsman:upgrade` | update every Craftsman install (user and per-project) to the latest commit, then tell you what to reload and re-init |
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
 | `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |

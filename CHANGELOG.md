@@ -7,6 +7,23 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
+- **`/craftsman:merge`: saying "merge" now lands the branch.** Sessions used to
+  answer "merge" with git commands for the user to run. Worktree isolation
+  refused git against the main checkout, and nothing told the model it could
+  land outside `/orchestrate`.
+  - *The command lands any branch or worktree through `repo-exec.mjs merge`*,
+    including Claude Code's own `.claude/worktrees/` session worktrees. It
+    commits leftovers, leaves the session's worktree (`ExitWorktree` keep),
+    re-runs tests, merges, pushes base and cleans up. On a gate failure or
+    conflict it fixes and retries rather than handing back.
+  - *SessionStart now carries a one-line `MERGE:` rule* pointing "merge" at the
+    command.
+  - *`repo-exec.mjs` cleanup also deletes the merged branch on `origin`* when it
+    was pushed (`remote_branch_deleted`). This is best-effort, because the merge
+    has already landed by then.
+  - *Permissions stay with the user.* A plugin can't grant itself push rights,
+    so allow `git push` to main in your own settings if auto mode blocks it.
+
 - **Units can land through an auto-merging pull/merge request
   (`repoExec.land: "pr"`).** Use this when GitHub, GitLab or Azure DevOps
   protects the base branch against the direct push `repo-exec.mjs merge` makes

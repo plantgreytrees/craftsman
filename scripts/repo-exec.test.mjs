@@ -232,6 +232,55 @@ function commitUnit(context, info, slug) {
   return prepared;
 }
 
+test("repo-exec: a direct merge of a pushed branch pushes base and deletes the remote branch too", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { origin, base } = addOrigin(data.workspace, context.root);
+      const info = inspectRepo(context, { base_branch: base });
+      const prepared = commitUnit(context, info, "pushed-unit");
+      git(prepared.worktree_path, ["push", "-q", "origin", prepared.branch]);
+      git(context.root, ["fetch", "-q", "origin"]);
+      const unitHead = git(prepared.worktree_path, ["rev-parse", "HEAD"]);
+
+      const merged = merge(context, { ...prepared, unit: "pushed-unit", slug: "pushed-unit" }, info);
+
+      assert.equal(merged.merged, true);
+      assert.equal(merged.branch_deleted, true);
+      assert.equal(merged.remote_branch_deleted, true);
+      assert.equal(git(origin, ["merge-base", "--is-ancestor", unitHead, base]), "", "origin's base contains the unit");
+      assert.equal(git(origin, ["branch", "--list", prepared.branch]), "", "the remote branch is gone");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// /craftsman:merge lands branches no plan unit prepared — e.g. a Claude Code
+// session worktree — by path and branch alone, with no unit or slug.
+test("repo-exec: merges a plain .claude/worktrees worktree by path, with no unit or slug", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const worktree = path.join(context.root, ".claude", "worktrees", "session-fix");
+      git(context.root, ["worktree", "add", "-q", "-b", "worktree-session-fix", worktree]);
+      fs.writeFileSync(path.join(worktree, "fix.txt"), "fix\n");
+      git(worktree, ["add", "fix.txt"]);
+      git(worktree, ["commit", "-q", "-m", "fix: from a session worktree"]);
+
+      const merged = merge(context, { worktree_path: worktree, branch: "worktree-session-fix" }, info);
+
+      assert.equal(merged.merged, true);
+      assert.equal(merged.cleaned, true, merged.cleanup_error);
+      assert.equal(merged.branch_deleted, true);
+      assert.equal(merged.remote_branch_deleted, false, "no remote, nothing to delete");
+      assert.equal(fs.existsSync(path.join(context.root, "fix.txt")), true);
+      assert.equal(fs.existsSync(worktree), false);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 test("repo-exec: land:pr pushes only the unit branch, opens a PR, and keeps base untouched", () => {
   const data = fixture();
   try {

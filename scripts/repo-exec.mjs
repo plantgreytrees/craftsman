@@ -311,7 +311,18 @@ function cleanup(context, input, info) {
   // the base branch explicitly; an unmerged (parked) branch is kept.
   const branchDeleted = Boolean(mergedInto(context.root, branch, [info.base_branch]));
   if (branchDeleted) run(context.root, ["branch", "-D", branch]);
-  return { ...info, cleaned: true, branch, branch_deleted: branchDeleted };
+  // A branch that was also pushed (for review, or by a session that couldn't
+  // merge) would otherwise outlive its merge on the host. Best-effort: the
+  // merge already landed, so a failed remote delete is reported, not thrown.
+  let remoteBranchDeleted = false;
+  if (branchDeleted && info.has_remote
+    && run(context.root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { allowFailure: true })) {
+    try {
+      execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", branch], { stdio: "ignore" });
+      remoteBranchDeleted = true;
+    } catch {}
+  }
+  return { ...info, cleaned: true, branch, branch_deleted: branchDeleted, remote_branch_deleted: remoteBranchDeleted };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
