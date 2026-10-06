@@ -239,6 +239,14 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **An isolated-agent grant survives a `cd` into a nested repo.** `/scrutinise`,
+  `/idea` and `/architect --deep` wrote their one-dispatch grant under the
+  project root derived from the cwd. A Bash `cd` into a nested git repo before
+  the dispatch moved that root, so the dispatch found no grant and was blocked
+  with "no unspent grant". The first grant was left unspent. Grants are now
+  keyed on `CLAUDE_PROJECT_DIR`, which stays the same for the whole session.
+  They still fall back to the cwd-derived root only when it is unset.
+
 - **`/craftsman:init` detects each stack's own test command from CI.** It
   took the first CI step mentioning "test" for every non-npm marker and cut it
   at the first quote. So a .NET + Python repo got

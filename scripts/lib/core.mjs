@@ -169,9 +169,16 @@ export function sessionDir(sid, context = null) {
 // Granted by orchestrate-scope-guard.mjs when the command is invoked, spent by
 // agent-mode-guard.mjs when the dispatch happens. Spending is a rename, which
 // only one caller can win, so two parallel dispatches can't both slip through.
+// Those two hooks can fire from different cwds — a Bash `cd` into a nested git
+// repo moves PROJECT_ROOT between them — so grants are keyed on the harness's
+// CLAUDE_PROJECT_DIR, which stays put for the session, and only fall back to
+// the cwd-derived state dir when it is unset.
 export const GRANTED_AGENTS = ["scrutineer", "idea-critic", "architect-analyst"];
+const GRANT_STATE_DIR = process.env.CLAUDE_PROJECT_DIR
+  ? path.join(path.resolve(process.env.CLAUDE_PROJECT_DIR), ".craftsman")
+  : null;
 export function agentGrantFile(agent, sid, context = null) {
-  return path.join(sessionDir(sid, context), `${agent}-grant`);
+  return path.join(GRANT_STATE_DIR || context?.stateDir || STATE_DIR, "sessions", sid, `${agent}-grant`);
 }
 export function grantAgent(agent, sid, context = null) {
   const grant = agentGrantFile(agent, sid, context);

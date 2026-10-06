@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(ROOT, "agent-mode-guard.mjs");
 
-function run(dir, input) {
+function run(dir, input, cwd = dir) {
   return spawnSync(process.execPath, [GUARD], {
-    cwd: dir,
+    cwd,
     input: JSON.stringify(input),
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
@@ -109,6 +109,23 @@ test("agent-mode-guard: one /scrutinise invocation grants exactly one scrutineer
     assert.equal(invokeScrutinise(dir, "s1", { prompt: "/scrutinise src/ --deep run-1" }).status, 0);
     const third = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } });
     assert.equal(third.status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: a grant survives a cd into a nested git repo between /scrutinise and the dispatch", () => {
+  // The cwd-derived project root moves to the nested repo; the session's
+  // CLAUDE_PROJECT_DIR does not, and the grant must follow the latter.
+  const dir = tmpProject();
+  try {
+    const nested = path.join(dir, "nested");
+    fs.mkdirSync(nested);
+    assert.equal(spawnSync("git", ["init", "-q", nested]).status, 0);
+    assert.equal(invokeScrutinise(dir, "s1").status, 0);
+    const dispatch = () => run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:scrutineer" } }, nested);
+    assert.equal(dispatch().status, 0);
+    assert.equal(dispatch().status, 2, "still one-shot");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
