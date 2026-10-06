@@ -44,6 +44,24 @@ test("init keeps declared stop-gate commands verbatim, an empty map included", (
   assert.equal(buildInitPlan(root, { checkTools: false }).config.stopGate.commands["pyproject.toml"], "make test");
 });
 
+test("a CI test step only fills the marker whose tool it runs, quoted arguments intact", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-"));
+  fs.mkdirSync(path.join(root, ".github", "workflows"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".github", "workflows", "ci.yml"), [
+    "jobs:", "  test:", "    steps:", "      - name: Run tests",
+    "        run: dotnet test tests/tests_unit --nologo --logger \"trx;LogFileName=results.trx\"",
+    "      - run: |", "          cd api", "          python -m pytest -q tests",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "App.sln"), "");
+  fs.writeFileSync(path.join(root, "pyproject.toml"), "");
+  fs.writeFileSync(path.join(root, "Cargo.toml"), "");
+  const { testCommands } = buildInitPlan(root, { checkTools: false });
+
+  assert.equal(testCommands["*.sln"], "dotnet test tests/tests_unit --nologo --logger \"trx;LogFileName=results.trx\"");
+  assert.equal(testCommands["pyproject.toml"], "python -m pytest -q tests");
+  assert.equal(testCommands["Cargo.toml"], "cargo test --quiet");
+});
+
 test("init repairs missing structure and is idempotent", () => {
   const root = fixture();
   applyInitPlan(buildInitPlan(root, { checkTools: false }));

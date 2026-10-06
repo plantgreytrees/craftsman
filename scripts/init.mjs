@@ -97,18 +97,36 @@ function makeTest(root) {
   return fs.existsSync(file) && /^test\s*:/m.test(fs.readFileSync(file, "utf8")) ? "make test" : null;
 }
 
-function ciTest(root) {
+// A CI step counts for a marker only when it runs that marker's own test tool,
+// so a dotnet step never becomes a Python project's command.
+const ciTools = {
+  "Cargo.toml": /^cargo\s+test\b/, "go.mod": /^go\s+test\b/,
+  "pyproject.toml": /^(python3?\s+-m\s+)?(pytest|tox|nox)\b/, "requirements.txt": /^(python3?\s+-m\s+)?(pytest|tox|nox)\b/,
+  "setup.py": /^(python3?\s+-m\s+)?(pytest|tox|nox)\b/, "pom.xml": /^(mvn|\.\/mvnw)\b.*\btest\b/,
+  "build.gradle": /^(gradle|\.\/gradlew)\b.*\btest\b/, "build.gradle.kts": /^(gradle|\.\/gradlew)\b.*\btest\b/,
+  "Gemfile": /^(bundle\s+exec\s+)?(rake|rspec)\b/, "*.sln": /^dotnet\s+test\b/, "*.csproj": /^dotnet\s+test\b/,
+  "composer.json": /^(composer\s+test|(vendor\/bin\/)?phpunit)\b/, "mix.exs": /^mix\s+test\b/,
+  "pubspec.yaml": /^(dart|flutter)\s+test\b/, "CMakeLists.txt": /^ctest\b/,
+};
+
+function ciTest(root, marker) {
+  const tool = ciTools[marker];
+  if (!tool) return null;
   for (const file of filesIn(root).filter((entry) => /(^|\/)(\.github\/workflows|\.gitlab-ci\.yml)/.test(entry))) {
-    const text = fs.readFileSync(path.join(root, file), "utf8");
-    const match = text.match(/(?:run|script):\s*["']?([^"'\n]+(?:test|pytest|cargo test|go test)[^"'\n]*)/i);
-    if (match) return match[1].trim();
+    for (const line of fs.readFileSync(path.join(root, file), "utf8").split(/\r?\n/)) {
+      // `run: cmd`, `script: cmd`, `- cmd`, or a bare line of a `run: |` block.
+      let command = line.trim().replace(/^-\s+/, "").replace(/^(run|script):\s*/, "").trim();
+      const quoted = command.match(/^(["'])(.*)\1$/);
+      if (quoted) command = quoted[2].trim();
+      if (tool.test(command)) return command;
+    }
   }
   return null;
 }
 
 function commandFor(root, marker) {
   if (marker === "package.json") return packageTest(root) || markerDefaults[marker];
-  return makeTest(root) || ciTest(root) || markerDefaults[marker];
+  return makeTest(root) || ciTest(root, marker) || markerDefaults[marker];
 }
 
 function detectStack(root) {

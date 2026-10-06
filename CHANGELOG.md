@@ -224,6 +224,14 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **`/craftsman:init` detects each stack's own test command from CI.** It
+  took the first CI step mentioning "test" for every non-npm marker and cut it
+  at the first quote. So a .NET + Python repo got
+  `dotnet test ... --logger` (dangling) as its Python gate. Now a CI step only
+  fills the marker whose tool it starts with (`dotnet test` for `*.sln`,
+  `pytest` for Python, and so on). The step is taken whole, quoted arguments
+  included, and other markers fall back to their defaults.
+
 - **Runs no longer stop after every unit waiting for a manual `/compact`.**
   The compact gate blocked every tool call after each hand-off or terminal
   tracker transition until `/compact` ran. But `/compact` is a built-in CLI
