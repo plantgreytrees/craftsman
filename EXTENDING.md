@@ -251,9 +251,11 @@ default — keep the entries you still want:
 
 `/idea` → `/architect` → `/instruction` is the front of the loop: vet the idea,
 decide the architecture with the user, then generate one `/goal` prompt that
-runs `/plan` → `/orchestrate` → `/scrutinise` → `/sync-docs --all` to
-completion. The idea's slug is reused by the plan, the `scrutinise-<slug>` fix
-round, and `/sync-docs --all <slug>`, which ends in `/architect --update`.
+runs `/plan` → `/orchestrate` → `/scrutinise` → `/sync-docs --all` →
+`/craftsman:merge` to completion. The idea's slug is reused by the plan, the
+`scrutinise-<slug>` fix round, and `/sync-docs --all <slug>`, which ends in
+`/architect --update`. `/craftsman:merge` then lands the session's branch with
+its plan, tracker and doc edits; pasting the prompt is the go-ahead to push.
 
 `/architect` writes each area as two files under `architecture.dir` (default
 `docs/architecture`). `<area>.md` is for people and is never loaded by the
