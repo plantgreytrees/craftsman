@@ -23,14 +23,29 @@ units:
     scope_id: state-root-pin
     project: .
     depends_on: []
-    module: core root pin, grants, scope keys
+    module: core root pin, scope keys
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    # Split by 9.1's ARCH-ENGINE-08 check: as one step it loaded 174,808 bytes (> 122,880).
+    # Both halves shipped together in 1e4601b, executed root-only before the check existed.
+    scope:
+      read: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs]
+      docs: [docs/architecture/state.rules.md]
+      write: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/pre-guard.test.mjs, scripts/session-context.test.mjs, scripts/builtin-skill-context.test.mjs, scripts/arch-check.test.mjs]  # re-scoped in execution: non-git test fixtures became git roots (ARCH-STATE-01)
+    arch: [ARCH-STATE-01, ARCH-STATE-03, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: state-root-pin-grants
+    scope_id: state-root-pin-grants
+    project: .
+    depends_on: []
+    module: grant paths, no SubagentStop
     language: JavaScript (Node ESM, node:test)
     security: high
     scope:
-      read: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/stop-gate.mjs, hooks/hooks.json, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
+      read: [scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, hooks/hooks.json, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
       docs: [docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
-      write: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs, scripts/pre-guard.test.mjs, scripts/session-context.test.mjs, scripts/builtin-skill-context.test.mjs, scripts/arch-check.test.mjs]  # re-scoped in execution: non-git test fixtures became git roots (ARCH-STATE-01)
-    arch: [ARCH-STATE-01, ARCH-STATE-02, ARCH-STATE-03, ARCH-STATE-06, ARCH-STATE-07, ARCH-AUTO-06]
+      write: [scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
+    arch: [ARCH-STATE-02, ARCH-STATE-06, ARCH-STATE-07, ARCH-AUTO-06]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
   - id: telemetry
     scope_id: telemetry
@@ -101,14 +116,29 @@ units:
     scope_id: engine-guards
     project: .
     depends_on: [workflow-spike]
-    module: Workflow guard, stop-gate background tasks, runner grant
+    module: Workflow guard, runner grant
+    language: JavaScript
+    security: high
+    # Split by 9.1's ARCH-ENGINE-08 check: as one step it loaded 135,142 bytes (> 122,880).
+    # Both halves shipped together in 21ca2d6, executed root-only before the check existed.
+    scope:
+      read: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
+      write: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
+    arch: [ARCH-STATE-05, ARCH-STATE-07, ARCH-AUTO-06]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: engine-guards-stop
+    scope_id: engine-guards-stop
+    project: .
+    depends_on: [workflow-spike]
+    module: stop-gate background tasks
     language: JavaScript
     security: high
     scope:
-      read: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/stop-gate.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/agent-mode-guard.test.mjs, scripts/stop-gate.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
-      docs: [docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
-      write: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/stop-gate.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/agent-mode-guard.test.mjs, scripts/stop-gate.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
-    arch: [ARCH-STATE-04, ARCH-STATE-05, ARCH-STATE-07, ARCH-AUTO-06]
+      read: [scripts/stop-gate.mjs, scripts/stop-gate.test.mjs]
+      docs: [docs/architecture/state.rules.md]
+      write: [scripts/stop-gate.mjs, scripts/stop-gate.test.mjs]
+    arch: [ARCH-STATE-04]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
   - id: engine
     scope_id: engine
@@ -133,7 +163,7 @@ units:
     scope:
       read: [scripts/arch-check.mjs, scripts/arch-check.test.mjs, scripts/scope.mjs, commands/plan.md, skills/language-aware-planning/references/plan-template.md, craftsman.config.json, scripts/stats.mjs]
       docs: [docs/architecture/engine.rules.md]
-      write: [scripts/arch-check.mjs, scripts/arch-check.test.mjs, commands/plan.md, skills/language-aware-planning/references/plan-template.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      write: [scripts/arch-check.mjs, scripts/arch-check.test.mjs, commands/plan.md, skills/language-aware-planning/references/plan-template.md, docs/plans/autonomous-e2e-loop-evidence.md, docs/plans/autonomous-e2e-loop.md]  # re-scoped: 9.1 split step 1 to fit ARCH-ENGINE-08
     arch: [ARCH-ENGINE-08, ARCH-ENGINE-06]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
   - id: run-manifest-parked
@@ -156,8 +186,10 @@ units:
     module: command/agent/skill descriptions
     language: Markdown frontmatter + JavaScript test
     security: normal
+    # Edits frontmatter `description:` lines only; bodies are never loaded, so the
+    # globs stay in `write` and `read` holds only what the unit loads (ARCH-ENGINE-08).
     scope:
-      read: [commands/*.md, agents/*.md, skills/*/SKILL.md, scripts/model-policy.mjs]
+      read: [scripts/model-policy.mjs]
       docs: [docs/architecture/auto.rules.md, docs/architecture/engine.rules.md, docs/architecture/landing.rules.md]
       write: [commands/*.md, agents/*.md, skills/*/SKILL.md, scripts/descriptions.test.mjs, docs/plans/autonomous-e2e-loop-evidence.md]
     arch: [ARCH-AUTO-01, ARCH-ENGINE-04, ARCH-LAND-01]
@@ -201,11 +233,16 @@ Tooling: implementer · gates security-auditor · guards pre-guard, quality-gate
 Depends on: none
 - [x] 1.1 `core.mjs` `resolveProjectRoot`: derive the root without `process.cwd()`. Order: `CLAUDE_PROJECT_DIR` → its git toplevel (a non-git dir holding `craftsman.workspace.json` stays itself as a workspace root); else a session pin written at SessionStart, keyed by `CLAUDE_CODE_SESSION_ID`, under `os.tmpdir()`. A bare CLI with neither keeps today's cwd toplevel as an explicit last resort, never reached by a hook. → accept: `core.test.mjs` spawns `core.mjs` from 4 cwds (repo, subdir, unrelated git repo, non-git parent) with one `CLAUDE_PROJECT_DIR` and gets one identical `PROJECT_ROOT`.
 - [x] 1.2 Above-repo session: `CLAUDE_PROJECT_DIR` non-git with no workspace manifest → `enabled()` is false and session-context prints one notice; with a manifest → the workspace root resolves. → accept: two fixture tests.
-- [x] 1.3 Grants (`agentGrantFile`, `grantAgent`, `spendAgentGrant`) compute the path from (sid, project id) on the pinned root only. → accept: orchestrate-scope-guard writes the `/idea` grant from cwd A; agent-mode-guard spends it from cwd B; a second spend is blocked.
 - [x] 1.4 `scope.mjs` `scopeFile`/`requiredFile`: key by the unit's worktree (from `tool_input` path, worktree binding or `input.cwd` resolved to its git worktree), falling back to the session scope. → accept: `scope.test.mjs` shows two worktrees holding two independent active scopes, and no-worktree falling back to the session scope.
 - [x] 1.5 Sub-project grants and scopes live under the ROOT project's `sessions/<sid>/` keyed by project id; no hook resolves a project by cwd. → accept: test asserts the sub-project grant path sits under the root state dir; grep test: no hook script outside `core.mjs` calls `process.cwd()` to resolve a project.
-- [x] 1.6 Test that `hooks/hooks.json` has no `SubagentStop` key (STATE-07). → accept: test passes.
 - [x] 1.7 Full suite. → accept: `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` exit 0.
+
+### Step 1b — state-root-pin-grants (., JavaScript, high)
+Split from Step 1 by the ARCH-ENGINE-08 size check (9.1); shipped with it in 1e4601b.
+Tooling: implementer · gates security-auditor · guards pre-guard, quality-gate
+Depends on: none
+- [x] 1.3 Grants (`agentGrantFile`, `grantAgent`, `spendAgentGrant`) compute the path from (sid, project id) on the pinned root only. → accept: orchestrate-scope-guard writes the `/idea` grant from cwd A; agent-mode-guard spends it from cwd B; a second spend is blocked.
+- [x] 1.6 Test that `hooks/hooks.json` has no `SubagentStop` key (STATE-07). → accept: test passes.
 
 ### Step 2 — telemetry (., JavaScript, normal)
 Tooling: implementer · gates observability-reviewer
@@ -247,9 +284,13 @@ Depends on: state-root-pin, telemetry, auto-command (merged and installed)
 ### Step 7 — engine-guards (., JavaScript, high)
 Depends on: workflow-spike
 - [x] 7.1 `hooks/hooks.json` matcher `Task|Agent|Workflow`; `agent-mode-guard.mjs` allows Workflow only for a script under `${CLAUDE_PLUGIN_ROOT}/workflows/` (or the plugin's named workflow) while `execution.engine` is `"workflow"`, and blocks ad-hoc scripts. → accept: test blocks an inline script and allows `workflows/run.js` only under engine=workflow.
-- [x] 7.2 `stop-gate.mjs`: when Stop input `background_tasks` lists an in-flight workflow or subagent, skip only the acceptance block; the secrets and regression checks stay armed. → accept: `stop-gate.test.mjs` case with `background_tasks` shows the acceptance block skipped and the secrets block still firing.
 - [x] 7.3 `/auto` grants its per-unit runner dispatches (`unit-runner`, `implementer`, reviewer) through the grant mechanism; spent on use (AUTO-06). → accept: guard test shows an `/auto` session allowed one runner dispatch per grant, and a non-`/auto` session blocked.
 - [x] 7.4 STATE-07 test still green; full suite exit 0.
+
+### Step 7b — engine-guards-stop (., JavaScript, high)
+Split from Step 7 by the ARCH-ENGINE-08 size check (9.1); shipped with it in 21ca2d6.
+Depends on: workflow-spike
+- [x] 7.2 `stop-gate.mjs`: when Stop input `background_tasks` lists an in-flight workflow or subagent, skip only the acceptance block; the secrets and regression checks stay armed. → accept: `stop-gate.test.mjs` case with `background_tasks` shows the acceptance block skipped and the secrets block still firing.
 
 ### Step 8 — engine (., JS + Markdown + JSON, normal)
 Depends on: workflow-spike, engine-guards
@@ -262,8 +303,8 @@ Depends on: workflow-spike, engine-guards
 
 ### Step 9 — plan-fit-and-measure (., JS + Markdown, normal)
 Depends on: engine, baseline-run
-- [ ] 9.1 `arch-check.mjs scope`: refuse a step whose `scope.read` + `scope.docs` bytes + task text exceed `execution.unitContextBytes` (ENGINE-08). → accept: `arch-check.test.mjs` refuses an oversized fixture and passes this plan's steps.
-- [ ] 9.2 `commands/plan.md` + plan-template: name the size check in the dry-run duty. → accept: text present.
+- [x] 9.1 `arch-check.mjs scope`: refuse a step whose `scope.read` + `scope.docs` bytes + task text exceed `execution.unitContextBytes` (ENGINE-08). → accept: `arch-check.test.mjs` refuses an oversized fixture and passes this plan's steps.
+- [x] 9.2 `commands/plan.md` + plan-template: name the size check in the dry-run duty. → accept: text present.
 - [ ] 9.3 Live: run one unit (or the remaining units) through `/craftsman:auto` on the workflow engine; record root-context tokens next to the baseline, and the Phase A round and the final prompt-to-continue observed. → accept: the evidence doc has a "Baseline vs workflow" table with both numbers and the observed `/auto` phases.
 
 ### Step 10 — run-manifest-parked (., JS, normal)

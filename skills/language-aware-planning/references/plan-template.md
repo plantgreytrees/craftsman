@@ -88,6 +88,10 @@ Depends on: <scope_id list, or none>
   `docs` must contain concrete paths or narrow globs; `write` must contain every
   file the unit may create or edit. Never use a repository-wide glob or a whole
   directory when a file list can express the scope.
+- A unit must fit one fresh agent: `scope.read` + `scope.docs` bytes plus its
+  task text stay within `execution.unitContextBytes` (default 122880).
+  `arch-check.mjs scope` (the manifest with its `task` text on stdin) refuses an
+  oversized step — split it (ARCH-ENGINE-08).
 - The per-unit `arch:` list names the architecture rules the unit is bound by
   (`commands/_architecture.md`). Find them with `scripts/arch-check.mjs governs
   <scope.write…>`; `scope.mjs` refuses to activate a step that writes a governed

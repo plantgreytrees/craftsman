@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs } from "./arch-check.mjs";
+import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs, unitContextBytes, checkUnitContext, DEFAULT_UNIT_CONTEXT_BYTES } from "./arch-check.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
@@ -195,4 +195,40 @@ test("arch-check CLI: lint and scope modes exit non-zero on violations", () => {
     assert.equal(governs.status, 0);
     assert.match(governs.stdout, /auth\.rules\.md/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ARCH-ENGINE-08: /plan's dry-run refuses a unit too big for one fresh agent.
+test("unit context: scope.read + scope.docs + task text over execution.unitContextBytes is refused", () => {
+  const dir = project({ "src/big.ts": "x".repeat(4000), "src/lib/a.ts": "x".repeat(1000), "src/lib/b.ts": "x".repeat(500) });
+  try {
+    const step = { id: "u1", task: "t".repeat(100), scope: { read: ["src/big.ts", "src/lib/*.ts", "src/not-yet.ts"], docs: ["src/session.ts"], write: [] } };
+    assert.equal(unitContextBytes(step, dir), 4000 + 1500 + "export const session = {};\n".length + 100, "globs expand, missing files count zero");
+    assert.deepEqual(checkUnitContext(step, dir, 10000), []);
+    assert.match(checkUnitContext(step, dir, 5000)[0], /u1 needs \d+ bytes.*over execution\.unitContextBytes 5000/);
+
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ execution: { unitContextBytes: 5000 } }));
+    const cli = spawnSync(process.execPath, [path.join(ROOT, "arch-check.mjs"), "scope", "--root", dir], {
+      cwd: dir, input: JSON.stringify({ ...step, scope: { ...step.scope, write: ["src/other.ts"] } }), encoding: "utf8",
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+    });
+    assert.equal(cli.status, 1);
+    assert.match(cli.stderr, /unitContextBytes 5000/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Every step of the plan that introduced the check fits the default budget.
+test("unit context: every step of docs/plans/autonomous-e2e-loop.md fits the default budget", () => {
+  const repo = path.join(ROOT, "..");
+  const plan = fs.readFileSync(path.join(repo, "docs", "plans", "autonomous-e2e-loop.md"), "utf8");
+  const list = (block, key) => (new RegExp(`^\\s+${key}: \\[([^\\]]*)\\]`, "m").exec(block)?.[1] || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  const steps = plan.split(/^\s+- id: /m).slice(1).map((block) => block.split("\n")[0].trim())
+    .map((id, i, ids) => {
+      const block = plan.split(/^\s+- id: /m)[i + 1];
+      const section = plan.split(/^### Step \d+[a-z]? — /m).find((s) => s.startsWith(`${id} `)) || "";
+      return { id, task: section, scope: { read: list(block, "read"), docs: list(block, "docs") } };
+    });
+  assert.ok(steps.length >= 10, `found ${steps.length} steps`);
+  for (const step of steps) assert.ok(step.task, `step ${step.id} has task text`);
+  assert.deepEqual(steps.flatMap((step) => checkUnitContext(step, repo, DEFAULT_UNIT_CONTEXT_BYTES)), []);
 });

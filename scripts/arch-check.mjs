@@ -17,7 +17,8 @@
 // CLI (exit 1 on any violation):
 //   arch-check.mjs lint                 validate every rules doc + its cites
 //   arch-check.mjs governs <path>...    which rules docs govern these paths
-//   arch-check.mjs scope < manifest     dry-run the scope.mjs check for one step
+//   arch-check.mjs scope < manifest     dry-run the scope.mjs check for one step,
+//                                       plus its context size (ARCH-ENGINE-08)
 //   arch-check.mjs unmanaged            list prose under the dir with no rules pair
 // `--root <dir>` overrides the project root (defaults to the current project).
 import fs from "node:fs";
@@ -148,6 +149,41 @@ export function checkScope(scope, docs) {
   return violations;
 }
 
+// ARCH-ENGINE-08: what a unit's fresh agent must load before it edits —
+// scope.read + scope.docs on disk plus the task text, in bytes. A narrow glob
+// counts every file it matches; a path that doesn't exist yet counts zero.
+export const DEFAULT_UNIT_CONTEXT_BYTES = 122880;
+export function unitContextBytes(manifest, root) {
+  const entries = [...(manifest.scope?.read || manifest.read || []), ...(manifest.scope?.docs || manifest.docs || [])].map(norm);
+  const files = new Set();
+  for (const entry of entries) {
+    if (!isGlob(entry)) { files.add(entry); continue; }
+    const re = globToRe(entry);
+    const walk = (rel) => {
+      let names = [];
+      try { names = fs.readdirSync(path.join(root, rel), { withFileTypes: true }); } catch { return; }
+      for (const d of names) {
+        const child = rel ? `${rel}/${d.name}` : d.name;
+        if (d.isDirectory()) { if (d.name !== ".git" && d.name !== "node_modules") walk(child); }
+        else if (re.test(child)) files.add(child);
+      }
+    };
+    walk(staticPrefix(entry).replace(/\/[^/]*$/, "").replace(/\/$/, ""));
+  }
+  let bytes = 0;
+  for (const file of files) {
+    try { bytes += fs.statSync(path.join(root, file)).size; } catch { /* not written yet */ }
+  }
+  const task = Array.isArray(manifest.tasks) ? manifest.tasks.join("\n") : String(manifest.task || "");
+  return bytes + Buffer.byteLength(task);
+}
+export function checkUnitContext(manifest, root, max = DEFAULT_UNIT_CONTEXT_BYTES) {
+  const bytes = unitContextBytes(manifest, root);
+  return bytes > max
+    ? [`unit ${manifest.id || manifest.unit || "?"} needs ${bytes} bytes of scope.read + scope.docs + task text, over execution.unitContextBytes ${max} — split the step (ARCH-ENGINE-08)`]
+    : [];
+}
+
 function lineCount(file) {
   try { return fs.readFileSync(file, "utf8").replace(/\r?\n$/, "").split(/\r?\n/).length; } catch { return -1; }
 }
@@ -238,8 +274,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (mode === "scope") {
     let manifest;
     try { manifest = JSON.parse(await readStdin() || "{}"); } catch (e) { problems = [`manifest is not JSON: ${e.message}`]; }
-    if (manifest) problems = checkScope(manifest, docs);
-    if (!problems.length) console.log("arch-check: scope cites every governing rules doc — PASS");
+    if (manifest) {
+      problems = [...checkScope(manifest, docs),
+        ...checkUnitContext(manifest, root, cfg?.execution?.unitContextBytes || DEFAULT_UNIT_CONTEXT_BYTES)];
+    }
+    if (!problems.length) console.log("arch-check: scope cites every governing rules doc and fits execution.unitContextBytes — PASS");
   } else {
     problems = ["usage: arch-check.mjs lint | governs <path>... | scope < manifest.json | unmanaged  [--root <dir>]"];
   }
