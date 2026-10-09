@@ -1,5 +1,5 @@
 ---
-description: Planner — decompose a request into a lean, executable plan doc (docs/plans/<slug>.md), register its execution rows in the tracker, and hand off to the executor. Emits docs; writes NO code. The only planner that persists docs.
+description: Planner — decompose a request into a lean, executable plan doc (docs/plans/<slug>.md), register its tracker rows, and hand off to the executor. Writes NO code; the only planner that persists docs.
 argument-hint: "<feature or list of features>"
 model: sonnet
 allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand

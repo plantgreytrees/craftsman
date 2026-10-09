@@ -1,5 +1,5 @@
 ---
-description: Prompt generator — turn a vetted, architected idea (or a request) into ONE paste-ready `/goal` prompt that drives the full craftsman loop (/plan → /orchestrate → /scrutinise → /sync-docs --all, which ends in /architect --update → /craftsman:merge) to verified, landed completion, every step bound to the architecture rules and the plan's acceptance criteria, plus an implementation-weight estimate (quick / medium / long / extra long) shown outside the prompt. Writes NO code and NO docs.
+description: Prompt generator — turn a vetted idea or request into ONE paste-ready /goal driving /plan → /orchestrate → /scrutinise → /sync-docs → /craftsman:merge to landed completion, with a size estimate.
 argument-hint: "<idea-slug | plan-slug | request>"
 model: sonnet
 allowed-tools: Bash, Read, Write, Glob, Grep

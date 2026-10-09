@@ -1,3 +1,7 @@
+---
+description: Shared protocol for read-only analysis commands. Not invoked directly.
+disable-model-invocation: true
+---
 > Canonical protocol shared by every command whose job is READ-ONLY analysis —
 > tracing, diagnosing, or reviewing code before a plan exists (`/understand`,
 > `/investigate`, `/plan`'s Phase 0, `/scrutinise`, `/scrutinise --deep`). Each

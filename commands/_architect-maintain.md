@@ -1,3 +1,7 @@
+---
+description: Shared protocol for /architect --init and --update. Not invoked directly.
+disable-model-invocation: true
+---
 > Canonical protocol for `/architect --init` and `/architect --update`. `/architect`
 > `Read`s this only when one of those flags is passed. Not user-invocable.
 > Doc authority, the two-file format, and rule states are in `_architecture.md`

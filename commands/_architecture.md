@@ -1,8 +1,11 @@
-> Canonical contract for how every command (`/idea`, `/instruction`, `/plan`,
-> `/orchestrate`, `/scrutinise`, `/sync-docs`, `/understand`, `/investigate`,
-> `/fix-tests`) consumes architecture decisions written by `/architect`.
-> `Read` it only when `docs/architecture/*.rules.md` exists — a repo with no
-> rules docs pays nothing. Not user-invocable.
+---
+description: Contract for /architect's rules docs. Not invoked.
+disable-model-invocation: true
+---
+> How every command (`/idea`, `/instruction`, `/plan`, `/orchestrate`,
+> `/scrutinise`, `/sync-docs`, `/understand`, `/investigate`, `/fix-tests`)
+> consumes architecture decisions. `Read` it only when
+> `docs/architecture/*.rules.md` exists; else it costs nothing.
 
 # Architecture contract
 

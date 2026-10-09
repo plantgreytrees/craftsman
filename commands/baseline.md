@@ -1,5 +1,5 @@
 ---
-description: Snapshot pre-existing lint/type findings so the quality gate reports only NEW issues, and record them in docs/errors/ so they stay visible instead of disappearing. Run once per repo before first use, and after any large intentional cleanup.
+description: Snapshot existing lint/type findings so the quality gate reports only NEW issues, recorded in docs/errors/ to stay visible. Run once per repo, and after any large intentional cleanup.
 allowed-tools: Bash
 ---
 

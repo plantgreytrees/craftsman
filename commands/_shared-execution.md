@@ -1,7 +1,8 @@
-> Canonical protocol for the per-unit execution loop (`/orchestrate` Phase C).
-> `Read` only when about to run Phase X — split from `_shared-machinery.md` so
-> a run short of execution never pays for it.
-> Not user-invocable.
+---
+description: Shared per-unit execution loop for /orchestrate Phase C. Not invoked.
+disable-model-invocation: true
+---
+> `Read` only when about to run Phase X — a run short of execution never pays for it.
 
 ## Phase L — Merge-only locking
 

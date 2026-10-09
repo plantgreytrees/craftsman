@@ -1,6 +1,6 @@
 ---
 name: consumer-tracer
-description: Given a changed public API, exported type, or shared contract, returns the exhaustive evidence-backed list of every consumer that must change with it — including wire/transport consumers that are grep-able but not statically linked.
+description: Given a changed public API, exported type or shared contract, returns the exhaustive, evidence-backed list of consumers that must change with it, including grep-able wire/transport consumers.
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---

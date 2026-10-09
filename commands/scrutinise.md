@@ -1,5 +1,5 @@
 ---
-description: Verify — post-implementation review for logical defects, security issues, and cross-unit inconsistency that a per-unit merge gate can't see, run by ONE isolated fresh-context reviewer; hands findings to /plan to persist. Reviews only; fixes NOTHING.
+description: Verify — post-implementation review for logic, security and cross-unit defects a per-unit gate can't see, by ONE isolated fresh-context reviewer; findings go to /plan to persist. Fixes NOTHING.
 argument-hint: "<module | git range | plan-slug> [--deep <run-slug>]"
 model: sonnet
 allowed-tools: Task, Agent, Bash, Read, Glob, Grep, TodoWrite, SlashCommand

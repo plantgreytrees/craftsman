@@ -1,6 +1,6 @@
 ---
 name: plan-strategist
-description: For a non-trivial feature request, surfaces hidden assumptions, generates at least two genuinely different decompositions, stress-tests each, and recommends one with a rationale — the single highest-leverage reasoning step in planning, before any plan doc is written.
+description: For a non-trivial request, surfaces hidden assumptions, generates two or more genuinely different decompositions, stress-tests each, and recommends one before any plan doc is written.
 tools: Read, Grep, Glob
 model: opus
 ---

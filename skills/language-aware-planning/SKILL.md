@@ -1,6 +1,6 @@
 ---
 name: language-aware-planning
-description: Use before implementing any non-trivial change — new module, new public API, multi-file change, concurrency, or persistence. Produces an implementation plan in the target language's own idioms and checks it against that language's design checklist. Not needed for small edits or bug fixes.
+description: Use before a non-trivial change (new module or public API, multi-file, concurrency, persistence) — plan it in the target language's idioms against its design checklist. Not for small edits or fixes.
 ---
 
 # Language-Aware Planning

@@ -1,5 +1,5 @@
 ---
-description: Built-in drift check — after a `claude update`, verify every Claude Code built-in craftsman wraps still matches what its wrapper assumes, surface new built-ins worth wrapping, and (on approval) update through the loop. Writes only docs/builtins.md itself.
+description: After a `claude update`, check every built-in craftsman wraps still matches its wrapper's assumptions, surface new ones worth wrapping, and update on approval. Writes only docs/builtins.md.
 argument-hint: "[--report-only]"
 allowed-tools: Bash, Read, Glob, Grep, WebFetch, Task, Agent, AskUserQuestion, SlashCommand, Edit, Write
 model: sonnet

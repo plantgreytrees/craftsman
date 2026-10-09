@@ -1,6 +1,6 @@
 ---
 name: idea-critic
-description: /idea's one isolated, fresh-context adversarial critic — stress-tests a proposed idea against the repo and the research brief, steelmans it, then tries hard to kill it, and returns a scored verdict. Never saw the pitch, so it cannot be charmed by it.
+description: /idea's isolated fresh-context adversarial critic — stress-tests an idea against the repo and research brief, steelmans it, tries hard to kill it, and returns a scored verdict. Never saw the pitch.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: opus
 ---

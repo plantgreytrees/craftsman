@@ -1,6 +1,6 @@
 ---
 name: architect-analyst
-description: /architect --deep's one isolated, fresh-context analyst — validates an idea's claims against the actual code and derives the full set of engineering, software, systems, data, security and operational decisions it requires, each with real options and a recommendation.
+description: /architect --deep's isolated fresh-context analyst — checks an idea's claims against the code and derives every decision it needs (engineering, data, security, ops) with options and a pick.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 model: fable
 ---

@@ -1,5 +1,5 @@
 ---
-description: Land a finished branch on the base branch yourself — commit leftovers, leave its worktree, merge, push, and clean up the worktree and the local and remote branch. Run it whenever the user says "merge"; never hand them git commands instead.
+description: Land a finished branch on base yourself — commit leftovers, merge, push, and clean up the worktree and the local and remote branch. Run it whenever the user says "merge"; never hand back git commands.
 argument-hint: "[branch | worktree path]"
 allowed-tools: Bash, Read, Edit, ExitWorktree
 ---

@@ -1,3 +1,7 @@
+---
+description: Shared constraints for code-executing commands. Not invoked directly.
+disable-model-invocation: true
+---
 # Shared execution machinery
 
 > Canonical protocol for every command that **executes** code changes (`/orchestrate`,

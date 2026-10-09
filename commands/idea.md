@@ -1,5 +1,5 @@
 ---
-description: Evaluator — scrutinise an idea before anything is designed or built: neutral restatement, duplicate/overlap scan, whole-system fit, heavy research, one isolated adversarial critic, and a scored verdict (pursue / with changes / defer / reject) persisted to docs/ideas/<slug>.md. Never blindly agrees. Writes NO code and NO plans.
+description: Evaluator — scrutinise an idea before it is built: restatement, overlap scan, system fit, research, an isolated critic, and a scored verdict in docs/ideas/<slug>.md. Never blindly agrees. No code.
 argument-hint: "<the idea, in your own words> [--deep]"
 model: opus
 allowed-tools: Task, Agent, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, WebSearch, WebFetch, AskUserQuestion, SlashCommand
