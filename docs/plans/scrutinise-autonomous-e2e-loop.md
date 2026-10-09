@@ -180,7 +180,7 @@ units:
     scope_id: land-locale
     project: .
     depends_on: [land-holder-untracked]
-    module: repo-exec git under LC_ALL=C
+    module: repo-exec under LC_ALL=C
     language: JavaScript (Node ESM, node:test)
     security: normal
     scope:
