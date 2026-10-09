@@ -210,9 +210,9 @@ Depends on: none
 ### Step 2 — telemetry (., JavaScript, normal)
 Tooling: implementer · gates observability-reviewer
 Depends on: state-root-pin
-- [ ] 2.1 New `scripts/telemetry.mjs`: a hook (Stop) and CLI that reads only a bounded tail (≤256 KB) of the hook input's `transcript_path`, takes the last assistant `usage` (input + cache_read + cache_creation) as root-context tokens, computes percent of the context window, and appends `{ev:"context", sid, phase, unit, tokens, percent, cost}` through `logEvent`. `phase`/`unit` come from the active scope or CLI args. Feature detection only, no version strings. → accept: `telemetry.test.mjs` feeds a fixture transcript and asserts the exact event.
-- [ ] 2.2 `stats.mjs`: add a "root context per run" section (per sid: samples, peak tokens, final tokens, peak percent). → accept: `stats.test.mjs` with fixture events asserts the section.
-- [ ] 2.3 `hooks/hooks.json`: register `telemetry.mjs` on Stop (timeout ≤10). → accept: wiring sees the entry; full suite exit 0.
+- [x] 2.1 New `scripts/telemetry.mjs`: a hook (Stop) and CLI that reads only a bounded tail (≤256 KB) of the hook input's `transcript_path`, takes the last assistant `usage` (input + cache_read + cache_creation) as root-context tokens, computes percent of the context window, and appends `{ev:"context", sid, phase, unit, tokens, percent, cost}` through `logEvent`. `phase`/`unit` come from the active scope or CLI args. Feature detection only, no version strings. → accept: `telemetry.test.mjs` feeds a fixture transcript and asserts the exact event.
+- [x] 2.2 `stats.mjs`: add a "root context per run" section (per sid: samples, peak tokens, final tokens, peak percent). → accept: `stats.test.mjs` with fixture events asserts the section.
+- [x] 2.3 `hooks/hooks.json`: register `telemetry.mjs` on Stop (timeout ≤10). → accept: wiring sees the entry; full suite exit 0.
 
 ### Step 3 — baseline-run (live evidence)
 Depends on: telemetry (merged and installed)
