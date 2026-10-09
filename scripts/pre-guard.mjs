@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot } from "./lib/core.mjs";
-import { readScope, requiredFile } from "./scope.mjs";
+import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 
 let input = {};
@@ -223,7 +223,7 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
   }
 }
 
-if (!activeScope && fs.existsSync(requiredFile(input)) && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
+if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
   process.stderr.write(
     `craftsman: ${tool} blocked because this session requires an active unit scope. ` +
     `Re-analyse the unit boundary, activate scripts/scope.mjs with the exact read/docs/write ` +
@@ -291,8 +291,10 @@ if (g.enabled !== false && writeTool) {
   const isDoc = Boolean(tracker) || docPaths.some((p) => globToRe(p).test(rel) || globToRe(p).test("./" + rel));
   if (isDoc) {
     const sid = sidOf(input);
-    const marker = path.join(sessionDir(sid, activeContext), "doc-write");   // this session's own authority
-    const pending = path.join(activeContext.stateDir, "doc-write-pending"); // grant dropped by doc-write.mjs
+    // Grants live with the root project, whichever worktree is being edited
+    // (ARCH-STATE-06) — doc-write.mjs drops its grant at the root STATE_DIR.
+    const marker = path.join(sessionDir(sid), "doc-write");      // this session's own authority
+    const pending = path.join(STATE_DIR, "doc-write-pending");   // grant dropped by doc-write.mjs
     const ttl = g.ttlMs ?? 3600000;
     const pendingTtl = g.pendingTtlMs ?? 1800000;
     let ok = false;
@@ -306,7 +308,7 @@ if (g.enabled !== false && writeTool) {
     if (!ok) {
       try {
         if (Date.now() - fs.statSync(pending).mtimeMs < pendingTtl) {
-          fs.mkdirSync(sessionDir(sid, activeContext), { recursive: true });
+          fs.mkdirSync(sessionDir(sid), { recursive: true });
           fs.writeFileSync(marker, `claimed ${new Date().toISOString()}\n`);
           ok = true;
         }

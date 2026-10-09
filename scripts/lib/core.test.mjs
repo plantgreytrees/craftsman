@@ -8,10 +8,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
   renderKnownIssuesDoc, gitTrackedFiles, pruneSessions, recordFailure, topRules,
+  writeRootPin, rootPinPath,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -318,4 +321,93 @@ test("learnedRules: enabled:false surfaces nothing even when rules were collecte
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------- root pinning (ARCH-STATE-01) ---
+const CORE = fileURLToPath(new URL("./core.mjs", import.meta.url));
+const HOOKS_JSON = path.join(path.dirname(CORE), "..", "..", "hooks", "hooks.json");
+const initRepo = (cwd) => spawnSync("git", ["init", "-q"], { cwd, encoding: "utf8" });
+function printRoot(cwd, env) {
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e",
+    `const m = await import(${JSON.stringify(pathToFileURL(CORE).href)}); ` +
+    `console.log(JSON.stringify({ root: m.PROJECT_ROOT, source: m.ROOT_SOURCE, enabled: m.enabled({}, null) }));`,
+  ], { cwd, env, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+function cleanEnv(extra = {}) {
+  const env = { ...process.env };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  return { ...env, ...extra };
+}
+
+test("PROJECT_ROOT: identical from five different cwds under one CLAUDE_PROJECT_DIR", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-root-")));
+  try {
+    const repo = path.join(base, "repo");
+    const other = path.join(base, "other");
+    // A repo nested inside the project — a unit worktree or a submodule —
+    // is where cwd-first resolution used to split state (idea R6).
+    const nested = path.join(repo, ".worktrees", "unit-1");
+    fs.mkdirSync(path.join(repo, "src", "deep"), { recursive: true });
+    fs.mkdirSync(nested, { recursive: true });
+    fs.mkdirSync(other);
+    initRepo(repo);
+    initRepo(nested);
+    initRepo(other);
+    const env = cleanEnv({ CLAUDE_PROJECT_DIR: repo });
+    const roots = [repo, path.join(repo, "src", "deep"), nested, other, base].map((cwd) => printRoot(cwd, env).root);
+    assert.deepEqual(roots, [repo, repo, repo, repo, repo]);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test("PROJECT_ROOT: a Bash-run script with no CLAUDE_PROJECT_DIR follows the session pin, not cwd", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-pin-")));
+  const sid = `pin-test-${process.pid}`;
+  try {
+    const repo = path.join(base, "repo");
+    const other = path.join(base, "other");
+    fs.mkdirSync(path.join(repo, "sub"), { recursive: true });
+    fs.mkdirSync(other);
+    initRepo(repo);
+    initRepo(other);
+    writeRootPin(sid, repo);
+    const env = cleanEnv({ CLAUDE_CODE_SESSION_ID: sid });
+    assert.deepEqual(printRoot(path.join(repo, "sub"), env), { root: repo, source: "session-pin", enabled: true });
+    assert.equal(printRoot(base, env).root, repo, "a non-git cwd above the repo still gets the pinned root");
+    // A different repository (a test fixture, another checkout) keeps its own root.
+    assert.equal(printRoot(other, env).root, other);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(rootPinPath(sid), { force: true });
+  }
+});
+
+test("PROJECT_ROOT: a non-git CLAUDE_PROJECT_DIR is off without a workspace manifest, on with one", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-above-")));
+  try {
+    fs.mkdirSync(path.join(base, "repo"));
+    initRepo(path.join(base, "repo"));
+    const env = cleanEnv({ CLAUDE_PROJECT_DIR: base });
+    assert.deepEqual(printRoot(path.join(base, "repo"), env), { root: base, source: "project-dir", enabled: false });
+    fs.writeFileSync(path.join(base, "craftsman.workspace.json"), JSON.stringify({ version: 1, projects: { repo: { root: "repo" } } }));
+    assert.deepEqual(printRoot(path.join(base, "repo"), env), { root: base, source: "project-dir", enabled: true });
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test("hooks never resolve a project from process.cwd()", () => {
+  const hooks = JSON.parse(fs.readFileSync(HOOKS_JSON, "utf8")).hooks;
+  const scripts = new Set(Object.values(hooks).flat().flatMap((entry) => entry.hooks)
+    .map((hook) => /scripts\/([\w-]+\.mjs)/.exec(hook.command)?.[1]).filter(Boolean));
+  assert.ok(scripts.size > 3);
+  for (const script of scripts) {
+    const source = fs.readFileSync(path.join(path.dirname(CORE), "..", script), "utf8");
+    assert.doesNotMatch(source, /(projectContext|resolveSelectedProject|resolveProjectRoot|gitTop)\([^)]*process\.cwd\(\)/, script);
+  }
+});
+
+test("ARCH-STATE-07: craftsman registers no SubagentStop hook", () => {
+  assert.equal("SubagentStop" in JSON.parse(fs.readFileSync(HOOKS_JSON, "utf8")).hooks, false);
 });

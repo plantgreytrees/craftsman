@@ -9,7 +9,9 @@ import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
   sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
+  ROOT_SOURCE, rootUnanchored, writeRootPin,
 } from "./lib/core.mjs";
+import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
@@ -17,9 +19,21 @@ import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
 const sid = sidOf(input);
+// Opened above a repo with no workspace manifest: nothing to anchor state to
+// (ARCH-STATE-01). Say so once instead of silently splitting state.
+if (ROOT_SOURCE === "project-dir" && rootUnanchored()) {
+  process.stdout.write(
+    `craftsman off: ${PROJECT_ROOT} is not a git repository. Open the session inside a repo, ` +
+    `or register its projects with /craftsman:workspace-init.\n`
+  );
+  process.exit(0);
+}
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context)) process.exit(0);
+// Bash-run scripts have no CLAUDE_PROJECT_DIR; this pin is how they find
+// the same root the hooks use.
+writeRootPin(sid, PROJECT_ROOT);
 
 const markers = {
   "package.json": "JavaScript/TypeScript", "deno.json": "Deno",
@@ -117,8 +131,8 @@ try {
   handoff = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, context), "handoff.json"), "utf8"));
 } catch { /* no hand-off yet, or it was partially written */ }
 if (handoff) {
-  fs.mkdirSync(sessionDir(sid, context), { recursive: true });
-  fs.writeFileSync(path.join(sessionDir(sid, context), "scope-required"), "resume requires fresh scope activation\n");
+  fs.mkdirSync(path.dirname(requiredFile(input)), { recursive: true });
+  fs.writeFileSync(requiredFile({ session_id: input.session_id }), "resume requires fresh scope activation\n");
 }
 
 let handoffStale = false;

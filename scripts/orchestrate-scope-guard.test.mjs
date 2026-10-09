@@ -20,7 +20,10 @@ function run(dir, input) {
 }
 
 function tmpProject() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-guard-"));
+  // A git root: a non-git CLAUDE_PROJECT_DIR is "above a repo" and leaves craftsman off.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-guard-")));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  return dir;
 }
 
 // scope.mjs's requiredFile() resolves PROJECT_ROOT from core.mjs at import

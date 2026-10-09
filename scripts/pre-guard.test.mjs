@@ -13,6 +13,8 @@ const GUARD = path.join(ROOT, "pre-guard.mjs");
 const DOC_WRITE = path.join(ROOT, "doc-write.mjs");
 
 function run(script, dir, input, extraEnv = {}) {
+  // A git root: a non-git CLAUDE_PROJECT_DIR is "above a repo" and leaves craftsman off.
+  if (!fs.existsSync(path.join(dir, ".git"))) spawnSync("git", ["init", "-q"], { cwd: dir });
   return spawnSync(process.execPath, [script], {
     cwd: dir,
     input: JSON.stringify(input),

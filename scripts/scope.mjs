@@ -5,9 +5,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   PROJECT_ROOT, atomicWrite, enabled, isGitRoot, loadConfig, logEvent, readStdin,
-  loadWorkspaceManifest, projectContext,
-  resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
-  sessionDir, sidOf, worktreeBindingPath,
+  projectContext, resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
+  sessionDir, sidOf, sha1, worktreeBindingPath,
 } from "./lib/core.mjs";
 import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
 
@@ -46,31 +45,56 @@ export function normalizeScope(value) {
   };
 }
 
-export function scopeFile(input) { return path.join(sessionDir(sidOf(input), input?.project ? projectContext(input.project) : null), "scope.json"); }
-export function requiredFile(input) { return path.join(sessionDir(sidOf(input), input?.project ? projectContext(input.project) : null), "scope-required"); }
+// Every scope and scope-required marker lives in the ROOT project's session
+// dir, named by project id and — for a unit — its worktree (ARCH-STATE-03,
+// ARCH-STATE-06): inside a workflow or sub-agent session_id is the root
+// session's, so only the worktree tells two units apart. No worktree → the
+// session scope, which the root engine uses.
+const SCOPE_NAME = /^scope(@[A-Za-z0-9_-]+)?(-[0-9a-f]{16})?\.json$/;
+function scopeName(input, prefix, suffix) {
+  const project = input?.project && input.project !== "." ? `@${input.project}` : "";
+  const worktree = input?.worktree_path ? `-${sha1(path.resolve(input.worktree_path)).slice(0, 16)}` : "";
+  return `${prefix}${project}${worktree}${suffix}`;
+}
+const rootSessionDir = (input) => sessionDir(sidOf(input));
+export function scopeFile(input) { return path.join(rootSessionDir(input), scopeName(input, "scope", ".json")); }
+export function requiredFile(input) { return path.join(rootSessionDir(input), scopeName(input, "scope-required", "")); }
+
+const inside = (root, target) => target === root || target.startsWith(root + path.sep);
+const targetOf = (input) => path.resolve(input?.tool_input?.file_path || input?.tool_input?.path || input?.cwd || process.cwd());
+
+// Required when the session is armed, or when the target sits in a unit
+// worktree that was armed on its own.
+export function scopeRequired(input) {
+  if (fs.existsSync(requiredFile({ ...input, worktree_path: undefined }))) return true;
+  const target = targetOf(input);
+  let names = [];
+  try { names = fs.readdirSync(rootSessionDir(input)).filter((n) => /^scope-required(@[A-Za-z0-9_-]+)?-[0-9a-f]{16}$/.test(n)); } catch {}
+  return names.some((name) => {
+    try { return inside(path.resolve(fs.readFileSync(path.join(rootSessionDir(input), name), "utf8").trim()), target); }
+    catch { return false; }
+  });
+}
 
 export function readScope(input) {
-  const read = (context) => {
-    try { return JSON.parse(fs.readFileSync(scopeFile({ ...input, project: context.id }), "utf8")); }
-    catch { return null; }
-  };
-  if (input?.project) return read(projectContext(input.project));
-  const contexts = [];
+  let scopes = [];
   try {
-    contexts.push(projectContext("."));
-    const manifest = loadWorkspaceManifest();
-    for (const id of Object.keys(manifest?.projects || {})) contexts.push(projectContext(id));
+    scopes = fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).map((n) => {
+      try { return JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), n), "utf8")); } catch { return null; }
+    }).filter(Boolean);
   } catch { return null; }
-  const scopes = contexts.map(read).filter(Boolean);
+  if (input?.project) scopes = scopes.filter((scope) => (scope.project || ".") === input.project);
   if (!scopes.length) return null;
-  const target = input?.tool_input?.file_path || input?.tool_input?.path || input?.cwd || process.cwd();
-  const absolute = path.resolve(target);
-  const matching = scopes.filter((scope) => {
-    const root = path.resolve(scope.worktree_path || scope.project_root);
-    return absolute === root || absolute.startsWith(root + path.sep);
-  });
-  if (matching.length === 1) return matching[0];
-  return { ...scopes[0], scope_ambiguous: scopes.length > 1 };
+  const absolute = targetOf(input);
+  const matching = scopes.filter((scope) => inside(path.resolve(scope.worktree_path || scope.project_root), absolute));
+  // The innermost root wins: a unit worktree nested under the session's
+  // checkout owns its own files.
+  matching.sort((a, b) => (b.worktree_path || b.project_root).length - (a.worktree_path || a.project_root).length);
+  if (matching.length) return matching[0];
+  if (scopes.length === 1) return scopes[0];
+  const session = scopes.filter((scope) => !scope.worktree_path);
+  if (session.length === 1) return session[0];
+  return { ...scopes[0], scope_ambiguous: true };
 }
 
 function sameRepository(first, second) {
@@ -87,8 +111,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const cfg = loadConfig(selectedContext);
     if (!enabled(cfg, selectedContext)) process.exit(0);
     if (input.action === "require") {
-      fs.mkdirSync(sessionDir(sidOf(input), selectedContext), { recursive: true });
-      fs.writeFileSync(requiredFile(input), new Date().toISOString() + "\n");
+      fs.mkdirSync(rootSessionDir(input), { recursive: true });
+      // A worktree marker names its worktree, so scopeRequired can match a target.
+      fs.writeFileSync(requiredFile(input), input.worktree_path ? path.resolve(input.worktree_path) + "\n" : new Date().toISOString() + "\n");
       process.stdout.write(`scope required for session ${sidOf(input)}\n`);
       process.exit(0);
     }
@@ -140,8 +165,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (scope.project !== "." && !isGitRoot(scope.project_root)) {
       throw new Error(`workspace project is not a Git root: ${scope.project}`);
     }
-    atomicWrite(scopeFile(input), JSON.stringify(scope, null, 2) + "\n");
-    try { fs.unlinkSync(requiredFile(input)); } catch {}
+    const keyed = { ...input, worktree_path: scope.worktree_path };
+    atomicWrite(scopeFile(keyed), JSON.stringify(scope, null, 2) + "\n");
+    for (const marker of [requiredFile(keyed), requiredFile({ ...input, worktree_path: undefined })]) {
+      try { fs.unlinkSync(marker); } catch {}
+    }
     logEvent({ ev: "scope_activated", sid: sidOf(input), plan: scope.plan, unit: scope.unit });
     process.stdout.write(`scope active for ${scope.unit}\n`);
   } catch (error) {

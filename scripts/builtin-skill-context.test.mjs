@@ -19,7 +19,10 @@ function run(dir, skill) {
 }
 
 function tmpProject() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-builtin-skill-"));
+  // A git root: a non-git CLAUDE_PROJECT_DIR is "above a repo" and leaves craftsman off.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-builtin-skill-")));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  return dir;
 }
 
 test("builtin-skill-context: wraps built-in code-review with standards, ARCH rules and open criteria", () => {

@@ -19,7 +19,10 @@ function run(dir, input) {
 }
 
 function tmpProject() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-agent-mode-"));
+  // A git root: a non-git CLAUDE_PROJECT_DIR is "above a repo" and leaves craftsman off.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-agent-mode-")));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  return dir;
 }
 
 test("agent-mode-guard: blocks Task delegation under default root-only mode", () => {
@@ -214,6 +217,52 @@ test("agent-mode-guard: execution.builtinAgents: [] turns the built-in allowance
     );
     const result = run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "Explore" } });
     assert.equal(result.status, 2);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ARCH-STATE-02: the writer (orchestrate-scope-guard) and the spender
+// (agent-mode-guard) find one grant whatever cwd each hook runs in.
+function hook(script, cwd, dir, input, extraEnv = {}) {
+  return spawnSync(process.execPath, [path.join(ROOT, script)], {
+    cwd, input: JSON.stringify(input), encoding: "utf8",
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...extraEnv },
+  });
+}
+
+test("agent-mode-guard: a grant written from one cwd is spent from another, exactly once", () => {
+  const dir = tmpProject();
+  const elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-elsewhere-")));
+  try {
+    fs.mkdirSync(path.join(dir, "src", "deep"), { recursive: true });
+    spawnSync("git", ["init", "-q"], { cwd: elsewhere });
+    assert.equal(hook("orchestrate-scope-guard.mjs", path.join(dir, "src", "deep"), dir, { session_id: "s1", prompt: "/idea new thing" }).status, 0);
+    const spend = { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "craftsman:idea-critic" } };
+    assert.equal(hook("agent-mode-guard.mjs", elsewhere, dir, spend).status, 0);
+    assert.equal(hook("agent-mode-guard.mjs", dir, dir, spend).status, 2, "a grant is spent once");
+    assert.equal(fs.existsSync(path.join(elsewhere, ".craftsman")), false, "no state lands in the cwd's repo");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+test("agent-mode-guard: a sub-project grant lives in the root session dir, keyed by project id", () => {
+  const dir = tmpProject();
+  try {
+    const sub = path.join(dir, "services", "payments");
+    fs.mkdirSync(sub, { recursive: true });
+    spawnSync("git", ["init", "-q"], { cwd: sub });
+    const manifest = path.join(dir, "craftsman.workspace.json");
+    fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { payments: { root: "services/payments" } } }));
+    const env = { CRAFTSMAN_WORKSPACE_MANIFEST: manifest };
+    assert.equal(hook("orchestrate-scope-guard.mjs", sub, dir, { session_id: "s1", project: "payments", prompt: "/idea x" }, env).status, 0);
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", "s1", "idea-critic-grant@payments")), true);
+    assert.equal(fs.existsSync(path.join(sub, ".craftsman", "sessions")), false);
+    const spend = { session_id: "s1", project: "payments", tool_name: "Agent", tool_input: { subagent_type: "idea-critic" } };
+    assert.equal(hook("agent-mode-guard.mjs", sub, dir, { ...spend, project: undefined }, env).status, 2, "the root project's grant is a different one");
+    assert.equal(hook("agent-mode-guard.mjs", dir, dir, spend, env).status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

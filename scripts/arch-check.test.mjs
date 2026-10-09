@@ -22,6 +22,8 @@ human: docs/architecture/auth.md
 
 function project(files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-arch-"));
+  // A git root: a non-git CLAUDE_PROJECT_DIR is "above a repo" and leaves craftsman off.
+  spawnSync("git", ["init", "-q"], { cwd: dir });
   const all = {
     "docs/architecture/auth.rules.md": AUTH_RULES,
     "docs/architecture/auth.md": "# Auth\nhuman reference\n",

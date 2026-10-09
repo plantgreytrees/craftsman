@@ -23,6 +23,30 @@ function withProject(fn) {
   try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+test("session-context: a session opened above a repo, with no workspace manifest, is off with one notice", () => {
+  withProject((dir) => {
+    fs.mkdirSync(path.join(dir, "repo"));
+    spawnSync("git", ["init", "-q"], { cwd: path.join(dir, "repo") });
+    const result = run(SESSION_CONTEXT, dir, { session_id: "above" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^craftsman off: .* is not a git repository/);
+    assert.equal(result.stdout.trim().split("\n").length, 1);
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "no state is written for an unanchored root");
+  });
+});
+
+test("session-context: SessionStart pins the root for Bash-run scripts", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const sid = `pin-session-${process.pid}`;
+    const pin = path.join(os.tmpdir(), "craftsman-roots", sid);
+    try {
+      assert.equal(run(SESSION_CONTEXT, dir, { session_id: sid }).status, 0);
+      assert.equal(fs.readFileSync(pin, "utf8").trim(), path.resolve(dir));
+    } finally { fs.rmSync(pin, { force: true }); }
+  });
+});
+
 test("session-context: SessionStart removes merged, clean leftover worktrees and keeps dirty ones", () => {
   withProject((dir) => {
     const git = (cwd, ...args) => {

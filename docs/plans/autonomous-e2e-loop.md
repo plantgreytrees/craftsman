@@ -29,7 +29,7 @@ units:
     scope:
       read: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/stop-gate.mjs, hooks/hooks.json, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
       docs: [docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
-      write: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
+      write: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs, scripts/pre-guard.test.mjs, scripts/session-context.test.mjs, scripts/builtin-skill-context.test.mjs, scripts/arch-check.test.mjs]  # re-scoped in execution: non-git test fixtures became git roots (ARCH-STATE-01)
     arch: [ARCH-STATE-01, ARCH-STATE-02, ARCH-STATE-03, ARCH-STATE-06, ARCH-STATE-07, ARCH-AUTO-06]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
   - id: telemetry
@@ -199,13 +199,13 @@ default.
 ### Step 1 — state-root-pin (., JavaScript, high)
 Tooling: implementer · gates security-auditor · guards pre-guard, quality-gate
 Depends on: none
-- [ ] 1.1 `core.mjs` `resolveProjectRoot`: derive the root without `process.cwd()`. Order: `CLAUDE_PROJECT_DIR` → its git toplevel (a non-git dir holding `craftsman.workspace.json` stays itself as a workspace root); else a session pin written at SessionStart, keyed by `CLAUDE_CODE_SESSION_ID`, under `os.tmpdir()`. A bare CLI with neither keeps today's cwd toplevel as an explicit last resort, never reached by a hook. → accept: `core.test.mjs` spawns `core.mjs` from 4 cwds (repo, subdir, unrelated git repo, non-git parent) with one `CLAUDE_PROJECT_DIR` and gets one identical `PROJECT_ROOT`.
-- [ ] 1.2 Above-repo session: `CLAUDE_PROJECT_DIR` non-git with no workspace manifest → `enabled()` is false and session-context prints one notice; with a manifest → the workspace root resolves. → accept: two fixture tests.
-- [ ] 1.3 Grants (`agentGrantFile`, `grantAgent`, `spendAgentGrant`) compute the path from (sid, project id) on the pinned root only. → accept: orchestrate-scope-guard writes the `/idea` grant from cwd A; agent-mode-guard spends it from cwd B; a second spend is blocked.
-- [ ] 1.4 `scope.mjs` `scopeFile`/`requiredFile`: key by the unit's worktree (from `tool_input` path, worktree binding or `input.cwd` resolved to its git worktree), falling back to the session scope. → accept: `scope.test.mjs` shows two worktrees holding two independent active scopes, and no-worktree falling back to the session scope.
-- [ ] 1.5 Sub-project grants and scopes live under the ROOT project's `sessions/<sid>/` keyed by project id; no hook resolves a project by cwd. → accept: test asserts the sub-project grant path sits under the root state dir; grep test: no hook script outside `core.mjs` calls `process.cwd()` to resolve a project.
-- [ ] 1.6 Test that `hooks/hooks.json` has no `SubagentStop` key (STATE-07). → accept: test passes.
-- [ ] 1.7 Full suite. → accept: `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` exit 0.
+- [x] 1.1 `core.mjs` `resolveProjectRoot`: derive the root without `process.cwd()`. Order: `CLAUDE_PROJECT_DIR` → its git toplevel (a non-git dir holding `craftsman.workspace.json` stays itself as a workspace root); else a session pin written at SessionStart, keyed by `CLAUDE_CODE_SESSION_ID`, under `os.tmpdir()`. A bare CLI with neither keeps today's cwd toplevel as an explicit last resort, never reached by a hook. → accept: `core.test.mjs` spawns `core.mjs` from 4 cwds (repo, subdir, unrelated git repo, non-git parent) with one `CLAUDE_PROJECT_DIR` and gets one identical `PROJECT_ROOT`.
+- [x] 1.2 Above-repo session: `CLAUDE_PROJECT_DIR` non-git with no workspace manifest → `enabled()` is false and session-context prints one notice; with a manifest → the workspace root resolves. → accept: two fixture tests.
+- [x] 1.3 Grants (`agentGrantFile`, `grantAgent`, `spendAgentGrant`) compute the path from (sid, project id) on the pinned root only. → accept: orchestrate-scope-guard writes the `/idea` grant from cwd A; agent-mode-guard spends it from cwd B; a second spend is blocked.
+- [x] 1.4 `scope.mjs` `scopeFile`/`requiredFile`: key by the unit's worktree (from `tool_input` path, worktree binding or `input.cwd` resolved to its git worktree), falling back to the session scope. → accept: `scope.test.mjs` shows two worktrees holding two independent active scopes, and no-worktree falling back to the session scope.
+- [x] 1.5 Sub-project grants and scopes live under the ROOT project's `sessions/<sid>/` keyed by project id; no hook resolves a project by cwd. → accept: test asserts the sub-project grant path sits under the root state dir; grep test: no hook script outside `core.mjs` calls `process.cwd()` to resolve a project.
+- [x] 1.6 Test that `hooks/hooks.json` has no `SubagentStop` key (STATE-07). → accept: test passes.
+- [x] 1.7 Full suite. → accept: `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` exit 0.
 
 ### Step 2 — telemetry (., JavaScript, normal)
 Tooling: implementer · gates observability-reviewer

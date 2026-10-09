@@ -5,6 +5,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -30,22 +31,73 @@ export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
 // own declaration of which project this session belongs to, so cwd-based
 // detection is only trusted when it lands at or inside that project dir (or
 // the project dir sits inside it, covering a session opened one level up).
-async function resolveProjectRoot() {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR ? path.resolve(process.env.CLAUDE_PROJECT_DIR) : null;
+//
+// So the root never depends on cwd (ARCH-STATE-01): a hook always has
+// CLAUDE_PROJECT_DIR, and its git toplevel is the root. A Bash-run script has
+// no CLAUDE_PROJECT_DIR, so SessionStart pins the root per session
+// (CLAUDE_CODE_SESSION_ID) and the script reads the pin. The pin is honoured
+// only when cwd is not inside some other repository — a test fixture or a
+// deliberately different checkout keeps its own root. A bare CLI with neither
+// falls back to cwd's toplevel: there is no session to agree with.
+function gitTop(dir) {
   try {
-    const { stdout } = await pexec("git", ["rev-parse", "--show-toplevel"], { cwd: process.cwd() });
-    const top = stdout.trim();
-    if (top) {
-      const resolved = path.resolve(top);
-      if (!projectDir || isInside(projectDir, resolved) || isInside(resolved, projectDir)) {
-        return resolved;
-      }
-    }
-  } catch { /* not a git repo (or git absent) — fall through */ }
-  if (projectDir) return projectDir;
-  return process.cwd();
+    return path.resolve(execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim()) || null;
+  } catch { return null; }
 }
-export const PROJECT_ROOT = await resolveProjectRoot();
+function gitCommonDir(dir) {
+  try {
+    const out = execFileSync("git", ["-C", dir, "rev-parse", "--git-common-dir"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out ? path.resolve(dir, out) : null;
+  } catch { return null; }
+}
+const pinSid = (sid) => String(sid).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+export function rootPinPath(sid, tmp = os.tmpdir()) {
+  return path.join(tmp, "craftsman-roots", pinSid(sid));
+}
+export function writeRootPin(sid, root, tmp = os.tmpdir()) {
+  if (!sid || sid === "shared") return null;
+  const file = rootPinPath(sid, tmp);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    // Write-then-rename replaces a planted symlink rather than following it.
+    const tmpFile = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpFile, path.resolve(root) + "\n", { flag: "wx", mode: 0o600 });
+    fs.renameSync(tmpFile, file);
+    return file;
+  } catch { return null; }
+}
+export function resolveProjectRoot({ env = process.env, cwd = process.cwd(), tmp = os.tmpdir() } = {}) {
+  if (env.CLAUDE_PROJECT_DIR) {
+    const projectDir = path.resolve(env.CLAUDE_PROJECT_DIR);
+    const top = gitTop(projectDir);
+    // Keep the harness's spelling when it is the toplevel (macOS /var vs
+    // /private/var), so tool paths compare against the same prefix.
+    let same = false;
+    try { same = !!top && fs.realpathSync(projectDir) === fs.realpathSync(top); } catch {}
+    return { root: same || !top ? projectDir : top, source: "project-dir" };
+  }
+  if (env.CLAUDE_CODE_SESSION_ID) {
+    let pinned = null;
+    try {
+      // The pin sits in the shared temp dir: trust only one this user wrote.
+      const file = rootPinPath(env.CLAUDE_CODE_SESSION_ID, tmp);
+      const owner = fs.statSync(file).uid;
+      if (typeof process.getuid !== "function" || owner === process.getuid()) pinned = fs.readFileSync(file, "utf8").trim();
+    } catch {}
+    if (pinned && fs.existsSync(pinned)) {
+      const here = gitCommonDir(cwd);
+      if (!here || here === gitCommonDir(pinned)) return { root: pinned, source: "session-pin" };
+    }
+  }
+  return { root: gitTop(cwd) || path.resolve(cwd), source: "cwd" };
+}
+const RESOLVED_ROOT = resolveProjectRoot();
+export const PROJECT_ROOT = RESOLVED_ROOT.root;
+export const ROOT_SOURCE = RESOLVED_ROOT.source;
 
 // Workspace mode is explicit. We never walk parent directories or enumerate
 // sibling repositories looking for projects: that would be both expensive and
@@ -170,8 +222,12 @@ export function sessionDir(sid, context = null) {
 // agent-mode-guard.mjs when the dispatch happens. Spending is a rename, which
 // only one caller can win, so two parallel dispatches can't both slip through.
 export const GRANTED_AGENTS = ["scrutineer", "idea-critic", "architect-analyst"];
+// Writer and spender compute the path from (sid, project id) on the pinned
+// root alone — never from the caller's cwd or a sub-project's own state dir
+// (ARCH-STATE-02, ARCH-STATE-06).
 export function agentGrantFile(agent, sid, context = null) {
-  return path.join(sessionDir(sid, context), `${agent}-grant`);
+  const project = context?.id && context.id !== "." ? `@${context.id}` : "";
+  return path.join(SESSIONS_DIR, sid, `${agent}-grant${project}`);
 }
 export function grantAgent(agent, sid, context = null) {
   const grant = agentGrantFile(agent, sid, context);
@@ -352,9 +408,19 @@ export function deepMerge(a, b) {
 
 // ------------------------------------------------------------ kill switch ---
 
+// A session opened above a repo (CLAUDE_PROJECT_DIR is not a git root) works
+// only through a registered workspace manifest (ARCH-STATE-01): without one
+// there is no project to anchor state to, so craftsman stays off.
+const unanchored = new Map();
+export function rootUnanchored(root = PROJECT_ROOT) {
+  const key = path.resolve(root);
+  if (!unanchored.has(key)) unanchored.set(key, !isGitRoot(key) && !fs.existsSync(workspaceManifestPath()));
+  return unanchored.get(key);
+}
 export function enabled(cfg, context = null) {
   const env = (process.env.CRAFTSMAN || "").toLowerCase();
   if (env === "off" || env === "0" || env === "false") return false;
+  if (ROOT_SOURCE === "project-dir" && rootUnanchored()) return false;
   if (fs.existsSync(context?.offFlag || OFF_FLAG)) return false;
   return cfg.enabled !== false;
 }
