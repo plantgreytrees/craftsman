@@ -363,3 +363,123 @@ test("repo-exec: land:pr refuses before any push without a remote, host or CLI",
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
+
+// ARCH-LAND-06: the four landing failures come back as a park with a decision
+// for /auto's Phase C — never a throw, never a half-landed unit.
+function assertPark(result, reason) {
+  assert.equal(result.parked, true, JSON.stringify(result));
+  assert.equal(result.reason, reason);
+  assert.equal(result.merged, false);
+  assert.equal(result.cleaned, false, "the worktree is kept for the answer");
+  assert.ok(result.decision.question.trim(), "a question");
+  assert.ok(result.decision.options.length >= 2, "real options");
+  assert.ok(result.decision.options.includes(result.decision.recommended), "recommended is one of the options");
+  assert.ok(fs.existsSync(result.worktree_path));
+}
+
+test("repo-exec: a merge conflict parks the unit with a decision and leaves base unmerged", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const prepared = prepare(context, { unit: "clash", slug: "clash" }, info);
+      fs.writeFileSync(path.join(prepared.worktree_path, "README.md"), "unit side\n");
+      git(prepared.worktree_path, ["commit", "-q", "-am", "feat: unit side"]);
+      fs.writeFileSync(path.join(context.root, "README.md"), "base side\n");
+      git(context.root, ["commit", "-q", "-am", "chore: base side"]);
+      const baseBefore = git(context.root, ["rev-parse", info.base_branch]);
+
+      const result = merge(context, { ...prepared, unit: "clash", slug: "clash" }, info);
+
+      assertPark(result, "conflict");
+      assert.match(result.decision.question, /conflicts/);
+      assert.match(result.error, /CONFLICT/);
+      assert.equal(git(context.root, ["rev-parse", info.base_branch]), baseBefore, "nothing landed");
+      assert.notEqual(spawnSync("git", ["-C", context.root, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).status, 0, "the merge was aborted");
+      assert.equal(git(context.root, ["status", "--porcelain", "--untracked-files=no"]), "", "no half-merged files left");
+      const locks = path.join(info.common_git_dir, ".craftsman", "merge-locks");
+      assert.equal(fs.existsSync(path.join(locks, `${info.base_branch}.lock`)), false, "the merge lock is released");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: a rejected push parks the unit with a decision (direct and pr)", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { origin, base } = addOrigin(data.workspace, context.root);
+      const hook = path.join(origin, "hooks", "pre-receive");
+      fs.writeFileSync(hook, "#!/bin/sh\necho 'protected: pushes refused' >&2\nexit 1\n");
+      fs.chmodSync(hook, 0o755);
+      const info = inspectRepo(context, { base_branch: base });
+      const originBefore = git(origin, ["rev-parse", base]);
+
+      const direct = commitUnit(context, info, "push-direct");
+      const result = merge(context, { ...direct, unit: "push-direct", slug: "push-direct" }, info);
+      assertPark(result, "rejected-push");
+      assert.equal(result.land, "direct");
+      assert.match(result.error, /protected: pushes refused/);
+      assert.match(result.decision.question, /rejected the push/);
+      assert.equal(git(origin, ["rev-parse", base]), originBefore, "origin is untouched");
+
+      usePrLanding(context.root);
+      const viaPr = commitUnit(context, info, "push-pr");
+      const { runner, calls } = fakeGh();
+      const parked = merge(context, viaPr, info, { runner });
+      assertPark(parked, "rejected-push");
+      assert.equal(parked.land, "pr");
+      assert.equal(parked.pushed, false);
+      assert.ok(!calls.some((line) => line.startsWith("gh pr create")), "no PR is opened for an unpushed branch");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: an ff-only failure parks the unit with a decision", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { origin, base } = addOrigin(data.workspace, context.root);
+      // origin's base moves on from another clone while local base diverges.
+      const other = path.join(data.workspace, "other");
+      git(data.workspace, ["clone", "-q", origin, other]);
+      git(other, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "remote work"]);
+      git(other, ["push", "-q", "origin", base]);
+      git(context.root, ["commit", "-q", "--allow-empty", "-m", "local work"]);
+      const info = inspectRepo(context, { base_branch: base });
+      const prepared = commitUnit(context, info, "diverged");
+
+      const result = merge(context, { ...prepared, unit: "diverged", slug: "diverged" }, info);
+
+      assertPark(result, "ff-only");
+      assert.match(result.decision.question, /cannot fast-forward/);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: a refused pr auto-merge parks the unit with a decision and keeps the PR", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { base } = addOrigin(data.workspace, context.root);
+      usePrLanding(context.root);
+      const info = inspectRepo(context, { base_branch: base });
+      const prepared = commitUnit(context, info, "no-auto");
+      const { runner: ok } = fakeGh();
+      const runner = (cli, args) => (args[0] === "pr" && args[1] === "merge"
+        ? { status: 1, stdout: "", stderr: "auto-merge is not allowed for this repository" }
+        : ok(cli, args));
+
+      const result = merge(context, prepared, info, { runner });
+
+      assertPark(result, "auto-merge");
+      assert.equal(result.pushed, true);
+      assert.equal(result.pr.url, "https://github.com/o/r/pull/12");
+      assert.match(result.auto_merge_error, /auto-merge is not allowed/);
+      assert.match(result.decision.question, /pull\/12/);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});

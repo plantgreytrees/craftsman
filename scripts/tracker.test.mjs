@@ -182,3 +182,83 @@ test("tracker: a linked worktree writes the ledger and TRACKER.md in the main ch
   // The main checkout sees the same row the worktree wrote.
   assert.equal(currentState({ id: ".", root: main, stateDir: path.join(main, ".craftsman") })[0].status, "PENDING");
 });
+
+// ARCH-TRACKER-03/04, ARCH-ENGINE-07: an autonomous park carries the question
+// Phase C asks; an autonomous run never cancels.
+const DECISION = { question: "Which store?", options: ["sqlite", "postgres"], recommended: "sqlite" };
+function parkable(selected, unit = "unit-1") {
+  transition({ plan: "docs/plans/example.md", unit, status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/example.md", unit, status: "IN_PROGRESS", evidence: "claimed" }, selected);
+}
+
+test("tracker: an autonomous PARKED without a valid decision is refused; with one it persists in the ledger", () => {
+  const selected = context();
+  parkable(selected);
+  const park = (extra) => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "open decision", autonomous: true, ...extra }, selected);
+  assert.throws(() => park({}), /PARKED refused: an autonomous park needs decision/);
+  for (const bad of [
+    "sqlite?", { options: ["a", "b"] }, { question: "q", options: ["only one"] },
+    { question: "q", options: ["a", ""] }, { question: "q", options: ["a", "b"], recommended: 3 },
+  ]) assert.throws(() => park({ decision: bad }), /decision/, JSON.stringify(bad));
+  assert.equal(status(selected, "unit-1"), "IN_PROGRESS", "refused parks write nothing");
+
+  const event = park({ decision: { ...DECISION, question: "  Which store?  " } });
+  assert.deepEqual(event.decision, DECISION, "validated and trimmed");
+  assert.equal(event.autonomous, true);
+  const [row] = currentState(selected);
+  assert.equal(row.status, "PARKED");
+  assert.deepEqual(row.decision, DECISION);
+  const lines = fs.readFileSync(ledgerPath(selected), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(lines.at(-1).decision, DECISION, "the decision is in the ledger itself");
+
+  // Unparked, the row no longer carries the stale question.
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "answered: sqlite" }, selected);
+  assert.equal(currentState(selected)[0].decision, null);
+});
+
+test("tracker: a decision is only for PARKED, and a manual park still needs none", () => {
+  const selected = context();
+  parkable(selected);
+  assert.throws(() => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "BLOCKED", evidence: "x", decision: DECISION }, selected), /only recorded on PARKED/);
+  assert.throws(() => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "BLOCKED", evidence: "x", autonomous: "yes" }, selected), /autonomous must be a boolean/);
+  const event = transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "user asked to pause" }, selected);
+  assert.equal(event.decision, null);
+  assert.equal(event.autonomous, false);
+});
+
+test("tracker: an autonomous CANCELLED is refused; a manual one is not", () => {
+  const selected = context();
+  parkable(selected, "unit-1");
+  parkable(selected, "unit-2");
+  assert.throws(() => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "CANCELLED", evidence: "dropped", autonomous: true }, selected), /CANCELLED refused/);
+  assert.equal(status(selected, "unit-1"), "IN_PROGRESS");
+  assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-2", status: "CANCELLED", evidence: "user dropped it" }, selected).status, "CANCELLED");
+});
+
+test("tracker: events gain decision/autonomous without losing a field, and renderBlock output is unchanged", () => {
+  const selected = context();
+  parkable(selected);
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "open decision", autonomous: true, decision: DECISION }, selected);
+  const last = JSON.parse(fs.readFileSync(ledgerPath(selected), "utf8").trim().split("\n").at(-1));
+  for (const field of ["key", "project", "plan", "unit", "scope_id", "goal", "module", "status", "evidence", "session_id", "updated_at", "decision", "autonomous"]) {
+    assert.ok(field in last, `event keeps ${field}`);
+  }
+  const rows = [
+    { key: ".::docs/plans/example.md::unit-1", project: ".", plan: "docs/plans/example.md", unit: "unit-1", scope_id: "S1", module: "core", status: "PARKED", evidence: "open decision", updated_at: "2026-10-09T10:00:00.000Z", decision: DECISION, autonomous: true },
+    { key: ".::docs/plans/example.md::unit-2", project: ".", plan: "docs/plans/example.md", unit: "unit-2", scope_id: null, module: null, status: "PENDING", evidence: null, updated_at: "2026-10-09T11:00:00.000Z", decision: null, autonomous: false },
+  ];
+  // Snapshot of the view as it rendered before these fields existed.
+  assert.equal(renderBlock(rows), [
+    "<!-- craftsman:ledger:begin -->",
+    "<!-- Generated from the tracker ledger (.craftsman/tracker/events.jsonl) after every transition. Do not edit by hand: change a row with scripts/tracker.mjs. -->",
+    "",
+    "| plan | unit | module | status | evidence | updated |",
+    "|---|---|---|---|---|---|",
+    "| [example](./example.md) | unit-1 (S1) | core | PARKED | open decision | 2026-10-09 |",
+    "| [example](./example.md) | unit-2 | — | PENDING | — | 2026-10-09 |",
+    "",
+    "<!-- craftsman:ledger:end -->",
+  ].join("\n"));
+  const { decision, autonomous, ...legacy } = rows[0];
+  assert.equal(renderBlock([legacy, rows[1]]), renderBlock(rows), "the new fields never reach the TRACKER.md view");
+});

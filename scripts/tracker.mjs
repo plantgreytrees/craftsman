@@ -7,6 +7,7 @@ import {
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
   mainCheckoutRoot,
 } from "./lib/core.mjs";
+import { syncRunManifest } from "./run-manifest.mjs";
 
 export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
 const TRANSITIONS = {
@@ -40,6 +41,40 @@ function validateTransition(from, to, evidence) {
   if (["MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"].includes(to) && (!evidence || !String(evidence).trim())) {
     throw new Error(`${to} requires evidence`);
   }
+}
+
+// A PARKED row's open question for /auto's Phase C (ARCH-TRACKER-03,
+// ARCH-ENGINE-07): what to ask, the real options, and optionally the one the
+// runner would pick. Returns a clean copy; anything malformed is refused.
+export function validateDecision(decision) {
+  const text = (value) => typeof value === "string" && value.trim() !== "";
+  if (!decision || typeof decision !== "object" || Array.isArray(decision)) throw new Error("decision must be an object {question, options[], recommended?}");
+  if (!text(decision.question)) throw new Error("decision needs a question");
+  if (!Array.isArray(decision.options) || decision.options.length < 2 || !decision.options.every(text)) {
+    throw new Error("decision needs at least two non-empty options");
+  }
+  if (decision.recommended !== undefined && !text(decision.recommended)) throw new Error("decision.recommended must be a non-empty string");
+  return {
+    question: decision.question.trim(),
+    options: decision.options.map((option) => option.trim()),
+    ...(decision.recommended !== undefined ? { recommended: decision.recommended.trim() } : {}),
+  };
+}
+
+// Input-only rules for the new fields; replaying old events never runs them.
+// An autonomous run parks only with a decision and never cancels a unit
+// (ARCH-TRACKER-03/04); a decision belongs to a PARKED row alone.
+function validateParkInput(input, status) {
+  if (input.autonomous !== undefined && typeof input.autonomous !== "boolean") throw new Error("autonomous must be a boolean");
+  if (input.autonomous && status === "CANCELLED") throw new Error("CANCELLED refused: an autonomous run never cancels a unit; PARK it with a decision instead");
+  if (input.decision !== undefined && input.decision !== null) {
+    if (status !== "PARKED") throw new Error(`decision is only recorded on PARKED, not ${status}`);
+    return validateDecision(input.decision);
+  }
+  if (input.autonomous && status === "PARKED") {
+    throw new Error("PARKED refused: an autonomous park needs decision {question, options[], recommended?} for Phase C");
+  }
+  return null;
 }
 
 // A unit is not done while its own acceptance criteria are unticked. This is
@@ -188,7 +223,17 @@ export function transition(input, context = projectContext(input.project || ".")
   }
   delete event.previous_status;
   syncQuietly(context);
+  manifestQuietly(context, [event.plan]);
   return event;
+}
+
+// The derived .craftsman/runs/<slug>.json (ARCH-TRACKER-01) — bookkeeping,
+// so like the TRACKER.md view it never fails the ledger write.
+function manifestQuietly(context, plans) {
+  try {
+    const rows = currentState(context);
+    for (const plan of new Set(plans)) syncRunManifest(context, plan, rows);
+  } catch { /* the next transition regenerates it */ }
 }
 
 function writeTransition(input, context) {
@@ -200,6 +245,7 @@ function writeTransition(input, context) {
     const previous = state.find((row) => row.key === key);
     const status = input.status || (previous ? "IN_PROGRESS" : "PENDING");
     validateTransition(previous?.status, status, input.evidence);
+    const decision = validateParkInput(input, status);
     if (previous?.status !== status) assertUnitAcceptance({ ...input, scope_id: input.scope_id || previous?.scope_id }, status, context);
     const event = {
       key,
@@ -213,6 +259,10 @@ function writeTransition(input, context) {
       evidence: input.evidence || previous?.evidence || null,
       session_id: sidOf(input),
       updated_at: new Date().toISOString(),
+      // Added fields (ARCH-TRACKER-02): null on every non-PARKED event so a
+      // row that moves on never keeps a stale question.
+      decision,
+      autonomous: input.autonomous === true,
     };
     fs.appendFileSync(file, JSON.stringify(event) + "\n", "utf8");
     logEvent({ ev: "tracker_transition", key, from: previous?.status || null, to: status, unit: input.unit }, context);
@@ -262,6 +312,7 @@ export function reconcileAcceptance(context = projectContext("."), input = {}) {
   if (completed.length) {
     logEvent({ ev: "tracker_auto_complete", units: completed.map((c) => c.unit) }, context);
     syncQuietly(context);
+    manifestQuietly(context, completed.map((c) => c.plan));
   }
   return { completed, ready, plan_wide_open: planWideOpen, all_met: criteria.every((c) => c.done) };
 }

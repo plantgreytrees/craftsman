@@ -27,7 +27,7 @@ Run whichever stages have not run yet, in order, each to completion: `/idea <req
 
 ## Phase C — Ask again
 
-When the goal ends, read the tracker (`tracker.mjs` `status`) for the slug and gather, in one consolidated `AskUserQuestion` round: each PARKED row's decision, each `/scrutinise` finding that needs a judgement call, and the rows still open. Apply the answers (plan amendment, unpark, re-scope) before any next pass. Never default an open decision here either.
+When the goal ends, build the round from the ledger, not from memory: `tracker.mjs` `status` for the slug (its derived view is `.craftsman/runs/<slug>.json`, ARCH-TRACKER-01). Every PARKED row of an autonomous run carries `decision {question, options[], recommended?}` (ARCH-TRACKER-03) — a unit's open question or a landing park (conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06). Gather, in one consolidated `AskUserQuestion` round: each PARKED row's decision, asked with its own question and options and its `recommended` marked; each `/scrutinise` finding that needs a judgement call; and the rows still open. A PARKED row without a decision → ask what it needs; never guess. Apply the answers (plan amendment, unpark through `tracker.mjs` with the answer as evidence, re-scope) before any next pass. Never default an open decision here either.
 
 ## Finish
 

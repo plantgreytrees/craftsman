@@ -33,6 +33,21 @@ test("auto.md: Phase A asks every open decision up front and never defaults one 
   assert.match(section(auto, "## Phase C — Ask again"), /one consolidated `AskUserQuestion` round[\s\S]*PARKED row's decision/);
 });
 
+test("auto.md: Phase C builds its round from ledger decisions; the runner parks through tracker.mjs with one (ARCH-TRACKER-03, LAND-06)", () => {
+  const again = section(auto, "## Phase C — Ask again");
+  assert.match(again, /build the round from the ledger, not from memory: `tracker\.mjs` `status`/);
+  assert.match(again, /\.craftsman\/runs\/<slug>\.json/);
+  assert.match(again, /decision \{question, options\[\], recommended\?\}/);
+  assert.match(again, /conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06/);
+  assert.match(again, /asked with its own question and options and its `recommended` marked/);
+  assert.match(again, /without a decision → ask what it needs; never guess/);
+  const runner = read("agents/unit-runner.md");
+  const park = section(runner, "## park");
+  assert.match(park, /`S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked\[0\]>`/);
+  assert.match(park, /Never `CANCELLED`/);
+  assert.match(section(runner, "## land"), /`\{parked:true, decision\}`[^\n]*→ return `PARKED` with `parked:\[decision\]`/);
+});
+
 test("auto.md: Phase B sizes a fresh turn cap from instruction.md's bands and falls back to the paste (AUTO-04/05/07)", () => {
   const run = section(auto, "## Phase B — Run");
   assert.match(run, /commands\/instruction\.md/);

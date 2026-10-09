@@ -225,21 +225,34 @@ function merge(context, input, info, deps = {}) {
   const lock = acquireLock(info, input);
   const originalBranch = run(context.root, ["branch", "--show-current"]);
   let mergeStarted = false;
+  let step = null; // the landing step that PARKs instead of throwing (ARCH-LAND-06)
   try {
     heartbeat(lock);
     run(context.root, ["checkout", info.base_branch]);
-    if (info.has_remote && input.pull !== false) { heartbeat(lock); run(context.root, ["pull", "--ff-only", "origin", info.base_branch]); }
+    if (info.has_remote && input.pull !== false) {
+      heartbeat(lock);
+      step = "ff-only";
+      run(context.root, ["pull", "--ff-only", "origin", info.base_branch]);
+    }
     heartbeat(lock);
     mergeStarted = true;
+    step = "conflict";
     run(context.root, ["merge", "--no-ff", branch]);
+    step = null;
     heartbeat(lock);
     run(context.root, ["merge-base", "--is-ancestor", branch, info.base_branch]);
-    if (info.has_remote && input.push !== false) { heartbeat(lock); run(context.root, ["push", "origin", info.base_branch]); }
+    if (info.has_remote && input.push !== false) {
+      heartbeat(lock);
+      step = "rejected-push";
+      run(context.root, ["push", "origin", info.base_branch]);
+      step = null;
+    }
   } catch (error) {
-    if (mergeStarted) {
+    if (mergeStarted && step !== "rejected-push") {
       try { run(context.root, ["merge", "--abort"], { allowFailure: true }); } catch {}
     }
-    throw error;
+    if (!step) throw error;
+    return landingPark(step, { ...info, branch, land: "direct", merged: false, worktree_path: worktree }, error);
   } finally {
     if (originalBranch && originalBranch !== info.base_branch) {
       try { run(context.root, ["checkout", originalBranch], { allowFailure: true }); } catch {}
@@ -247,6 +260,41 @@ function merge(context, input, info, deps = {}) {
     releaseLock(lock);
   }
   return cleanupAfterLanding(context, input, info, { ...info, branch, land: "direct", merged: true });
+}
+
+// The four landing failures that PARK a unit instead of failing the run
+// (ARCH-LAND-06) come back as {parked:true, decision} for /auto's Phase C,
+// worktree and branch kept so the answer can be acted on. The caller records
+// it with tracker.mjs PARKED + this decision.
+const PARK_DECISIONS = {
+  "conflict": (r) => ({
+    question: `Merging ${r.branch} into ${r.base_branch} conflicts (the merge was aborted; nothing landed). How should it be resolved?`,
+    options: [`Resolve it in the unit worktree (merge ${r.base_branch} in) and land again`, "Re-plan the unit on the current base", "Drop the unit"],
+    recommended: `Resolve it in the unit worktree (merge ${r.base_branch} in) and land again`,
+  }),
+  "ff-only": (r) => ({
+    question: `Local ${r.base_branch} cannot fast-forward to origin/${r.base_branch} (they diverged), so ${r.branch} was not merged. How should base be reconciled?`,
+    options: [`Reconcile local ${r.base_branch} with origin by hand, then land again`, `Land ${r.branch} through a pull request instead`],
+    recommended: `Reconcile local ${r.base_branch} with origin by hand, then land again`,
+  }),
+  "rejected-push": (r) => ({
+    question: r.land === "pr"
+      ? `origin rejected the push of ${r.branch}. How should it land?`
+      : `origin rejected the push of ${r.base_branch} after ${r.branch} was merged locally (local ${r.base_branch} holds the unpushed merge). How should it land?`,
+    options: ["Fix the remote's refusal (permissions, hooks, protection) and push again", "Land through a pull request instead (repoExec.land: \"pr\")", "Leave it unpushed for the user"],
+    recommended: "Land through a pull request instead (repoExec.land: \"pr\")",
+  }),
+  "auto-merge": (r) => ({
+    question: `${r.pr?.url || "The pull request"} for ${r.branch} is open, but the host refused auto-merge. How should it be merged?`,
+    options: ["Merge the pull request by hand on the host", "Enable auto-merge for the repository and retry", "Leave the pull request open for review"],
+    recommended: "Merge the pull request by hand on the host",
+  }),
+};
+
+function landingPark(reason, result, error) {
+  const output = `${error?.stderr || ""}${error?.stdout || ""}`.trim();
+  const detail = (output || String(error?.message || "")).trim().split("\n").slice(-10).join("\n");
+  return { ...result, parked: true, reason, error: detail, cleaned: false, decision: PARK_DECISIONS[reason](result) };
 }
 
 // The "pr" land mode. It never touches the primary checkout or the base
@@ -267,7 +315,10 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner }
   if (input.fetch !== false) run(context.root, ["fetch", "origin", info.base_branch]);
   const subjects = run(worktree, ["log", "--reverse", "--format=%s", `origin/${info.base_branch}..${branch}`]);
   if (!subjects) throw new Error(`${branch} has no commits beyond origin/${info.base_branch}`);
-  run(worktree, ["push", "-u", "origin", branch]);
+  try { run(worktree, ["push", "-u", "origin", branch]); }
+  catch (error) {
+    return landingPark("rejected-push", { ...info, branch, land: "pr", merged: false, pushed: false, worktree_path: worktree }, error);
+  }
   const lines = subjects.split("\n");
   const pr = openPullRequest({
     ...options,
@@ -275,6 +326,11 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner }
     body: `Landed by craftsman (repoExec.land: "pr").\n\n${lines.map((line) => `- ${line}`).join("\n")}`,
   }, runner);
   const { auto_merge, auto_merge_error, ...request } = pr;
+  if (auto_merge_error) {
+    return landingPark("auto-merge", {
+      ...info, branch, land: "pr", merged: false, pushed: true, pr: request, auto_merge, auto_merge_error, worktree_path: worktree,
+    }, new Error(auto_merge_error));
+  }
   return cleanupAfterLanding(context, input, info, {
     ...info, branch, land: "pr", merged: false, pushed: true, pr: request, auto_merge,
     ...(auto_merge_error ? { auto_merge_error } : {}),
