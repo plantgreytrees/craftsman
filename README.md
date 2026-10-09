@@ -168,7 +168,12 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   tracker. Each transition re-renders the file's generated ledger block, and
   the `tracker-sync` hook does the same at SessionStart, after edits and at
   Stop. `pre-guard` blocks writes to a worktree's copy and hand edits of the
-  block.
+  block. When a unit reaches MERGED or COMPLETE, the ledger also keeps its own
+  `[unit:<id>]` acceptance lines, so they outlive the worktree's gitignored
+  `acceptance.md`. Once every row of a plan is COMPLETE or CANCELLED,
+  `{"action":"archive","plan":"docs/plans/<slug>.md"}` retires it: the rows
+  leave the ledger and `TRACKER.md`, and one line per unit, with its criteria,
+  goes to the committed [tracker archive](docs/plans/TRACKER-archive.md).
 - **Fast** — session start never blocks on a build (the baseline runs in the
   background); tool detection is scoped to your detected stack and cached;
   lint results are content-hash cached; the Stop-gate's test-regression check
