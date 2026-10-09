@@ -288,6 +288,10 @@ unit.
      remaining tracker rows.
    - Re-enter Phase B until every tracker row is COMPLETE. Always end by
      listing what remains and prompting the user to continue.
+   - **Git authority:** `/auto` lands each finished unit and the run via
+     `/craftsman:merge` without asking (see Open questions). Merge never
+     needs a Phase C approval; only real conflicts and rejected pushes
+     escalate.
 5. **Mod with fallback.**
    - The mod launches the `/goal` itself, removing the paste.
    - It shows a band with plan, unit, tracker % and context %.
@@ -339,10 +343,15 @@ unit.
     completion; never leave a decision open or silently assumed.
   - Complete all tracker items in one go.
   - When work remains, always prompt to continue.
-- **Still open:** may `/auto` merge to main unattended at the end, or must
-  the post-completion round approve the merge? The user's CLAUDE.md
-  authorises merging when asked; standing pre-approval for unattended runs
-  is unconfirmed.
+- **May `/auto` merge and manage git unattended?** → **Yes, full
+  permission.** *(answered 2026-10-09)*
+  - Invoking `/auto` is standing pre-approval to commit, branch, rebase or
+    merge `origin/main` in, push, land on main, and clean up worktrees and
+    local and remote branches.
+  - It needs no approval round.
+  - This stays bound by the `/craftsman:merge` and CLAUDE.md safety rules:
+    no `--force` push or worktree removal, and stop only on a real conflict
+    or a rejected push.
 
 ## Next step
 `/architect autonomous-e2e-loop --deep` (cross-cutting: it touches execution
