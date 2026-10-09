@@ -8,7 +8,7 @@ export const meta = {
   ],
 }
 
-// Orchestration only (ARCH-ENGINE-03): no fs, shell, import or clock here.
+// Orchestration only (ARCH-ENGINE-03): no filesystem, shell, module loading or clock here.
 // Every repo action runs inside an agent through craftsman's own scripts.
 // args: { sessionId, pluginRoot, projectRoot, protocolText?, project, plan, units: [{ unit, task, criteria, scope, arch }] }
 

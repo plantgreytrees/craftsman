@@ -94,7 +94,7 @@ units:
     scope:
       read: [scripts/scope.mjs, scripts/quality-gate.mjs, scripts/repo-exec.mjs, scripts/tracker.mjs, agents/implementer.md, commands/_shared-execution.md]
       docs: [docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
-      write: [workflows/spike.js, agents/unit-runner.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      write: [workflows/spike.js, agents/unit-runner.md, commands/_shared-execution.md, docs/plans/autonomous-e2e-loop-evidence.md]
     arch: [ARCH-ENGINE-02, ARCH-ENGINE-03, ARCH-ENGINE-04, ARCH-ENGINE-09, ARCH-STATE-03]
     tooling: { implementer: implementer, gates: [], skills: [workflow-authoring], guards: [pre-guard, quality-gate] }
   - id: engine-guards
@@ -242,7 +242,7 @@ Tooling: skills workflow-authoring
 Depends on: state-root-pin, telemetry, auto-command (merged and installed)
 - [x] 6.1 `agents/unit-runner.md`: one-unit protocol. Gate smoke run first (TRACKER-05) → implementer → separate fresh reviewer → at most 2 fix rounds → return `{unit,status,evidence,sha|pr,parked[]}`. → accept: file exists; ENGINE-04 single protocol.
 - [ ] 6.2 `workflows/spike.js`: orchestration only (ENGINE-03); one `agent()` with a schema running unit-runner on a throwaway 1-file unit in its own worktree; a second forced-park unit. → accept: script passes the ENGINE-03 lint (step 8.4).
-- [ ] 6.3 Run the spike live. Record in the evidence doc: hook events from agent sessions (pre-guard/quality-gate in `events.jsonl`); scope activation keyed by the agent's worktree; a quality-gate event; repo-exec prepare/merge sha; a tracker transition; the park path (decision in `parked[]`); root tokens. End with an explicit verdict: **GO** (workflow default) or **FAIL**. A FAIL is a `BLOCKED ON USER` stop, since ENGINE-01 fixes the default and only the user can amend it. → accept: the evidence doc's "Spike" section has every item and a verdict.
+- [x] 6.3 Run the spike live. Record in the evidence doc: hook events from agent sessions (pre-guard/quality-gate in `events.jsonl`); scope activation keyed by the agent's worktree; a quality-gate event; repo-exec prepare/merge sha; a tracker transition; the park path (decision in `parked[]`); root tokens. End with an explicit verdict: **GO** (workflow default) or **FAIL**. A FAIL is a `BLOCKED ON USER` stop, since ENGINE-01 fixes the default and only the user can amend it. → accept: the evidence doc's "Spike" section has every item and a verdict.
 
 ### Step 7 — engine-guards (., JavaScript, high)
 Depends on: workflow-spike

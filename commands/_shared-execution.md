@@ -19,7 +19,7 @@ A lock guards **the merge only**, never the work. Concurrent sessions may target
 
 ## Phase X — Per-unit execution loop
 
-For each unit, dependency order (shared/library → consumers → UI/presentation last):
+For each unit, dependency order (shared/library → consumers → UI/presentation last). Per-agent form: `unit-runner` (ARCH-ENGINE-04):
 
 1. **Claim** — atomically claim plan/unit via `scripts/claim.mjs` (real session id, plan, unit); an existing claim is BLOCKED/duplicate, never overwrite. Records the same transition in `scripts/tracker.mjs`'s structured ledger — the human-readable row is a concise projection. Release only after close-out or explicit PARKED.
 2. **Worktree + branch** — `repo-exec.mjs action:"prepare"` (project, unit, slug, session id, optional worktree path). Discovers the real base branch, fetches its own remote, creates/reattaches the worktree. ALL edits/gates/review/conflict-resolution run there; base branch untouched until step 9. **No worktree → no edits.**

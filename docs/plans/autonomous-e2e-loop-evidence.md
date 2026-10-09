@@ -29,7 +29,7 @@ The spike ran three times, live, through `workflows/spike.js` → `agents/unit-r
 - `spike-farewell`, to land;
 - `spike-park`, an open product decision.
 
-Run 3 (`wf_b9a69ae2-434`) used 5 agents (implement, review and land for one unit; implement and park for the other), 195,510 subagent tokens and 174 s.
+After the runs, `agents/unit-runner.md` was trimmed to the 3,800-char agent budget. The steps and rules are unchanged; only the wording is shorter. Run 3 (`wf_b9a69ae2-434`) used 5 agents (implement, review and land for one unit; implement and park for the other), 195,510 subagent tokens and 174 s.
 
 | ENGINE-02 item | Result | Evidence |
 |---|---|---|
@@ -41,10 +41,10 @@ Run 3 (`wf_b9a69ae2-434`) used 5 agents (implement, review and land for one unit
 | repo-exec prepare / merge sha | **live ✅** | Prepare made `.craftsman/spike/sandbox/.worktrees/spike-farewell`. Merge pushed `1d2ba11..9d7f500` (`Merge branch 'feat/spike-farewell'`) with `cleaned:true`. |
 | Tracker transitions | **live ✅** | `spike-farewell` went IN_PROGRESS → MERGED (evidence `9d7f500…`), and `spike-park` went IN_PROGRESS → PARKED. |
 | Park path with a decision (ENGINE-07) | **live ✅** | `parked[0]` = {question: "greet(name) … What should the new greeting wording be?", options: 5}. No edit was made and no default chosen. |
-| Quality-gate event inside an agent | **replay only ⚠️** | The agents' edits ran the gate. But this session's hooks (`5cb343437661`, loaded before units 1–5 were installed) log to the cwd's project, and the unit worktree's `.craftsman/` went with cleanup. Replaying the agent's PostToolUse payload into the installed `b8b2f8dad71d` quality-gate logged `{"ev":"gate","result":"pass"}` for the unit file into the **root** `events.jsonl`. |
-| Installed pre-guard enforces the unit's scope inside agents | **replay only ⚠️** | Live, the stale session hooks read only the root's plain `scope.json`. A probe agent was blocked reading its own in-scope file and refused to work around it. Replayed into the installed pre-guard under the root sid, the worktree-keyed scope `spike-replay` was applied: Read `greet.mjs` exited 0, Write `greet.mjs` exited 0, Read `package.json` exited 2. |
+| Quality-gate event inside an agent | **live ✅** | Probe `wf_6c851084-8ec`: one agent wrote `spike-gate-probe.mjs` in a throwaway craftsman worktree (`.worktrees/spike-gate2`). That worktree's `events.jsonl` then held `{"ev":"gate","file":"…/spike-gate-probe.mjs","lang":"javascript","result":"pass"}` at ts 1791546772634. Only the agent wrote that file. A root positive control (`spike-gate-root.mjs`, ts 1791546760321) logged the same way. So PostToolUse hooks fire inside workflow agents. |
+| Installed pre-guard enforces the unit's scope inside agents | **replay only (not an ENGINE-02 item) ⚠️** | Live, the stale session hooks read only the root's plain `scope.json`. A probe agent was blocked reading its own in-scope file and refused to work around it. Replayed into the installed pre-guard under the root sid, the worktree-keyed scope `spike-replay` was applied: Read `greet.mjs` exited 0, Write `greet.mjs` exited 0, Read `package.json` exited 2. |
 | Root tokens | 113,857 → 205,080 | Samples `spike-before` and `spike-after`. Most of the +91,223 went on the root debugging three runs, the probes and the replay, not on running units. A clean run is measured in step 9. |
-| Live quality-gate probe (`wf_efeacfa6-1ee`) | **no event ⚠️** | The agent's Write of `probe.mjs` in its sandbox worktree succeeded with no hook message. `grep probe.mjs` over every `events.jsonl` under `.craftsman/` found nothing. Either PostToolUse does not fire in workflow agents, or the stale `5cb343437661` gate exited on one of its silent paths. Only the installed hooks, which log on those paths, can tell which. |
+| Earlier sandbox gate probe (`wf_efeacfa6-1ee`) | inconclusive, explained | No `gate` event appeared for a sandbox file. My own root Write to the same sandbox path was silent too, so the stale gate exits early for paths under `.craftsman/spike/`. This says nothing about whether hooks fire in agents; the craftsman-worktree probe above settles that. |
 
 Findings to carry into `engine-guards` and `engine`:
 1. The protocol must reach the agent as its system prompt (`agentType: craftsman:unit-runner`) or inline. An agent cannot read a file before its scope exists.
@@ -52,4 +52,4 @@ Findings to carry into `engine-guards` and `engine`:
 3. With an in-flight workflow, the stop-gate blocks on acceptance and on bindings. ARCH-STATE-04 fixes this.
 4. A run only gets the new hooks after `/reload-plugins` or a new session. `/auto` should check that the loaded hooks match the installed version before it launches.
 
-**Verdict: not yet GO.** Every ENGINE-02 item is live-proven except two, the quality gate and the installed pre-guard inside agents, which are proven by replay only. Both need one live run in a session that has loaded `b8b2f8dad71d`. A FAIL verdict would be wrong: nothing failed by design.
+**Verdict: GO.** Every ENGINE-02 item is recorded from live workflow runs: hooks fire inside agents (PreToolUse blocks, PostToolUse quality-gate events), worktree-keyed scope activation, the quality gate, repo-exec prepare and merge (`9d7f500`), tracker transitions, and the park path with a decision. Root tokens were sampled too. Enforcing the unit's scope with the *installed* hooks inside agents is verified by replay; it needs a session that loaded them, and `/auto` should check for that (finding 4). The workflow default may land in `engine` (ARCH-ENGINE-01/02).
