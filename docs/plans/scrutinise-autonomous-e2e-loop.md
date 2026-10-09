@@ -105,9 +105,9 @@ units:
 Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one isolated scrutineer): 0 Critical, 6 Warning, 9 Suggestion. ARCH-TRACKER-03 and ARCH-LAND-06 were judged violated in practice (W1).
 
 ## Step 1 — engine-close (., JavaScript, normal)
-- [ ] 1.1 `workflows/run.js` `close()`: a land result of `PARKED` runs the `park` role with its `parked` decision, as an implement park does (W1). → accept: `engine.test.mjs` case where land returns PARKED shows a `park` call carrying the decision and a PARKED result.
-- [ ] 1.2 Every other non-MERGED, non-PENDING terminal result (`BLOCKED` from implement, review or land, and `dead()`) runs a new `block` role: `S tracker` → `BLOCKED` with the evidence, commit work as `wip:`, `S repo-exec` cleanup, `S claim` release (W2). Add `## block` to `agents/unit-runner.md` (≤3,800 chars). → accept: `engine.test.mjs` cases for an implement BLOCKED and a dead land agent each show one `block` call; doc-size policy passes.
-- [ ] 1.3 Full suite exit 0.
+- [x] 1.1 `workflows/run.js` `close()`: a land result of `PARKED` runs the `park` role with its `parked` decision, as an implement park does (W1). → accept: `engine.test.mjs` case where land returns PARKED shows a `park` call carrying the decision and a PARKED result.
+- [x] 1.2 Every other non-MERGED, non-PENDING terminal result (`BLOCKED` from implement, review or land, and `dead()`) runs a new `block` role: `S tracker` → `BLOCKED` with the evidence, commit work as `wip:`, `S repo-exec` cleanup, `S claim` release (W2). Add `## block` to `agents/unit-runner.md` (≤3,800 chars). → accept: `engine.test.mjs` cases for an implement BLOCKED and a dead land agent each show one `block` call; doc-size policy passes.
+- [x] 1.3 Full suite exit 0.
 
 ## Step 2 — scope-release (., JavaScript, high)
 - [ ] 2.1 `scope.mjs` `release` unlinks that worktree's `scopeFile` and `requiredFile` along with the binding (W3). → accept: scope.test — after release, neither file exists.

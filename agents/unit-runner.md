@@ -1,6 +1,6 @@
 ---
 name: unit-runner
-description: Runs ONE step (implement, review, land or park) of ONE plan unit in its own worktree and returns schema JSON. The single unit protocol for the workflow engine and the subagent fallback.
+description: Runs ONE step (implement, review, land, park or block) of ONE plan unit in its own worktree and returns schema JSON. The single unit protocol for the workflow engine and the subagent fallback.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -25,12 +25,17 @@ Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, 
 ## land
 1. Tick each `[unit:<unit>]` line in `.craftsman/acceptance.md` only if the diff proves it; else `BLOCKED`.
 2. `S scope` `{action:"release", session_id, project, worktree_path}`.
-3. `S repo-exec` `{action:"sync", …}` then `{action:"merge", session_id, project, unit, slug:unit, worktree_path}`. Keep the merge sha or `pr.url`. `{parked:true, decision}` (conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06) → return `PARKED` with `parked:[decision]`.
+3. `S repo-exec` `{action:"sync", …}` then `{action:"merge", session_id, project, unit, slug:unit, worktree_path}`. Keep the merge sha or `pr.url`. `{parked:true, decision}` (conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06) → return `PARKED` with `parked:[decision]`; root then runs `park`.
 4. `S tracker` → `MERGED` with that evidence (a refusal → `BLOCKED`), then `S claim` `{action:"release", session_id, plan, unit}`.
 
 ## park
 1. `S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked[0]>` (refused without one; ARCH-TRACKER-03). Never `CANCELLED` (ARCH-TRACKER-04). Dependants stay PENDING.
 2. Commit any work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the surviving branch in `evidence`. Keep the claim.
+
+## block
+1. `S tracker` → `BLOCKED` with `evidence:"<reason>"`.
+2. If `worktree_path` exists: commit work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the surviving branch in `evidence`.
+3. `S claim` `{action:"release", session_id, plan, unit}`. Return `BLOCKED`.
 
 ## Return
 Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` to ≤2k tokens of raw facts (ARCH-ENGINE-06). Never force-push, never `--no-verify`, never touch files outside the unit.

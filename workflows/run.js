@@ -122,16 +122,32 @@ async function reviewLoop(done, u) {
 
 // ARCH-ENGINE-07: an open decision parks the unit with that decision; the
 // park agent records it in the tracker and keeps the branch.
+async function park(result, u) {
+  const parked = await run('park', u, 'Land',
+    `reason: ${result.evidence}\nworktree_path: ${result.worktree_path || ''}\nparked: ${JSON.stringify(result.parked)}`)
+  return { ...(parked || result), status: 'PARKED', parked: result.parked }
+}
+
+// Every other unfinished unit is recorded BLOCKED and its claim released,
+// so no row is left IN_PROGRESS behind a returned run.
+async function block(result, u) {
+  const blocked = await run('block', u, 'Land',
+    `reason: ${result.evidence}\nworktree_path: ${result.worktree_path || ''}`)
+  const recorded = blocked ? blocked.evidence : 'block agent returned nothing; tracker row not updated'
+  return { ...result, status: 'BLOCKED', evidence: `${result.evidence} | ${recorded}`, parked: [] }
+}
+
+// Landing parks (conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06)
+// go through park like any other, so Phase C sees their decision (ARCH-TRACKER-03).
 async function close(result, u) {
-  if (result.status === 'IMPLEMENTED') {
-    return (await run('land', u, 'Land', `worktree_path: ${result.worktree_path}`)) || dead(u, 'land')
+  let out = result
+  if (out.status === 'IMPLEMENTED') {
+    const landed = (await run('land', u, 'Land', `worktree_path: ${out.worktree_path}`)) || dead(u, 'land')
+    out = { ...landed, worktree_path: landed.worktree_path || out.worktree_path }
   }
-  if (result.status === 'PARKED') {
-    const parked = await run('park', u, 'Land',
-      `reason: ${result.evidence}\nworktree_path: ${result.worktree_path || ''}\nparked: ${JSON.stringify(result.parked)}`)
-    return { ...(parked || result), status: 'PARKED', parked: result.parked }
-  }
-  return result
+  if (out.status === 'MERGED') return out
+  if (out.status === 'PARKED') return park(out, u)
+  return block(out, u)
 }
 
 function summary(result) {
@@ -161,7 +177,7 @@ for (const u of planOrder(args.units)) {
   }
   log(`unit ${u.unit}`)
   const [result] = await pipeline([u], (item) => run('implement', item, 'Implement'), reviewLoop, close)
-  const done = summary(result || dead(u, 'pipeline'))
+  const done = summary(result || await block(dead(u, 'pipeline'), u))
   if (done.status === 'MERGED') landed.add(u.unit)
   results.push(done)
 }

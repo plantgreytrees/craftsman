@@ -106,3 +106,40 @@ test("engine: a dead agent blocks its unit; root keeps only bounded per-unit sum
   for (const r of results) assert.ok(JSON.stringify(r).length <= 8000, "≤ ~2k tokens per unit (ARCH-ENGINE-06)");
   assert.equal(results[1].findings, undefined, "bulky agent output stays out of root");
 });
+
+test("engine: a landing park runs the park role with its decision, so the ledger gets it (ARCH-LAND-06, TRACKER-03)", async () => {
+  const decision = { question: "Merge conflict in a.js. How should it land?", options: ["Rebase and retry", "Leave the branch"] };
+  const { results, calls } = await runPlan([unit("a"), unit("b", ["a"])], (role, u) =>
+    role === "land" ? { unit: u, status: "PARKED", evidence: "conflict", parked: [decision] }
+      : role === "park" ? { unit: u, status: "PARKED", evidence: "tracker PARKED", parked: [] }
+      : happy(role, u));
+  assert.deepEqual(calls.filter((c) => c.unit === "a").map((c) => c.role), ["implement", "review", "land", "park"]);
+  const parkCall = calls.find((c) => c.role === "park");
+  assert.match(parkCall.prompt, /Merge conflict in a\.js/);
+  assert.match(parkCall.prompt, /worktree_path: \/w\/a/, "the implement worktree reaches park");
+  assert.equal(results[0].status, "PARKED");
+  assert.deepEqual(results[0].parked, [decision]);
+  assert.equal(results[1].status, "PENDING");
+});
+
+test("engine: a BLOCKED implement result runs the block role once; the unit is never left IN_PROGRESS", async () => {
+  const { results, calls } = await runPlan([unit("a"), unit("b", ["a"])], (role, u) =>
+    role === "implement" ? { unit: u, status: "BLOCKED", evidence: "suite fails", worktree_path: "/w/a", parked: [] }
+      : role === "block" ? { unit: u, status: "BLOCKED", evidence: "tracker BLOCKED, claim released", parked: [] }
+      : happy(role, u));
+  assert.deepEqual(calls.map((c) => c.role), ["implement", "block"]);
+  assert.match(calls[1].prompt, /reason: suite fails/);
+  assert.equal(results[0].status, "BLOCKED");
+  assert.match(results[0].evidence, /suite fails \| tracker BLOCKED/);
+  assert.equal(results[1].status, "PENDING");
+});
+
+test("engine: a dead land agent is blocked through the block role with the implement worktree", async () => {
+  const { results, calls } = await runPlan([unit("a")], (role, u) =>
+    role === "land" ? null
+      : role === "block" ? { unit: u, status: "BLOCKED", evidence: "tracker BLOCKED", parked: [] }
+      : happy(role, u));
+  assert.deepEqual(calls.map((c) => c.role), ["implement", "review", "land", "block"]);
+  assert.match(calls[3].prompt, /worktree_path: \/w\/a/);
+  assert.match(results[0].evidence, /land agent returned nothing/);
+});
