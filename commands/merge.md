@@ -101,8 +101,8 @@ Never use `--no-verify`, `--force` or `git worktree remove --force`.
   `bumps: "<submodule>"`, and `plan-graph.mjs` refuses a plan without one or
   whose bump does not depend on every submodule step.
 - **Only registered projects.** Touch only projects in `craftsman.workspace.json`
-  plus the submodules `git submodule status` reports on those roots — never
-  find repos by scanning directories (ARCH-LAND-04).
+  plus the submodules whose gitlinks their indexes record — never find repos by
+  scanning directories (ARCH-LAND-07).
 - **No force.** `pre-guard.mjs` blocks force pushes (flags, `+refspec` or
   `--mirror`), `reset --hard` and `worktree remove --force` while `/auto` is
   active (ARCH-LAND-05). It fails closed: a command over 16 KB, or one

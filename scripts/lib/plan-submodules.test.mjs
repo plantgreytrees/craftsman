@@ -26,7 +26,7 @@ test("submoduleParents: the nearest enclosing registered root is the parent; a s
   assert.deepEqual(Object.fromEntries(parents), { lib: "app", deep: "lib" });
 });
 
-test("submoduleParents: nesting without a gitlink is not a submodule (R13-W1, ARCH-LAND-04)", () => {
+test("submoduleParents: nesting without a gitlink is not a submodule (R13-W1, ARCH-LAND-07)", () => {
   assert.deepEqual(Object.fromEntries(submoduleParents(nested, () => false)), {});
   // A nested independent clone needs no bump.
   assert.equal(check([step("lib-change", [], "lib"), step("consumer", ["lib-change"], "app")], () => false).length, 2);

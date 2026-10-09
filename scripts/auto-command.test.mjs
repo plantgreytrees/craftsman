@@ -102,10 +102,10 @@ test("instruction.md: a composed sample goal measures ≤ 4000 characters", () =
   assert.ok(Buffer.byteLength(goal) <= 4000, `composed goal is ${Buffer.byteLength(goal)} bytes`);
 });
 
-test("merge.md: /auto's standing authority, per-repo plan-graph landing and submodule bump (ARCH-LAND-01..04)", () => {
+test("merge.md: /auto's standing authority, per-repo plan-graph landing and submodule bump (ARCH-LAND-01..03, 07)", () => {
   const under = section(merge, "## 5a. Under /auto");
   assert.match(under, /standing approval[\s\S]*across every registered workspace project/);
   assert.match(under, /own\s+`repo-exec\.mjs` `merge`[\s\S]*order `plan-graph\.mjs`/);
   assert.match(under, /submodule pointer bump is an explicit\s+dependent unit in the parent/);
-  assert.match(under, /`git submodule status`[\s\S]*never\s+find repos by scanning/);
+  assert.match(under, /submodules whose gitlinks their indexes record[\s\S]*never find repos by\s+scanning directories \(ARCH-LAND-07\)/);
 });

@@ -33,5 +33,5 @@ test("orderSteps: sub-repo unit, then the parent's pointer bump, then the consum
     step("lib-change", [], "lib"),
   ], { workspace, isGitlink: () => true });
   assert.deepEqual(orderSteps(steps).map(({ id, project }) => `${project}:${id}`), ["lib:lib-change", "app:bump-lib", "app:consumer"]);
-  assert.throws(() => validateSteps([step("x", [], "unregistered")], { workspace }), /unknown workspace project/, "only registered projects are touched (LAND-04)");
+  assert.throws(() => validateSteps([step("x", [], "unregistered")], { workspace }), /unknown workspace project/, "only registered projects are touched (LAND-07)");
 });

@@ -6,7 +6,7 @@ import path from "node:path";
 
 // True when the parent repo's index records a gitlink (mode 160000) at the
 // child's path: what `git submodule status` reports, read from a registered
-// root or the workspace root only (ARCH-LAND-04). A git failure throws, so an
+// root or the workspace root only (ARCH-LAND-07). A git failure throws, so an
 // unreadable index never silently drops the bump requirement.
 export function gitlinkAt(parentRoot, childRoot) {
   const rel = path.relative(parentRoot, childRoot).split(path.sep).join("/");

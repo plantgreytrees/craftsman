@@ -3,7 +3,7 @@ area: landing
 governs: ["scripts/repo-exec.mjs", "scripts/lib/land.mjs", "scripts/workspace-init.mjs", "scripts/plan-graph.mjs", "scripts/lib/plan-submodules.mjs", "commands/merge.md", "commands/workspace-init.md"]
 human: docs/architecture/landing.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: d7da89f424960b24ee235b043673a1e2a2a78849
+verified_at: 8dd9488dfea500934c30c0df39f3ca2b735bf21a
 updated: 2026-10-09
 ---
 # ARCH landing — enforced rules
@@ -11,6 +11,7 @@ updated: 2026-10-09
 - **ARCH-LAND-01** [decided] Invoking /auto is standing approval to commit, branch, merge base in, push, land and clean up worktrees and branches across every registered project — check: auto.md + merge.md — cite: commands/merge.md:89-94
 - **ARCH-LAND-02** [decided] Every repo lands through its own repo-exec merge (direct | pr) in plan-graph order — check: plan dry-run order — cite: scripts/repo-exec.mjs:186-259
 - **ARCH-LAND-03** [decided] A parent repo's submodule pointer bump MUST be an explicit dependent unit in the parent, after the submodule unit lands; repo-exec stays single-repo — check: plan dry-run contains the bump unit; plan-submodules.test.mjs cases — cite: scripts/lib/plan-submodules.mjs:1-89
-- **ARCH-LAND-04** [decided] Only registered workspace projects are touched; submodules are found only via git submodule status on registered roots, never by scanning — check: grep for directory walks — cite: scripts/lib/core.mjs:90-130
+- **ARCH-LAND-04** [superseded by ARCH-LAND-07] Only registered workspace projects are touched; submodules are found only via git submodule status on registered roots, never by scanning — check: grep for directory walks — cite: scripts/lib/core.mjs:90-130
+- **ARCH-LAND-07** [decided] Only registered workspace projects are touched; submodules are found only from the gitlinks (mode 160000, `git ls-files -s`) in the index of a registered root, plus a read-only check of the workspace root's index whose only effect is to refuse the plan; never by scanning directories — check: plan-submodules.test.mjs gitlink cases; plan-graph.test.mjs unknown-project case; grep for directory walks — cite: scripts/lib/plan-submodules.mjs:11-47
 - **ARCH-LAND-05** [decided] /auto MUST NOT use --force, -f on push, reset --hard or worktree remove --force; pre-guard blocks them while /auto is active — check: pre-guard.test.mjs — cite: scripts/pre-guard.mjs:178-194
 - **ARCH-LAND-06** [decided] Merge conflicts, ff-only failures, rejected pushes and pr auto-merge errors PARK the unit with a decision for Phase C; nothing else stops landing — check: repo-exec error paths — cite: scripts/repo-exec.mjs:222-251

@@ -3,7 +3,7 @@
 > and `/architect --update landing` should be run.
 
 # Landing architecture
-_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-09 at `8dd9488` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Running `/auto` gives it full authority to commit, branch, merge, push, land
@@ -36,7 +36,8 @@ flowchart LR
 | ARCH-LAND-01 | `/auto` has standing git authority | User decision | Approve each merge in Phase C |
 | ARCH-LAND-02 | Each repo lands its own way, in plan order | Reuses `repo-exec` unchanged | — |
 | ARCH-LAND-03 | An explicit pointer-bump unit, enforced by `plan-graph.mjs` | Reviewable, tracked, keeps repo-exec single-repo | An implicit bump in repo-exec (a hidden cross-repo write); protocol text alone |
-| ARCH-LAND-04 | Registered projects only | Craftsman's explicit-workspace rule | Scanning for repos |
+| ARCH-LAND-04 | Superseded by ARCH-LAND-07 | Named `git submodule status`; the code reads the same gitlinks with `ls-files -s` | — |
+| ARCH-LAND-07 | Registered projects only; submodules from index gitlinks, workspace root read only to refuse | Craftsman's explicit-workspace rule; `ls-files -s` reads the index gitlinks `submodule status` reports | Scanning for repos; `git submodule status` (needs `.gitmodules`) |
 | ARCH-LAND-05 | No force operations | The user's CLAUDE.md and safety | — |
 | ARCH-LAND-06 | Only listed failures park | User: stop only on real problems | — |
 
