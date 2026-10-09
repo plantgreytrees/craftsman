@@ -3,7 +3,7 @@
 > and `/architect --update auto` should be run.
 
 # Auto architecture
-_Last verified: 2026-10-09 at `655e17e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 `/craftsman:auto <request>` is the one command that takes work from an idea

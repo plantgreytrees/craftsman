@@ -3,7 +3,7 @@
 > and `/architect --update landing` should be run.
 
 # Landing architecture
-_Last verified: 2026-10-09 at `5fab154` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Running `/auto` gives it full authority to commit, branch, merge, push, land

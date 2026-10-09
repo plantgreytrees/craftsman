@@ -3,7 +3,7 @@
 > and `/architect --update tracker` should be run.
 
 # Tracker architecture
-_Last verified: 2026-10-09 at `655e17e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 The tracker already works much like Anthropic's "feature list". It is an

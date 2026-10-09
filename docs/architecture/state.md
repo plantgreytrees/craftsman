@@ -3,7 +3,7 @@
 > and `/architect --update state` should be run.
 
 # State architecture
-_Last verified: 2026-10-09 at `655e17e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Craftsman's guards keep their state under `.craftsman/sessions/<session-id>/`.
