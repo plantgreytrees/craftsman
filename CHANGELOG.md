@@ -28,7 +28,10 @@ All notable changes to craftsman are documented here. Format loosely follows
     per plan unit. The stop gate defers its acceptance block while a workflow
     or agent is still running. The project root and grant paths now derive
     from the session's project, never from cwd, so a grant written in one
-    directory is spent in another.
+    directory is spent in another. While `/auto` runs, `pre-guard` blocks
+    force pushes (including `--mirror`), `reset --hard` and
+    `worktree remove --force`, however they are quoted, wrapped or split, and
+    fails closed on any command it cannot read in time.
   - **Units that fit one agent.** `/plan` refuses a unit whose scoped files
     and task text exceed `execution.unitContextBytes` (default 122,880).
   - **Parked decisions and run manifest.** A unit that cannot finish is

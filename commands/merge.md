@@ -101,9 +101,11 @@ Never use `--no-verify`, `--force` or `git worktree remove --force`.
 - **Only registered projects.** Touch only projects in `craftsman.workspace.json`
   plus the submodules `git submodule status` reports on those roots — never
   find repos by scanning directories (ARCH-LAND-04).
-- **No force.** `pre-guard.mjs` blocks force pushes (flags or `+refspec`),
-  `reset --hard` and `worktree remove --force` while `/auto` is active
-  (ARCH-LAND-05). A conflict, ff-only failure, rejected push or PR auto-merge
+- **No force.** `pre-guard.mjs` blocks force pushes (flags, `+refspec` or
+  `--mirror`), `reset --hard` and `worktree remove --force` while `/auto` is
+  active (ARCH-LAND-05). It fails closed: a command over 16 KB, or one
+  `scripts/lib/force-block.mjs` cannot read inside its deadline, is blocked
+  too. A conflict, ff-only failure, rejected push or PR auto-merge
   error PARKs the unit with a decision for `/auto`'s Phase C (ARCH-LAND-06).
 
 ## 6. Report
