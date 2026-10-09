@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -202,6 +202,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: force-block-shell-words
+    scope_id: force-block-shell-words
+    project: .
+    depends_on: [force-block-escape]
+    module: force block bash word splitting
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/shell-words.mjs, scripts/lib/shell-words.test.mjs, scripts/arch-check.test.mjs, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/shell-words.mjs, scripts/lib/shell-words.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
+    arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
 # Plan: scrutinise fixes for autonomous-e2e-loop
@@ -292,10 +305,20 @@ One isolated scrutineer: 0 Critical, 1 Warning (Security), 1 Suggestion. ARCH-LA
 - [x] 14.1 `gitInvocations` also splits on every separator regardless of quotes (the pre-12.2 `split(/&&|\|\||[;|&\n()`]/)`), and a destructive form found in either split blocks (R5-W1). Fails safe: an over-block needs a separator inside a quoted operand followed by a destructive phrase. → accept: `git commit -m "a\" -m " ; git push -f origin main ; echo "b"`, `git commit -m "a\" -m " && git reset --hard && echo "b"`, `git tag -m "a\" -m "⏎git push --force⏎echo "b" v1`, `echo #git commit -m "⏎git push -f origin main⏎#"` and `true #git commit -m "⏎git reset --hard⏎#"` (⏎ = newline) join `DESTRUCTIVE`; `git -C "/a;b" push --force origin main` stays blocked; every `ALLOWED` case still passes.
 - [x] 14.2 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
 
+## Round 6 — `/scrutinise` of `a8394d1..18c3f3e`
+One isolated scrutineer: 0 Critical, 1 Warning (Security), 1 Suggestion. ARCH-LAND-05 was judged VIOLATED: both segment passes still read `\"…\"` as one quoted word, so a destructive flag between escaped quotes with no separator stays hidden, and `{a,b}` brace expansion is not modelled. Rounds 4–6 each patched one lexical gap, so this round replaces patching with bash's own word splitting. Every other rule HOLDS.
+
+## Step 15 — force-block-shell-words (., JavaScript, high)
+- [ ] 15.1 New `scripts/lib/shell-words.mjs` exports `shellSegments(value)`: bash word splitting into one word list per command — single quotes literal; double quotes honour `\" \\ \$ \``; an unquoted `\` escapes the next character; a word-initial `#` comments to end of line; `; & | && || ( ) \`` and newline outside quotes split; one level of `{a,b}` brace expansion; `$( )` or a backtick inside double quotes is split as a command of its own. Its own module because `state-root-pin` reads `pre-guard.mjs` with 25 bytes to spare and needs no lexer. → accept: `shell-words.test.mjs` pins each rule above with one case each.
+- [ ] 15.2 `pre-guard` `gitInvocations` also checks every `shellSegments` word list, alongside its two existing passes; any pass finding a destructive form blocks (R6-W1). → accept: `git --namespace=\"x reset --hard #\"`, `git --namespace=\"x push -f origin main #\"`, `git push --receive-pack=\"x -f origin main --receive-pack=x\"`, `git -c a.b=\"x worktree remove --force ../w #\"` and `git push {-f,origin} main` join `DESTRUCTIVE`, each exit 0 on the pre-change guard; every `ALLOWED` case still passes.
+- [ ] 15.3 Pin Step 14.1's accepted over-block (R6-S1). → accept: `git commit -m "fix; git push -f is banned"` sits in `DESTRUCTIVE` under a comment saying it is blocked by design.
+- [ ] 15.4 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
 - **Round 5:** the lexical class also covers `$'…'` ANSI-C quoting, line continuations and `${var}` inside a message — same residual, same remedy. The `repo-exec.test` locale case proves the fix only where git's German catalogue is installed (it is on the dev host); a host-conditional skip would be a skipped test, so it stays as is.
+- **Round 6:** `eval`, `printf`-built arguments and `IFS` changes are runtime constructs a lexer cannot see — they join the round-3 lexical residual. `landing.rules.md` ARCH-LAND-05's `pre-guard.mjs` line cite is stale — doc drift for `/sync-docs`.
 - Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.
