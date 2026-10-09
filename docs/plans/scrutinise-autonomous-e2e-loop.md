@@ -119,9 +119,9 @@ units:
     language: JavaScript (Node ESM, node:test)
     security: high
     scope:
-      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs]
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/agent-mode-guard.test.mjs]
       docs: [docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/agent-mode-guard.test.mjs]
     arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
   - id: runner-block-trigger
@@ -183,11 +183,11 @@ One isolated scrutineer: 0 Critical, 5 Warning (one Architecture), 6 Suggestion.
 - [x] 7.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes` (arch-check.test); full suite exit 0.
 
 ## Step 8 — force-block-live (., JavaScript, high)
-- [ ] 8.1 `pre-guard` maps each `git -c alias.<name>=<value>` name to its value, and a subcommand matching a recorded alias is replaced by the alias's words before the destructive check, so `git -c alias.p=push p --force`, `p -f`, `p +HEAD:main` and `alias.p=reset p --hard` are blocked (R2-W2). → accept: the four forms join `DESTRUCTIVE` in pre-guard.test.
-- [ ] 8.2 A quoted string is checked as its own command only as the argument of `sh|bash|zsh -c` or `eval`; `git commit -m "… git reset --hard …"` is allowed (suggestion). → accept: pre-guard.test allows two commit messages naming destructive forms; `bash -c '…'` forms stay blocked.
-- [ ] 8.3 `core.mjs` adds `autoForceBlock(sid, context, now)`: live while the marker is under 24 h and its plan has no ledger rows yet or any row not MERGED/COMPLETE (so PARKED/BLOCKED rows awaiting Phase C keep it on); `pre-guard` uses it, runner grants keep `autoActive` (R2-W3). → accept: core.test and pre-guard.test — an all-PARKED plan keeps the force block and denies runner grants; a no-rows plan keeps both live; an all-MERGED plan lapses both.
-- [ ] 8.4 `planStatuses` compares plan slugs through `planSlugOf`, so a bare-slug ledger row counts; `RUNNER_DISPATCHES_PER_UNIT` = 8 (implement + 3 reviews + 2 fix rounds + land + park/block) with its comment (suggestions). → accept: core.test bare-slug row case; agent-mode-guard.test still passes.
-- [ ] 8.5 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
+- [x] 8.1 `pre-guard` maps each `git -c alias.<name>=<value>` name to its value, and a subcommand matching a recorded alias is replaced by the alias's words before the destructive check, so `git -c alias.p=push p --force`, `p -f`, `p +HEAD:main` and `alias.p=reset p --hard` are blocked (R2-W2). → accept: the four forms join `DESTRUCTIVE` in pre-guard.test.
+- [x] 8.2 A quoted string is checked as its own command only as the argument of `sh|bash|zsh -c` or `eval`; `git commit -m "… git reset --hard …"` is allowed (suggestion). → accept: pre-guard.test allows two commit messages naming destructive forms; `bash -c '…'` forms stay blocked.
+- [x] 8.3 `core.mjs` adds `autoForceBlock(sid, context, now)`: live while the marker is under 24 h and its plan has no ledger rows yet or any row not MERGED/COMPLETE (so PARKED/BLOCKED rows awaiting Phase C keep it on); `pre-guard` uses it, runner grants keep `autoActive` (R2-W3). → accept: core.test and pre-guard.test — an all-PARKED plan keeps the force block and denies runner grants; a no-rows plan keeps both live; an all-MERGED plan lapses both.
+- [x] 8.4 `planStatuses` compares plan slugs through `planSlugOf`, so a bare-slug ledger row counts; `RUNNER_DISPATCHES_PER_UNIT` = 8 (implement + 3 reviews + 2 fix rounds + land + park/block) with its comment (suggestions). → accept: core.test bare-slug row case; agent-mode-guard.test still passes.
+- [x] 8.5 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
 
 ## Step 9 — runner-block-trigger (., Markdown, normal)
 - [ ] 9.1 `agents/unit-runner.md` states that any `BLOCKED` return from implement, review or land → root runs `block`, so the subagent engine closes a blocked unit as the workflow engine does (R2-W4, ARCH-ENGINE-04); stays ≤3,800 chars. → accept: doc-size policy passes; a unit-runner.md test (or wiring test) asserts the trigger line.

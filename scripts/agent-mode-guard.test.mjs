@@ -339,7 +339,7 @@ test("agent-mode-guard: an /auto session gets one runner dispatch per grant; a n
 
     assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "auto", prompt: "/craftsman:auto two-units" }).status, 0);
     const grant = path.join(dir, ".craftsman", "sessions", "auto", "runner-grant");
-    assert.equal(fs.readFileSync(grant, "utf8").trim(), "14", "2 units × 7 dispatches");
+    assert.equal(fs.readFileSync(grant, "utf8").trim(), "16", "2 units × 8 dispatches");
     fs.writeFileSync(grant, "1\n");
     assert.equal(dispatch("auto", "craftsman:unit-runner").status, 0, "one grant, one dispatch");
     assert.equal(dispatch("auto", "craftsman:implementer").status, 2, "spent on use");
@@ -347,7 +347,7 @@ test("agent-mode-guard: an /auto session gets one runner dispatch per grant; a n
 
     // The /goal's /orchestrate inside the /auto run re-arms it, sized afresh.
     assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "auto", tool_name: "Skill", tool_input: { skill: "craftsman:orchestrate", args: "two-units" } }).status, 0);
-    assert.equal(fs.readFileSync(grant, "utf8").trim(), "14");
+    assert.equal(fs.readFileSync(grant, "utf8").trim(), "16");
     assert.equal(dispatch("plain", "craftsman:unit-runner").status, 2, "another session's grant is not this one's");
 
     // Once every row of the plan has landed the run is over: a later

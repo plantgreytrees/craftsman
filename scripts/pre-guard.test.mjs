@@ -332,8 +332,14 @@ const DESTRUCTIVE = [
   "echo `git push -f origin main`",
   "git -c alias.p='push --force' p origin main",
   "git -c alias.r=\"!git reset --hard\" r",
+  // An alias of the bare subcommand, the flags at the call site (R2-W2).
+  "git -c alias.p=push p --force origin main",
+  "git -c alias.p=push p -f o m",
+  "git -c alias.p=reset p --hard",
+  "git -c alias.p=push p o +HEAD:main",
 ];
-const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status"];
+const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status",
+  "git commit -m \"note: git reset --hard is banned\"", "git commit -m 'dont git push -f'"];
 const bash = (sid, command) => ({ session_id: sid, tool_name: "Bash", tool_input: { command } });
 
 test("pre-guard: while /auto is active, force pushes, hard resets and forced worktree removal are blocked", () => {
@@ -367,6 +373,20 @@ test("pre-guard: the force block lapses once the /auto run is over (ARCH-LAND-05
     marker("legacy", "2026-10-09T00:00:00.000Z\n");
     for (const sid of ["finished", "aged", "legacy"]) {
       assert.equal(run(GUARD, dir, bash(sid, "git push --force origin main")).status, 0, sid);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the force block holds through Phase C while rows are PARKED or BLOCKED (ARCH-LAND-05)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-phase-c-")));
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman", "tracker"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "tracker", "events.jsonl"), ["PARKED", "BLOCKED"].flatMap((status, i) =>
+      ["PENDING", status].map((s) => JSON.stringify({ key: `.::docs/plans/parked.md::u${i}`, plan: "docs/plans/parked.md", unit: `u${i}`, status: s }))).join("\n") + "\n");
+    for (const [sid, plan] of [["phase-c", "parked"], ["no-rows", "fresh"]]) {
+      fs.mkdirSync(path.join(dir, ".craftsman", "sessions", sid), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), JSON.stringify({ plan, at: new Date().toISOString() }));
+      assert.equal(run(GUARD, dir, bash(sid, "git push --force origin main")).status, 2, sid);
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

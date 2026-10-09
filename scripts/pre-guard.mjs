@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoActive } from "./lib/core.mjs";
+import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 
@@ -45,20 +45,24 @@ function gitInvocations(value) {
 const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z]*${letter}[A-Za-z]*$`).test(word);
 
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
-// A quoted string (`bash -c '…'`) is checked as a command of its own, and a
-// `git -c alias.<name>=<value>` is checked as the git command it defines.
+// The script of `sh|bash|zsh -c '…'` or `eval '…'` is checked as a command
+// of its own (a commit message naming a form is not). A `git -c
+// alias.<name>=<value>` is checked as what it defines, and a later `<name>`
+// subcommand as that value plus its call-site flags.
 function destructiveGit(value) {
-  for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
-    const inner = quoted[1] ?? quoted[2];
-    const found = inner !== value && /\bgit\b/.test(inner) && destructiveGit(inner);
+  for (const quoted of value.matchAll(/(?:\b(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c\w*|\beval)\s+(?:"([^"]*)"|'([^']*)')/g)) {
+    const found = destructiveGit(quoted[1] ?? quoted[2]);
     if (found) return found;
   }
-  for (const alias of value.matchAll(/\balias\.[\w.-]+=(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
-    const defined = (alias[1] ?? alias[2] ?? alias[3]).replace(/^!/, "");
+  const aliases = new Map();
+  for (const alias of value.matchAll(/\balias\.([\w.-]+)=(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
+    const defined = (alias[2] ?? alias[3] ?? alias[4]).replace(/^!\s*/, "");
+    aliases.set(alias[1], defined.replace(/^git\s+/, "").split(/\s+/).filter(Boolean));
     const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`);
     if (found) return found;
   }
-  for (const [sub, ...rest] of gitInvocations(value)) {
+  for (const words of gitInvocations(value)) {
+    const [sub, ...rest] = aliases.has(words[0]) ? [...aliases.get(words[0]), ...words.slice(1)] : words;
     if (sub === "push" && rest.some((w) => /^--force(?:-with-lease|-if-includes)?(?:=|$)/.test(w) || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.includes("--hard")) return "git reset --hard";
     if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === "--force" || shortFlag(w, "f"))) return "git worktree remove --force";
@@ -154,20 +158,10 @@ function projectAllowed(active, candidate) {
   return resolved === realRoot || resolved.startsWith(realRoot + path.sep);
 }
 
-// Decide whether one Read/Glob/Grep/Write/Edit/MultiEdit/NotebookEdit call is
-// inside the active unit scope. Checked in strict precedence order — each
-// step below is a named, independently-testable reason a call is or isn't
-// allowed, so a wrong verdict here (a leak, or a false block that burns a
-// retry) can be traced to exactly one rule instead of one dense expression:
-//   1. Tracker/plan-doc reads always pass — every unit needs its own
-//      bookkeeping metadata regardless of scope.
-//   2. A candidate outside the active project's root always fails, even for
-//      an otherwise-scoped path — the workspace project boundary is absolute.
-//   3. No resolvable target path at all fails closed.
-//   4. A search tool (Glob/Grep) whose search ROOT itself sits under a
-//      declared `<dir>/**` entry passes without checking every match inside.
-//   5. Otherwise every candidate must match a declared entry in the given
-//      scope buckets (read+docs for reads, write for writes).
+// Is one file-tool call inside the active unit scope? In order: 1. tracker/
+// plan-doc reads pass; 2. outside the project root fails; 3. no target fails
+// closed; 4. a Glob/Grep rooted under a declared `<dir>/**` passes; 5. else
+// every candidate must match its bucket (read+docs, or write).
 function scopeVerdict(activeScope, tool, bucket, buckets, candidates) {
   if (bucket === "read" && candidates.length &&
       candidates.every((candidate) => orchestrationMetadataAllowed(activeScope, candidate))) {
@@ -241,11 +235,11 @@ if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|pus
 }
 
 // ARCH-LAND-05: /auto holds standing git authority (LAND-01) but never a
-// destructive one. While its marker is live (core.mjs autoActive), force
-// pushes (flags or a +refspec), hard resets and forced worktree removal are
-// blocked; a plain `git push origin HEAD:main` is not.
+// destructive one. While its run lasts (core.mjs autoForceBlock, Phase C
+// included), force pushes (flags or a +refspec), hard resets and forced
+// worktree removal are blocked; a plain `git push origin HEAD:main` is not.
 // orchestrate-scope-guard.mjs writes the marker at this same (sid) path.
-if (tool === "Bash" && autoActive(sidOf(input))) {
+if (tool === "Bash" && autoForceBlock(sidOf(input))) {
   const destructive = destructiveGit(command);
   if (destructive) {
     logEvent({ ev: "auto_force_blocked", sid: sidOf(input), command });

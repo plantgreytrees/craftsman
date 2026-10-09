@@ -15,15 +15,10 @@ export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // -------------------------------------------------------------- git root ---
-// cwd is wherever the last `cd` left it — possibly another repo entirely — so
-// state, config and checks anchor to the project root, never cwd
-// (ARCH-STATE-01): a hook always has
-// CLAUDE_PROJECT_DIR, and its git toplevel is the root. A Bash-run script has
-// no CLAUDE_PROJECT_DIR, so SessionStart pins the root per session
-// (CLAUDE_CODE_SESSION_ID) and the script reads the pin. The pin is honoured
-// only when cwd is not inside some other repository — a test fixture or a
-// deliberately different checkout keeps its own root. A bare CLI with neither
-// falls back to cwd's toplevel: there is no session to agree with.
+// State anchors to the project root, never cwd (ARCH-STATE-01): a hook uses
+// CLAUDE_PROJECT_DIR's toplevel; a Bash-run script reads the per-session pin
+// SessionStart wrote, unless cwd is inside another repo (a fixture keeps its
+// own root). A bare CLI falls back to cwd's toplevel.
 function gitTop(dir) {
   try {
     return path.resolve(execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
@@ -238,8 +233,8 @@ export function spendAgentGrant(agent, sid, context = null) {
 // holds the dispatches left; each spend takes exactly one. Same rename-first
 // claim as spendAgentGrant, so two racing spenders never both take the last.
 export const RUNNER_AGENTS = ["unit-runner", "implementer", "code-reviewer"];
-// implement + up to 3 reviews + 2 fix rounds (ARCH-ENGINE-05) + close.
-export const RUNNER_DISPATCHES_PER_UNIT = 7;
+// implement + up to 3 reviews + 2 fix rounds (ARCH-ENGINE-05) + land + park/block.
+export const RUNNER_DISPATCHES_PER_UNIT = 8;
 export function grantRunnerDispatches(count, sid, context = null) {
   const grant = agentGrantFile("runner", sid, context);
   try {
@@ -276,12 +271,12 @@ export function spendRunnerDispatch(sid, context = null) {
   return left >= 1;
 }
 // /auto's marker (ARCH-AUTO-06, ARCH-LAND-05): `{plan, at}` in the root
-// session dir. It is live only while its run is: younger than a day, and its
-// plan has no ledger rows yet (Phase A still writing it) or an open one
-// (PENDING/IN_PROGRESS). Once every row is MERGED, PARKED, BLOCKED or
-// COMPLETE, runner grants and the force block lapse on their own.
+// session dir, never live past a day. Runner grants (autoActive) need a
+// PENDING/IN_PROGRESS row or no rows yet; the force block (autoForceBlock)
+// also holds while PARKED/BLOCKED rows await Phase C, until every row lands.
 export const AUTO_MARKER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const OPEN_STATUSES = new Set(["PENDING", "IN_PROGRESS"]);
+const LANDED_STATUSES = new Set(["MERGED", "COMPLETE"]);
 export const autoMarkerFile = (sid) => path.join(sessionDir(sid), "auto-active");
 // The plan slug a command's arguments name: its first non-flag word, with an
 // optional docs/plans/ prefix and .md suffix. null when it isn't slug-shaped.
@@ -312,18 +307,22 @@ function planStatuses(plan, context) {
   for (const line of text.split("\n")) {
     try {
       const event = JSON.parse(line);
-      if (event.plan === `docs/plans/${plan}.md`) latest.set(event.key, event.status);
+      if (planSlugOf(event.plan) === plan) latest.set(event.key, event.status);
     } catch {}
   }
   return [...latest.values()];
 }
-export function autoActive(sid, context = null, now = Date.now()) {
+function autoMarkerHolds(sid, context, now, holds) {
   const marker = readAutoMarker(sid);
   if (!marker || now - Date.parse(marker.at) > AUTO_MARKER_MAX_AGE_MS) return false;
   if (!marker.plan) return true;
   const statuses = planStatuses(marker.plan, context);
-  return !statuses.length || statuses.some((status) => OPEN_STATUSES.has(status));
+  return !statuses.length || statuses.some(holds);
 }
+export const autoActive = (sid, context = null, now = Date.now()) =>
+  autoMarkerHolds(sid, context, now, (status) => OPEN_STATUSES.has(status));
+export const autoForceBlock = (sid, context = null, now = Date.now()) =>
+  autoMarkerHolds(sid, context, now, (status) => !LANDED_STATUSES.has(status));
 
 export const scrutineerGrantFile =(sid, context = null) => agentGrantFile("scrutineer", sid, context);
 export const grantScrutineer = (sid, context = null) => grantAgent("scrutineer", sid, context);

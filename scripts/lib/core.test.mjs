@@ -354,6 +354,7 @@ test("autoActive: live for a fresh or open plan; lapsed when aged out, finished 
       { key: ".::docs/plans/open.md::u2", plan: "docs/plans/open.md", unit: "u2", status: "MERGED", evidence: "x" },
       { key: ".::docs/plans/done.md::u1", plan: "docs/plans/done.md", unit: "u1", status: "PENDING" },
       { key: ".::docs/plans/done.md::u1", plan: "docs/plans/done.md", unit: "u1", status: "PARKED", evidence: "x" },
+      { key: ".::bare::u1", plan: "bare", unit: "u1", status: "MERGED", evidence: "x" }, // a bare-slug row counts
     ];
     fs.mkdirSync(path.join(repo, ".craftsman", "tracker"), { recursive: true });
     fs.writeFileSync(path.join(repo, ".craftsman", "tracker", "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
@@ -361,13 +362,17 @@ test("autoActive: live for a fresh or open plan; lapsed when aged out, finished 
       `const m = await import(${JSON.stringify(pathToFileURL(CORE).href)}); ` +
       `const old = new Date(Date.now() - m.AUTO_MARKER_MAX_AGE_MS - 1000).toISOString(); ` +
       `m.writeAutoMarker("fresh", "unplanned"); m.writeAutoMarker("open", "open"); m.writeAutoMarker("done", "done"); ` +
-      `m.writeAutoMarker("aged", "open", old); ` +
+      `m.writeAutoMarker("aged", "open", old); m.writeAutoMarker("bare", "bare"); ` +
       `m.writeAutoMarker("legacy", "open"); const fs = await import("node:fs"); fs.writeFileSync(m.autoMarkerFile("legacy"), "2026-10-09T00:00:00.000Z\\n"); ` +
-      `console.log(JSON.stringify(["fresh", "open", "done", "aged", "legacy", "absent"].map((sid) => m.autoActive(sid))));`,
+      `const sids = ["fresh", "open", "done", "aged", "legacy", "absent", "bare"]; ` +
+      `console.log(JSON.stringify([sids.map((sid) => m.autoActive(sid)), sids.map((sid) => m.autoForceBlock(sid))]));`,
     ], { cwd: repo, env: cleanEnv({ CLAUDE_PROJECT_DIR: repo }), encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), [true, true, false, false, false, false],
-      "fresh (no rows yet) and open are live; finished, aged, legacy and absent are not");
+    const [active, forceBlock] = JSON.parse(result.stdout);
+    assert.deepEqual(active, [true, true, false, false, false, false, false],
+      "fresh (no rows yet) and open are live; parked, aged, legacy, absent and landed are not");
+    assert.deepEqual(forceBlock, [true, true, true, false, false, false, false],
+      "the force block also holds while rows are PARKED for Phase C");
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
