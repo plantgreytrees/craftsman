@@ -72,9 +72,9 @@ if (invoked === "orchestrate" || invoked === "auto") {
   } catch { /* best-effort — falls back to /orchestrate's own prose-driven require call */ }
 }
 
-// /auto's marker {plan, at}: pre-guard.mjs blocks destructive git and
-// agent-mode-guard.mjs spends runner grants only while it is live (core.mjs
-// autoActive; ARCH-LAND-05). Root session dir, same (sid) on every side
+// /auto's marker {plan, at}: pre-guard.mjs blocks destructive git while
+// core.mjs autoForceBlock holds (ARCH-LAND-05); runner grants are spent
+// only while autoActive does. Root session dir, same (sid) on every side
 // (STATE-02). The /orchestrate an /auto goal starts with re-points a live
 // marker at that plan, since /auto's own argument may be an idea or request.
 const slug = planSlugOf(args);

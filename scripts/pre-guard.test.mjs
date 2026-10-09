@@ -330,6 +330,7 @@ const DESTRUCTIVE = [
   "(git push --force origin main)",
   "echo $(git reset --hard)",
   "echo `git push -f origin main`",
+  "git commit -m \"$(git push -f origin main)\"", // the R3 message skip must not hide a substitution
   "git -c alias.p='push --force' p origin main",
   "git -c alias.r=\"!git reset --hard\" r",
   // An alias of the bare subcommand, the flags at the call site (R2-W2).
@@ -337,9 +338,16 @@ const DESTRUCTIVE = [
   "git -c alias.p=push p -f o m",
   "git -c alias.p=reset p --hard",
   "git -c alias.p=push p o +HEAD:main",
+  // Any interpreter's quoted script, a lone &, a quoted -C path, alias chains (R3).
+  "python3 -c \"import subprocess; subprocess.run('git push -f', shell=True)\"",
+  "git log -1 & bash --norc -c 'git push -f origin main'",
+  "git status & git push --force origin main",
+  "git -C \"/a b\" push --force origin main",
+  "git -c alias.p=reset -c alias.q=p q --hard",
+  "git config alias.p \"push --force\"",
 ];
 const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status",
-  "git commit -m \"note: git reset --hard is banned\"", "git commit -m 'dont git push -f'"];
+  "git commit -m \"note: git reset --hard is banned\"", "git commit -m 'dont git push -f'", "git tag -m \"git push -f is banned\" v1"];
 const bash = (sid, command) => ({ session_id: sid, tool_name: "Bash", tool_input: { command } });
 
 test("pre-guard: while /auto is active, force pushes, hard resets and forced worktree removal are blocked", () => {

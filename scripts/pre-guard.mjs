@@ -27,12 +27,12 @@ function mutatesGit(value) {
 }
 
 // Each `git …` in a compound command, as its words after the global options.
-// Subshells, $( ) and backticks split segments too, and quotes are stripped
-// from each word, so `(git push -f)` reads like `git push -f`.
+// `&`, subshells, $( ) and backticks split segments too; a quoted word stays
+// whole, unquoted, so `(git -C "/a b" push -f)` reads like `git push -f`.
 function gitInvocations(value) {
   const invocations = [];
-  for (const segment of value.split(/&&|\|\||[;|\n()`]/)) {
-    const words = segment.trim().split(/\s+/).map((word) => word.replace(/^["']+|["']+$/g, "")).filter(Boolean);
+  for (const segment of value.split(/&&|\|\||[;|&\n()`]/)) {
+    const words = (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean);
     const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
     if (at < 0) continue;
     let i = at + 1;
@@ -44,25 +44,31 @@ function gitInvocations(value) {
 
 const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z]*${letter}[A-Za-z]*$`).test(word);
 
+const MESSAGE_OPERAND = /\bgit\b[^;&|\n]*\s(?:commit|tag)\b[^;&|\n]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
+
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
-// The script of `sh|bash|zsh -c '…'` or `eval '…'` is checked as a command
-// of its own (a commit message naming a form is not). A `git -c
-// alias.<name>=<value>` is checked as what it defines, and a later `<name>`
-// subcommand as that value plus its call-site flags.
+// Every quoted string is checked as a command of its own (`bash -c`,
+// `python3 -c`, …) except a commit/tag message operand (a $( ) or backtick
+// in one still splits gitInvocations). `-c alias.<n>=<v>`, `config alias.<n> <v>`
+// are checked as what they define, and a call through an alias chain as the
+// resolved words plus its call-site flags.
 function destructiveGit(value) {
-  for (const quoted of value.matchAll(/(?:\b(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c\w*|\beval)\s+(?:"([^"]*)"|'([^']*)')/g)) {
-    const found = destructiveGit(quoted[1] ?? quoted[2]);
+  for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
+    const inner = quoted[1] ?? quoted[2];
+    if (MESSAGE_OPERAND.test(value.slice(0, quoted.index))) continue;
+    const found = destructiveGit(inner);
     if (found) return found;
   }
   const aliases = new Map();
-  for (const alias of value.matchAll(/\balias\.([\w.-]+)=(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
+  for (const alias of value.matchAll(/\balias\.([\w.-]+)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
     const defined = (alias[2] ?? alias[3] ?? alias[4]).replace(/^!\s*/, "");
     aliases.set(alias[1], defined.replace(/^git\s+/, "").split(/\s+/).filter(Boolean));
     const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`);
     if (found) return found;
   }
-  for (const words of gitInvocations(value)) {
-    const [sub, ...rest] = aliases.has(words[0]) ? [...aliases.get(words[0]), ...words.slice(1)] : words;
+  for (let words of gitInvocations(value)) {
+    for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++) words = [...aliases.get(words[0]), ...words.slice(1)];
+    const [sub, ...rest] = words;
     if (sub === "push" && rest.some((w) => /^--force(?:-with-lease|-if-includes)?(?:=|$)/.test(w) || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.includes("--hard")) return "git reset --hard";
     if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === "--force" || shortFlag(w, "f"))) return "git worktree remove --force";
@@ -218,11 +224,8 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
   }
 }
 
-// _shared-machinery.md's Standing constraints: "a hook rejection is fixed in
-// the worktree, never bypassed (--no-verify is forbidden)" — prose only until
-// now. Unconditional (not gated on an active worktree binding): this applies
-// to every git commit/push regardless of whether orchestrate's worktree flow
-// is even in play.
+// A hook rejection is fixed, never bypassed (--no-verify is forbidden):
+// unconditional, for every commit/push with or without a worktree binding.
 if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|push)\b/.test(command)
     && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)) {
   logEvent({ ev: "verify_bypass_blocked", sid: sidOf(input), command });
@@ -285,11 +288,8 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 
 if (!file) process.exit(0);
 
-// 0) One tracker, in the main checkout. A linked worktree's copy of
-//    docs/plans/TRACKER.md is invisible to every other session until a merge
-//    (and then conflicts with the root copy), so it is never written; in the
-//    root copy, the ledger block is generated by tracker.mjs and the
-//    tracker-sync hook, so a hand edit that changes it is refused.
+// 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
+//    written, and the root's generated ledger block is never hand-edited.
 const tracker = ["Write", "Edit", "MultiEdit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
 if (tracker) {
   if (path.resolve(tracker.main) !== path.resolve(tracker.root)) {
