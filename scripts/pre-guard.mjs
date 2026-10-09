@@ -27,11 +27,17 @@ function mutatesGit(value) {
 }
 
 // Each `git …` in a compound command, as its words after the global options.
-// `&`, subshells, $( ) and backticks split segments too; a quoted word stays
-// whole, unquoted, so `(git -C "/a b" push -f)` reads like `git push -f`.
+// Unquoted `&`, subshells, $( ) and backticks split segments too; a quoted
+// word stays whole, unquoted, so `(git -C "/a;b" push -f)` reads like
+// `git push -f` (a quoted script is destructiveGit's to check).
 function gitInvocations(value) {
   const invocations = [];
-  for (const segment of value.split(/&&|\|\||[;|&\n()`]/)) {
+  const segments = [""];
+  for (const piece of value.match(/"[^"]*"|'[^']*'|&&|\|\||[;|&\n()`]|[^"';|&\n()`]+|["']/g) || []) {
+    if (/^(?:&&|\|\||[;|&\n()`])$/.test(piece)) segments.push("");
+    else segments[segments.length - 1] += piece;
+  }
+  for (const segment of segments) {
     const words = (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean);
     const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
     if (at < 0) continue;
@@ -48,14 +54,15 @@ const MESSAGE_OPERAND = /\bgit\b[^;&|\n]*\s(?:commit|tag)\b[^;&|\n]*\s(?:-[A-Za-
 
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
 // Every quoted string is checked as a command of its own (`bash -c`,
-// `python3 -c`, …) except a commit/tag message operand (a $( ) or backtick
-// in one still splits gitInvocations). `-c alias.<n>=<v>`, `config alias.<n> <v>`
+// `python3 -c`, …) except a commit/tag message operand with no $( ) or
+// backtick in it (one that has runs, so it is checked). `-c alias.<n>=<v>`,
+// `config alias.<n> <v>`
 // are checked as what they define, and a call through an alias chain as the
 // resolved words plus its call-site flags.
 function destructiveGit(value) {
   for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
     const inner = quoted[1] ?? quoted[2];
-    if (MESSAGE_OPERAND.test(value.slice(0, quoted.index))) continue;
+    if (MESSAGE_OPERAND.test(value.slice(0, quoted.index)) && !/\$\(|`/.test(inner)) continue;
     const found = destructiveGit(inner);
     if (found) return found;
   }

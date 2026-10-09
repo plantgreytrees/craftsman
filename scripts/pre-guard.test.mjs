@@ -345,6 +345,12 @@ const DESTRUCTIVE = [
   "git -C \"/a b\" push --force origin main",
   "git -c alias.p=reset -c alias.q=p q --hard",
   "git config alias.p \"push --force\"",
+  // An interpreter inside a message's $( ), a separator in a quoted -C path (R4).
+  "git commit -m \"$(bash -c 'git push -f origin main')\"",
+  "git commit -m \"$(sh -c 'git reset --hard')\"",
+  "git tag -am \"$(bash -c 'git push -f')\" v1",
+  "git -C \"/a;b\" push --force origin main",
+  "git -C \"/a&b\" reset --hard",
 ];
 const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status",
   "git commit -m \"note: git reset --hard is banned\"", "git commit -m 'dont git push -f'", "git tag -m \"git push -f is banned\" v1"];

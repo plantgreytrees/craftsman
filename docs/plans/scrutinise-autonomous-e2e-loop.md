@@ -264,9 +264,9 @@ One isolated scrutineer: 0 Critical, 1 Warning (Security), 5 Suggestion; every r
 One isolated scrutineer: 0 Critical, 1 Warning (Security), 3 Suggestion. ARCH-LAND-05 was judged VIOLATED as a narrow regression from Step 10: a skipped message operand hid an interpreter inside `$( )`. Every other rule HOLDS.
 
 ## Step 12 — force-block-substitution (., JavaScript, high)
-- [ ] 12.1 A commit/tag message operand holding `$(` or a backtick is not skipped; it is checked as a command, since it runs (R4-W1). This over-blocks only a message that holds both a substitution and a destructive phrase. → accept: `git commit -m "$(bash -c 'git push -f origin main')"`, `git commit -m "$(sh -c 'git reset --hard')"` and `git tag -am "$(bash -c 'git push -f')" v1` join `DESTRUCTIVE`; the plain commit/tag message cases stay in `ALLOWED`.
-- [ ] 12.2 `gitInvocations` splits segments only on separators outside quotes (R4-S1). → accept: `git -C "/a;b" push --force origin main` and `git -C "/a&b" reset --hard` join `DESTRUCTIVE`; every existing wrapped form (`$( )`, backticks, subshells, `bash -c`) stays blocked.
-- [ ] 12.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
+- [x] 12.1 A commit/tag message operand holding `$(` or a backtick is not skipped; it is checked as a command, since it runs (R4-W1). This over-blocks only a message that holds both a substitution and a destructive phrase. → accept: `git commit -m "$(bash -c 'git push -f origin main')"`, `git commit -m "$(sh -c 'git reset --hard')"` and `git tag -am "$(bash -c 'git push -f')" v1` join `DESTRUCTIVE`; the plain commit/tag message cases stay in `ALLOWED`.
+- [x] 12.2 `gitInvocations` splits segments only on separators outside quotes (R4-S1). → accept: `git -C "/a;b" push --force origin main` and `git -C "/a&b" reset --hard` join `DESTRUCTIVE`; every existing wrapped form (`$( )`, backticks, subshells, `bash -c`) stays blocked.
+- [x] 12.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
 
 ## Step 13 — land-locale (., JavaScript, normal)
 - [ ] 13.1 `repo-exec` `run()` runs every git call with `LC_ALL=C`, so the untracked-refusal match (and every parsed git output) holds under a localised git (R4-S2). → accept: repo-exec.test runs the untracked-holder case with a non-C `LANG`/`LC_ALL` in `process.env` and it still throws.
