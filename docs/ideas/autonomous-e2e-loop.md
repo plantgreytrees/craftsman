@@ -8,7 +8,7 @@ isolation: NOT ISOLATED
 created: 2026-10-09
 updated: 2026-10-09
 related: [docs/plans/token-efficiency.md, commands/instruction.md, CHANGELOG.md]
-touches: [commands/instruction.md, commands/orchestrate.md, commands/_shared-execution.md, commands/_shared-machinery.md, commands/plan.md, commands/idea.md, commands/architect.md, commands/auto.md (new), workflows/*.js (new), hooks/register.js (new mod module), hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/lib/core.mjs, scripts/orchestrate-scope-guard.mjs, scripts/stop-gate.mjs, scripts/session-context.mjs, craftsman.config.json, .claude-plugin/plugin.json, scripts/*.test.mjs, README.md, EXTENDING.md, CHANGELOG.md]
+touches: [commands/instruction.md, commands/orchestrate.md, commands/_shared-execution.md, commands/_shared-machinery.md, commands/plan.md, commands/idea.md, commands/architect.md, commands/auto.md (new), workflows/*.js (new), hooks/register.js (new mod module), hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/lib/core.mjs, scripts/orchestrate-scope-guard.mjs, scripts/stop-gate.mjs, scripts/session-context.mjs, craftsman.config.json, .claude-plugin/plugin.json, scripts/*.test.mjs, README.md, EXTENDING.md, CHANGELOG.md, commands/workspace-init.md, scripts/workspace-init.mjs, scripts/repo-exec.mjs, commands/merge.md]
 ---
 
 # Idea: One-entry autonomous loop with a light root context
@@ -291,7 +291,8 @@ unit.
    - **Git authority:** `/auto` lands each finished unit and the run via
      `/craftsman:merge` without asking (see Open questions). Merge never
      needs a Phase C approval; only real conflicts and rejected pushes
-     escalate.
+     escalate. This covers registered workspace sub-repos and submodules
+     too, landed in dependency order.
 5. **Mod with fallback.**
    - The mod launches the `/goal` itself, removing the paste.
    - It shows a band with plan, unit, tracker % and context %.
@@ -352,6 +353,19 @@ unit.
   - This stays bound by the `/craftsman:merge` and CLAUDE.md safety rules:
     no `--force` push or worktree removal, and stop only on a real conflict
     or a rejected push.
+- **Does that authority extend to sub-repos?** → **Yes.** *(answered
+  2026-10-09)*
+  - The same authority covers every project registered in
+    `craftsman.workspace.json` (see `/craftsman:workspace-init`), and the
+    target repo's git submodules and nested repos.
+  - Each repo lands by its own `repoExec.land` (direct or pr).
+  - Dependencies land before the repos that consume them. A parent repo's
+    submodule pointer is bumped and committed only after the sub-repo's
+    change is pushed.
+  - Unregistered repos are never touched or discovered by scanning,
+    keeping craftsman's explicit-workspace rule.
+  - Each sub-repo is a separate grant (doc-write, agent, scope), keyed to
+    that repo's own pinned root (see R6).
 
 ## Next step
 `/architect autonomous-e2e-loop --deep` (cross-cutting: it touches execution
