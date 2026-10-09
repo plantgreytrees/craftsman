@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -137,6 +137,32 @@ units:
       write: [agents/unit-runner.md, scripts/auto-command.test.mjs]
     arch: [ARCH-ENGINE-04]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
+  - id: force-block-quoted
+    scope_id: force-block-quoted
+    project: .
+    depends_on: [force-block-live]
+    module: force block quoted strings, &, alias chains
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/arch-check.test.mjs, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
+    arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: land-holder-untracked
+    scope_id: land-holder-untracked
+    project: .
+    depends_on: [land-holder]
+    module: holder landing refusals + tests
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, scripts/arch-check.test.mjs, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      docs: [docs/architecture/landing.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
+    arch: [ARCH-LAND-02, ARCH-LAND-06]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
 # Plan: scrutinise fixes for autonomous-e2e-loop
@@ -193,8 +219,24 @@ One isolated scrutineer: 0 Critical, 5 Warning (one Architecture), 6 Suggestion.
 - [x] 9.1 `agents/unit-runner.md` states that any `BLOCKED` return from implement, review or land → root runs `block`, so the subagent engine closes a blocked unit as the workflow engine does (R2-W4, ARCH-ENGINE-04); stays ≤3,800 chars. → accept: doc-size policy passes; a unit-runner.md test (or wiring test) asserts the trigger line.
 - [x] 9.2 Full suite exit 0.
 
+## Round 3 — `/scrutinise` of `38c7786..ad2ce10`
+One isolated scrutineer: 0 Critical, 1 Warning (Security), 5 Suggestion; every rule HOLDS, ARCH-LAND-05 weaker than at 38c7786 against interpreter-wrapped forms. Steps 10–11 fix the Warning and fold the Suggestions.
+
+## Step 10 — force-block-quoted (., JavaScript, high)
+- [ ] 10.1 `destructiveGit` recurses into every quoted string again (as 38c7786 did), skipping only a quoted operand that directly follows a message option (`-m`, `-<flags>m`, `--message[=]`, `-F`, `--file[=]`) of a `git commit` or `git tag` in the same segment (R3-W1). → accept: `python3 -c "import subprocess; subprocess.run('git push -f', shell=True)"` and `git log -1 & bash --norc -c 'git push -f origin main'` join `DESTRUCTIVE`, as does `git commit -m "$(git push -f origin main)"` (a substitution inside a message still runs); the two commit-message cases and `git tag -m "git push -f is banned" v1` stay in `ALLOWED`.
+- [ ] 10.2 `gitInvocations` splits on a lone `&` and keeps a quoted word whole, so `git status & git push --force origin main` and `git -C "/a b" push --force origin main` are blocked (R3-S1). → accept: both join `DESTRUCTIVE`.
+- [ ] 10.3 Aliases resolve to a fixed point (bounded by the alias count), and `git config alias.<n> "<value>"` is checked like `-c alias.<n>=<value>` (R3-S5). → accept: `git -c alias.p=reset -c alias.q=p q --hard` and `git config alias.p "push --force"` join `DESTRUCTIVE`.
+- [ ] 10.4 `orchestrate-scope-guard.mjs:75-77` comment names `autoForceBlock` for pre-guard and `autoActive` for runner grants, no longer than now (R3-S4). → accept: grep shows both names in the comment.
+- [ ] 10.5 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes` (trim comments in `pre-guard.mjs`/`core.mjs` only, no behaviour change); full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
+
+## Step 11 — land-holder-untracked (., JavaScript, high)
+- [ ] 11.1 A holder merge that git refuses because untracked working-tree files would be overwritten throws (as a dirty holder does) instead of parking `conflict`; ARCH-LAND-06's four park reasons stand (R3-S3). → accept: repo-exec.test — an untracked file in the holder at a path the branch adds makes merge throw, with no PARKED result and the holder's base unmoved.
+- [ ] 11.2 repo-exec.test covers a holder with `MERGE_HEAD` set (throws) and an `ff-only` park inside the holder (remote, `push:false`, holder base behind and diverged from origin) (R3-S6). → accept: both cases pass.
+- [ ] 11.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes` (trim comments in `repo-exec*.mjs` only); full suite exit 0; 11.1's test fails on the pre-change code.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
+- **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
 - Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.
