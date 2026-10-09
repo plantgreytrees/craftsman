@@ -1,13 +1,13 @@
 ---
 slug: autonomous-e2e-loop
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
 isolation: NOT ISOLATED
 created: 2026-10-09
 updated: 2026-10-09
-related: [docs/plans/token-efficiency.md, commands/instruction.md, CHANGELOG.md]
+related: [docs/plans/token-efficiency.md, commands/instruction.md, CHANGELOG.md, docs/architecture/state.rules.md, docs/architecture/engine.rules.md, docs/architecture/auto.rules.md, docs/architecture/mod.rules.md, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md]
 touches: [commands/instruction.md, commands/orchestrate.md, commands/_shared-execution.md, commands/_shared-machinery.md, commands/plan.md, commands/idea.md, commands/architect.md, commands/auto.md (new), workflows/*.js (new), hooks/register.js (new mod module), hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/lib/core.mjs, scripts/orchestrate-scope-guard.mjs, scripts/stop-gate.mjs, scripts/session-context.mjs, craftsman.config.json, .claude-plugin/plugin.json, scripts/*.test.mjs, README.md, EXTENDING.md, CHANGELOG.md, commands/workspace-init.md, scripts/workspace-init.mjs, scripts/repo-exec.mjs, commands/merge.md]
 ---
 
