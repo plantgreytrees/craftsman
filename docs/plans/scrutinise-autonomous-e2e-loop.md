@@ -275,10 +275,10 @@ units:
     language: JavaScript (Node ESM, node:test)
     security: normal
     scope:
-      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/core.mjs, scripts/auto-command.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/auto-command.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, docs/plans/autonomous-e2e-loop-evidence.md]
       docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md]
       write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
-    arch: [ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-ENGINE-02]
+    arch: [ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-ENGINE-02, ARCH-ENGINE-08]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
@@ -457,6 +457,15 @@ One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is M
 ## Step 23 — land-submodule-bump, round 15 fixes (., JavaScript, normal)
 - [ ] 23.1 `gitlinkAt` reads `ls-files -s -z` and splits on NUL (R15-W1). → accept: a real-git test of a gitlink whose name has a non-ASCII byte and a `"` fails on `08815dc`; full suite exit 0.
 
+## Round 16 — `/scrutinise` of `8e9f06d..dc50998`
+One isolated scrutineer: 0 Critical, 1 Warning, 2 Suggestion; the criterion is MET (refusal plans probed as accepted on `8e9f06d`); LAND-02, LAND-03, LAND-04 and ENGINE-02 HOLD.
+- R16-W1 [Architecture] the `land-submodule-bump` manifest needed 144,845 bytes of `scope.read` + `scope.docs`, over `execution.unitContextBytes` (ARCH-ENGINE-08): `CHANGELOG.md` and `scripts/lib/core.mjs` were in `read`, and `arch` omitted ENGINE-08.
+- R16-S3 [Test-coverage] untested: an early second bump step, a bump with no submodule steps, a nested non-gitlink `bumps` target.
+
+## Step 24 — land-submodule-bump, round 16 fixes (., JavaScript, normal)
+- [ ] 24.1 The manifest reads neither `CHANGELOG.md` (write-only for its one clause) nor `core.mjs`, and lists ARCH-ENGINE-08 (R16-W1). → accept: `arch-check.mjs scope` on the manifest with Steps 20–24 as task text PASS (47,077 bytes).
+- [ ] 24.2 `plan-submodules.test.mjs` covers the three R16-S3 cases. → accept: full suite exit 0.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
@@ -475,6 +484,7 @@ One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is M
   - R15-S1: a registered project whose superproject is an unregistered repo other than the workspace root (or an unregistered clone nested in a registered one) is not detected. Finding it means querying repos outside the registered set, which ARCH-LAND-04 limits; widening that is a decision for `/architect`.
   - R15-S2 (Disputed): LAND-04's text names `git submodule status`, while `gitlinkAt` reads the same index gitlinks via `ls-files -s`. The rule's own check, "grep for directory walks", passes, and the scrutineer rated it HOLDS.
   - R15-S3: no subprocess test drives `plan-graph.mjs` with a real `CRAFTSMAN_WORKSPACE_MANIFEST`. The manifest shape the lib relies on matches `core.mjs:105-129` today.
+- **Round 16:** R16-S2 widens R15-S2. When the workspace root is not registered, `submoduleParents` reads that root's index, which is more than LAND-04's "registered roots" text allows. The read is read-only and can only lead to a refusal (fail-closed), and the rule's `check:` passes. Sanctioning it in the rule text, or requiring the root to be registered, is a decision for `/architect`. Plan-time vs landing-time: a submodule added after planning is not re-checked at landing.
 - Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.

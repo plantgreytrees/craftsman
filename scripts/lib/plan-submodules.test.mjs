@@ -93,6 +93,12 @@ test("validateSteps: the bump step must depend on every submodule step, directly
     step("lib-a", [], "lib"), step("lib-b", ["lib-a"], "lib"), bump("bump-lib", "lib", ["lib-b"], "app"),
   ]);
   assert.equal(steps.length, 3);
+  // Every bump step is checked, not just the first (R16-S3).
+  assert.throws(() => check([
+    step("lib-a", [], "lib"), bump("bump-late", "lib", ["lib-a"], "app"), bump("bump-early", "lib", [], "app"),
+  ]), /bump step bump-early must depend on submodule step lib-a/);
+  // A bump with no submodule steps in the plan is a plain pointer refresh.
+  assert.equal(check([bump("bump-lib", "lib", [], "app")]).length, 1);
 });
 
 test("validateSteps: bumps must name a submodule of the step's own project (ARCH-LAND-03)", () => {
@@ -100,6 +106,8 @@ test("validateSteps: bumps must name a submodule of the step's own project (ARCH
   assert.throws(() => check([sub, bump("bump-lib", "lib", ["lib-change"], "other")]), /not a submodule of its project other/);
   assert.throws(() => check([bump("bump-app", "app", [], "other")]), /not a submodule/);
   assert.throws(() => check([bump("bump-x", 7, [], "app")]), /not a submodule/);
+  // Nested under the step's project but with no gitlink: not a submodule (R16-S3).
+  assert.throws(() => check([bump("bump-lib", "lib", [], "app")], () => false), /not a submodule of its project app/);
   // deep's nearest enclosing project is lib, not app.
   assert.throws(() => check([step("d", [], "deep"), bump("bump-deep", "deep", ["d"], "app")]), /not a submodule of its project app/);
   const ok = check([
