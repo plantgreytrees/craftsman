@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
-import { shellSegments } from "./lib/shell-words.mjs";
+import { destructiveGit } from "./lib/force-block.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 
@@ -25,60 +25,6 @@ const command = typeof toolInput.command === "string" ? toolInput.command : "";
 function mutatesGit(value) {
   const command = value.replace(/\r?\n/g, ";");
   return /(?:^|[;&|]\s*)\s*git\s+(?:(?:-[A-Za-z]+\s+[^\s]+)\s+)*(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|(?:^|[;&|]\s*)\s*git\s+branch\s+-[dD]\b|(?:^|[;&|]\s*)\s*git\s+worktree\s+(?:remove|move|prune)\b/.test(command);
-}
-
-// Each `git …` in a compound command, as its words after the global options,
-// read three ways — quote-aware, plain split, bash's own words; any may block.
-function gitInvocations(value) {
-  const invocations = [];
-  const segments = [""];
-  for (const piece of value.match(/"[^"]*"|'[^']*'|&&|\|\||[;|&\n()`]|[^"';|&\n()`]+|["']/g) || []) {
-    if (/^(?:&&|\|\||[;|&\n()`])$/.test(piece)) segments.push("");
-    else segments[segments.length - 1] += piece;
-  }
-  segments.push(...value.split(/&&|\|\||[;|&\n()`]/));
-  const lists = segments.map((segment) => (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean));
-  for (const words of [...lists, ...shellSegments(value)]) {
-    const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
-    if (at < 0) continue;
-    let i = at + 1;
-    while (i < words.length && words[i].startsWith("-")) i += /^-[Cc]$|^--(?:git-dir|work-tree|namespace)$/.test(words[i]) ? 2 : 1;
-    invocations.push(words.slice(i));
-  }
-  return invocations;
-}
-
-const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z]*${letter}[A-Za-z]*$`).test(word);
-
-const MESSAGE_OPERAND = /\bgit\b[^;&|\n]*\s(?:commit|tag)\b[^;&|\n]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
-
-// The destructive git forms /auto must never run (ARCH-LAND-05), or null.
-// Every quoted string is checked as a command (`bash -c`, `python3 -c`, …)
-// except a commit/tag message operand without $( ) or a backtick. Alias
-// definitions are checked as what they define, and an alias call as its
-// resolved words plus call-site flags.
-function destructiveGit(value) {
-  for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
-    const inner = quoted[1] ?? quoted[2];
-    if (MESSAGE_OPERAND.test(value.slice(0, quoted.index)) && !/\$\(|`/.test(inner)) continue;
-    const found = destructiveGit(inner);
-    if (found) return found;
-  }
-  const aliases = new Map();
-  for (const alias of value.matchAll(/\balias\.([\w.-]+)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
-    const defined = (alias[2] ?? alias[3] ?? alias[4]).replace(/^!\s*/, "");
-    aliases.set(alias[1], defined.replace(/^git\s+/, "").split(/\s+/).filter(Boolean));
-    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`);
-    if (found) return found;
-  }
-  for (let words of gitInvocations(value)) {
-    for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++) words = [...aliases.get(words[0]), ...words.slice(1)];
-    const [sub, ...rest] = words;
-    if (sub === "push" && rest.some((w) => /^--force(?:-with-lease|-if-includes)?(?:=|$)/.test(w) || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
-    if (sub === "reset" && rest.includes("--hard")) return "git reset --hard";
-    if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === "--force" || shortFlag(w, "f"))) return "git worktree remove --force";
-  }
-  return null;
 }
 
 function commandDirectoryTargets(command, worktree) {

@@ -363,6 +363,23 @@ const DESTRUCTIVE = [
   "git push --receive-pack=\\\"x -f origin main --receive-pack=x\\\"",
   "git -c a.b=\\\"x worktree remove --force ../w #\\\"",
   "git push {-f,origin} main",
+  // Redirections, a second git word, option prefixes, git-<sub>, $'\u'/$"", braces (R7).
+  "git push -f>/dev/null origin main",
+  "git reset --hard>/dev/null",
+  "git reset --hard</dev/null",
+  "git worktree remove --force>/dev/null ../w",
+  "git push origin main -f2>/dev/null",
+  "exec -a git git reset --hard",
+  "git reset --har",
+  "git push --force-with o HEAD:main",
+  "git worktree remove --forc ../wt",
+  "/usr/lib/git-core/git-push -f o HEAD:main",
+  "git reset $'\\u002d\\u002dhard'",
+  "git reset $\"--hard\"",
+  "git reset {--hard,--hard}{,}",
+  "git reset {{--hard,--hard},--hard}",
+  "git reset --har{d..d}",
+  "git --attr-source HEAD push -f origin main",
   // Blocked by design: a separator then a destructive phrase in a message (14.1).
   "git commit -m \"fix; git push -f is banned\"",
 ];
