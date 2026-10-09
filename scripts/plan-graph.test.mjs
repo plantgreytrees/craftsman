@@ -26,12 +26,12 @@ test("validateSteps: keeps project as an explicit repository boundary", () => {
 // ARCH-LAND-02/03: each repo lands in plan-graph order, and a submodule
 // pointer bump is its own parent unit after the sub-repo lands.
 test("orderSteps: sub-repo unit, then the parent's pointer bump, then the consumer", () => {
-  const workspace = { projects: { lib: { path: "vendor/lib" }, app: { path: "." } } };
+  const workspace = { projects: { lib: { id: "lib", root: "/w/app/vendor/lib" }, app: { id: "app", root: "/w/app" } } };
   const steps = validateSteps([
     step("consumer", ["bump-lib"], "app"),
-    step("bump-lib", ["lib-change"], "app"),
+    { ...step("bump-lib", ["lib-change"], "app"), bumps: "lib" },
     step("lib-change", [], "lib"),
-  ], { workspace });
+  ], { workspace, isGitlink: () => true });
   assert.deepEqual(orderSteps(steps).map(({ id, project }) => `${project}:${id}`), ["lib:lib-change", "app:bump-lib", "app:consumer"]);
   assert.throws(() => validateSteps([step("x", [], "unregistered")], { workspace }), /unknown workspace project/, "only registered projects are touched (LAND-04)");
 });

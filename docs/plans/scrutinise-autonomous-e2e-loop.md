@@ -277,7 +277,7 @@ units:
     scope:
       read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/core.mjs, scripts/auto-command.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/plans/autonomous-e2e-loop-evidence.md]
       docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md]
-      write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-ENGINE-02]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
 ---
@@ -427,6 +427,18 @@ A fresh check of all 42 rules found 39 HOLD, none VIOLATED. ARCH-ENGINE-01 is su
 - [ ] 20.2 `commands/merge.md` §5a and `plan-template.md` name the `bumps` field and say `plan-graph.mjs` refuses a plan without the bump unit; `auto-command.test.mjs` phrases still match. → accept: full suite exit 0.
 - [ ] 20.3 LAND-03 cites the new check; ENGINE-02 cites the spike evidence (`docs/plans/autonomous-e2e-loop-evidence.md`). → accept: `arch-check lint` PASS.
 - [ ] 20.4 One CHANGELOG clause on the existing `/craftsman:auto` entry; full suite exit 0.
+
+## Round 13 — `/scrutinise` of `8e9f06d..fd258d0`
+One isolated scrutineer: 0 Critical, 2 Warning, 2 Suggestion; the criterion is MET; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
+- R13-W1 [Correctness] `plan-submodules.mjs:8-20` treats any registered project nested in another's root as a submodule. A nested independent clone, or every project when one is rooted at the workspace root (`workspace-init.mjs:46` allows that), would be refused without a bump it cannot make. ARCH-LAND-04 says submodules are those git reports.
+- R13-W2 [Cross-unit] `commands/orchestrate.md:29` lists the stdin fields as id, scope_id, project, depends_on and the old refusals only. An orchestrator following it drops `bumps`.
+- R13-S1 [Test-coverage] `plan-graph.test.mjs:28-36`'s LAND-02/03 test uses `path`, so it exercises no submodule and its bump step has no `bumps`.
+- R13-S2 [Correctness] A bump step's `project` must be the parent's registered id; "." is refused, and nothing says so.
+
+## Step 21 — land-submodule-bump, round 13 fixes (., JavaScript, normal)
+- [ ] 21.1 A nested pair counts as a submodule only when the parent's index holds a gitlink (mode 160000) at the child's relative path; the check is injectable (`isGitlink`) for tests (R13-W1). → accept: a nested project with no gitlink, and a project rooted at the workspace root, need no bump; a real `git init` parent with a gitlink child is detected.
+- [ ] 21.2 `commands/orchestrate.md:29` names `bumps` and the bump refusals (R13-W2), within its size budget.
+- [ ] 21.3 `plan-graph.test.mjs`'s LAND-02/03 test uses `root` and `bumps` (R13-S1); `plan-template.md` says the bump's `project` is the parent's registered id (R13-S2). → accept: full suite exit 0; lint PASS.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.

@@ -1,11 +1,23 @@
 // ARCH-LAND-03: a submodule's pointer bump is an explicit step in its parent
 // (`bumps: "<submodule>"`) that lands after every step in the submodule.
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
-// A registered project whose root sits inside another registered project's
-// root is a submodule of the nearest enclosing one (ARCH-LAND-04: only
-// registered projects, never a directory scan).
-export function submoduleParents(workspace) {
+// True when the parent repo's index records a gitlink (mode 160000) at the
+// child's path: what `git submodule status` reports, read from a registered
+// root only (ARCH-LAND-04).
+export function gitlinkAt(parentRoot, childRoot) {
+  const rel = path.relative(parentRoot, childRoot).split(path.sep).join("/");
+  try {
+    const out = execFileSync("git", ["-C", parentRoot, "ls-files", "-s", "--", rel], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return out.split("\n").some((line) => line.startsWith("160000 ") && line.endsWith(`\t${rel}`));
+  } catch { return false; }
+}
+
+// A registered project is a submodule of the nearest registered project whose
+// root encloses it, when that parent holds a gitlink to it. A nested
+// independent clone, or a project rooted at the workspace root, is not.
+export function submoduleParents(workspace, isGitlink = gitlinkAt) {
   const entries = Object.entries(workspace?.projects || {}).filter(([, project]) => typeof project?.root === "string");
   const parents = new Map();
   for (const [id, { root }] of entries) {
@@ -14,7 +26,7 @@ export function submoduleParents(workspace) {
       if (other === id || !root.startsWith(outer + path.sep)) continue;
       if (!parent || outer.length > parent.root.length) parent = { id: other, root: outer };
     }
-    if (parent) parents.set(id, parent.id);
+    if (parent && isGitlink(parent.root, root)) parents.set(id, parent.id);
   }
   return parents;
 }
@@ -33,8 +45,8 @@ function dependsOn(byId, from, target) {
 }
 
 // Steps are already validated (ids unique, dependencies known).
-export function checkSubmoduleBumps(steps, workspace) {
-  const parents = submoduleParents(workspace);
+export function checkSubmoduleBumps(steps, workspace, { isGitlink } = {}) {
+  const parents = submoduleParents(workspace, isGitlink);
   const byId = new Map(steps.map((step) => [step.id, step]));
   for (const step of steps) {
     if (step.bumps === undefined) continue;

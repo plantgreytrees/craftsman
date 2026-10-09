@@ -3,7 +3,7 @@
 import { loadWorkspaceManifest } from "./lib/core.mjs";
 import { checkSubmoduleBumps } from "./lib/plan-submodules.mjs";
 
-export function validateSteps(steps, { workspace = loadWorkspaceManifest() } = {}) {
+export function validateSteps(steps, { workspace = loadWorkspaceManifest(), isGitlink } = {}) {
   if (!Array.isArray(steps) || !steps.length) throw new Error("plan must contain at least one step");
   const ids = new Set();
   for (const step of steps) {
@@ -29,7 +29,7 @@ export function validateSteps(steps, { workspace = loadWorkspaceManifest() } = {
       if (dependency === step.id) throw new Error(`scope step ${step.id} cannot depend on itself`);
     }
   }
-  if (workspace) checkSubmoduleBumps(steps, workspace); // ARCH-LAND-03
+  if (workspace) checkSubmoduleBumps(steps, workspace, { isGitlink }); // ARCH-LAND-03
   return steps;
 }
 
