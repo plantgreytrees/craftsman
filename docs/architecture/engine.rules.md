@@ -3,7 +3,7 @@ area: engine
 governs: ["workflows/**", "agents/unit-runner.md", "commands/_shared-execution.md", "craftsman.config.json", "scripts/wiring.test.mjs"]
 human: docs/architecture/engine.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: 256913f42d004100f55ed7bc1115c151b8d9466f
+verified_at: 5fab1545491bae481c79541a12e4e22bb9f6b2fb
 updated: 2026-10-09
 ---
 # ARCH engine — enforced rules
