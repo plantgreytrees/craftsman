@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -98,6 +98,45 @@ units:
       write: [scripts/lib/core.mjs, scripts/lib/core.test.mjs]
     arch: [ARCH-STATE-01, ARCH-STATE-02]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: land-holder
+    scope_id: land-holder
+    project: .
+    depends_on: [land-linked-worktree]
+    module: repo-exec lands in the base holder
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+      docs: [docs/architecture/landing.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+    arch: [ARCH-LAND-02, ARCH-LAND-06]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: force-block-live
+    scope_id: force-block-live
+    project: .
+    depends_on: [core-hardening]
+    module: force block alias + Phase C liveness
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs]
+    arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: runner-block-trigger
+    scope_id: runner-block-trigger
+    project: .
+    depends_on: [engine-close]
+    module: unit-runner block trigger
+    language: Markdown (agent protocol)
+    security: normal
+    scope:
+      read: [agents/unit-runner.md]
+      docs: [docs/architecture/engine.rules.md]
+      write: [agents/unit-runner.md]
+    arch: [ARCH-ENGINE-04]
+    tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
 # Plan: scrutinise fixes for autonomous-e2e-loop
@@ -135,7 +174,28 @@ Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one i
 - [x] 6.2 `spendRunnerDispatch` retries the rename claim a few times before denying (S3). → accept: core.test — two sequential spends of a 2-count grant both succeed, a third is denied.
 - [x] 6.3 Full suite exit 0.
 
+## Round 2 — `/scrutinise` of `01e12a7..1779c2f`
+One isolated scrutineer: 0 Critical, 5 Warning (one Architecture), 6 Suggestion. Steps 7–9 fix every Warning and the folded Suggestions; ARCH-LAND-05 and ARCH-LAND-06 were judged VIOLATED, ARCH-ENGINE-04 violated in practice. The ARCH-LAND-06 finding is fixed in code, never by editing the rule.
+
+## Step 7 — land-holder (., JavaScript, high)
+- [ ] 7.1 `repo-exec` merge with base held by another worktree: with a remote and pushing, keep the detached temp-worktree landing; with no remote, or `push:false`, land by merging inside the holder checkout itself (pull `--ff-only` first when there is a remote and `pull` isn't false), exactly as the primary-root path does in its own checkout. Conflict → `merge --abort` in the holder, PARK `conflict`; ff-only failure → PARK `ff-only`; an in-progress merge in the holder or a dirty holder whose merge git refuses → throw, as a dirty root does. Delete the `base-checked-out` park reason so ARCH-LAND-06's four reasons stand (R2-A1, R2-W1). → accept: repo-exec.test — no-remote linked root lands into the holder's base (merged:true, base advanced, holder still on base); `push:false` with a remote lands locally into the holder with origin untouched; a holder conflict parks `conflict` with the holder clean.
+- [ ] 7.2 `landDetached` is only ever reached with a remote and a push, so it never reports `merged:true` for a discarded merge (R2-W1). → accept: covered by 7.1's `push:false` case.
+- [ ] 7.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes` (arch-check.test); full suite exit 0.
+
+## Step 8 — force-block-live (., JavaScript, high)
+- [ ] 8.1 `pre-guard` maps each `git -c alias.<name>=<value>` name to its value, and a subcommand matching a recorded alias is replaced by the alias's words before the destructive check, so `git -c alias.p=push p --force`, `p -f`, `p +HEAD:main` and `alias.p=reset p --hard` are blocked (R2-W2). → accept: the four forms join `DESTRUCTIVE` in pre-guard.test.
+- [ ] 8.2 A quoted string is checked as its own command only as the argument of `sh|bash|zsh -c` or `eval`; `git commit -m "… git reset --hard …"` is allowed (suggestion). → accept: pre-guard.test allows two commit messages naming destructive forms; `bash -c '…'` forms stay blocked.
+- [ ] 8.3 `core.mjs` adds `autoForceBlock(sid, context, now)`: live while the marker is under 24 h and its plan has no ledger rows yet or any row not MERGED/COMPLETE (so PARKED/BLOCKED rows awaiting Phase C keep it on); `pre-guard` uses it, runner grants keep `autoActive` (R2-W3). → accept: core.test and pre-guard.test — an all-PARKED plan keeps the force block and denies runner grants; a no-rows plan keeps both live; an all-MERGED plan lapses both.
+- [ ] 8.4 `planStatuses` compares plan slugs through `planSlugOf`, so a bare-slug ledger row counts; `RUNNER_DISPATCHES_PER_UNIT` = 8 (implement + 3 reviews + 2 fix rounds + land + park/block) with its comment (suggestions). → accept: core.test bare-slug row case; agent-mode-guard.test still passes.
+- [ ] 8.5 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
+
+## Step 9 — runner-block-trigger (., Markdown, normal)
+- [ ] 9.1 `agents/unit-runner.md` states that any `BLOCKED` return from implement, review or land → root runs `block`, so the subagent engine closes a blocked unit as the workflow engine does (R2-W4, ARCH-ENGINE-04); stays ≤3,800 chars. → accept: doc-size policy passes; a unit-runner.md test (or wiring test) asserts the trigger line.
+- [ ] 9.2 Full suite exit 0.
+
 ## Not driven (recorded)
+- **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
+- Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.
 - `core.test.mjs:400`'s no-cwd check is a floor, not proof, for ARCH-STATE-06.
