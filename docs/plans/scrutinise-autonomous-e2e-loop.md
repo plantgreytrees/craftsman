@@ -131,9 +131,9 @@ Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one i
 - [x] 5.3 Full suite exit 0.
 
 ## Step 6 — core-hardening (., JavaScript, high)
-- [ ] 6.1 Root pin: `lstatSync` and reject anything but a regular file owned by the current uid; check the `craftsman-roots` directory's uid and that it is not group/world-writable before reading or writing (S2). → accept: core.test — a symlinked pin entry and a foreign-mode directory are both ignored.
-- [ ] 6.2 `spendRunnerDispatch` retries the rename claim a few times before denying (S3). → accept: core.test — two sequential spends of a 2-count grant both succeed, a third is denied.
-- [ ] 6.3 Full suite exit 0.
+- [x] 6.1 Root pin: `lstatSync` and reject anything but a regular file owned by the current uid; check the `craftsman-roots` directory's uid and that it is not group/world-writable before reading or writing (S2). → accept: core.test — a symlinked pin entry and a foreign-mode directory are both ignored.
+- [x] 6.2 `spendRunnerDispatch` retries the rename claim a few times before denying (S3). → accept: core.test — two sequential spends of a 2-count grant both succeed, a third is denied.
+- [x] 6.3 Full suite exit 0.
 
 ## Not driven (recorded)
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.

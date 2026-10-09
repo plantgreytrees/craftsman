@@ -15,24 +15,9 @@ export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // -------------------------------------------------------------- git root ---
-// Every hook/command runs with cwd wherever the harness or the model's last
-// `cd` left it — NOT reliably the repo root. All craftsman state, config
-// resolution and check invocations anchor to the actual project root instead,
-// so a session opened one directory up (or a Bash tool mid-`cd`) can't split
-// state across two ".craftsman/" directories or silently mis-detect the stack.
-//
-// Trusting `git rev-parse --show-toplevel` from bare process.cwd() is not
-// enough on its own: a Bash call earlier in the session may have `cd`'d into
-// an entirely unrelated git checkout (e.g. exploring a plugin's own cached
-// repo) and never `cd`'d back before this hook fired. That still resolves to
-// a real, valid git root — just the wrong one — so every downstream check
-// (including the worktree sweep in stop-gate.mjs) ends up reasoning about a
-// stranger repo's branches and worktrees. CLAUDE_PROJECT_DIR is the harness's
-// own declaration of which project this session belongs to, so cwd-based
-// detection is only trusted when it lands at or inside that project dir (or
-// the project dir sits inside it, covering a session opened one level up).
-//
-// So the root never depends on cwd (ARCH-STATE-01): a hook always has
+// cwd is wherever the last `cd` left it — possibly another repo entirely — so
+// state, config and checks anchor to the project root, never cwd
+// (ARCH-STATE-01): a hook always has
 // CLAUDE_PROJECT_DIR, and its git toplevel is the root. A Bash-run script has
 // no CLAUDE_PROJECT_DIR, so SessionStart pins the root per session
 // (CLAUDE_CODE_SESSION_ID) and the script reads the pin. The pin is honoured
@@ -58,11 +43,21 @@ const pinSid = (sid) => String(sid).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64)
 export function rootPinPath(sid, tmp = os.tmpdir()) {
   return path.join(tmp, "craftsman-roots", pinSid(sid));
 }
+// The pins sit in the shared temp dir: trust a pin, and the craftsman-roots
+// dir holding it, only when it is the real thing (lstat — no symlink), this
+// user owns it, and neither group nor others can write it.
+function ownedPrivate(p, kind) {
+  const st = fs.lstatSync(p);
+  if (kind === "dir" ? !st.isDirectory() : !st.isFile()) return false;
+  if (typeof process.getuid !== "function") return true;
+  return st.uid === process.getuid() && (st.mode & 0o022) === 0;
+}
 export function writeRootPin(sid, root, tmp = os.tmpdir()) {
   if (!sid || sid === "shared") return null;
   const file = rootPinPath(sid, tmp);
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    if (!ownedPrivate(path.dirname(file), "dir")) return null;
     // Write-then-rename replaces a planted symlink rather than following it.
     const tmpFile = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmpFile, path.resolve(root) + "\n", { flag: "wx", mode: 0o600 });
@@ -83,10 +78,8 @@ export function resolveProjectRoot({ env = process.env, cwd = process.cwd(), tmp
   if (env.CLAUDE_CODE_SESSION_ID) {
     let pinned = null;
     try {
-      // The pin sits in the shared temp dir: trust only one this user wrote.
       const file = rootPinPath(env.CLAUDE_CODE_SESSION_ID, tmp);
-      const owner = fs.statSync(file).uid;
-      if (typeof process.getuid !== "function" || owner === process.getuid()) pinned = fs.readFileSync(file, "utf8").trim();
+      if (ownedPrivate(path.dirname(file), "dir") && ownedPrivate(file, "file")) pinned = fs.readFileSync(file, "utf8").trim();
     } catch {}
     if (pinned && fs.existsSync(pinned)) {
       const here = gitCommonDir(cwd);
@@ -167,11 +160,8 @@ export function isGitRoot(root) {
 }
 
 // The main checkout that owns `root`, even when `root` is a linked worktree.
-// Shared, cross-session state (the tracker ledger and its TRACKER.md view)
-// lives here: written inside a worktree it is invisible to every other
-// session until a merge, and each worktree's copy drifts. The first entry of
-// `git worktree list` is always the main working tree; a bare main repo, or
-// a root that isn't a git checkout at all, keeps `root` itself.
+// Cross-session state (the tracker ledger, TRACKER.md) lives here, not in a
+// worktree copy that drifts. A bare repo or non-git root keeps `root`.
 const mainRoots = new Map();
 export function mainCheckoutRoot(root = PROJECT_ROOT) {
   const key = path.resolve(root);
@@ -218,9 +208,8 @@ export function sessionDir(sid, context = null) {
 // Isolated fresh-context agents: one command invocation grants exactly one
 // dispatch of its named agent, even under root-only agent mode — /scrutinise →
 // `scrutineer`, /idea → `idea-critic`, /architect --deep → `architect-analyst`.
-// Granted by orchestrate-scope-guard.mjs when the command is invoked, spent by
-// agent-mode-guard.mjs when the dispatch happens. Spending is a rename, which
-// only one caller can win, so two parallel dispatches can't both slip through.
+// orchestrate-scope-guard grants it, agent-mode-guard spends it by a rename
+// only one caller can win.
 export const GRANTED_AGENTS = ["scrutineer", "idea-critic", "architect-analyst"];
 // Writer and spender compute the path from (sid, project id) on the pinned
 // root alone — never from the caller's cwd or a sub-project's own state dir
@@ -259,10 +248,25 @@ export function grantRunnerDispatches(count, sid, context = null) {
   } catch {}
   return grant;
 }
+// While another spender holds the grant (its `.spent-` file exists) the
+// rename misses for a moment, so it is retried briefly before denying; with
+// no holder, a missing grant denies at once.
+const SPEND_RETRIES = 20;
+const SPEND_RETRY_MS = 10;
+function grantHeld(grant) {
+  const prefix = `${path.basename(grant)}.spent-`;
+  try { return fs.readdirSync(path.dirname(grant)).some((f) => f.startsWith(prefix)); } catch { return false; }
+}
 export function spendRunnerDispatch(sid, context = null) {
   const grant = agentGrantFile("runner", sid, context);
   const held = `${grant}.spent-${process.pid}-${Date.now()}`;
-  try { fs.renameSync(grant, held); } catch { return false; }
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(grant, held); break; }
+    catch {
+      if (attempt >= SPEND_RETRIES || !grantHeld(grant)) return false;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, SPEND_RETRY_MS);
+    }
+  }
   let left = 0;
   try { left = Number.parseInt(fs.readFileSync(held, "utf8"), 10) || 0; } catch {}
   try {
@@ -362,15 +366,9 @@ export function clearWorktreeBinding(input, context = null) {
   try { fs.unlinkSync(worktreeBindingPath(input, context)); } catch {}
 }
 
-// Session-owned worktree ledger. The binding above is released before the
-// locked merge, so by Stop time it can no longer answer "did THIS session
-// create that worktree?" — and the Stop sweep must never police a worktree
-// belonging to a concurrent session or to the human. repo-exec.mjs records
-// every worktree it prepares for a session here and forgets it on cleanup;
-// the sweep consults this list and ignores everything else. Best-effort by
-// design: a ledger write must never fail a worktree lifecycle step, and a
-// missing ledger simply means "this session owns nothing" — i.e. it fails
-// open, never into a spurious block.
+// Session-owned worktree ledger: repo-exec records each worktree it prepares
+// and forgets it on cleanup; the Stop sweep touches only these, never another
+// session's or the human's. Best-effort — a missing ledger means "owns nothing".
 export function sessionWorktreeLedgerPath(input, context = null) {
   const selected = context || (input?.project ? projectContext(input.project) : null);
   return path.join(sharedStateDir(selected), "sessions", sidOf(input), "worktrees.json");
@@ -401,11 +399,8 @@ export function forgetSessionWorktree(input, worktree, context = null) {
 
 // Acceptance criteria (.craftsman/acceptance.md). A session "owns" the file
 // when its recorded identity matches — the Stop gate then enforces it. The
-// identity covers the criteria, NOT their tick state: hashing the raw content
-// meant ticking a box by any path the PostToolUse hook doesn't see (sed, a
-// script) silently dropped ownership, and the gate went quiet exactly when an
-// agent was claiming to be done. A concurrent session rewriting the criteria
-// still changes the identity, which is what ownership exists to detect.
+// identity covers the criteria, not their tick state, so a tick by sed keeps
+// ownership while a concurrent rewrite of the criteria still changes it.
 const ACCEPTANCE_LINE = /^(\s*[-*]\s*)\[([ xX])\]/;
 export function acceptancePath(context = null) {
   return path.join((context || projectContext(".")).stateDir, "acceptance.md");
@@ -542,12 +537,8 @@ export function detectLang(file, cfg, context = null) {
 }
 
 // ------------------------------------------------------------ repo markers ---
-// Cached whole-repo tracked-plus-untracked-not-ignored file listing, used both
-// for stack-marker presence (any depth — a .csproj two directories down, a
-// go.mod in a monorepo service) and available to any caller that needs the
-// set. `--others --exclude-standard` adds files on disk but not yet
-// staged/committed (a freshly scaffolded package.json/go.mod), while still
-// respecting .gitignore.
+// Cached tracked-plus-untracked-not-ignored file listing, for stack markers
+// at any depth (a nested .csproj, a fresh go.mod) and any caller needing it.
 const _gitFiles = new Map();
 // `{ fresh: true }` forces a recompute (tests exercising freshly-changed
 // on-disk state within one process); every real caller uses the default,

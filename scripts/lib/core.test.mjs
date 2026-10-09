@@ -8,13 +8,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   globToRe, deepMerge, normLine, tokenize, splitCmd, filterAttributed, extractSig,
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
   renderKnownIssuesDoc, gitTrackedFiles, pruneSessions, recordFailure, topRules,
-  writeRootPin, rootPinPath,
+  writeRootPin, rootPinPath, resolveProjectRoot, agentGrantFile, grantRunnerDispatches, spendRunnerDispatch,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -411,6 +411,58 @@ test("PROJECT_ROOT: a Bash-run script with no CLAUDE_PROJECT_DIR follows the ses
     fs.rmSync(base, { recursive: true, force: true });
     fs.rmSync(rootPinPath(sid), { force: true });
   }
+});
+
+test("PROJECT_ROOT: a symlinked pin or a group/world-writable craftsman-roots dir is ignored", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-pin-trust-")));
+  const tmp = path.join(base, "tmp");
+  const sid = "pin-trust";
+  const resolve = () => resolveProjectRoot({ env: { CLAUDE_CODE_SESSION_ID: sid }, cwd: base, tmp });
+  try {
+    const repo = path.join(base, "repo");
+    fs.mkdirSync(repo);
+    initRepo(repo);
+    assert.equal(writeRootPin(sid, repo, tmp), rootPinPath(sid, tmp));
+    assert.deepEqual(resolve(), { root: repo, source: "session-pin" }, "control: a private pin is trusted");
+
+    const planted = path.join(base, "planted");
+    fs.writeFileSync(planted, `${repo}\n`);
+    fs.rmSync(rootPinPath(sid, tmp));
+    fs.symlinkSync(planted, rootPinPath(sid, tmp));
+    assert.equal(resolve().source, "cwd", "a symlinked pin is not followed");
+
+    fs.rmSync(rootPinPath(sid, tmp));
+    assert.ok(writeRootPin(sid, repo, tmp));
+    fs.chmodSync(path.dirname(rootPinPath(sid, tmp)), 0o777);
+    assert.equal(resolve().source, "cwd", "a world-writable roots dir is not trusted");
+    assert.equal(writeRootPin(sid, repo, tmp), null, "nor written into");
+    fs.chmodSync(path.dirname(rootPinPath(sid, tmp)), 0o770);
+    assert.equal(resolve().source, "cwd", "nor a group-writable one");
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test("spendRunnerDispatch: a 2-count grant spends twice then denies, and waits out a concurrent holder", async () => {
+  const sid = `spend-retry-${process.pid}`;
+  const grant = agentGrantFile("runner", sid);
+  try {
+    grantRunnerDispatches(2, sid);
+    assert.deepEqual([spendRunnerDispatch(sid), spendRunnerDispatch(sid), spendRunnerDispatch(sid)], [true, true, false]);
+
+    // Another spender holds the grant (renamed to its .spent- file) for 50ms.
+    grantRunnerDispatches(1, sid);
+    const holder = spawn(process.execPath, ["-e", `
+      const fs = require("node:fs");
+      const [grant, held] = [${JSON.stringify(grant)}, ${JSON.stringify(`${grant}.spent-holder`)}];
+      fs.renameSync(grant, held);
+      process.stdout.write("held\\n");
+      setTimeout(() => fs.renameSync(held, grant), 50);
+    `], { stdio: ["ignore", "pipe", "inherit"] });
+    await new Promise((resolve) => holder.stdout.once("data", resolve));
+    const exited = new Promise((resolve) => holder.once("exit", resolve));
+    assert.equal(spendRunnerDispatch(sid), true, "the spend waits for the holder rather than denying");
+    await exited;
+    assert.equal(spendRunnerDispatch(sid), false, "and took the only dispatch");
+  } finally { fs.rmSync(path.dirname(grant), { recursive: true, force: true }); }
 });
 
 test("PROJECT_ROOT: a non-git CLAUDE_PROJECT_DIR is off without a workspace manifest, on with one", () => {
