@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words, force-block-forms, force-block-closed, force-block-bounded, verify-bypass-bounded, land-submodule-bump]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words, force-block-forms, force-block-closed, force-block-bounded, verify-bypass-bounded, land-submodule-bump, land-submodule-bump-changelog]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -275,10 +275,23 @@ units:
     language: JavaScript (Node ESM, node:test)
     security: normal
     scope:
-      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/auto-command.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, scripts/auto-command.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, docs/plans/autonomous-e2e-loop-evidence.md]
       docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md]
-      write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-ENGINE-02, ARCH-ENGINE-08]
+    tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
+  - id: land-submodule-bump-changelog
+    scope_id: land-submodule-bump-changelog
+    project: .
+    depends_on: [land-submodule-bump]
+    module: CHANGELOG clause for the submodule bump check
+    language: Markdown
+    security: normal
+    scope:
+      read: [CHANGELOG.md]
+      docs: []
+      write: [CHANGELOG.md]
+    arch: []
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
@@ -426,7 +439,7 @@ A fresh check of all 42 rules found 39 HOLD, none VIOLATED. ARCH-ENGINE-01 is su
 - [ ] 20.1 `plan-graph.mjs` `validateSteps` (through `scripts/lib/plan-submodules.mjs`, keeping `plan-graph.mjs` inside the `auto-command` step budget) treats a registered project whose `root` lies inside another registered project's root as a submodule of the nearest enclosing one. A step may declare `bumps: "<submodule id>"`. It refuses: a `bumps` naming a project that is not a submodule of the step's own project; a plan with steps in a submodule but no bump step in its parent; and a bump step that does not depend, directly or transitively, on every step of that submodule. With no workspace manifest it checks nothing new (ARCH-LAND-03, LAND-04). → accept: `scripts/lib/plan-submodules.test.mjs` cases for each refusal fail on the pre-change code; the valid sub → bump → consumer order passes.
 - [ ] 20.2 `commands/merge.md` §5a and `plan-template.md` name the `bumps` field and say `plan-graph.mjs` refuses a plan without the bump unit; `auto-command.test.mjs` phrases still match. → accept: full suite exit 0.
 - [ ] 20.3 LAND-03 cites the new check; ENGINE-02 cites the spike evidence (`docs/plans/autonomous-e2e-loop-evidence.md`). → accept: `arch-check lint` PASS.
-- [ ] 20.4 One CHANGELOG clause on the existing `/craftsman:auto` entry; full suite exit 0.
+- [ ] 20.4 Moved to Step 26 (R18-W1).
 
 ## Round 13 — `/scrutinise` of `8e9f06d..fd258d0`
 One isolated scrutineer: 0 Critical, 2 Warning, 2 Suggestion; the criterion is MET; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
@@ -474,6 +487,14 @@ One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is U
 ## Step 25 — land-submodule-bump, round 17 fixes (., JavaScript, normal)
 - [ ] 25.1 `bumps` is refused unless it names a known submodule (`parents.has`) of the step's project (R17-W1, S4). → accept: projectless and `.` bump cases fail on `cfd10b2`; full suite exit 0.
 - [ ] 25.2 `read` lists `commands/orchestrate.md` and `CHANGELOG.md` again; the LAND-03 note is marked superseded (R17-S2, S3). → accept: `arch-check.mjs scope` PASS.
+
+## Round 18 — `/scrutinise` of `8e9f06d..d04d44f`
+One isolated scrutineer: 0 Critical, 1 Warning, 1 Suggestion (R15-S3 restated); the criterion is MET (4 of 4 refusal tests fail on `8e9f06d`); LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
+- R18-W1 [Architecture] the `land-submodule-bump` manifest fit `execution.unitContextBytes` only by leaving its own `plan-submodules` files out of `read`; with them it was 132,619 bytes, because `CHANGELOG.md` alone is 61 KB (ARCH-ENGINE-08).
+
+## Step 26 — land-submodule-bump-changelog (., Markdown, normal)
+Depends on: land-submodule-bump
+- [ ] 26.1 One CHANGELOG clause on the existing `/craftsman:auto` entry (was 20.4; split out by R18-W1). `land-submodule-bump` reads both `plan-submodules` files and no longer reads or writes `CHANGELOG.md`. → accept: `arch-check.mjs scope` PASS for both manifests; full suite exit 0.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
