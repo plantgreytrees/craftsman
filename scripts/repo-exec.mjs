@@ -9,7 +9,7 @@ import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 
 function run(root, args, options = {}) {
   try {
-    return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: options.allowFailure ? ["ignore", "pipe", "pipe"] : undefined }).trim();
+    return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: options.allowFailure ? ["ignore", "pipe", "pipe"] : undefined, env: { ...process.env, LC_ALL: "C" } }).trim();
   } catch (error) {
     if (options.allowFailure) return "";
     throw error;
@@ -408,7 +408,7 @@ function cleanup(context, input, info) {
   if (branchDeleted && info.has_remote
     && run(context.root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { allowFailure: true })) {
     try {
-      execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", branch], { stdio: "ignore" });
+      execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", branch], { stdio: "ignore", env: { ...process.env, LC_ALL: "C" } });
       remoteBranchDeleted = true;
     } catch {}
   }

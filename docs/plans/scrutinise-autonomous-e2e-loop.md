@@ -269,8 +269,8 @@ One isolated scrutineer: 0 Critical, 1 Warning (Security), 3 Suggestion. ARCH-LA
 - [x] 12.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
 
 ## Step 13 — land-locale (., JavaScript, normal)
-- [ ] 13.1 `repo-exec` `run()` runs every git call with `LC_ALL=C`, so the untracked-refusal match (and every parsed git output) holds under a localised git (R4-S2). → accept: repo-exec.test runs the untracked-holder case with a non-C `LANG`/`LC_ALL` in `process.env` and it still throws.
-- [ ] 13.2 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
+- [x] 13.1 `repo-exec` `run()` runs every git call with `LC_ALL=C`, so the untracked-refusal match (and every parsed git output) holds under a localised git (R4-S2). → accept: repo-exec.test runs the untracked-holder case with a non-C `LANG`/`LC_ALL` in `process.env` and it still throws.
+- [x] 13.2 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.

@@ -550,6 +550,17 @@ test("repo-exec: a holder with untracked files in the way or a merge in progress
       assert.notEqual(spawnSync("git", ["-C", primary.root, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).status, 0);
       fs.rmSync(path.join(primary.root, "blocked.txt"));
 
+      // Under a translated git the refusal still throws: repo-exec pins LC_ALL=C.
+      const saved = { LC_ALL: process.env.LC_ALL, LANGUAGE: process.env.LANGUAGE };
+      Object.assign(process.env, { LC_ALL: "en_US.UTF-8", LANGUAGE: "de" });
+      fs.writeFileSync(path.join(primary.root, "blocked-de.txt"), "new\n");
+      try {
+        assert.throws(() => land("blocked-de"), (error) => /untracked working tree files would be overwritten/.test(`${error.stderr}${error.message}`));
+      } finally {
+        for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+      fs.rmSync(path.join(primary.root, "blocked-de.txt"));
+
       fs.writeFileSync(path.join(info.common_git_dir, "MERGE_HEAD"), `${before}\n`);
       assert.throws(() => land("mid-merge"), /merge in progress/);
       assert.equal(git(primary.root, ["rev-parse", base]), before);
