@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { worktreeBindingPath } from "./lib/core.mjs";
+import { forceBlocked } from "./lib/force-block.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const SCOPE = path.join(ROOT, "scope.mjs");
@@ -380,6 +381,17 @@ const DESTRUCTIVE = [
   "git reset {{--hard,--hard},--hard}",
   "git reset --har{d..d}",
   "git --attr-source HEAD push -f origin main",
+  // &> redirects, substitutions after a message, --mirror, a brace payload that crashed the guard (R8).
+  "git push &>/dev/null -f origin main",
+  "git reset &>/dev/null --hard",
+  "git reset &>>log --hard",
+  "git worktree remove &>/dev/null --force ../w",
+  "git commit --allow-empty -m x $(bash -cm 'git push -f origin main')",
+  "git commit --allow-empty -m x `bash -cm 'git reset --hard'`",
+  "git tag -m x v1 $(sh -cm 'git reset --hard')",
+  "git push --mirror origin",
+  "git push --mirr origin",
+  `echo ${'{"a,b"}'.repeat(6000)}; git push -f origin main`,
   // Blocked by design: a separator then a destructive phrase in a message (14.1).
   "git commit -m \"fix; git push -f is banned\"",
 ];
@@ -400,6 +412,12 @@ test("pre-guard: while /auto is active, force pushes, hard resets and forced wor
     }
     for (const command of ALLOWED) assert.equal(run(GUARD, dir, bash(sid, command)).status, 0, command);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a command the force block cannot read is blocked, not let through (fail closed)", () => {
+  assert.equal(forceBlocked("git status", () => { throw new RangeError("stack"); }), "a command the force block cannot read");
+  assert.equal(forceBlocked("git status"), null);
+  assert.equal(forceBlocked("git push -f origin main"), "git push --force");
 });
 
 test("pre-guard: the force block lapses once the /auto run is over (ARCH-LAND-05)", () => {

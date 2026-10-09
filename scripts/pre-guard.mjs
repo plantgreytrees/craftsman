@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
-import { destructiveGit } from "./lib/force-block.mjs";
+import { forceBlocked } from "./lib/force-block.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 
@@ -194,7 +194,7 @@ if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|pus
 // worktree removal are blocked; a plain `git push origin HEAD:main` is not.
 // orchestrate-scope-guard.mjs writes the marker at this same (sid) path.
 if (tool === "Bash" && autoForceBlock(sidOf(input))) {
-  const destructive = destructiveGit(command);
+  const destructive = forceBlocked(command);
   if (destructive) {
     logEvent({ ev: "auto_force_blocked", sid: sidOf(input), command });
     process.stderr.write(

@@ -23,15 +23,16 @@ function ansiC(body) {
   });
 }
 
+// A `{x..y}` range, ending in null when cut at MAX_WORDS.
 function sequence(from, to) {
   const numeric = /^-?\d+$/.test(from) && /^-?\d+$/.test(to);
   const [a, b] = numeric ? [Number(from), Number(to)] : [from.codePointAt(0), to.codePointAt(0)];
   const items = [];
-  for (let n = a; items.length < MAX_WORDS; n += a <= b ? 1 : -1) {
+  for (let n = a; ; n += a <= b ? 1 : -1) {
+    if (items.length === MAX_WORDS) return [...items, null];
     items.push(numeric ? String(n) : String.fromCodePoint(n));
-    if (n === b) break;
+    if (n === b) return items;
   }
-  return items;
 }
 
 // The first brace group that expands, split on its top-level commas or read as
@@ -47,7 +48,7 @@ function expandOnce(word) {
       const tail = word.slice(e + 1);
       if (commas.length) return [s, ...commas].map((from, n) => head + word.slice(from + 1, [...commas, e][n]) + tail);
       const range = /^(-?\d+|.)\.\.(-?\d+|.)(?:\.\.-?\d+)?$/s.exec(word.slice(s + 1, e));
-      if (range) return sequence(range[1], range[2]).map((item) => head + item + tail);
+      if (range) return sequence(range[1], range[2]).map((item) => (item === null ? UNEXPANDED : head + item + tail));
       break;
     }
   }
@@ -55,19 +56,20 @@ function expandOnce(word) {
 }
 
 // Every expansion of a word, in bash's order (word order decides which word a
-// guard reads as the subcommand), cut at MAX_WORDS with UNEXPANDED appended.
+// guard reads as the subcommand). Depth-first on an explicit stack, no
+// recursion; one budget covers emitted and pending words, and running out of
+// it appends UNEXPANDED.
 function braces(word) {
   const words = [];
-  let full = false;
-  const walk = (next) => {
-    if (words.length >= MAX_WORDS) full = true;
-    if (full) return;
-    const parts = expandOnce(next);
-    if (parts) parts.forEach(walk);
+  const pending = [word];
+  while (pending.length) {
+    if (words.length + pending.length > MAX_WORDS) return [...words, UNEXPANDED];
+    const next = pending.pop();
+    const parts = next === UNEXPANDED ? null : expandOnce(next);
+    if (parts) pending.push(...parts.reverse());
     else words.push(next);
-  };
-  walk(word);
-  return full ? [...words, UNEXPANDED] : words;
+  }
+  return words;
 }
 
 export function shellSegments(value) {
@@ -111,7 +113,7 @@ export function shellSegments(value) {
       i = j + 1;
     } else if (c === "#" && word === null) {
       while (i < value.length && value[i] !== "\n") i++;
-    } else if (c === "<" || c === ">") {
+    } else if (c === "<" || c === ">" || (c === "&" && value[i + 1] === ">")) {
       if (word !== null && /^\d+$/.test(word)) word = null;
       end();
       while (/[<>&|]/.test(value[i] ?? "")) i++;

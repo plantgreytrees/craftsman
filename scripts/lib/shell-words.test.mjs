@@ -40,7 +40,7 @@ test("shell-words: $( ) and backticks inside double quotes split as commands of 
 });
 
 test("shell-words: a redirection ends the word and drops its target, fd numbers included", () => {
-  assert.deepEqual(shellSegments("a -f>/dev/null b 2>&1 c <in d >>log e &>x f <<<s"), [["a", "-f", "b", "c", "d", "e"], ["f"]]);
+  assert.deepEqual(shellSegments("a -f>/dev/null b 2>&1 c <in d >>log e &>x f <<<s"), [["a", "-f", "b", "c", "d", "e", "f"]]);
   assert.deepEqual(shellSegments("cat <(r --hard)"), [["cat"], ["r", "--hard"]]);
 });
 
@@ -56,4 +56,19 @@ test("shell-words: braces expand until none remain, sequences included, capped b
   assert.deepEqual(shellSegments("r {a,b}{,c} {{x,y},z} h{d..e} {1..3}"), [["r", "a", "ac", "b", "bc", "x", "y", "z", "hd", "he", "1", "2", "3"]]);
   assert.deepEqual(shellSegments("g {,} {{push,o},-f} {a}"), [["g", "push", "o", "-f", "{a}"]]);
   assert.equal(shellSegments("r " + "{a,b}".repeat(12))[0].at(-1), UNEXPANDED);
+});
+
+test("shell-words: &> and &>> redirect, they do not end the command", () => {
+  assert.deepEqual(shellSegments("p &>/dev/null -f o; r &>>log --hard"), [["p", "-f", "o"], ["r", "--hard"]]);
+});
+
+test("shell-words: thousands of brace groups return the sentinel without exhausting the stack", () => {
+  const words = shellSegments("e " + '{"a,b"}'.repeat(6000))[0];
+  assert.equal(words.at(-1), UNEXPANDED);
+  assert.ok(words.length <= 258);
+});
+
+test("shell-words: a {x..y} sequence past the cap ends in the sentinel", () => {
+  assert.equal(shellSegments("r {1..300}")[0].at(-1), UNEXPANDED);
+  assert.equal(shellSegments("r {1..256}")[0].length, 257);
 });
