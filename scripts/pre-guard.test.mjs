@@ -357,6 +357,14 @@ const DESTRUCTIVE = [
   "git tag -m \"a\\\" -m \"\ngit push --force\necho \"b\" v1",
   "echo #git commit -m \"\ngit push -f origin main\n#\"",
   "true #git commit -m \"\ngit reset --hard\n#\"",
+  // Escaped quotes with no separator, brace expansion — bash's own words (R6).
+  "git --namespace=\\\"x reset --hard #\\\"",
+  "git --namespace=\\\"x push -f origin main #\\\"",
+  "git push --receive-pack=\\\"x -f origin main --receive-pack=x\\\"",
+  "git -c a.b=\\\"x worktree remove --force ../w #\\\"",
+  "git push {-f,origin} main",
+  // Blocked by design: a separator then a destructive phrase in a message (14.1).
+  "git commit -m \"fix; git push -f is banned\"",
 ];
 const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status",
   "git commit -m \"note: git reset --hard is banned\"", "git commit -m 'dont git push -f'", "git tag -m \"git push -f is banned\" v1"];

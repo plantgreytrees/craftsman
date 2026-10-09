@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
+import { shellSegments } from "./lib/shell-words.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 
@@ -26,10 +27,8 @@ function mutatesGit(value) {
   return /(?:^|[;&|]\s*)\s*git\s+(?:(?:-[A-Za-z]+\s+[^\s]+)\s+)*(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|(?:^|[;&|]\s*)\s*git\s+branch\s+-[dD]\b|(?:^|[;&|]\s*)\s*git\s+worktree\s+(?:remove|move|prune)\b/.test(command);
 }
 
-// Each `git …` in a compound command, as its words after the global options.
-// Unquoted `&`, subshells, $( ) and backticks split segments too; a quoted
-// word stays whole, unquoted, so `(git -C "/a;b" push -f)` reads like
-// `git push -f` (a quoted script is destructiveGit's to check).
+// Each `git …` in a compound command, as its words after the global options,
+// read three ways — quote-aware, plain split, bash's own words; any may block.
 function gitInvocations(value) {
   const invocations = [];
   const segments = [""];
@@ -37,10 +36,9 @@ function gitInvocations(value) {
     if (/^(?:&&|\|\||[;|&\n()`])$/.test(piece)) segments.push("");
     else segments[segments.length - 1] += piece;
   }
-  // `\"` and `#` can make shell-unquoted text read as quoted: split plainly too.
   segments.push(...value.split(/&&|\|\||[;|&\n()`]/));
-  for (const segment of segments) {
-    const words = (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean);
+  const lists = segments.map((segment) => (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean));
+  for (const words of [...lists, ...shellSegments(value)]) {
     const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
     if (at < 0) continue;
     let i = at + 1;
