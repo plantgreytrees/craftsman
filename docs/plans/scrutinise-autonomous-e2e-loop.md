@@ -110,9 +110,9 @@ Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one i
 - [x] 1.3 Full suite exit 0.
 
 ## Step 2 — scope-release (., JavaScript, high)
-- [ ] 2.1 `scope.mjs` `release` unlinks that worktree's `scopeFile` and `requiredFile` along with the binding (W3). → accept: scope.test — after release, neither file exists.
-- [ ] 2.2 `readScope` ignores a worktree scope whose `worktree_path` no longer exists, and `scopeRequired` ignores a marker naming a missing worktree. → accept: scope.test — two units activated, worktrees removed, a root-target read resolves to no unit scope (not `scope_ambiguous`).
-- [ ] 2.3 Full suite exit 0.
+- [x] 2.1 `scope.mjs` `release` unlinks that worktree's `scopeFile` and `requiredFile` along with the binding (W3). → accept: scope.test — after release, neither file exists.
+- [x] 2.2 `readScope` ignores a worktree scope whose `worktree_path` no longer exists, and `scopeRequired` ignores a marker naming a missing worktree. → accept: scope.test — two units activated, worktrees removed, a root-target read resolves to no unit scope (not `scope_ambiguous`).
+- [x] 2.3 Full suite exit 0.
 
 ## Step 3 — auto-marker (., JavaScript, high)
 - [ ] 3.1 `/auto` writes `auto-active` as JSON `{plan, at}`. One `core.mjs` helper `autoActive(sid, context)` says it is live only when it is younger than 24 h and that plan's ledger has a PENDING or IN_PROGRESS row; a legacy timestamp-only marker is not live (W4). `orchestrate-scope-guard` and `pre-guard` read it only through the helper. → accept: core.test cases for live, aged-out, plan-finished and legacy markers.

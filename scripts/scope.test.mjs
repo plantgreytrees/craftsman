@@ -82,6 +82,25 @@ test("scope: two worktrees hold two independent scopes in one session", () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test("scope: released and removed units leave no scope behind for root", () => {
+  const { root, trees: [a, b] } = repoWithWorktrees("unit-a", "unit-b");
+  const dir = path.join(root, ".craftsman", "sessions", "s3");
+  try {
+    for (const [tree, unit] of [[a, "unit-a"], [b, "unit-b"]]) {
+      assert.equal(hook("scope.mjs", tree, root, { action: "require", session_id: "s3", worktree_path: tree }).status, 0);
+      assert.equal(hook("scope.mjs", tree, root, manifest("s3", unit, [`${unit}.txt`], tree)).status, 0);
+    }
+    assert.equal(hook("scope.mjs", root, root, { action: "release", session_id: "s3", project: ".", worktree_path: a }).status, 0);
+    assert.deepEqual(fs.readdirSync(dir).filter((n) => n.startsWith("scope")).length, 1, "release unlinks unit-a's scope");
+    // unit-b's worktree disappears without a release (a sweep, a crash).
+    spawnSync("git", ["worktree", "remove", b], { cwd: root });
+    const read = { session_id: "s3", tool_name: "Read", tool_input: { file_path: path.join(root, "README.md") } };
+    const result = hook("pre-guard.mjs", root, root, read);
+    assert.equal(result.status, 0, `root is not held to a stale unit scope: ${result.stderr}`);
+    assert.doesNotMatch(result.stderr, /ambiguous|outside active unit scope/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("scope: a session with no worktree falls back to the session scope", () => {
   const { root } = repoWithWorktrees();
   try {

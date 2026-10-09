@@ -71,17 +71,21 @@ export function scopeRequired(input) {
   let names = [];
   try { names = fs.readdirSync(rootSessionDir(input)).filter((n) => /^scope-required(@[A-Za-z0-9_-]+)?-[0-9a-f]{16}$/.test(n)); } catch {}
   return names.some((name) => {
-    try { return inside(path.resolve(fs.readFileSync(path.join(rootSessionDir(input), name), "utf8").trim()), target); }
-    catch { return false; }
+    try {
+      const worktree = path.resolve(fs.readFileSync(path.join(rootSessionDir(input), name), "utf8").trim());
+      return fs.existsSync(worktree) && inside(worktree, target);
+    } catch { return false; }
   });
 }
 
+// A unit scope whose worktree is gone is stale: it must never be enforced on
+// root or make the remaining scopes ambiguous.
 export function readScope(input) {
   let scopes = [];
   try {
     scopes = fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).map((n) => {
       try { return JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), n), "utf8")); } catch { return null; }
-    }).filter(Boolean);
+    }).filter((scope) => scope && (!scope.worktree_path || fs.existsSync(scope.worktree_path)));
   } catch { return null; }
   if (input?.project) scopes = scopes.filter((scope) => (scope.project || ".") === input.project);
   if (!scopes.length) return null;
@@ -122,6 +126,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       try { binding = JSON.parse(fs.readFileSync(worktreeBindingPath(input, { ...selectedContext, worktreePath: input.worktree_path }), "utf8")); } catch {}
       if (binding && binding.session_id !== sidOf(input)) throw new Error("worktree is owned by another session");
       clearWorktreeBinding(input, selectedContext);
+      // The unit's scope and scope-required files go with its binding; the
+      // session's own scope (no worktree) is never released here.
+      if (input.worktree_path) {
+        for (const file of [scopeFile(input), requiredFile(input)]) {
+          try { fs.unlinkSync(file); } catch {}
+        }
+      }
       process.stdout.write(`worktree binding released for session ${sidOf(input)}\n`);
       process.exit(0);
     }
