@@ -24,7 +24,7 @@ function newestGoal(entries, since = 0, launched = {}) {
 // The newest scope file name in a session dir listing.
 function newestScope(entries) {
   const scopes = (Array.isArray(entries) ? entries : [])
-    .filter((f) => f && f.kind === "file" && /^scope(?:@[^-]+)?(?:-[0-9a-f]{16})?\.json$/.test(f.name))
+    .filter((f) => f && f.kind === "file" && /^scope(?:@[A-Za-z0-9_-]+?)?(?:-[0-9a-f]{16})?\.json$/.test(f.name))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   return scopes[0] ? scopes[0].name : null;
 }
@@ -91,8 +91,11 @@ export function register(on) {
     let goal = null;
     let launched = {};
     try {
-      launched = (await $.store.get(LAUNCHED)) || {};
-      goal = newestGoal(await $.fs.list(GOALS), (usage && usage.startedAt) || 0, launched);
+      // Without the session's start time no goal file can be shown to be new, so none launches.
+      if (usage && typeof usage.startedAt === "number" && usage.startedAt > 0) {
+        launched = (await $.store.get(LAUNCHED)) || {};
+        goal = newestGoal(await $.fs.list(GOALS), usage.startedAt, launched);
+      }
     } catch { /* no goal dir or no store: nothing to launch */ }
     if (goal) {
       await $.store.set(LAUNCHED, { ...launched, [goal.name]: goal.mtimeMs });

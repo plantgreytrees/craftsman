@@ -14,7 +14,7 @@ const engine = {
     const arg = (e) => (typeof e === "string" ? e : e && (e.path ?? e.key ?? e));
     on("turn.complete", ($, e) => { scenario = String(e.answer); return { text: "" }; });
     on("session.id", () => ({ value: "sid1" }));
-    on("session.usage", () => ({ value: { startedAt: 1000, context: { tokens: 5000, window: 200000, percent: 2.5 }, cost: { usd: 0.1 } } }));
+    on("session.usage", () => ({ value: { ...(scenario.includes("no-started-at") ? {} : { startedAt: 1000 }), context: { tokens: 5000, window: 200000, percent: 2.5 }, cost: { usd: 0.1 } } }));
     on("fs.list", ($, e) => {
       log.push({ list: e });
       const p = arg(e);
@@ -25,13 +25,16 @@ const engine = {
           { name: "x.goal.txt", kind: "file", size: 17, mtimeMs: 2000, isLink: false },
         ] };
       }
-      if (p.endsWith("/.craftsman/sessions/sid1")) return { value: [{ name: "scope.json", kind: "file", size: 2, mtimeMs: 1, isLink: false }] };
+      if (p.endsWith("/.craftsman/sessions/sid1")) {
+        const name = scenario.includes("named-scope") ? "scope@my-app-0123456789abcdef.json" : "scope.json";
+        return { value: [{ name, kind: "file", size: 2, mtimeMs: 1, isLink: false }] };
+      }
       return { value: [] };
     });
     on("fs.read", ($, e) => {
       log.push({ read: e });
       const p = arg(e);
-      if (p.endsWith("scope.json")) return { value: JSON.stringify({ plan: "docs/plans/p.md", unit: "u2" }) };
+      if (/\/sessions\/sid1\/scope[^/]*\.json$/.test(p)) return { value: JSON.stringify({ plan: "docs/plans/p.md", unit: "u2" }) };
       if (p.endsWith("tracker/events.jsonl")) {
         return { value: [{ plan: "docs/plans/p.md", unit: "u1", status: "MERGED" }, { plan: "docs/plans/p.md", unit: "u2", status: "IN_PROGRESS" }]
           .map((r) => JSON.stringify(r)).join("\n") };
@@ -91,6 +94,17 @@ describe("craftsman mod", () => {
   test("a goal file older than the session never launches", { plugins: [engine] }, async (t) => {
     const log = await turn(t, "no-goal-file");
     expect(log.some((l) => l.goal || l.submit)).toBe(false);
+  });
+
+  test("without the session's start time no goal file launches", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "no-started-at");
+    expect(log.some((l) => l.goal || l.submit)).toBe(false);
+    expect(log.filter((l) => l.status).pop().status.includes("x.goal.txt")).toBe(false);
+  });
+
+  test("a project-named scope file whose name holds a hyphen still drives the band", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "no-goal-file named-scope");
+    expect(log.filter((l) => l.status).pop().status).toBe("craftsman · p · u2 · tracker 50% · ctx 2.5%");
   });
 
   test("the band shows plan, unit, tracker % and context %; the sample goes to telemetry.mjs", { plugins: [engine] }, async (t) => {

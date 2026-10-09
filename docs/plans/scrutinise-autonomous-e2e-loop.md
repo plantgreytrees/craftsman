@@ -121,9 +121,9 @@ Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one i
 - [x] 3.4 Full suite exit 0.
 
 ## Step 4 — mod-goal-since (., JavaScript, high)
-- [ ] 4.1 `register.js`: with no `session.usage.startedAt`, launch nothing — a goal file counts as new only when written after the session started (W5; auto.md Phase B step 3 "written this session"). → accept: register.test.ts case — no startedAt, a goal file present, nothing launched.
-- [ ] 4.2 The band's scope-name pattern matches core's (`@[A-Za-z0-9_-]+`), so hyphenated project ids are found (S6). → accept: register.test.ts case with `scope@my-app-<hash>.json`; `claude plugin test .` passes.
-- [ ] 4.3 Full suite exit 0.
+- [x] 4.1 `register.js`: with no `session.usage.startedAt`, launch nothing — a goal file counts as new only when written after the session started (W5; auto.md Phase B step 3 "written this session"). → accept: register.test.ts case — no startedAt, a goal file present, nothing launched.
+- [x] 4.2 The band's scope-name pattern matches core's (`@[A-Za-z0-9_-]+`), so hyphenated project ids are found (S6). → accept: register.test.ts case with `scope@my-app-<hash>.json`; `claude plugin test .` passes.
+- [x] 4.3 Full suite exit 0.
 
 ## Step 5 — land-linked-worktree (., JavaScript, high)
 - [ ] 5.1 `repo-exec` merge: when base cannot be checked out in `context.root` because another worktree holds it, merge in a temporary detached worktree at the base tip and push `HEAD:<base>`; never move a branch ref another worktree has checked out. With no remote, PARK with a decision instead (W6, LAND-06). The temporary worktree is removed on every path. → accept: repo-exec.test — a linked-worktree root whose base is checked out by the primary lands on the remote base; the no-remote case parks with a decision.
