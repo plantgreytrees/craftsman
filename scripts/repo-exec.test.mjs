@@ -420,6 +420,8 @@ test("repo-exec: a rejected push parks the unit with a decision (direct and pr)"
       const result = merge(context, { ...direct, unit: "push-direct", slug: "push-direct" }, info);
       assertPark(result, "rejected-push");
       assert.equal(result.land, "direct");
+      assert.equal(result.merged_locally, true, "local base holds the unpushed merge");
+      assert.ok(git(context.root, ["merge-base", "--is-ancestor", direct.branch, base]) === "", "and it really does");
       assert.match(result.error, /protected: pushes refused/);
       assert.match(result.decision.question, /rejected the push/);
       assert.equal(git(origin, ["rev-parse", base]), originBefore, "origin is untouched");
@@ -432,6 +434,82 @@ test("repo-exec: a rejected push parks the unit with a decision (direct and pr)"
       assert.equal(parked.land, "pr");
       assert.equal(parked.pushed, false);
       assert.ok(!calls.some((line) => line.startsWith("gh pr create")), "no PR is opened for an unpushed branch");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// A session worktree as root while the primary checkout holds base.
+function linked(data, remote = true) {
+  const primary = projectContext("one");
+  const { origin, base } = remote ? addOrigin(data.workspace, primary.root) : { base: git(primary.root, ["branch", "--show-current"]) };
+  const root = path.join(primary.root, ".claude", "worktrees", "session");
+  git(primary.root, ["worktree", "add", "-q", "-b", "worktree-session", root]);
+  const context = { ...primary, root };
+  const info = inspectRepo(context, { base_branch: base });
+  const dir = path.join(info.common_git_dir, ".craftsman", "land");
+  const temps = () => (fs.existsSync(dir) ? fs.readdirSync(dir) : []);
+  const land = (slug) => merge(context, { ...commitUnit(context, info, slug), unit: slug, slug }, info);
+  return { primary, origin, base, context, info, temps, land };
+}
+
+test("repo-exec: from a linked-worktree root whose base is checked out elsewhere, a unit lands on origin's base", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { primary, origin, base, context, temps, land } = linked(data);
+      const before = git(primary.root, ["rev-parse", "HEAD"]);
+      const landed = land("linked");
+      assert.equal(landed.merged, true, JSON.stringify(landed));
+      assert.equal(git(origin, ["log", "-1", "--format=%s", `${base}^2`]), "feat: linked through a pull request");
+      assert.equal(git(primary.root, ["rev-parse", "HEAD"]), before, "base's checkout not moved");
+      assert.equal(git(primary.root, ["branch", "--show-current"]), base);
+      assert.equal(git(context.root, ["branch", "--show-current"]), "worktree-session");
+      assert.deepEqual(temps(), []);
+      assert.ok(!git(primary.root, ["worktree", "list"]).includes(path.join(".craftsman", "land")));
+      assert.equal(landed.cleaned, true, landed.cleanup_error);
+      assert.equal(landed.branch_deleted, true, "in origin's base");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: from a linked-worktree root, a conflict or refused push parks and removes the temporary worktree", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { primary, origin, base, context, info, temps, land } = linked(data);
+      const clash = commitUnit(context, info, "clash");
+      fs.writeFileSync(path.join(clash.worktree_path, "README.md"), "unit side\n");
+      git(clash.worktree_path, ["commit", "-q", "-am", "feat: unit side"]);
+      fs.writeFileSync(path.join(primary.root, "README.md"), "base side\n");
+      git(primary.root, ["commit", "-q", "-am", "chore: base side"]);
+      git(primary.root, ["push", "-q", "origin", base]);
+      assertPark(merge(context, { ...clash, unit: "clash", slug: "clash" }, info), "conflict");
+      assert.deepEqual(temps(), []);
+
+      const hook = path.join(origin, "hooks", "pre-receive");
+      fs.writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+      fs.chmodSync(hook, 0o755);
+      const parked = land("refused");
+      assertPark(parked, "rejected-push");
+      assert.equal(parked.merged_locally, false, "the merge lived only in the temporary worktree");
+      assert.doesNotMatch(parked.decision.question, /merged locally/);
+      assert.deepEqual(temps(), []);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: from a linked-worktree root with no remote, a base checked out elsewhere parks with a decision", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { primary, base, temps, land } = linked(data, false);
+      const before = git(primary.root, ["rev-parse", base]);
+      const result = land("local-only");
+      assertPark(result, "base-checked-out");
+      assert.equal(result.holder, primary.root);
+      assert.match(result.decision.question, /no remote/);
+      assert.equal(git(primary.root, ["rev-parse", base]), before, "base not moved");
+      assert.deepEqual(temps(), []);
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });

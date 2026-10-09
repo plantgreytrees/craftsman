@@ -150,11 +150,8 @@ function sync(context, input, info) {
   return { ...info, worktree_path: worktree, base_ref: baseRef };
 }
 
-// Finds the project's own detected test command via the SAME cfg.stopGate.commands
-// convention stop-gate.mjs/session-context.mjs already use (marker file → command) —
-// no new config surface, just reused. Fails open (returns null) when nothing is
-// detected, matching this plugin's "no repo check for a dimension → note it, don't
-// invent one" rule elsewhere.
+// The project's test command, by stop-gate's cfg.stopGate.commands (marker
+// file → command); null when nothing is detected.
 function findGateCommand(worktree, cfg) {
   for (const [marker, command] of Object.entries(cfg.stopGate?.commands || {})) {
     if (marker.includes("*")) {
@@ -169,17 +166,10 @@ function findGateCommand(worktree, cfg) {
   return null;
 }
 
-// The one check `merge()` previously had zero awareness of: whether the code
-// being merged actually passes its own tests. _shared-execution.md's Phase X
-// step 7 (GATE) already runs this once during implementation, but that was
-// pure self-report as far as the merge boundary was concerned — nothing here
-// verified it actually happened or actually passed. This re-runs the test
-// command independently, inside the worktree, right before the merge that
-// makes it permanent. Deliberately NOT skippable via any per-call input field
-// — a caller-controlled skip flag would make this exactly as bypassable as
-// the prose it replaces. The only way to disable it is an actual config
-// change: `repoExec.verifyTestsBeforeMerge: false` or `stopGate.enabled: false`
-// in craftsman.config.json — a visible, auditable edit, not a silent runtime flag.
+// Re-runs the test command in the worktree right before the merge, so the
+// GATE is verified here, not self-reported. No per-call skip flag: only
+// config (`repoExec.verifyTestsBeforeMerge: false` or `stopGate.enabled:
+// false`) disables it — a visible, auditable edit.
 function verifyGateBeforeMerge(context, worktree) {
   const cfg = loadConfig(context);
   if (cfg.stopGate?.enabled === false || cfg.repoExec?.verifyTestsBeforeMerge === false) return;
@@ -222,6 +212,8 @@ function merge(context, input, info, deps = {}) {
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   verifyGateBeforeMerge(context, worktree);
   if (land === "pr") return landPullRequest(context, input, info, { worktree, branch, cfg, runner: deps.runner });
+  const holder = baseHeldElsewhere(context.root, info.base_branch);
+  if (holder) return landDetached(context, input, info, { worktree, branch, holder });
   const lock = acquireLock(info, input);
   const originalBranch = run(context.root, ["branch", "--show-current"]);
   let mergeStarted = false;
@@ -252,7 +244,8 @@ function merge(context, input, info, deps = {}) {
       try { run(context.root, ["merge", "--abort"], { allowFailure: true }); } catch {}
     }
     if (!step) throw error;
-    return landingPark(step, { ...info, branch, land: "direct", merged: false, worktree_path: worktree }, error);
+    // A refused push comes after the local merge, so local base holds it.
+    return landingPark(step, { ...info, branch, land: "direct", merged: false, merged_locally: step === "rejected-push", worktree_path: worktree }, error);
   } finally {
     if (originalBranch && originalBranch !== info.base_branch) {
       try { run(context.root, ["checkout", originalBranch], { allowFailure: true }); } catch {}
@@ -260,6 +253,63 @@ function merge(context, input, info, deps = {}) {
     releaseLock(lock);
   }
   return cleanupAfterLanding(context, input, info, { ...info, branch, land: "direct", merged: true });
+}
+
+// The other worktree holding `base`, or null (git won't check it out twice).
+function baseHeldElsewhere(root, base) {
+  const here = fs.realpathSync(root);
+  let current = null;
+  for (const line of run(root, ["worktree", "list", "--porcelain"]).split("\n")) {
+    if (line.startsWith("worktree ")) current = line.slice("worktree ".length);
+    else if (line === `branch refs/heads/${base}` && current) {
+      let resolved = current;
+      try { resolved = fs.realpathSync(current); } catch {}
+      if (resolved !== here) return current;
+    }
+  }
+  return null;
+}
+
+// Merges in a temporary detached worktree at origin's base and pushes
+// HEAD:<base>, never moving a ref another worktree holds. No remote → PARK
+// (ARCH-LAND-06). The temporary worktree goes on every path.
+function landDetached(context, input, info, { worktree, branch, holder }) {
+  const result = { ...info, branch, land: "direct", merged: false, merged_locally: false, worktree_path: worktree };
+  if (!info.has_remote) {
+    return landingPark("base-checked-out", { ...result, holder }, new Error(`${info.base_branch} is checked out in ${holder}`));
+  }
+  const lock = acquireLock(info, input);
+  const temp = path.join(info.common_git_dir, ".craftsman", "land", `${branch.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
+  let added = false;
+  let step = null;
+  try {
+    heartbeat(lock);
+    if (input.pull !== false) run(context.root, ["fetch", "origin", info.base_branch]);
+    fs.mkdirSync(path.dirname(temp), { recursive: true });
+    run(context.root, ["worktree", "add", "--detach", temp, `origin/${info.base_branch}`]);
+    added = true;
+    heartbeat(lock);
+    step = "conflict";
+    run(temp, ["merge", "--no-ff", "--no-edit", branch]);
+    step = null;
+    run(temp, ["merge-base", "--is-ancestor", branch, "HEAD"]);
+    if (input.push !== false) {
+      heartbeat(lock);
+      step = "rejected-push";
+      run(temp, ["push", "origin", `HEAD:${info.base_branch}`]);
+      step = null;
+    }
+  } catch (error) {
+    if (added && step === "conflict") run(temp, ["merge", "--abort"], { allowFailure: true });
+    if (!step) throw error;
+    return landingPark(step, result, error);
+  } finally {
+    if (added) run(context.root, ["worktree", "remove", temp], { allowFailure: true });
+    fs.rmSync(temp, { recursive: true, force: true });
+    run(context.root, ["worktree", "prune"], { allowFailure: true });
+    releaseLock(lock);
+  }
+  return cleanupAfterLanding(context, input, info, { ...result, merged: true });
 }
 
 // The four landing failures that PARK a unit instead of failing the run
@@ -278,8 +328,8 @@ const PARK_DECISIONS = {
     recommended: `Reconcile local ${r.base_branch} with origin by hand, then land again`,
   }),
   "rejected-push": (r) => ({
-    question: r.land === "pr"
-      ? `origin rejected the push of ${r.branch}. How should it land?`
+    question: r.land === "pr" || !r.merged_locally
+      ? `origin rejected the push of ${r.branch} to ${r.base_branch}. How should it land?`
       : `origin rejected the push of ${r.base_branch} after ${r.branch} was merged locally (local ${r.base_branch} holds the unpushed merge). How should it land?`,
     options: ["Fix the remote's refusal (permissions, hooks, protection) and push again", "Land through a pull request instead (repoExec.land: \"pr\")", "Leave it unpushed for the user"],
     recommended: "Land through a pull request instead (repoExec.land: \"pr\")",
@@ -288,6 +338,11 @@ const PARK_DECISIONS = {
     question: `${r.pr?.url || "The pull request"} for ${r.branch} is open, but the host refused auto-merge. How should it be merged?`,
     options: ["Merge the pull request by hand on the host", "Enable auto-merge for the repository and retry", "Leave the pull request open for review"],
     recommended: "Merge the pull request by hand on the host",
+  }),
+  "base-checked-out": (r) => ({
+    question: `${r.base_branch} is checked out in ${r.holder} and ${r.project} has no remote, so ${r.branch} cannot land without moving that checkout's branch. How should it land?`,
+    options: [`Merge ${r.branch} from ${r.holder} by hand`, `Add an origin remote so it lands with push HEAD:${r.base_branch}`, "Leave the unit unmerged for the user"],
+    recommended: `Merge ${r.branch} from ${r.holder} by hand`,
   }),
 };
 
@@ -333,7 +388,6 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner }
   }
   return cleanupAfterLanding(context, input, info, {
     ...info, branch, land: "pr", merged: false, pushed: true, pr: request, auto_merge,
-    ...(auto_merge_error ? { auto_merge_error } : {}),
   });
 }
 
@@ -364,8 +418,10 @@ function cleanup(context, input, info) {
   // Not `branch -d`: that judges "merged" against the primary checkout's HEAD,
   // which merge() restores to whatever was checked out before — often not the
   // base — so it failed after the worktree was already gone. Decide against
-  // the base branch explicitly; an unmerged (parked) branch is kept.
-  const branchDeleted = Boolean(mergedInto(context.root, branch, [info.base_branch]));
+  // the base branch explicitly; an unmerged (parked) branch is kept. A
+  // detached landing (landDetached) leaves the merge on origin's base only.
+  const bases = info.has_remote ? [info.base_branch, `refs/remotes/origin/${info.base_branch}`] : [info.base_branch];
+  const branchDeleted = Boolean(mergedInto(context.root, branch, bases));
   if (branchDeleted) run(context.root, ["branch", "-D", branch]);
   // A branch that was also pushed (for review, or by a session that couldn't
   // merge) would otherwise outlive its merge on the host. Best-effort: the

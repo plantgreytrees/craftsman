@@ -126,9 +126,9 @@ Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one i
 - [x] 4.3 Full suite exit 0.
 
 ## Step 5 — land-linked-worktree (., JavaScript, high)
-- [ ] 5.1 `repo-exec` merge: when base cannot be checked out in `context.root` because another worktree holds it, merge in a temporary detached worktree at the base tip and push `HEAD:<base>`; never move a branch ref another worktree has checked out. With no remote, PARK with a decision instead (W6, LAND-06). The temporary worktree is removed on every path. → accept: repo-exec.test — a linked-worktree root whose base is checked out by the primary lands on the remote base; the no-remote case parks with a decision.
-- [ ] 5.2 A rejected `direct` push park reports `merged_locally:true`; delete the unreachable `auto_merge_error` spread in `landPullRequest` (S4). → accept: repo-exec.test rejected-push case asserts `merged_locally`.
-- [ ] 5.3 Full suite exit 0.
+- [x] 5.1 `repo-exec` merge: when base cannot be checked out in `context.root` because another worktree holds it, merge in a temporary detached worktree at the base tip and push `HEAD:<base>`; never move a branch ref another worktree has checked out. With no remote, PARK with a decision instead (W6, LAND-06). The temporary worktree is removed on every path. → accept: repo-exec.test — a linked-worktree root whose base is checked out by the primary lands on the remote base; the no-remote case parks with a decision.
+- [x] 5.2 A rejected `direct` push park reports `merged_locally:true`; delete the unreachable `auto_merge_error` spread in `landPullRequest` (S4). → accept: repo-exec.test rejected-push case asserts `merged_locally`.
+- [x] 5.3 Full suite exit 0.
 
 ## Step 6 — core-hardening (., JavaScript, high)
 - [ ] 6.1 Root pin: `lstatSync` and reject anything but a regular file owned by the current uid; check the `craftsman-roots` directory's uid and that it is not group/world-writable before reading or writing (S2). → accept: core.test — a symlinked pin entry and a foreign-mode directory are both ignored.
