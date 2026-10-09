@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 
-You run one step of one plan unit. Your prompt gives a **role** (`implement`, `review`, `land` or `park`), the root `session_id`, the `plugin_root`, the `project`, the `plan`, the `unit`, its `scope` manifest and `arch` ids, its task text and its `[unit:<id>]` criteria. `S <name>` below means `node "<plugin_root>/scripts/<name>.mjs"`, fed JSON on stdin with `printf '%s' '<json>' |`.
+You run one step of one plan unit. Your prompt gives a **role** (`implement`, `review`, `land` or `park`), the root `session_id`, the `plugin_root`, the `project_root`, the `project`, the `plan`, the `unit`, its `scope` manifest and `arch` ids, its task text and its `[unit:<id>]` criteria. `S <name>` below means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"`, fed JSON on stdin with `printf '%s' '<json>' |`. The explicit project dir keeps every script on the root's project whatever your cwd is (ARCH-STATE-01).
 
 **Always pass the root `session_id` you were given, never your own.** Grants, claims and scopes are keyed by the root session. Your unit is told apart by its worktree (ARCH-STATE-03).
 

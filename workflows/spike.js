@@ -10,7 +10,7 @@ export const meta = {
 
 // Orchestration only (ARCH-ENGINE-03): no fs, shell, import or clock here.
 // Every repo action runs inside an agent through craftsman's own scripts.
-// args: { sessionId, pluginRoot, protocolText?, project, plan, units: [{ unit, task, criteria, scope, arch }] }
+// args: { sessionId, pluginRoot, projectRoot, protocolText?, project, plan, units: [{ unit, task, criteria, scope, arch }] }
 
 const MAX_FIX_ROUNDS = 2
 
@@ -51,6 +51,7 @@ function brief(role, u, extra) {
       : `Follow the "role: ${role}" section of your unit-runner protocol exactly. Return only its schema JSON.`,
     `session_id: ${args.sessionId}`,
     `plugin_root: ${args.pluginRoot}`,
+    `project_root: ${args.projectRoot}`,
     `project: ${args.project}`,
     `plan: ${args.plan}`,
     `unit: ${u.unit}`,

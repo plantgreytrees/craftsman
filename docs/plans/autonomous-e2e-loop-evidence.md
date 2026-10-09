@@ -25,4 +25,30 @@ This is the root session that ran units 1–4 itself, with no subagents (`execut
 
 ## Spike
 
-Not run yet. See the plan's step 6.
+The spike ran three times, live, through `workflows/spike.js` → `agents/unit-runner.md`, against a throwaway workspace project `spike`. That project is a sandbox git repo with its own bare remote under the ignored `.craftsman/spike/`, so no merge touched the real `main`. There are two units:
+- `spike-farewell`, to land;
+- `spike-park`, an open product decision.
+
+Run 3 (`wf_b9a69ae2-434`) used 5 agents (implement, review and land for one unit; implement and park for the other), 195,510 subagent tokens and 174 s.
+
+| ENGINE-02 item | Result | Evidence |
+|---|---|---|
+| Hooks fire inside agents | **live ✅** | Run 1: the pre-guard blocked both agents' `Read agents/unit-runner.md` (`scope_blocked` events at ts 1791545592063 and 1791545601762). Both agents refused to work around it. |
+| Agents carry the root session id | **live ✅** | That block named the root's own scope (`workflow-spike`). Claims and scopes from the agents were recorded under sid `715e38a2…`. |
+| Worktree-keyed scope activation | **live ✅** | Under the root session dir: `scope@spike-a61fac18f9cce8b7.json`, `scope@spike-e7990106f4eaad4d.json` and `scope@spike-e674f28759e57504.json`, each with its own `scope-required@…`. That is one scope per unit worktree under one session id. |
+| Smoke gate first (TRACKER-05) | **live ✅** | `npm test` was green before any edit, in every implement agent. |
+| Implementer → separate fresh reviewer (ENGINE-05) | **live ✅** | `implement:spike-farewell` → `review:spike-farewell` (APPROVED) → `land:spike-farewell`. |
+| repo-exec prepare / merge sha | **live ✅** | Prepare made `.craftsman/spike/sandbox/.worktrees/spike-farewell`. Merge pushed `1d2ba11..9d7f500` (`Merge branch 'feat/spike-farewell'`) with `cleaned:true`. |
+| Tracker transitions | **live ✅** | `spike-farewell` went IN_PROGRESS → MERGED (evidence `9d7f500…`), and `spike-park` went IN_PROGRESS → PARKED. |
+| Park path with a decision (ENGINE-07) | **live ✅** | `parked[0]` = {question: "greet(name) … What should the new greeting wording be?", options: 5}. No edit was made and no default chosen. |
+| Quality-gate event inside an agent | **replay only ⚠️** | The agents' edits ran the gate. But this session's hooks (`5cb343437661`, loaded before units 1–5 were installed) log to the cwd's project, and the unit worktree's `.craftsman/` went with cleanup. Replaying the agent's PostToolUse payload into the installed `b8b2f8dad71d` quality-gate logged `{"ev":"gate","result":"pass"}` for the unit file into the **root** `events.jsonl`. |
+| Installed pre-guard enforces the unit's scope inside agents | **replay only ⚠️** | Live, the stale session hooks read only the root's plain `scope.json`. A probe agent was blocked reading its own in-scope file and refused to work around it. Replayed into the installed pre-guard under the root sid, the worktree-keyed scope `spike-replay` was applied: Read `greet.mjs` exited 0, Write `greet.mjs` exited 0, Read `package.json` exited 2. |
+| Root tokens | 113,857 before the spike | One sample before run 1. The post-run sample was refused along with the agent launches, so no "after" figure exists yet. |
+
+Findings to carry into `engine-guards` and `engine`:
+1. The protocol must reach the agent as its system prompt (`agentType: craftsman:unit-runner`) or inline. An agent cannot read a file before its scope exists.
+2. `CLAUDE_PROJECT_DIR` is unset in agent Bash. Every script call must pin it (`CLAUDE_PROJECT_DIR=<project_root>`). Without it, the cwd's git toplevel wins (ARCH-STATE-01).
+3. With an in-flight workflow, the stop-gate blocks on acceptance and on bindings. ARCH-STATE-04 fixes this.
+4. A run only gets the new hooks after `/reload-plugins` or a new session. `/auto` should check that the loaded hooks match the installed version before it launches.
+
+**Verdict: not yet GO.** Every ENGINE-02 item is live-proven except two, the quality gate and the installed pre-guard inside agents, which are proven by replay only. Both need one live run in a session that has loaded `b8b2f8dad71d`. A FAIL verdict would be wrong: nothing failed by design.

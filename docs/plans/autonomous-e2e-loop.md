@@ -240,7 +240,7 @@ Depends on: auto-command, telemetry
 ### Step 6 — workflow-spike (live evidence; ENGINE-02 gate)
 Tooling: skills workflow-authoring
 Depends on: state-root-pin, telemetry, auto-command (merged and installed)
-- [ ] 6.1 `agents/unit-runner.md`: one-unit protocol. Gate smoke run first (TRACKER-05) → implementer → separate fresh reviewer → at most 2 fix rounds → return `{unit,status,evidence,sha|pr,parked[]}`. → accept: file exists; ENGINE-04 single protocol.
+- [x] 6.1 `agents/unit-runner.md`: one-unit protocol. Gate smoke run first (TRACKER-05) → implementer → separate fresh reviewer → at most 2 fix rounds → return `{unit,status,evidence,sha|pr,parked[]}`. → accept: file exists; ENGINE-04 single protocol.
 - [ ] 6.2 `workflows/spike.js`: orchestration only (ENGINE-03); one `agent()` with a schema running unit-runner on a throwaway 1-file unit in its own worktree; a second forced-park unit. → accept: script passes the ENGINE-03 lint (step 8.4).
 - [ ] 6.3 Run the spike live. Record in the evidence doc: hook events from agent sessions (pre-guard/quality-gate in `events.jsonl`); scope activation keyed by the agent's worktree; a quality-gate event; repo-exec prepare/merge sha; a tracker transition; the park path (decision in `parked[]`); root tokens. End with an explicit verdict: **GO** (workflow default) or **FAIL**. A FAIL is a `BLOCKED ON USER` stop, since ENGINE-01 fixes the default and only the user can amend it. → accept: the evidence doc's "Spike" section has every item and a verdict.
 
