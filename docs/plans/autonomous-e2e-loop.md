@@ -309,11 +309,11 @@ Depends on: engine, baseline-run
 
 ### Step 10 — run-manifest-parked (., JS, normal)
 Depends on: engine
-- [ ] 10.1 `tracker.mjs`: transitions accept an optional `decision {question, options[], recommended?}` (validated) and an `autonomous` flag; an autonomous PARKED without a valid decision is refused; an autonomous CANCELLED is refused; events gain fields and never lose them; `renderBlock` output is unchanged. → accept: `tracker.test.mjs` covers the decision, the refusals and a renderBlock snapshot.
-- [ ] 10.2 New `scripts/run-manifest.mjs`: derive `.craftsman/runs/<slug>.json` (features: unit, status, criteria ticked/total, decision) from the ledger plus acceptance.md, regenerated on every transition. → accept: `run-manifest.test.mjs` shows it matches the ledger after transitions, and that a hand edit is overwritten.
-- [ ] 10.3 `repo-exec.mjs`: merge conflict, ff-only failure, rejected push and pr auto-merge error each return `{parked:true, decision}` for Phase C (LAND-06). → accept: `repo-exec.test.mjs` fixture for conflict and rejected push.
-- [ ] 10.4 `commands/auto.md` Phase C + `agents/unit-runner.md`: Phase C builds its round from ledger decisions; the runner parks through `tracker.mjs` with a decision. → accept: auto-command test asserts the Phase C source.
-- [ ] 10.5 Full suite exit 0.
+- [x] 10.1 `tracker.mjs`: transitions accept an optional `decision {question, options[], recommended?}` (validated) and an `autonomous` flag; an autonomous PARKED without a valid decision is refused; an autonomous CANCELLED is refused; events gain fields and never lose them; `renderBlock` output is unchanged. → accept: `tracker.test.mjs` covers the decision, the refusals and a renderBlock snapshot.
+- [x] 10.2 New `scripts/run-manifest.mjs`: derive `.craftsman/runs/<slug>.json` (features: unit, status, criteria ticked/total, decision) from the ledger plus acceptance.md, regenerated on every transition. → accept: `run-manifest.test.mjs` shows it matches the ledger after transitions, and that a hand edit is overwritten.
+- [x] 10.3 `repo-exec.mjs`: merge conflict, ff-only failure, rejected push and pr auto-merge error each return `{parked:true, decision}` for Phase C (LAND-06). → accept: `repo-exec.test.mjs` fixture for conflict and rejected push.
+- [x] 10.4 `commands/auto.md` Phase C + `agents/unit-runner.md`: Phase C builds its round from ledger decisions; the runner parks through `tracker.mjs` with a decision. → accept: auto-command test asserts the Phase C source.
+- [x] 10.5 Full suite exit 0.
 
 ### Step 11 — description-diet (., Markdown, normal)
 Depends on: run-manifest-parked, mod-launcher, plan-fit-and-measure
@@ -322,8 +322,8 @@ Depends on: run-manifest-parked, mod-launcher, plan-fit-and-measure
 
 ### Step 12 — release-notes (., Markdown, normal)
 Depends on: description-diet
-- [ ] 12.1 README: `/craftsman:auto` row; `execution.engine` and `unitContextBytes` config; root-context-first for autonomous runs supersedes the total-token rationale (ENGINE-10). EXTENDING: the two config keys. → accept: text present.
-- [ ] 12.2 CHANGELOG `## [Unreleased]`: one entry for the feature, including the ENGINE-10 supersession of `CHANGELOG.md:453-457`. → accept: one bullet group present.
+- [x] 12.1 README: `/craftsman:auto` row; `execution.engine` and `unitContextBytes` config; root-context-first for autonomous runs supersedes the total-token rationale (ENGINE-10). EXTENDING: the two config keys. → accept: text present.
+- [x] 12.2 CHANGELOG `## [Unreleased]`: one entry for the feature, including the ENGINE-10 supersession of `CHANGELOG.md:453-457`. → accept: one bullet group present.
 
 ## Sequencing
 The user fixed this order: state → telemetry → baseline → /auto → mod → spike → engine (guards, then engine) → measure → manifest → diet → notes. Root pinning comes first because every unattended grant depends on it (idea R6). Telemetry must exist before any baseline. The spike gates the workflow default (ENGINE-02). Guards go in before the engine so no Workflow call is ever unguarded. PARKED decisions persist in step 10; until then they travel in the runner's `parked[]` JSON (ENGINE-06).

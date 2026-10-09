@@ -134,6 +134,25 @@ project hasn't made in a month stops being narrated every session:
 
 (one week, shown as an example — the default is 30 days).
 
+### Running units in fresh contexts (`/craftsman:auto`)
+
+`/craftsman:auto` never runs a unit in the root context. Two keys control how:
+
+```json
+{ "execution": { "engine": "workflow", "unitContextBytes": 122880 } }
+```
+
+- `engine` — `"workflow"` (default) runs the plugin workflow `craftsman:run`
+  (`workflows/run.js`), one fresh agent per unit, in dependency order.
+  `"subagent"` dispatches one `unit-runner` agent per unit through Agent; it
+  is also the fallback when the Workflow tool is unavailable. `"root"` runs
+  units in the root context and is used only when set here. Both fresh-context
+  engines follow `agents/unit-runner.md`. A Workflow call is allowed only for a
+  plugin workflow while the engine is `"workflow"`.
+- `unitContextBytes` — the most a single unit may load: the bytes of its
+  `scope.read` and `scope.docs` files plus its task text. `/plan`'s scope
+  dry-run (`arch-check.mjs scope`) refuses a larger unit, so split it.
+
 ### Landing units through pull requests
 
 By default `/orchestrate` lands each finished unit by merging it into the base

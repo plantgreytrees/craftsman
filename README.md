@@ -47,7 +47,9 @@ does what the layer below can't:
 `/idea` vets a new idea, `/architect` turns it into enforced decisions, and
 `/instruction` packs the rest into one `/goal` prompt; `/understand` and
 `/investigate` enter at PLAN for existing code and bugs. One slug names the
-work from idea doc to plan, fix round and sync.
+work from idea doc to plan, fix round and sync. `/craftsman:auto` is the
+single entry for the whole loop: it asks every open decision up front, runs
+the units unattended, asks once more about what came back, and lands it.
 Planners write a short plan doc; `/orchestrate` executes it, reading each unit's
 actual diff through `gate-select.mjs` to deterministically route it to the
 specialists that apply — `ui-ux-reviewer`, `migration-reviewer`, `api-reviewer`,
@@ -81,6 +83,7 @@ gitignored local snapshot.
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
 | `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
 | `/architect` | turn a vetted idea into confirmed engineering/data/systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`; `--backfill` derives them for a project with existing plans and legacy docs) |
+| `/craftsman:auto` | one entry for the whole loop: ask every open decision first, run the units unattended in fresh agent contexts, ask about parked rows, land; repeat until every row is COMPLETE |
 | `/instruction` | generate one paste-ready `/goal` prompt that drives the whole loop to verified completion, plus an effort estimate |
 | `/understand` | build a cited understanding of a feature/area before touching it |
 | `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
@@ -196,6 +199,18 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   Claude Code's read-only built-in agents listed in `execution.builtinAgents`
   (default `["Explore"]`) also pass, since they're read-only by design. Flip
   `execution.agentMode` to `"subagents"` to restore real fan-out.
+- **Autonomous runs keep the root context light** — root-only mode was chosen
+  for lower total tokens. For autonomous runs that rationale is superseded:
+  root context comes first (ARCH-ENGINE-10), because a long unattended run
+  fails when root fills, not when the bill grows. `/craftsman:auto` therefore
+  runs each unit in a fresh agent context, chosen by `execution.engine`:
+  `workflow` (default) runs the plugin workflow `workflows/run.js`,
+  `subagent` dispatches one `unit-runner` per unit, and `root` keeps the old
+  in-root behaviour. Measured, root grew ~20k tokens per workflow unit against
+  ~47k–108k per root-only unit (`docs/plans/autonomous-e2e-loop-evidence.md`).
+  `/plan` refuses a unit whose scoped files and task text exceed
+  `execution.unitContextBytes` (default 122,880), so every unit fits one
+  fresh agent.
 - **Built-in skills, craftsman's rules** — `/orchestrate` runs Claude Code's
   own maintained `simplify` (step 6) and `code-review` (step 8) skills inside
   the loop. A `PreToolUse` hook on `Skill` hands them the governing standards,

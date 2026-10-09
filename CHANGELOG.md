@@ -7,6 +7,40 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
+- **`/craftsman:auto`: one entry for the whole loop, with a light root
+  context.** It asks every open decision up front (idea, architect, plan),
+  runs the units unattended under `/goal`, asks one consolidated round about
+  parked rows and judgement calls, then lands everything. It repeats until
+  every row for the slug is COMPLETE. The craftsman mod launches the goal at
+  turn end, with a paste-ready fallback where it can't.
+  - **Fresh context per unit.** Units no longer run in root. The new
+    `execution.engine` setting picks how: `workflow` (default) runs the plugin
+    workflow `workflows/run.js`, `subagent` dispatches one `unit-runner` per
+    unit, and `root` is opt-in only. Measured, root grew ~20k tokens per
+    workflow unit against ~47k–108k per root-only unit.
+  - **Root context first supersedes the total-token rationale for autonomous
+    runs** (ARCH-ENGINE-10). 2.1.0 made root-only the default to spend fewer
+    total tokens. That still holds for interactive `/orchestrate`, but a long
+    unattended run fails when root fills, so `/craftsman:auto` spends tokens
+    in fresh agents to keep root small.
+  - **Guards.** Workflow calls are allowed only for plugin workflows under the
+    `workflow` engine. `/auto` grants a bounded number of runner dispatches
+    per plan unit. The stop gate defers its acceptance block while a workflow
+    or agent is still running. The project root and grant paths now derive
+    from the session's project, never from cwd, so a grant written in one
+    directory is spent in another.
+  - **Units that fit one agent.** `/plan` refuses a unit whose scoped files
+    and task text exceed `execution.unitContextBytes` (default 122,880).
+  - **Parked decisions and run manifest.** A unit that cannot finish is
+    PARKED with a structured decision for the next ask round, and a landing
+    conflict or rejected push parks instead of failing the run.
+    `.craftsman/runs/<slug>.json` is a run manifest derived from the tracker
+    and acceptance criteria (status, criteria ticked, decision per unit).
+  - **Telemetry** records per-phase root-context growth, so the claims above
+    are measured (`docs/plans/autonomous-e2e-loop-evidence.md`).
+  - **Smaller always-on cost.** Every command, agent and skill description is
+    now 200 chars or less, and the underscore shared docs are no longer
+    model-invocable: ~3,716 → ~3,195 tokens per session.
 - **`/craftsman:merge`: saying "merge" now lands the branch.** Sessions used to
   answer "merge" with git commands for the user to run. Worktree isolation
   refused git against the main checkout, and nothing told the model it could
