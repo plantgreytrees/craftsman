@@ -34,6 +34,8 @@ All notable changes to craftsman are documented here. Format loosely follows
     fails closed on any command it cannot read in time.
   - **Units that fit one agent.** `/plan` refuses a unit whose scoped files
     and task text exceed `execution.unitContextBytes` (default 122,880).
+    `plan-graph.mjs` also refuses a plan that changes a registered submodule
+    without a `bumps` step in its parent that lands after it.
   - **Parked decisions and run manifest.** A unit that cannot finish is
     PARKED with a structured decision for the next ask round, and a landing
     conflict or rejected push parks instead of failing the run.

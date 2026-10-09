@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Validate and order scope-specific plan steps without loading plan prose.
 import { loadWorkspaceManifest } from "./lib/core.mjs";
+import { checkSubmoduleBumps } from "./lib/plan-submodules.mjs";
 
 export function validateSteps(steps, { workspace = loadWorkspaceManifest() } = {}) {
   if (!Array.isArray(steps) || !steps.length) throw new Error("plan must contain at least one step");
@@ -28,6 +29,7 @@ export function validateSteps(steps, { workspace = loadWorkspaceManifest() } = {
       if (dependency === step.id) throw new Error(`scope step ${step.id} cannot depend on itself`);
     }
   }
+  if (workspace) checkSubmoduleBumps(steps, workspace); // ARCH-LAND-03
   return steps;
 }
 

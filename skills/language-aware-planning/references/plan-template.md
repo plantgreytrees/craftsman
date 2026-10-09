@@ -100,6 +100,9 @@ Depends on: <scope_id list, or none>
 - A scope step is the smallest context-reset boundary: group all changes that
   affect the same project/repository and dependency boundary together. Use one
   `scope_id` per step, list explicit `depends_on` ids, and keep `project` stable.
+  A change in a registered submodule needs a step in its parent with
+  `bumps: "<submodule project>"` that depends on every submodule step
+  (ARCH-LAND-03); `plan-graph.mjs` refuses the plan otherwise.
   The executor topologically orders steps and activates one manifest for the
   whole step instead of reloading context for every task.
 - In a multi-repository workspace, `project` is a selected repository boundary,

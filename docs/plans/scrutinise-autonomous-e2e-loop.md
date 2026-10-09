@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words, force-block-forms, force-block-closed, force-block-bounded, verify-bypass-bounded]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words, force-block-forms, force-block-closed, force-block-bounded, verify-bypass-bounded, land-submodule-bump]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -267,6 +267,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/force-block.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: land-submodule-bump
+    scope_id: land-submodule-bump
+    project: .
+    depends_on: [verify-bypass-bounded]
+    module: plan-graph enforces the submodule bump unit
+    language: JavaScript (Node ESM, node:test)
+    security: normal
+    scope:
+      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/core.mjs, scripts/auto-command.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md]
+      write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+    arch: [ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-ENGINE-02]
+    tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
 # Plan: scrutinise fixes for autonomous-e2e-loop
@@ -405,6 +418,15 @@ The Warning sits outside /auto. The verify-bypass regex is linear for one `git` 
 - [x] 19.2 `forceBlocked`'s worker takes `execArgv: []`, so inherited flags (`--input-type`) cannot stop it starting. Its size verdict says to split the command (R10-S2, S3). → accept: a child-process test run under `--input-type=module` gets `null` for `git status` from the real worker, and the stall case takes at least its deadline.
 - [x] 19.3 The R9 hook tests assert which mechanism blocked (R10-S1). Over 16 KB, stderr names the size. A benign `("a git ").repeat(2000)` with no destructive form is unreadable through the word budget. → accept: both stderr assertions pass.
 - [x] 19.4 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
+
+## Round 12 — `/architect --update` of `8e9f06d`
+A fresh check of all 42 rules found 39 HOLD, none VIOLATED. ARCH-ENGINE-01 is superseded by ENGINE-12. ARCH-ENGINE-02 cites the idea doc, not the spike evidence. ARCH-LAND-03 is UNPROVEN: only `commands/merge.md` §5a states it, and `plan-graph.mjs` orders steps with no knowledge of submodules. The user chose to enforce LAND-03 in code.
+
+## Step 20 — land-submodule-bump (., JavaScript, normal)
+- [ ] 20.1 `plan-graph.mjs` `validateSteps` (through `scripts/lib/plan-submodules.mjs`, keeping `plan-graph.mjs` inside the `auto-command` step budget) treats a registered project whose `root` lies inside another registered project's root as a submodule of the nearest enclosing one. A step may declare `bumps: "<submodule id>"`. It refuses: a `bumps` naming a project that is not a submodule of the step's own project; a plan with steps in a submodule but no bump step in its parent; and a bump step that does not depend, directly or transitively, on every step of that submodule. With no workspace manifest it checks nothing new (ARCH-LAND-03, LAND-04). → accept: `scripts/lib/plan-submodules.test.mjs` cases for each refusal fail on the pre-change code; the valid sub → bump → consumer order passes.
+- [ ] 20.2 `commands/merge.md` §5a and `plan-template.md` name the `bumps` field and say `plan-graph.mjs` refuses a plan without the bump unit; `auto-command.test.mjs` phrases still match. → accept: full suite exit 0.
+- [ ] 20.3 LAND-03 cites the new check; ENGINE-02 cites the spike evidence (`docs/plans/autonomous-e2e-loop-evidence.md`). → accept: `arch-check lint` PASS.
+- [ ] 20.4 One CHANGELOG clause on the existing `/craftsman:auto` entry; full suite exit 0.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.

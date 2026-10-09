@@ -97,7 +97,9 @@ Never use `--no-verify`, `--force` or `git worktree remove --force`.
   returns for the plan's units; never one merge spanning repos (ARCH-LAND-02).
 - **Submodules.** A parent repo's submodule pointer bump is an explicit
   dependent unit in the parent, landed after the submodule's own unit;
-  `repo-exec` stays single-repo (ARCH-LAND-03).
+  `repo-exec` stays single-repo (ARCH-LAND-03). The bump step declares
+  `bumps: "<submodule>"`, and `plan-graph.mjs` refuses a plan without one or
+  whose bump does not depend on every submodule step.
 - **Only registered projects.** Touch only projects in `craftsman.workspace.json`
   plus the submodules `git submodule status` reports on those roots — never
   find repos by scanning directories (ARCH-LAND-04).
