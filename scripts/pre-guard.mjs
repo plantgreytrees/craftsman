@@ -37,6 +37,8 @@ function gitInvocations(value) {
     if (/^(?:&&|\|\||[;|&\n()`])$/.test(piece)) segments.push("");
     else segments[segments.length - 1] += piece;
   }
+  // `\"` and `#` can make shell-unquoted text read as quoted: split plainly too.
+  segments.push(...value.split(/&&|\|\||[;|&\n()`]/));
   for (const segment of segments) {
     const words = (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean);
     const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
@@ -53,12 +55,10 @@ const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z]*${letter}[A-Za-z]*$`)
 const MESSAGE_OPERAND = /\bgit\b[^;&|\n]*\s(?:commit|tag)\b[^;&|\n]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
 
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
-// Every quoted string is checked as a command of its own (`bash -c`,
-// `python3 -c`, …) except a commit/tag message operand with no $( ) or
-// backtick in it (one that has runs, so it is checked). `-c alias.<n>=<v>`,
-// `config alias.<n> <v>`
-// are checked as what they define, and a call through an alias chain as the
-// resolved words plus its call-site flags.
+// Every quoted string is checked as a command (`bash -c`, `python3 -c`, …)
+// except a commit/tag message operand without $( ) or a backtick. Alias
+// definitions are checked as what they define, and an alias call as its
+// resolved words plus call-site flags.
 function destructiveGit(value) {
   for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
     const inner = quoted[1] ?? quoted[2];

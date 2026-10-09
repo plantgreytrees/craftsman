@@ -351,6 +351,12 @@ const DESTRUCTIVE = [
   "git tag -am \"$(bash -c 'git push -f')\" v1",
   "git -C \"/a;b\" push --force origin main",
   "git -C \"/a&b\" reset --hard",
+  // An escaped quote or # comment after a message flag (R5).
+  "git commit -m \"a\\\" -m \" ; git push -f origin main ; echo \"b\"",
+  "git commit -m \"a\\\" -m \" && git reset --hard && echo \"b\"",
+  "git tag -m \"a\\\" -m \"\ngit push --force\necho \"b\" v1",
+  "echo #git commit -m \"\ngit push -f origin main\n#\"",
+  "true #git commit -m \"\ngit reset --hard\n#\"",
 ];
 const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status",
   "git commit -m \"note: git reset --hard is banned\"", "git commit -m 'dont git push -f'", "git tag -m \"git push -f is banned\" v1"];
