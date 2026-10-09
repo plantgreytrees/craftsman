@@ -216,7 +216,7 @@ Depends on: state-root-pin
 
 ### Step 3 — baseline-run (live evidence)
 Depends on: telemetry (merged and installed)
-- [ ] 3.1 After `telemetry` lands and `/craftsman:upgrade` installs it, record the root-only run that executes later units in this session (`agentMode: root-only`). Capture `node scripts/stats.mjs` root-context rows: sid, peak and final tokens, percent, units covered. → accept: `docs/plans/autonomous-e2e-loop-evidence.md` has a "Baseline (root-only)" table with real numbers from `events.jsonl`.
+- [x] 3.1 After `telemetry` lands and `/craftsman:upgrade` installs it, record the root-only run that executes later units in this session (`agentMode: root-only`). Capture `node scripts/stats.mjs` root-context rows: sid, peak and final tokens, percent, units covered. → accept: `docs/plans/autonomous-e2e-loop-evidence.md` has a "Baseline (root-only)" table with real numbers from `events.jsonl`.
 
 ### Step 4 — auto-command (., Markdown + JavaScript, high)
 Tooling: implementer · gates security-auditor
