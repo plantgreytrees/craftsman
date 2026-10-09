@@ -317,8 +317,8 @@ Depends on: engine
 
 ### Step 11 — description-diet (., Markdown, normal)
 Depends on: run-manifest-parked, mod-launcher, plan-fit-and-measure
-- [ ] 11.1 Measure `claude plugin details craftsman` always-on tokens before. Shorten every `description:` in `commands/*.md`, `agents/*.md` and `skills/*/SKILL.md` to ≤200 chars. Underscore-prefixed shared docs get `disable-model-invocation: true` and a ≤80-char description. Meaning is unchanged (auto.md and instruction.md keep AUTO-01's single-entry wording). → accept: new `descriptions.test.mjs` asserts ≤200 chars each and a combined cap below the measured "before" total.
-- [ ] 11.2 Record before/after always-on tokens in the evidence doc. → accept: numbers present, with after < before.
+- [x] 11.1 Measure `claude plugin details craftsman` always-on tokens before. Shorten every `description:` in `commands/*.md`, `agents/*.md` and `skills/*/SKILL.md` to ≤200 chars. Underscore-prefixed shared docs get `disable-model-invocation: true` and a ≤80-char description. Meaning is unchanged (auto.md and instruction.md keep AUTO-01's single-entry wording). → accept: new `descriptions.test.mjs` asserts ≤200 chars each and a combined cap below the measured "before" total.
+- [x] 11.2 Record before/after always-on tokens in the evidence doc. → accept: numbers present, with after < before.
 
 ### Step 12 — release-notes (., Markdown, normal)
 Depends on: description-diet

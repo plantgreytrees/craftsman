@@ -80,3 +80,15 @@ This session's loaded plugin (5cb343437661) predates `/craftsman:auto`, so the p
 
 5. **Land blocked in a linked-worktree root.** The land agent's `repo-exec merge` ran `git checkout main` inside `project_root`. That root is itself a linked worktree (`.claude/worktrees/idea-autonomous-e2e-loop`) and `main` is checked out by the primary checkout, so git refused with "'main' is already used by worktree". The agent returned BLOCKED, kept the branch, released its scope binding and reverted its acceptance ticks. Root then verified the suite (293/293) and fast-forwarded `main` with `git push origin HEAD:main` (`e125c60`). `repo-exec` needs a merge path that never checks the base out, such as a temporary worktree or an ff-only push.
 6. **Stale stop-gate during the run.** The stale stop-gate blocked twice while the workflow was in flight, on the runner's live binding and worktree (finding 3). The installed `stop-gate.mjs` defers only the acceptance block for in-flight tasks (ARCH-STATE-04). Binding and sweep checks still fire for a worktree an in-flight agent holds, so root must not act on them until the run reports back.
+
+## Description diet
+
+Measured with `claude plugin details craftsman` (installed plugin) before and after `06129e4`.
+
+| | before (`a7a62f0`) | after (`06129e4`) |
+|---|---|---|
+| always-on tokens | ~3,716 | ~3,195 |
+| combined `description:` chars | 9,156 (46 files) | 8,085 (53 files) |
+| longest description | 488 (`instruction.md`) | 200 |
+
+19 descriptions over 200 chars were shortened. The seven underscore shared docs had no frontmatter, so their descriptions were derived from body text; each now has `disable-model-invocation: true` and a description of 80 chars or less, and lists at ~30 tokens. `scripts/descriptions.test.mjs` holds each description to 200 chars, the shared docs to 80, and the combined total to 8,500 (below the 9,156 before).
