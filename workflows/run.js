@@ -1,18 +1,22 @@
 export const meta = {
-  name: 'craftsman-spike',
-  description: 'ENGINE-02 spike: run plan units through agents/unit-runner.md, one at a time',
+  name: 'run',
+  description: 'Run a craftsman plan: each unit through agents/unit-runner.md in plan-graph order',
+  whenToUse: 'Launched by /orchestrate or /craftsman:auto when execution.engine is "workflow"',
   phases: [
     { title: 'Implement', detail: 'smoke gate, implement, commit in the unit worktree' },
-    { title: 'Review', detail: 'fresh reviewer; at most 2 fix rounds' },
-    { title: 'Land', detail: 'merge, tracker, or park with a decision' },
+    { title: 'Review', detail: 'fresh reviewer; at most 2 fix rounds, then park' },
+    { title: 'Land', detail: 'merge and tracker, or park with a decision' },
   ],
 }
 
 // Orchestration only (ARCH-ENGINE-03): no filesystem, shell, module loading or clock here.
 // Every repo action runs inside an agent through craftsman's own scripts.
-// args: { sessionId, pluginRoot, projectRoot, protocolText?, project, plan, units: [{ unit, task, criteria, scope, arch }] }
+// args: { sessionId, pluginRoot, projectRoot, protocolText?, project, plan,
+//         units: [{ unit, depends_on?, task, criteria, scope, arch }] }
 
 const MAX_FIX_ROUNDS = 2
+// ARCH-ENGINE-06: root keeps per-unit summaries of at most ~2k tokens.
+const SUMMARY_CHARS = 8000
 
 const RESULT = {
   type: 'object',
@@ -38,6 +42,22 @@ const RESULT = {
     },
   },
   required: ['unit', 'status', 'evidence', 'parked'],
+}
+
+// Stable topological order over depends_on (ARCH-ENGINE-09): the caller's
+// order wherever the graph allows it. A dependency outside this run is
+// treated as already landed; a cycle is a plan error, never a guess.
+function planOrder(units) {
+  const ids = new Set(units.map((u) => u.unit))
+  const done = new Set()
+  const order = []
+  while (order.length < units.length) {
+    const next = units.find((u) => !done.has(u.unit) && (u.depends_on || []).every((d) => done.has(d) || !ids.has(d)))
+    if (!next) throw new Error(`dependency cycle among: ${units.filter((u) => !done.has(u.unit)).map((u) => u.unit).join(', ')}`)
+    done.add(next.unit)
+    order.push(next)
+  }
+  return order
 }
 
 // The protocol reaches the agent before any scope exists, so it can't be a
@@ -76,6 +96,7 @@ function dead(u, role) {
   return { unit: u.unit, status: 'BLOCKED', evidence: `${role} agent returned nothing`, parked: [] }
 }
 
+// ARCH-ENGINE-05: a separate fresh reviewer per round, at most 2 fix rounds, then PARK.
 async function reviewLoop(done, u) {
   if (!done || done.status !== 'IMPLEMENTED') return done || dead(u, 'implement')
   let head = done
@@ -84,7 +105,13 @@ async function reviewLoop(done, u) {
     if (!review) return dead(u, 'review')
     if (review.status === 'APPROVED') return head
     if (round === MAX_FIX_ROUNDS) {
-      return { ...head, status: 'PARKED', evidence: `review rounds exhausted: ${(review.findings || []).join('; ')}`, parked: [] }
+      return {
+        ...head,
+        status: 'PARKED',
+        evidence: `review rounds exhausted: ${(review.findings || []).join('; ')}`,
+        parked: [{ question: `Unit ${u.unit} still fails review after ${MAX_FIX_ROUNDS} fix rounds. How should it proceed?`,
+          options: ['Amend the plan or criteria', 'Accept the findings as follow-up rows', 'Drop the unit'] }],
+      }
     }
     const fixed = await run('implement', u, 'Implement',
       `fix round ${round + 1}\nworktree_path: ${head.worktree_path}\nfindings: ${JSON.stringify(review.findings)}`)
@@ -93,6 +120,8 @@ async function reviewLoop(done, u) {
   }
 }
 
+// ARCH-ENGINE-07: an open decision parks the unit with that decision; the
+// park agent records it in the tracker and keeps the branch.
 async function close(result, u) {
   if (result.status === 'IMPLEMENTED') {
     return (await run('land', u, 'Land', `worktree_path: ${result.worktree_path}`)) || dead(u, 'land')
@@ -100,17 +129,40 @@ async function close(result, u) {
   if (result.status === 'PARKED') {
     const parked = await run('park', u, 'Land',
       `reason: ${result.evidence}\nworktree_path: ${result.worktree_path || ''}\nparked: ${JSON.stringify(result.parked)}`)
-    return { ...(parked || result), parked: result.parked }
+    return { ...(parked || result), status: 'PARKED', parked: result.parked }
   }
   return result
 }
 
+function summary(result) {
+  const keep = {
+    unit: result.unit,
+    status: result.status,
+    evidence: String(result.evidence || '').slice(0, 2000),
+    ...(result.sha ? { sha: result.sha } : {}),
+    ...(result.pr ? { pr: result.pr } : {}),
+    parked: result.parked || [],
+  }
+  while (JSON.stringify(keep).length > SUMMARY_CHARS && keep.parked.length) keep.parked.pop()
+  return keep
+}
+
 // Sequential in plan-graph order (ARCH-ENGINE-09): one unit's pipeline
 // finishes before the next starts, until parallel scope isolation is proven.
+// A unit whose dependency did not land stays PENDING, never dispatched.
 const results = []
-for (const u of args.units) {
+const landed = new Set()
+const ids = new Set(args.units.map((u) => u.unit))
+for (const u of planOrder(args.units)) {
+  const waiting = (u.depends_on || []).filter((d) => ids.has(d) && !landed.has(d))
+  if (waiting.length) {
+    results.push({ unit: u.unit, status: 'PENDING', evidence: `waiting on ${waiting.join(', ')}`, parked: [] })
+    continue
+  }
   log(`unit ${u.unit}`)
   const [result] = await pipeline([u], (item) => run('implement', item, 'Implement'), reviewLoop, close)
-  results.push(result || dead(u, 'pipeline'))
+  const done = summary(result || dead(u, 'pipeline'))
+  if (done.status === 'MERGED') landed.add(u.unit)
+  results.push(done)
 }
 return { results }

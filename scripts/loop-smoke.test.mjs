@@ -10,7 +10,7 @@ import { transition } from "./tracker.mjs";
 const fixtures = new Set();
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-workflow-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-loop-smoke-"));
   const selected = { id: ".", root, stateDir: path.join(root, ".craftsman") };
   fixtures.add(root);
   fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }) + "\n");

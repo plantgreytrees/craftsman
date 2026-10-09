@@ -120,7 +120,7 @@ units:
     scope:
       read: [workflows/spike.js, agents/unit-runner.md, commands/_shared-execution.md, commands/auto.md, craftsman.config.json, scripts/wiring.test.mjs, scripts/workflow.test.mjs, scripts/plan-graph.mjs]
       docs: [docs/architecture/engine.rules.md, docs/architecture/auto.rules.md, docs/architecture/tracker.rules.md]
-      write: [workflows/run.js, workflows/spike.js, agents/unit-runner.md, craftsman.config.json, commands/_shared-execution.md, commands/auto.md, scripts/wiring.test.mjs, scripts/workflow.test.mjs, scripts/loop-smoke.test.mjs, scripts/engine.test.mjs]
+      write: [workflows/run.js, workflows/spike.js, agents/unit-runner.md, craftsman.config.json, commands/_shared-execution.md, commands/auto.md, scripts/wiring.test.mjs, scripts/workflow.test.mjs, scripts/loop-smoke.test.mjs, scripts/engine.test.mjs, scripts/agent-mode-guard.test.mjs]
     arch: [ARCH-ENGINE-01, ARCH-ENGINE-03, ARCH-ENGINE-04, ARCH-ENGINE-05, ARCH-ENGINE-06, ARCH-ENGINE-07, ARCH-ENGINE-09, ARCH-ENGINE-11, ARCH-AUTO-05, ARCH-TRACKER-05]
     tooling: { implementer: implementer, gates: [idiom-reviewer], skills: [workflow-authoring], guards: [pre-guard, quality-gate] }
   - id: plan-fit-and-measure
@@ -241,7 +241,7 @@ Depends on: auto-command, telemetry
 Tooling: skills workflow-authoring
 Depends on: state-root-pin, telemetry, auto-command (merged and installed)
 - [x] 6.1 `agents/unit-runner.md`: one-unit protocol. Gate smoke run first (TRACKER-05) → implementer → separate fresh reviewer → at most 2 fix rounds → return `{unit,status,evidence,sha|pr,parked[]}`. → accept: file exists; ENGINE-04 single protocol.
-- [ ] 6.2 `workflows/spike.js`: orchestration only (ENGINE-03); one `agent()` with a schema running unit-runner on a throwaway 1-file unit in its own worktree; a second forced-park unit. → accept: script passes the ENGINE-03 lint (step 8.4).
+- [x] 6.2 `workflows/spike.js`: orchestration only (ENGINE-03); one `agent()` with a schema running unit-runner on a throwaway 1-file unit in its own worktree; a second forced-park unit. → accept: script passes the ENGINE-03 lint (step 8.4).
 - [x] 6.3 Run the spike live. Record in the evidence doc: hook events from agent sessions (pre-guard/quality-gate in `events.jsonl`); scope activation keyed by the agent's worktree; a quality-gate event; repo-exec prepare/merge sha; a tracker transition; the park path (decision in `parked[]`); root tokens. End with an explicit verdict: **GO** (workflow default) or **FAIL**. A FAIL is a `BLOCKED ON USER` stop, since ENGINE-01 fixes the default and only the user can amend it. → accept: the evidence doc's "Spike" section has every item and a verdict.
 
 ### Step 7 — engine-guards (., JavaScript, high)
@@ -253,12 +253,12 @@ Depends on: workflow-spike
 
 ### Step 8 — engine (., JS + Markdown + JSON, normal)
 Depends on: workflow-spike, engine-guards
-- [ ] 8.1 `craftsman.config.json`: `execution.engine: "workflow"` (enum workflow|subagent|root) and `execution.unitContextBytes: 122880`. → accept: test asserts the default and the enum.
-- [ ] 8.2 `workflows/run.js`: `pipeline()` over plan-graph order (ENGINE-09); per unit, implementer `agent()` then reviewer `agent()`, at most 2 fix rounds, then PARK (ENGINE-05); every `agent()` has the result schema (ENGINE-06); an open decision → PARK with a decision and leave dependants PENDING (ENGINE-07); root keeps per-unit summaries ≤2k tokens. → accept: `engine.test.mjs` loads the script with a stub runtime and asserts the bounds and pipeline order.
-- [ ] 8.3 `commands/_shared-execution.md` + `commands/auto.md`: engine selection. `workflow` → launch `/craftsman:run`; workflow unavailable → `subagent` (unit-runner per unit via Agent), never silently `root`; `root` is explicit opt-in only (ENGINE-01). Both engines cite `agents/unit-runner.md` (ENGINE-04). → accept: `wiring.test.mjs` asserts both references and the fallback text.
-- [ ] 8.4 `wiring.test.mjs`: lint `workflows/*.js`: no `fs`, `child_process`, `import(`, `Date.now`, `Math.random` or `new Date`; every `agent(` call passes `schema`. → accept: the lint passes the real scripts and fails a fixture.
-- [ ] 8.5 `git mv scripts/workflow.test.mjs scripts/loop-smoke.test.mjs` (ENGINE-11). → accept: old file absent; renamed suite green.
-- [ ] 8.6 Full suite exit 0.
+- [x] 8.1 `craftsman.config.json`: `execution.engine: "workflow"` (enum workflow|subagent|root) and `execution.unitContextBytes: 122880`. → accept: test asserts the default and the enum.
+- [x] 8.2 `workflows/run.js`: `pipeline()` over plan-graph order (ENGINE-09); per unit, implementer `agent()` then reviewer `agent()`, at most 2 fix rounds, then PARK (ENGINE-05); every `agent()` has the result schema (ENGINE-06); an open decision → PARK with a decision and leave dependants PENDING (ENGINE-07); root keeps per-unit summaries ≤2k tokens. → accept: `engine.test.mjs` loads the script with a stub runtime and asserts the bounds and pipeline order.
+- [x] 8.3 `commands/_shared-execution.md` + `commands/auto.md`: engine selection. `workflow` → launch `/craftsman:run`; workflow unavailable → `subagent` (unit-runner per unit via Agent), never silently `root`; `root` is explicit opt-in only (ENGINE-01). Both engines cite `agents/unit-runner.md` (ENGINE-04). → accept: `wiring.test.mjs` asserts both references and the fallback text.
+- [x] 8.4 `wiring.test.mjs`: lint `workflows/*.js`: no `fs`, `child_process`, `import(`, `Date.now`, `Math.random` or `new Date`; every `agent(` call passes `schema`. → accept: the lint passes the real scripts and fails a fixture.
+- [x] 8.5 `git mv scripts/workflow.test.mjs scripts/loop-smoke.test.mjs` (ENGINE-11). → accept: old file absent; renamed suite green.
+- [x] 8.6 Full suite exit 0.
 
 ### Step 9 — plan-fit-and-measure (., JS + Markdown, normal)
 Depends on: engine, baseline-run

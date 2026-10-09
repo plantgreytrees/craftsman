@@ -2,7 +2,9 @@
   "enabled": true,
   "execution": {
     "agentMode": "root-only",
-    "builtinAgents": ["Explore"]
+    "builtinAgents": ["Explore"],
+    "engine": "workflow",
+    "unitContextBytes": 122880
   },
   "timeoutMs": 20000,
   "maxFeedbackLines": 40,

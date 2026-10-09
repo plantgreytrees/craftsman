@@ -94,3 +94,68 @@ test("wiring: every agent file is referenced by name from at least one command",
   const unreferenced = agentNames.filter((name) => !commandText.includes(`\`${name}\``));
   assert.deepEqual(unreferenced, []);
 });
+
+// ARCH-ENGINE-03: a workflow script only orchestrates. No filesystem, shell,
+// module loading or clock, and every agent() call carries its result schema
+// (ARCH-ENGINE-06) at the call site, where a reviewer can see it.
+function agentCalls(src) {
+  const calls = [];
+  for (const match of src.matchAll(/\bagent\(/g)) {
+    let depth = 0;
+    let end = match.index + match[0].length - 1;
+    for (; end < src.length; end++) {
+      if (src[end] === "(") depth++;
+      else if (src[end] === ")" && --depth === 0) break;
+    }
+    calls.push(src.slice(match.index, end + 1));
+  }
+  return calls;
+}
+function lintWorkflow(src) {
+  const banned = [
+    [/\bfs\b/, "fs"], [/child_process/, "child_process"], [/\bimport\s*\(/, "import()"],
+    [/^\s*import\s/m, "static import"], [/\brequire\s*\(/, "require()"],
+    [/Date\.now/, "Date.now"], [/Math\.random/, "Math.random"], [/new\s+Date\b/, "new Date"],
+  ];
+  const problems = banned.filter(([pattern]) => pattern.test(src)).map(([, name]) => name);
+  for (const call of agentCalls(src)) if (!/\bschema\s*:/.test(call)) problems.push(`agent() without schema: ${call.slice(0, 60)}`);
+  return problems;
+}
+
+test("wiring: every workflows/*.js only orchestrates, and every agent() call passes a schema (ARCH-ENGINE-03)", () => {
+  const dir = path.join(PLUGIN_ROOT, "workflows");
+  const scripts = fs.readdirSync(dir).filter((f) => f.endsWith(".js"));
+  assert.ok(scripts.includes("run.js"), "the engine's workflow ships");
+  for (const file of scripts) {
+    const src = fs.readFileSync(path.join(dir, file), "utf8");
+    assert.ok(agentCalls(src).length > 0, `${file} dispatches through agent()`);
+    assert.deepEqual(lintWorkflow(src), [], file);
+  }
+});
+
+test("wiring: the workflow lint fails a script that touches the filesystem, the clock, or drops a schema", () => {
+  const bad = [
+    "import fs from 'node:fs'\nawait agent('x', { schema: S })",
+    "const cp = await import('node:child_process')",
+    "const t = Date.now()",
+    "const r = Math.random()",
+    "const d = new Date()",
+    "await agent('do it', { label: 'no schema' })",
+  ];
+  for (const src of bad) assert.notDeepEqual(lintWorkflow(src), [], src);
+  assert.deepEqual(lintWorkflow("await agent(brief('a', u), { label: 'x', schema: RESULT })"), []);
+});
+
+test("wiring: both engines follow agents/unit-runner.md and fall back to subagent, never silently root (ARCH-ENGINE-01/04)", () => {
+  const config = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "craftsman.config.json"), "utf8"));
+  assert.equal(config.execution.engine, "workflow");
+  assert.ok(["workflow", "subagent", "root"].includes(config.execution.engine));
+  assert.equal(config.execution.unitContextBytes, 122880);
+  for (const file of ["commands/_shared-execution.md", "commands/auto.md"]) {
+    const text = fs.readFileSync(path.join(PLUGIN_ROOT, file), "utf8");
+    assert.match(text, /agents\/unit-runner\.md/, file);
+    assert.match(text, /workflows\/run\.js/, file);
+    assert.match(text, /`workflow` \(default\)/, file);
+    assert.match(text, /Workflow unavailable → `subagent`[^.]*never silently `root`/, file);
+  }
+});

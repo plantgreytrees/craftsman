@@ -295,9 +295,11 @@ test("agent-mode-guard: Workflow blocks an inline script and allows workflows/ru
     const call = (tool_input) => hook("agent-mode-guard.mjs", dir, dir, { session_id: "s1", tool_name: "Workflow", tool_input }, env);
     const runJs = { scriptPath: path.join(plugin, "workflows", "run.js") };
 
-    assert.equal(call(runJs).status, 2, "engine unset: even the plugin's workflow is blocked");
-    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ execution: { engine: "subagent" } }));
-    assert.equal(call(runJs).status, 2, "engine=subagent blocks it");
+    assert.equal(call(runJs).status, 0, "the plugin default engine is workflow (ARCH-ENGINE-01)");
+    for (const engine of ["subagent", "root"]) {
+      fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ execution: { engine } }));
+      assert.equal(call(runJs).status, 2, `engine=${engine} blocks even the plugin's workflow`);
+    }
 
     fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ execution: { engine: "workflow", agentMode: "subagents" } }));
     assert.equal(call(runJs).status, 0);
