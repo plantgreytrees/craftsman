@@ -275,7 +275,7 @@ units:
     language: JavaScript (Node ESM, node:test)
     security: normal
     scope:
-      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/auto-command.test.mjs, commands/merge.md, skills/language-aware-planning/references/plan-template.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      read: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/auto-command.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/plans/autonomous-e2e-loop-evidence.md]
       docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md]
       write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/plan-submodules.mjs, scripts/lib/plan-submodules.test.mjs, commands/orchestrate.md, commands/merge.md, skills/language-aware-planning/references/plan-template.md, CHANGELOG.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-ENGINE-02, ARCH-ENGINE-08]
@@ -463,8 +463,17 @@ One isolated scrutineer: 0 Critical, 1 Warning, 2 Suggestion; the criterion is M
 - R16-S3 [Test-coverage] untested: an early second bump step, a bump with no submodule steps, a nested non-gitlink `bumps` target.
 
 ## Step 24 — land-submodule-bump, round 16 fixes (., JavaScript, normal)
-- [ ] 24.1 The manifest reads neither `CHANGELOG.md` (write-only for its one clause) nor `core.mjs`, and lists ARCH-ENGINE-08 (R16-W1). → accept: `arch-check.mjs scope` on the manifest with Steps 20–24 as task text PASS (47,077 bytes).
+- [ ] 24.1 The manifest no longer reads `core.mjs`, and lists ARCH-ENGINE-08 (R16-W1). → accept: `arch-check.mjs scope` on the manifest with Steps 20–25 as task text PASS.
 - [ ] 24.2 `plan-submodules.test.mjs` covers the three R16-S3 cases. → accept: full suite exit 0.
+
+## Round 17 — `/scrutinise` of `8e9f06d..cfd10b2`
+One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is UNMET only through the Warning; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
+- R17-W1 [Correctness] `plan-submodules.mjs:68`: a `bumps` step with no `project` and a non-submodule target passed, since `parents.get(x)` and `step.project` were both `undefined`.
+- R17-S2 the manifest wrote `commands/orchestrate.md` and `CHANGELOG.md` without reading them, so a re-activated unit could not Edit them. R17-S3 the Not-driven note calling LAND-03 UNPROVEN predates Step 20. R17-S4 no projectless-bump test.
+
+## Step 25 — land-submodule-bump, round 17 fixes (., JavaScript, normal)
+- [ ] 25.1 `bumps` is refused unless it names a known submodule (`parents.has`) of the step's project (R17-W1, S4). → accept: projectless and `.` bump cases fail on `cfd10b2`; full suite exit 0.
+- [ ] 25.2 `read` lists `commands/orchestrate.md` and `CHANGELOG.md` again; the LAND-03 note is marked superseded (R17-S2, S3). → accept: `arch-check.mjs scope` PASS.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
@@ -478,7 +487,7 @@ One isolated scrutineer: 0 Critical, 1 Warning, 2 Suggestion; the criterion is M
   - A flagged command over 16 KB that is not a commit or push is blocked with the commit/push message, which says nothing about its size.
   - The 16 KB limit appears twice: in `pre-guard` it counts code units, and in `force-block` it counts bytes.
   - No test sends a flagged command just under 16 KB to time the commit/push regex. The scrutineer's probe of that regex at ~16 KB took ≤45 ms.
-- **`/architect --update` (2026-10-09), decided with the user.** ARCH-ENGINE-01 was VIOLATED: `agent-mode-guard.mjs:91-123` grants a `unit-runner` only to a live `/auto`, so a standalone `/orchestrate` had no `subagent` fallback. The user chose to amend the rule, not the code. ARCH-ENGINE-12 supersedes it, and `_shared-execution.md` and `auto.md` now cite ENGINE-12. ARCH-LAND-03 (submodule bump as a dependent unit) is UNPROVEN: only the protocol text at `commands/merge.md:98-100` enforces it, with no check in `plan-graph.mjs`. The user accepted it as protocol; there are no submodules in this scope.
+- **`/architect --update` (2026-10-09), decided with the user.** ARCH-ENGINE-01 was VIOLATED: `agent-mode-guard.mjs:91-123` grants a `unit-runner` only to a live `/auto`, so a standalone `/orchestrate` had no `subagent` fallback. The user chose to amend the rule, not the code. ARCH-ENGINE-12 supersedes it, and `_shared-execution.md` and `auto.md` now cite ENGINE-12. ARCH-LAND-03 (submodule bump as a dependent unit) is UNPROVEN: only the protocol text at `commands/merge.md:98-100` enforces it, with no check in `plan-graph.mjs`. The user accepted it as protocol; there are no submodules in this scope. *Superseded:* the user then chose enforcement, and Steps 20–25 make `plan-graph.mjs` refuse a missing or early bump.
 - **Round 10:** `mutatesGit` and `commandDirectoryTargets` share the many-`git` shape. They run after the force block and only with a worktree binding, and they guard isolation, not a decided rule here. `pre-guard.mjs:149` exits before the force block when craftsman is off for the project, which is outside this range. Treating a hook timeout as allow is the plan's own assumption; it was not verified at runtime.
 - **Round 15:** three Suggestions, not driven.
   - R15-S1: a registered project whose superproject is an unregistered repo other than the workspace root (or an unregistered clone nested in a registered one) is not detected. Finding it means querying repos outside the registered set, which ARCH-LAND-04 limits; widening that is a decision for `/architect`.

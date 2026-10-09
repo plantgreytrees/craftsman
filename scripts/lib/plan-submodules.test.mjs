@@ -106,6 +106,12 @@ test("validateSteps: bumps must name a submodule of the step's own project (ARCH
   assert.throws(() => check([sub, bump("bump-lib", "lib", ["lib-change"], "other")]), /not a submodule of its project other/);
   assert.throws(() => check([bump("bump-app", "app", [], "other")]), /not a submodule/);
   assert.throws(() => check([bump("bump-x", 7, [], "app")]), /not a submodule/);
+  // A step with no project (or `.`) cannot bump anything (R17-W1).
+  const projectless = (bumps) => ({ id: "b", scope_id: "b", depends_on: [], bumps });
+  for (const bumps of ["other", "nonexistent", "", "lib"]) {
+    assert.throws(() => check([projectless(bumps)]), /not a submodule/, `projectless bumps "${bumps}"`);
+  }
+  assert.throws(() => check([bump("b", "other", [], ".")]), /not a submodule/);
   // Nested under the step's project but with no gitlink: not a submodule (R16-S3).
   assert.throws(() => check([bump("bump-lib", "lib", [], "app")], () => false), /not a submodule of its project app/);
   // deep's nearest enclosing project is lib, not app.

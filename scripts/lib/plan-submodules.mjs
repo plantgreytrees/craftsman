@@ -65,7 +65,8 @@ export function checkSubmoduleBumps(steps, workspace, { isGitlink } = {}) {
   const byId = new Map(steps.map((step) => [step.id, step]));
   for (const step of steps) {
     if (step.bumps === undefined) continue;
-    if (typeof step.bumps !== "string" || parents.get(step.bumps) !== step.project) {
+    // has(): a step with no project must not match an absent entry (undefined).
+    if (typeof step.bumps !== "string" || !parents.has(step.bumps) || parents.get(step.bumps) !== step.project) {
       throw new Error(`scope step ${step.id} bumps ${step.bumps}, which is not a submodule of its project ${step.project}`);
     }
   }
