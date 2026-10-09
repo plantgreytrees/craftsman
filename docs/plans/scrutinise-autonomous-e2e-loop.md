@@ -159,9 +159,9 @@ units:
     security: high
     scope:
       read: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, scripts/arch-check.test.mjs, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
-      docs: [docs/architecture/landing.rules.md]
-      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
-    arch: [ARCH-LAND-02, ARCH-LAND-06]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]  # re-scoped: 11.3 splits run-manifest-parked per ARCH-ENGINE-08
+    arch: [ARCH-LAND-02, ARCH-LAND-06, ARCH-ENGINE-08]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
@@ -230,9 +230,9 @@ One isolated scrutineer: 0 Critical, 1 Warning (Security), 5 Suggestion; every r
 - [x] 10.5 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes` (trim comments in `pre-guard.mjs`/`core.mjs` only, no behaviour change); full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
 
 ## Step 11 — land-holder-untracked (., JavaScript, high)
-- [ ] 11.1 A holder merge that git refuses because untracked working-tree files would be overwritten throws (as a dirty holder does) instead of parking `conflict`; ARCH-LAND-06's four park reasons stand (R3-S3). → accept: repo-exec.test — an untracked file in the holder at a path the branch adds makes merge throw, with no PARKED result and the holder's base unmoved.
-- [ ] 11.2 repo-exec.test covers a holder with `MERGE_HEAD` set (throws) and an `ff-only` park inside the holder (remote, `push:false`, holder base behind and diverged from origin) (R3-S6). → accept: both cases pass.
-- [ ] 11.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes` (trim comments in `repo-exec*.mjs` only); full suite exit 0; 11.1's test fails on the pre-change code.
+- [x] 11.1 A holder merge that git refuses because untracked working-tree files would be overwritten throws (as a dirty holder does) instead of parking `conflict`; ARCH-LAND-06's four park reasons stand (R3-S3). → accept: repo-exec.test — an untracked file in the holder at a path the branch adds makes merge throw, with no PARKED result and the holder's base unmoved.
+- [x] 11.2 repo-exec.test covers a holder with `MERGE_HEAD` set (throws) and an `ff-only` park inside the holder (remote, `push:false`, holder base behind and diverged from origin) (R3-S6). → accept: both cases pass.
+- [x] 11.3 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0; 11.1's test fails on the pre-change code. Met by ARCH-ENGINE-08's own remedy, not comment trimming: the new tests need ~2 KB and `repo-exec*.mjs` holds only ~2.5 KB of comments, so task 10.3 (landing parks) moves from run-manifest-parked into its own Step 10b `run-manifest-land` (shipped in e125c60), as Steps 1b and 7b were split before.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.

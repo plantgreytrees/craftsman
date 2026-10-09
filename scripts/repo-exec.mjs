@@ -245,7 +245,8 @@ function merge(context, input, info, deps = {}) {
     if (mergeStarted && step !== "rejected-push") {
       try { run(at, ["merge", "--abort"], { allowFailure: true }); } catch {}
     }
-    if (!step) throw error;
+    // Untracked files in the way are a dirty checkout, not a conflict: throw.
+    if (!step || /untracked working tree files would be overwritten/.test(`${error?.stderr || ""}${error?.message || ""}`)) throw error;
     // A refused push comes after the local merge, so local base holds it.
     return landingPark(step, { ...info, branch, land: "direct", merged: false, merged_locally: step === "rejected-push", worktree_path: worktree }, error);
   } finally {

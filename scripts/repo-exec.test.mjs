@@ -538,6 +538,41 @@ test("repo-exec: from a linked-worktree root with push:false, the unit lands loc
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
+test("repo-exec: a holder with untracked files in the way or a merge in progress throws, never parks", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { primary, base, info, land } = linked(data, false);
+      const before = git(primary.root, ["rev-parse", base]);
+      fs.writeFileSync(path.join(primary.root, "blocked.txt"), "someone's new file\n");
+      assert.throws(() => land("blocked"), (error) => /untracked working tree files would be overwritten/.test(`${error.stderr}${error.message}`));
+      assert.equal(git(primary.root, ["rev-parse", base]), before, "nothing landed");
+      assert.notEqual(spawnSync("git", ["-C", primary.root, "rev-parse", "--verify", "--quiet", "MERGE_HEAD"]).status, 0);
+      fs.rmSync(path.join(primary.root, "blocked.txt"));
+
+      fs.writeFileSync(path.join(info.common_git_dir, "MERGE_HEAD"), `${before}\n`);
+      assert.throws(() => land("mid-merge"), /merge in progress/);
+      assert.equal(git(primary.root, ["rev-parse", base]), before);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: with push:false, a holder base diverged from origin parks ff-only", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { primary, base, land } = linked(data);
+      fs.writeFileSync(path.join(primary.root, "README.md"), "pushed\n");
+      git(primary.root, ["commit", "-q", "-am", "chore: pushed"]);
+      git(primary.root, ["push", "-q", "origin", base]);
+      git(primary.root, ["commit", "-q", "--amend", "-m", "chore: diverged"]);
+      const before = git(primary.root, ["rev-parse", base]);
+      assertPark(land("behind", { push: false }), "ff-only");
+      assert.equal(git(primary.root, ["rev-parse", base]), before, "the holder's base is unmoved");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 test("repo-exec: an ff-only failure parks the unit with a decision", () => {
   const data = fixture();
   try {

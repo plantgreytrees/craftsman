@@ -3,7 +3,7 @@ slug: autonomous-e2e-loop
 goal: One /craftsman:auto entry asks every decision up front, runs units unattended in fresh-context workflow agents, asks again after, and lands everything with a measured smaller root context.
 idea: docs/ideas/autonomous-e2e-loop.md
 classification: in-scope # idea verdict pursue-with-changes, status architected (docs/ideas/autonomous-e2e-loop.md:2-4); decided rules in docs/architecture/*.rules.md
-tracker_rows: [state-root-pin, telemetry, baseline-run, auto-command, mod-launcher, workflow-spike, engine-guards, engine, plan-fit-and-measure, run-manifest-parked, description-diet, release-notes]
+tracker_rows: [state-root-pin, telemetry, baseline-run, auto-command, mod-launcher, workflow-spike, engine-guards, engine, plan-fit-and-measure, run-manifest-parked, run-manifest-land, description-diet, release-notes]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS); no HTTP/event boundary — hooks are process-boundary JSON on stdin, traced by grep
   completeness_sweep: done
@@ -170,14 +170,27 @@ units:
     scope_id: run-manifest-parked
     project: .
     depends_on: [engine]
-    module: tracker decision field, run manifest, landing parks
+    module: tracker decision field, run manifest
     language: JavaScript + Markdown
     security: normal
     scope:
-      read: [scripts/tracker.mjs, scripts/tracker.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, scripts/lib/land.mjs, commands/auto.md, agents/unit-runner.md, scripts/auto-command.test.mjs]
-      docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/engine.rules.md]
-      write: [scripts/tracker.mjs, scripts/run-manifest.mjs, scripts/tracker.test.mjs, scripts/run-manifest.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, commands/auto.md, agents/unit-runner.md, scripts/auto-command.test.mjs]  # re-scoped before execution: 10.4 asserts auto.md in auto-command.test.mjs
-    arch: [ARCH-TRACKER-01, ARCH-TRACKER-02, ARCH-TRACKER-03, ARCH-TRACKER-04, ARCH-LAND-06, ARCH-AUTO-01, ARCH-ENGINE-07]
+      read: [scripts/tracker.mjs, scripts/tracker.test.mjs, scripts/lib/land.mjs, commands/auto.md, agents/unit-runner.md, scripts/auto-command.test.mjs]
+      docs: [docs/architecture/tracker.rules.md, docs/architecture/auto.rules.md, docs/architecture/engine.rules.md]
+      write: [scripts/tracker.mjs, scripts/run-manifest.mjs, scripts/tracker.test.mjs, scripts/run-manifest.test.mjs, commands/auto.md, agents/unit-runner.md, scripts/auto-command.test.mjs]  # re-scoped before execution: 10.4 asserts auto.md in auto-command.test.mjs
+    arch: [ARCH-TRACKER-01, ARCH-TRACKER-02, ARCH-TRACKER-03, ARCH-TRACKER-04, ARCH-AUTO-01, ARCH-ENGINE-07]
+    tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
+  - id: run-manifest-land
+    scope_id: run-manifest-land
+    project: .
+    depends_on: [run-manifest-parked]
+    module: landing parks
+    language: JavaScript (Node ESM, node:test)
+    security: normal
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+      docs: [docs/architecture/landing.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+    arch: [ARCH-LAND-06]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
   - id: description-diet
     scope_id: description-diet
@@ -311,9 +324,13 @@ Depends on: engine, baseline-run
 Depends on: engine
 - [x] 10.1 `tracker.mjs`: transitions accept an optional `decision {question, options[], recommended?}` (validated) and an `autonomous` flag; an autonomous PARKED without a valid decision is refused; an autonomous CANCELLED is refused; events gain fields and never lose them; `renderBlock` output is unchanged. → accept: `tracker.test.mjs` covers the decision, the refusals and a renderBlock snapshot.
 - [x] 10.2 New `scripts/run-manifest.mjs`: derive `.craftsman/runs/<slug>.json` (features: unit, status, criteria ticked/total, decision) from the ledger plus acceptance.md, regenerated on every transition. → accept: `run-manifest.test.mjs` shows it matches the ledger after transitions, and that a hand edit is overwritten.
-- [x] 10.3 `repo-exec.mjs`: merge conflict, ff-only failure, rejected push and pr auto-merge error each return `{parked:true, decision}` for Phase C (LAND-06). → accept: `repo-exec.test.mjs` fixture for conflict and rejected push.
 - [x] 10.4 `commands/auto.md` Phase C + `agents/unit-runner.md`: Phase C builds its round from ledger decisions; the runner parks through `tracker.mjs` with a decision. → accept: auto-command test asserts the Phase C source.
 - [x] 10.5 Full suite exit 0.
+
+### Step 10b — run-manifest-land (., JS, normal)
+Split from Step 10 by the ARCH-ENGINE-08 size check once later landing fixes grew `repo-exec*.mjs` (scrutinise-autonomous-e2e-loop 11.3); shipped with it in e125c60.
+Depends on: run-manifest-parked
+- [x] 10.3 `repo-exec.mjs`: merge conflict, ff-only failure, rejected push and pr auto-merge error each return `{parked:true, decision}` for Phase C (LAND-06). → accept: `repo-exec.test.mjs` fixture for conflict and rejected push.
 
 ### Step 11 — description-diet (., Markdown, normal)
 Depends on: run-manifest-parked, mod-launcher, plan-fit-and-measure
