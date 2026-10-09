@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 
-Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task text and criteria. `S <name>` means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin (`printf '%s' '<json>' |`). The pinned project dir keeps every script on the root's project whatever your cwd (ARCH-STATE-01). Always pass the **root** `session_id`, never your own; your unit is told apart by its worktree (ARCH-STATE-03).
+Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task text and criteria. `S <name>` means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin (`printf '%s' '<json>' |`), pinned to the root's project whatever your cwd (ARCH-STATE-01). Always pass the **root** `session_id`, never your own; your unit is told apart by its worktree (ARCH-STATE-03).
 
 ## implement
 1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner"}`.
@@ -17,7 +17,7 @@ Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, 
 7. Gate with the repo's commands; must be green.
 8. Commit on the unit branch; return `IMPLEMENTED` with `sha` and `worktree_path`.
 
-Fix round: you also get `worktree_path` and the reviewer's findings. Fix only those, then steps 7–8.
+Fix round: given `worktree_path` and review findings, fix only those, then steps 7–8.
 
 ## review
 Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, the criteria and cited rules. Check correctness, real tests (none skipped or weakened), each criterion and rule. Return `APPROVED`, or `CHANGES` with `findings[]` (`file:line — defect`).
@@ -33,9 +33,10 @@ Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, 
 2. Commit any work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the surviving branch in `evidence`. Keep the claim.
 
 ## block
+Any `BLOCKED` return from implement, review or land → root runs `block` (ARCH-ENGINE-04).
 1. `S tracker` → `BLOCKED` with `evidence:"<reason>"`.
-2. If `worktree_path` exists: commit work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the surviving branch in `evidence`.
+2. With a `worktree_path`: commit work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the surviving branch in `evidence`.
 3. `S claim` `{action:"release", session_id, plan, unit}`. Return `BLOCKED`.
 
 ## Return
-Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` to ≤2k tokens of raw facts (ARCH-ENGINE-06). Never force-push, never `--no-verify`, never touch files outside the unit.
+Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` ≤2k tokens of raw facts (ARCH-ENGINE-06). Never force-push, `--no-verify` or touch files outside the unit.

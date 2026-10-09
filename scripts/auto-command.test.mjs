@@ -46,6 +46,7 @@ test("auto.md: Phase C builds its round from ledger decisions; the runner parks 
   assert.match(park, /`S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked\[0\]>`/);
   assert.match(park, /Never `CANCELLED`/);
   assert.match(section(runner, "## land"), /`\{parked:true, decision\}`[^\n]*→ return `PARKED` with `parked:\[decision\]`/);
+  assert.match(section(runner, "## block"), /Any `BLOCKED` return from implement, review or land → root runs `block`/);
 });
 
 test("auto.md: Phase B sizes a fresh turn cap from instruction.md's bands and falls back to the paste (AUTO-04/05/07)", () => {

@@ -132,9 +132,9 @@ units:
     language: Markdown (agent protocol)
     security: normal
     scope:
-      read: [agents/unit-runner.md]
+      read: [agents/unit-runner.md, scripts/auto-command.test.mjs]
       docs: [docs/architecture/engine.rules.md]
-      write: [agents/unit-runner.md]
+      write: [agents/unit-runner.md, scripts/auto-command.test.mjs]
     arch: [ARCH-ENGINE-04]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
 ---
@@ -190,8 +190,8 @@ One isolated scrutineer: 0 Critical, 5 Warning (one Architecture), 6 Suggestion.
 - [x] 8.5 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
 
 ## Step 9 — runner-block-trigger (., Markdown, normal)
-- [ ] 9.1 `agents/unit-runner.md` states that any `BLOCKED` return from implement, review or land → root runs `block`, so the subagent engine closes a blocked unit as the workflow engine does (R2-W4, ARCH-ENGINE-04); stays ≤3,800 chars. → accept: doc-size policy passes; a unit-runner.md test (or wiring test) asserts the trigger line.
-- [ ] 9.2 Full suite exit 0.
+- [x] 9.1 `agents/unit-runner.md` states that any `BLOCKED` return from implement, review or land → root runs `block`, so the subagent engine closes a blocked unit as the workflow engine does (R2-W4, ARCH-ENGINE-04); stays ≤3,800 chars. → accept: doc-size policy passes; a unit-runner.md test (or wiring test) asserts the trigger line.
+- [x] 9.2 Full suite exit 0.
 
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
