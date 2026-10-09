@@ -98,6 +98,16 @@ jobs:
         run: npm install --global @anthropic-ai/claude-code
       - name: Validate plugin
         run: claude plugin validate .
+      - name: Mod tests (claude plugin test, ARCH-MOD-05)
+        shell: bash
+        run: |
+          have="$(claude --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          need="2.1.287"
+          if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" != "$need" ]; then
+            echo "::notice::claude $have < $need: skipping mod tests (claude plugin test)"
+            exit 0
+          fi
+          claude plugin test .
       - name: Check PR diff whitespace
         if: github.event_name == 'pull_request'
         shell: bash

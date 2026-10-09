@@ -1,0 +1,4 @@
+# `claude plugin validate .` — the mod's section (ARCH-MOD-01). Regenerate after changing hooks/register.js.
+./register.js hooks: command.run, turn.complete
+./register.js gating hook without .catch: command.run
+./register.js calls: $.command.run, $.fs.list, $.fs.read, $.process.run, $.prompt.submit, $.session.id, $.session.usage, $.store.get, $.store.set, $.ui.status

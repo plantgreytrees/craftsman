@@ -81,7 +81,7 @@ units:
     scope:
       read: [hooks/hooks.json, .claude-plugin/plugin.json, scripts/telemetry.mjs, commands/auto.md, .github/workflows/ci.yml]
       docs: [docs/architecture/mod.rules.md, docs/architecture/auto.rules.md]
-      write: [hooks/register.js, hooks/register.test.ts, .claude-plugin/plugin.json, docs/mod-manifest.txt, scripts/mod-manifest.test.mjs, .github/workflows/ci.yml, commands/auto.md]
+      write: [hooks/register.js, hooks/register.test.ts, hooks/hooks.json, .claude-plugin/plugin.json, docs/mod-manifest.txt, scripts/mod-manifest.test.mjs, .github/workflows/ci.yml, commands/auto.md, commands/auto-go.md, scripts/telemetry.mjs, scripts/telemetry.test.mjs]  # re-scoped in execution: the mod is declared by hooks.json "modules" (plugin.json unchanged); /auto-go needs a command file; telemetry takes a measured sample
     arch: [ARCH-MOD-01, ARCH-MOD-02, ARCH-MOD-03, ARCH-MOD-04, ARCH-MOD-05, ARCH-AUTO-07]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [plugin-authoring], guards: [pre-guard, quality-gate] }
   - id: workflow-spike
@@ -232,10 +232,10 @@ Depends on: state-root-pin, telemetry
 ### Step 5 — mod-launcher (., mod JS/TS, high)
 Tooling: implementer · gates security-auditor · skills plugin-authoring
 Depends on: auto-command, telemetry
-- [ ] 5.1 `hooks/register.js` mod: launch only, observe, draw (MOD-01). On turn end, a new `.craftsman/instructions/<slug>.goal.txt` → `command.run("goal", …)`, else `prompt.submit`, else register `/auto-go` (MOD-02). A band shows plan, unit, tracker % and context %; context samples go to `scripts/telemetry.mjs` (MOD-03). Mod and workflow support are feature-detected (MOD-04). Register no `tool.call`, `tool.check` or `agent.spawn`. → accept: `hooks/register.test.ts` covers each launch path under `claude plugin test`.
-- [ ] 5.2 `.claude-plugin/plugin.json`: declare the mod entry; commit `docs/mod-manifest.txt` from `claude plugin validate .`. → accept: `scripts/mod-manifest.test.mjs` asserts the manifest lists no `tool.call`/`tool.check`/`agent.spawn`, and that `plugin.json` parses.
-- [ ] 5.3 `.github/workflows/ci.yml`: a mod-test step running `claude plugin test`, skipped with a notice when `claude` < 2.1.287 (MOD-05). → accept: the step exists and is gated; the YAML is valid.
-- [ ] 5.4 `commands/auto.md` Phase B: when the mod is absent (`-p`, `disableAllHooks`, no mod support), print the paste-ready goal (AUTO-07). → accept: auto-command test still passes.
+- [x] 5.1 `hooks/register.js` mod: launch only, observe, draw (MOD-01). On turn end, a new `.craftsman/instructions/<slug>.goal.txt` → `command.run("goal", …)`, else `prompt.submit`, else register `/auto-go` (MOD-02). A band shows plan, unit, tracker % and context %; context samples go to `scripts/telemetry.mjs` (MOD-03). Mod and workflow support are feature-detected (MOD-04). Register no `tool.call`, `tool.check` or `agent.spawn`. → accept: `hooks/register.test.ts` covers each launch path under `claude plugin test`.
+- [x] 5.2 `.claude-plugin/plugin.json`: declare the mod entry; commit `docs/mod-manifest.txt` from `claude plugin validate .`. → accept: `scripts/mod-manifest.test.mjs` asserts the manifest lists no `tool.call`/`tool.check`/`agent.spawn`, and that `plugin.json` parses.
+- [x] 5.3 `.github/workflows/ci.yml`: a mod-test step running `claude plugin test`, skipped with a notice when `claude` < 2.1.287 (MOD-05). → accept: the step exists and is gated; the YAML is valid.
+- [x] 5.4 `commands/auto.md` Phase B: when the mod is absent (`-p`, `disableAllHooks`, no mod support), print the paste-ready goal (AUTO-07). → accept: auto-command test still passes.
 
 ### Step 6 — workflow-spike (live evidence; ENGINE-02 gate)
 Tooling: skills workflow-authoring

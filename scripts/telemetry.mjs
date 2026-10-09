@@ -5,6 +5,7 @@
 // only: it prints nothing and always exits 0.
 //
 //   node scripts/telemetry.mjs --transcript <path> [--phase <p>] [--unit <u>] [--sid <id>]
+//   node scripts/telemetry.mjs --sid <id> --tokens <n> --percent <p> [--cost <usd>] [--phase <p>] [--unit <u>]
 import fs from "node:fs";
 import { loadConfig, enabled, logEvent, readStdin, sidOf } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
@@ -58,10 +59,19 @@ export function contextEvent({ text, sid, phase = null, unit = null, cfg = {} })
   return { ev: "context", sid, phase, unit, tokens, percent, cost };
 }
 
+// --tokens/--percent[/--cost] from the CLI: the same event, already measured.
+export function directEvent({ sid, phase = null, unit = null, tokens, percent, cost }) {
+  const t = Number(tokens);
+  const p = Number(percent);
+  if (!sid || !Number.isFinite(t) || t < 0 || !Number.isFinite(p)) return null;
+  const c = cost === undefined ? null : Number(cost);
+  return { ev: "context", sid, phase, unit, tokens: t, percent: p, cost: Number.isFinite(c) ? c : null };
+}
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
-    const m = /^--(transcript|phase|unit|sid)$/.exec(argv[i]);
+    const m = /^--(transcript|phase|unit|sid|tokens|percent|cost)$/.exec(argv[i]);
     if (m && argv[i + 1] !== undefined) args[m[1]] = argv[++i];
   }
   return args;
@@ -70,10 +80,15 @@ function parseArgs(argv) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const args = parseArgs(process.argv.slice(2));
-    const input = args.transcript ? {} : JSON.parse((await readStdin()) || "{}");
+    const direct = args.tokens !== undefined;
+    const input = args.transcript || direct ? {} : JSON.parse((await readStdin()) || "{}");
     const cfg = loadConfig();
     const transcript = args.transcript || input.transcript_path;
-    if (enabled(cfg) && transcript && fs.existsSync(transcript)) {
+    if (enabled(cfg) && direct) {
+      // A sample the caller already measured (the mod reads session usage).
+      const event = directEvent(args);
+      if (event) logEvent(event);
+    } else if (enabled(cfg) && transcript && fs.existsSync(transcript)) {
       const sid = args.sid || sidOf(input);
       const scope = readScope({ ...input, session_id: sid });
       const event = contextEvent({

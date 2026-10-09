@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { TAIL_BYTES, contextEvent, readTail } from "./telemetry.mjs";
+import { TAIL_BYTES, contextEvent, directEvent, readTail } from "./telemetry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TELEMETRY = path.join(HERE, "telemetry.mjs");
@@ -74,6 +74,20 @@ test("telemetry: a missing or unreadable transcript is a silent no-op", () => {
     const r = spawnSync(process.execPath, [TELEMETRY], { cwd: dir, env: { ...process.env, CLAUDE_PROJECT_DIR: dir }, encoding: "utf8", input: JSON.stringify({ session_id: "x", transcript_path: path.join(dir, "missing.jsonl") }) });
     assert.equal(r.status, 0);
     assert.equal(fs.existsSync(path.join(dir, ".craftsman", "events.jsonl")), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("telemetry: a measured sample (the mod's session usage) logs the same event shape", () => {
+  assert.deepEqual(directEvent({ sid: "m", unit: "u", tokens: "1200", percent: "0.6", cost: "0.01" }),
+    { ev: "context", sid: "m", phase: null, unit: "u", tokens: 1200, percent: 0.6, cost: 0.01 });
+  assert.equal(directEvent({ sid: "m", tokens: "x", percent: "1" }), null);
+  assert.equal(directEvent({ tokens: "1", percent: "1" }), null, "a sample needs its session");
+  const dir = tmpRepo();
+  try {
+    const r = spawnSync(process.execPath, [TELEMETRY, "--sid", "mod-sid", "--tokens", "5000", "--percent", "2.5"], { cwd: dir, env: { ...process.env, CLAUDE_PROJECT_DIR: dir }, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const [{ ts, ...event }] = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    assert.deepEqual(event, { ev: "context", sid: "mod-sid", phase: null, unit: null, tokens: 5000, percent: 2.5, cost: null });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
