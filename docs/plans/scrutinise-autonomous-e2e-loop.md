@@ -450,6 +450,13 @@ One isolated scrutineer: 0 Critical, 1 Warning, 4 Suggestion; the criterion is M
 - [ ] 22.2 `gitlinkAt` throws when git fails, and passes `--literal-pathspecs` (R14-S2, S3). → accept: real-git test of a `:`-prefixed gitlink and of an unreadable parent.
 - [ ] 22.3 `governs` lists the lib file; the template skeleton shows `bumps:` (R14-S4, S5). → accept: lint PASS; full suite exit 0.
 
+## Round 15 — `/scrutinise` of `8e9f06d..08815dc`
+One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is MET; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
+- R15-W1 [Correctness] `plan-submodules.mjs:15-19`: `ls-files -s` without `-z` C-quotes a path with non-ASCII bytes, a tab, `"` or `\`, so `endsWith("\t" + rel)` never matches and such a submodule needs no bump.
+
+## Step 23 — land-submodule-bump, round 15 fixes (., JavaScript, normal)
+- [ ] 23.1 `gitlinkAt` reads `ls-files -s -z` and splits on NUL (R15-W1). → accept: a real-git test of a gitlink whose name has a non-ASCII byte and a `"` fails on `08815dc`; full suite exit 0.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
@@ -464,6 +471,10 @@ One isolated scrutineer: 0 Critical, 1 Warning, 4 Suggestion; the criterion is M
   - No test sends a flagged command just under 16 KB to time the commit/push regex. The scrutineer's probe of that regex at ~16 KB took ≤45 ms.
 - **`/architect --update` (2026-10-09), decided with the user.** ARCH-ENGINE-01 was VIOLATED: `agent-mode-guard.mjs:91-123` grants a `unit-runner` only to a live `/auto`, so a standalone `/orchestrate` had no `subagent` fallback. The user chose to amend the rule, not the code. ARCH-ENGINE-12 supersedes it, and `_shared-execution.md` and `auto.md` now cite ENGINE-12. ARCH-LAND-03 (submodule bump as a dependent unit) is UNPROVEN: only the protocol text at `commands/merge.md:98-100` enforces it, with no check in `plan-graph.mjs`. The user accepted it as protocol; there are no submodules in this scope.
 - **Round 10:** `mutatesGit` and `commandDirectoryTargets` share the many-`git` shape. They run after the force block and only with a worktree binding, and they guard isolation, not a decided rule here. `pre-guard.mjs:149` exits before the force block when craftsman is off for the project, which is outside this range. Treating a hook timeout as allow is the plan's own assumption; it was not verified at runtime.
+- **Round 15:** three Suggestions, not driven.
+  - R15-S1: a registered project whose superproject is an unregistered repo other than the workspace root (or an unregistered clone nested in a registered one) is not detected. Finding it means querying repos outside the registered set, which ARCH-LAND-04 limits; widening that is a decision for `/architect`.
+  - R15-S2 (Disputed): LAND-04's text names `git submodule status`, while `gitlinkAt` reads the same index gitlinks via `ls-files -s`. The rule's own check, "grep for directory walks", passes, and the scrutineer rated it HOLDS.
+  - R15-S3: no subprocess test drives `plan-graph.mjs` with a real `CRAFTSMAN_WORKSPACE_MANIFEST`. The manifest shape the lib relies on matches `core.mjs:105-129` today.
 - Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.

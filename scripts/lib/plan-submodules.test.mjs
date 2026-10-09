@@ -53,6 +53,9 @@ test("gitlinkAt: reads a mode-160000 entry from the parent's index, nothing else
     // A `:`-prefixed name is a literal path, not pathspec magic (R14-S3).
     git("update-index", "--add", "--cacheinfo", `160000,${"b".repeat(40)},:odd`);
     assert.equal(gitlinkAt(parent, path.join(parent, ":odd")), true);
+    // A name git would C-quote (non-ASCII, `"`) still matches (R15-W1).
+    git("update-index", "--add", "--cacheinfo", `160000,${"d".repeat(40)},vendor/é "lib"`);
+    assert.equal(gitlinkAt(parent, path.join(parent, "vendor", "é \"lib\"")), true);
     // An unreadable index fails closed (R14-S2).
     assert.throws(() => gitlinkAt(path.join(parent, "missing"), path.join(parent, "missing", "x")), /cannot read the git index/);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }

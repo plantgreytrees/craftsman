@@ -12,11 +12,12 @@ export function gitlinkAt(parentRoot, childRoot) {
   const rel = path.relative(parentRoot, childRoot).split(path.sep).join("/");
   let out;
   try {
-    out = execFileSync("git", ["--literal-pathspecs", "-C", parentRoot, "ls-files", "-s", "--", rel], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    // -z: paths come back unquoted, so a non-ASCII or `"` name still matches.
+    out = execFileSync("git", ["--literal-pathspecs", "-C", parentRoot, "ls-files", "-s", "-z", "--", rel], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
     throw new Error(`cannot read the git index of ${parentRoot} to find submodules: ${String(error.stderr || error.message).trim()}`);
   }
-  return out.split("\n").some((line) => line.startsWith("160000 ") && line.endsWith(`\t${rel}`));
+  return out.split("\0").some((entry) => entry.startsWith("160000 ") && entry.endsWith(`\t${rel}`));
 }
 
 // A registered project is a submodule of the nearest registered project whose
