@@ -100,6 +100,15 @@ function assertUnitAcceptance(input, status, context) {
   }
 }
 
+// The unit's own `[unit:<id>]` lines as they stand at MERGED/COMPLETE. The
+// acceptance file is per checkout and gitignored, so a unit's worktree copy
+// dies with the worktree; the ledger (main checkout) keeps them instead.
+function unitCriteria(ids, context) {
+  let text = "";
+  try { text = fs.readFileSync(acceptancePath(context), "utf8"); } catch { return []; }
+  return acceptanceCriteria(text).filter((c) => c.unit && ids.has(c.unit)).map((c) => c.line);
+}
+
 // The ledger and its TRACKER.md view live in the MAIN checkout, never in the
 // linked worktree a session happens to run in: every session (and every
 // worktree) must see one tracker the moment it changes — not after a merge.
@@ -246,7 +255,9 @@ function writeTransition(input, context) {
     const status = input.status || (previous ? "IN_PROGRESS" : "PENDING");
     validateTransition(previous?.status, status, input.evidence);
     const decision = validateParkInput(input, status);
-    if (previous?.status !== status) assertUnitAcceptance({ ...input, scope_id: input.scope_id || previous?.scope_id }, status, context);
+    const scopeId = input.scope_id || previous?.scope_id;
+    if (previous?.status !== status) assertUnitAcceptance({ ...input, scope_id: scopeId }, status, context);
+    const read = ["MERGED", "COMPLETE"].includes(status) ? unitCriteria(new Set([input.unit, scopeId].filter(Boolean)), context) : [];
     const event = {
       key,
       project: input.project || context.id,
@@ -263,6 +274,8 @@ function writeTransition(input, context) {
       // row that moves on never keeps a stale question.
       decision,
       autonomous: input.autonomous === true,
+      // Carried forward: compaction keeps only the latest event per key.
+      criteria: read.length ? read : previous?.criteria || null,
     };
     fs.appendFileSync(file, JSON.stringify(event) + "\n", "utf8");
     logEvent({ ev: "tracker_transition", key, from: previous?.status || null, to: status, unit: input.unit }, context);
@@ -361,6 +374,40 @@ export function compactLedger(context = projectContext(".")) {
   });
 }
 
+export function archivePath(context = projectContext(".")) {
+  return path.join(trackerRoot(context), "docs", "plans", "TRACKER-archive.md");
+}
+
+// Retire a finished plan: every row must be COMPLETE or CANCELLED. Its rows
+// leave the ledger and the live TRACKER.md block; a one-line entry per unit,
+// with the criteria it closed on, goes to the committed TRACKER-archive.md.
+export function archivePlan(input, context = projectContext(".")) {
+  if (typeof input.plan !== "string" || !input.plan.trim()) throw new Error("archive needs plan");
+  const file = ledgerPath(context);
+  const archived = withLock(file, () => {
+    const rows = currentState(context).filter((row) => row.plan === input.plan);
+    if (!rows.length) throw new Error(`archive refused: no tracker rows for ${input.plan}`);
+    const open = rows.filter((row) => !["COMPLETE", "CANCELLED"].includes(row.status));
+    if (open.length) throw new Error(`archive refused: ${open.map((r) => `${r.unit}=${r.status}`).join(", ")} not COMPLETE or CANCELLED`);
+    const keys = new Set(rows.map((row) => row.key));
+    const kept = readEvents(file).filter((event) => !keys.has(event.key));
+    const day = new Date().toISOString().slice(0, 10);
+    const entries = rows.sort((a, b) => a.key.localeCompare(b.key)).map((row) => [
+      `- ${day} **${path.posix.basename(row.plan, ".md")}#${row.unit}** ${row.status} — ${cell(row.evidence, 160)}`,
+      ...(row.criteria || []).map((line) => `  ${line}`),
+    ].join("\n"));
+    const doc = archivePath(context);
+    let text = "";
+    try { text = fs.readFileSync(doc, "utf8"); } catch { text = "# Tracker archive\n\nRows retired from the live ledger by `tracker.mjs archive`.\n"; }
+    atomicWrite(doc, `${text.trimEnd()}\n\n## ${input.plan} (${day})\n\n${entries.join("\n")}\n`);
+    atomicWrite(file, kept.length ? kept.map((e) => JSON.stringify(e)).join("\n") + "\n" : "");
+    return rows.map((row) => row.unit);
+  });
+  logEvent({ ev: "tracker_archived", plan: input.plan, units: archived.length }, context);
+  syncQuietly(context);
+  return { plan: input.plan, archived, archive: archivePath(context) };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
@@ -374,7 +421,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       output = { ledger: file };
     } else if (input.action === "compact") output = compactLedger(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
-    else throw new Error("action must be init, transition, status, list, compact, or sync");
+    else if (input.action === "archive") output = archivePlan(input, context);
+    else throw new Error("action must be init, transition, status, list, compact, sync, or archive");
     process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");

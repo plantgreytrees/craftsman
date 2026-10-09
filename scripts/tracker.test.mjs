@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  acceptanceNotice, currentState, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
+  acceptanceNotice, archivePath, archivePlan, compactLedger, currentState, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
   syncTrackerDoc, trackerDocPath, trackerRoot, transition,
 } from "./tracker.mjs";
 
@@ -240,7 +240,7 @@ test("tracker: events gain decision/autonomous without losing a field, and rende
   parkable(selected);
   transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "open decision", autonomous: true, decision: DECISION }, selected);
   const last = JSON.parse(fs.readFileSync(ledgerPath(selected), "utf8").trim().split("\n").at(-1));
-  for (const field of ["key", "project", "plan", "unit", "scope_id", "goal", "module", "status", "evidence", "session_id", "updated_at", "decision", "autonomous"]) {
+  for (const field of ["key", "project", "plan", "unit", "scope_id", "goal", "module", "status", "evidence", "session_id", "updated_at", "decision", "autonomous", "criteria"]) {
     assert.ok(field in last, `event keeps ${field}`);
   }
   const rows = [
@@ -261,4 +261,43 @@ test("tracker: events gain decision/autonomous without losing a field, and rende
   ].join("\n"));
   const { decision, autonomous, ...legacy } = rows[0];
   assert.equal(renderBlock([legacy, rows[1]]), renderBlock(rows), "the new fields never reach the TRACKER.md view");
+});
+
+test("tracker: a unit's tagged criteria are kept in the ledger, carried to COMPLETE, and outlive the acceptance file and compaction", () => {
+  const selected = context();
+  const acPath = path.join(selected.stateDir, "acceptance.md");
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(acPath, "- [x] [unit:unit-1] first\n- [x] [unit:unit-1] second\n- [x] [unit:unit-2] other unit\n");
+  startUnit(selected, "unit-1");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123" }, selected);
+  fs.rmSync(acPath); // the worktree copy dies with the worktree
+  compactLedger(selected);
+  const row = currentState(selected).find((r) => r.unit === "unit-1");
+  assert.equal(row.status, "COMPLETE");
+  assert.deepEqual(row.criteria, ["- [x] [unit:unit-1] first", "- [x] [unit:unit-1] second"]);
+});
+
+test("tracker: archive refuses a plan with an open row, then retires a finished plan to TRACKER-archive.md with its criteria", () => {
+  const selected = context();
+  const acPath = path.join(selected.stateDir, "acceptance.md");
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(acPath, "- [x] [unit:unit-1] shipped criterion\n");
+  startUnit(selected, "unit-1");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123" }, selected);
+  transition({ plan: "docs/plans/example.md", unit: "unit-2", status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/other.md", unit: "keep-me", status: "PENDING" }, selected);
+  assert.throws(() => archivePlan({ plan: "docs/plans/example.md" }, selected), /unit-2=PENDING not COMPLETE or CANCELLED/);
+  assert.throws(() => archivePlan({ plan: "docs/plans/none.md" }, selected), /no tracker rows/);
+  transition({ plan: "docs/plans/example.md", unit: "unit-2", status: "CANCELLED", evidence: "dropped" }, selected);
+
+  const result = archivePlan({ plan: "docs/plans/example.md" }, selected);
+  assert.deepEqual(result.archived.sort(), ["unit-1", "unit-2"]);
+  assert.deepEqual(currentState(selected).map((r) => r.unit), ["keep-me"], "only the archived plan leaves the ledger");
+  const view = fs.readFileSync(trackerDocPath(selected), "utf8");
+  assert.doesNotMatch(view, /\[example\]/);
+  assert.match(view, /\[other\]\(\.\/other\.md\) \| keep-me/);
+  const archive = fs.readFileSync(archivePath(selected), "utf8");
+  assert.match(archive, /## docs\/plans\/example\.md/);
+  assert.match(archive, /\*\*example#unit-1\*\* COMPLETE — all 1 acceptance criteria ticked; abc123\n {2}- \[x\] \[unit:unit-1\] shipped criterion/);
+  assert.match(archive, /\*\*example#unit-2\*\* CANCELLED — dropped/);
 });
