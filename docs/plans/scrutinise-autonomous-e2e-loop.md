@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -189,6 +189,19 @@ units:
       write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-02, ARCH-LAND-06]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
+  - id: force-block-escape
+    scope_id: force-block-escape
+    project: .
+    depends_on: [force-block-substitution]
+    module: force block escaped quotes and comments
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/arch-check.test.mjs, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
+    arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
 # Plan: scrutinise fixes for autonomous-e2e-loop
@@ -272,9 +285,17 @@ One isolated scrutineer: 0 Critical, 1 Warning (Security), 3 Suggestion. ARCH-LA
 - [x] 13.1 `repo-exec` `run()` runs every git call with `LC_ALL=C`, so the untracked-refusal match (and every parsed git output) holds under a localised git (R4-S2). → accept: repo-exec.test runs the untracked-holder case with a non-C `LANG`/`LC_ALL` in `process.env` and it still throws.
 - [x] 13.2 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
 
+## Round 5 — `/scrutinise` of `d1cc8fd..a8394d1`
+One isolated scrutineer: 0 Critical, 1 Warning (Security), 1 Suggestion. ARCH-LAND-05 was judged VIOLATED again: Step 12.2's quote-aware split does not model backslash escapes or `#` comments, so a region the shell runs as unquoted reads as quoted — after `-m`/`-F` it is skipped as a message, and its separators no longer split. Every other rule HOLDS.
+
+## Step 14 — force-block-escape (., JavaScript, high)
+- [ ] 14.1 `gitInvocations` also splits on every separator regardless of quotes (the pre-12.2 `split(/&&|\|\||[;|&\n()`]/)`), and a destructive form found in either split blocks (R5-W1). Fails safe: an over-block needs a separator inside a quoted operand followed by a destructive phrase. → accept: `git commit -m "a\" -m " ; git push -f origin main ; echo "b"`, `git commit -m "a\" -m " && git reset --hard && echo "b"`, `git tag -m "a\" -m "⏎git push --force⏎echo "b" v1`, `echo #git commit -m "⏎git push -f origin main⏎#"` and `true #git commit -m "⏎git reset --hard⏎#"` (⏎ = newline) join `DESTRUCTIVE`; `git -C "/a;b" push --force origin main` stays blocked; every `ALLOWED` case still passes.
+- [ ] 14.2 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0; each new `DESTRUCTIVE` form fails on the pre-change guard.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
+- **Round 5:** the lexical class also covers `$'…'` ANSI-C quoting, line continuations and `${var}` inside a message — same residual, same remedy. The `repo-exec.test` locale case proves the fix only where git's German catalogue is installed (it is on the dev host); a host-conditional skip would be a skipped test, so it stays as is.
 - Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.
