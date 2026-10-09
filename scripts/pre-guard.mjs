@@ -195,8 +195,10 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
 
 // A hook rejection is fixed, never bypassed (--no-verify is forbidden):
 // unconditional, for every commit/push with or without a worktree binding.
-if (tool === "Bash" && /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command)
-    && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)) {
+// The flag test is linear; the commit/push one retries per `git`, so only a
+// command under 16 KB reaches it — a larger one with a bypass flag is blocked.
+if (tool === "Bash" && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
+    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command))) {
   logEvent({ ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
     `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +

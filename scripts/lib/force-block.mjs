@@ -98,9 +98,9 @@ export function destructiveGit(value) {
 // blocks, as does a command too large to read in time. `source` (worker code
 // to eval) is the test seam for a stalled or exhausted check.
 export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS } = {}) {
-  if (Buffer.byteLength(value) > MAX_COMMAND_BYTES) return Promise.resolve(`a command over ${MAX_COMMAND_BYTES} bytes`);
+  if (Buffer.byteLength(value) > MAX_COMMAND_BYTES) return Promise.resolve(`a command over ${MAX_COMMAND_BYTES} bytes (split it into smaller commands)`);
   return new Promise((resolve) => {
-    const options = { workerData: { forceBlock: value }, resourceLimits: { maxOldGenerationSizeMb: HEAP_MB } };
+    const options = { workerData: { forceBlock: value }, execArgv: [], resourceLimits: { maxOldGenerationSizeMb: HEAP_MB } };
     const worker = source ? new Worker(source, { ...options, eval: true }) : new Worker(new URL(import.meta.url), options);
     const settle = (verdict) => {
       clearTimeout(timer);

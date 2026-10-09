@@ -419,14 +419,16 @@ test("pre-guard: a check that throws, stalls or exhausts its heap blocks inside 
   assert.equal(await forceBlocked("git status", { source: "throw new RangeError('stack')" }), unreadable);
   assert.equal(await forceBlocked("git status"), null);
   assert.equal(await forceBlocked("git push -f origin main"), "git push --force");
-  // In a child process, exiting as pre-guard does: a stalled check and an
-  // exhausted heap each end in exit 2 well inside the hook timeout.
+  // In a child process under --input-type=module (a flag a worker must not
+  // inherit): the real worker still answers, a stalled check blocks only once
+  // its deadline passes, and an exhausted heap blocks — exit 2, as pre-guard.
   const module = JSON.stringify(path.join(ROOT, "lib", "force-block.mjs"));
-  for (const source of ["for (;;) {}", "const a = []; for (;;) a.push(new Array(1e5).fill(Math.random()));"]) {
-    const child = `const { forceBlocked } = await import(${module}); process.exit((await forceBlocked("git status", { source: ${JSON.stringify(source)}, deadlineMs: 2000 })) ? 2 : 0);`;
-    const r = spawnSync(process.execPath, ["--input-type=module", "-e", child], { encoding: "utf8", timeout: 8000 });
-    assert.equal(r.status, 2, source);
-  }
+  const child = (body) => spawnSync(process.execPath, ["--input-type=module", "-e", `const { forceBlocked } = await import(${module}); ${body}`], { encoding: "utf8", timeout: 8000 });
+  assert.equal(child(`process.exit((await forceBlocked("git status")) === null ? 0 : 1);`).status, 0);
+  const stall = child(`const t = Date.now(); const v = await forceBlocked("git status", { source: "for (;;) {}", deadlineMs: 2000 }); process.exit(v && Date.now() - t >= 2000 ? 2 : 1);`);
+  assert.equal(stall.status, 2);
+  const heap = child(`process.exit((await forceBlocked("git status", { source: "const a = []; for (;;) a.push(new Array(1e5).fill(Math.random()));" })) ? 2 : 1);`);
+  assert.equal(heap.status, 2);
 });
 
 test("pre-guard: payloads that stalled or crashed the force block exit 2 inside the hook timeout (R9)", () => {
@@ -441,14 +443,22 @@ test("pre-guard: payloads that stalled or crashed the force block exit 2 inside 
       `${"git ".repeat(20000)}push -f`,
       `echo ${"{".repeat(26000)}a,b${"}".repeat(26000)}; git push -f origin main`,
       `echo ${"{".repeat(32000)}a,b${"}".repeat(32000)}; git push -f origin main`,
-      // Under the size cap, so the worker reads them: the word budget and the deadline.
+      // Under the size cap, so the worker reads them.
       `${"git ".repeat(3900)}push -f`,
       `echo ${"{".repeat(7000)}a,b${"}".repeat(7000)}; git push -f origin main`,
     ];
+    const guard = (command) => spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(bash(sid, command)), encoding: "utf8", timeout: 10000, env: { ...process.env, CLAUDE_PROJECT_DIR: dir } });
     for (const command of payloads) {
-      const r = spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(bash(sid, command)), encoding: "utf8", timeout: 10000, env: { ...process.env, CLAUDE_PROJECT_DIR: dir } });
+      const r = guard(command);
       assert.equal(r.status, 2, command.slice(0, 60));
+      // Which mechanism blocked: the size cap above 16 KB.
+      if (command.length > 16384) assert.match(r.stderr, /a command over 16384 bytes/, command.slice(0, 60));
     }
+    assert.match(guard(payloads[0]).stderr, /git push --force is BLOCKED/);
+    // No destructive form at all: only the word budget can block it.
+    const benign = guard("a git ".repeat(2000));
+    assert.equal(benign.status, 2);
+    assert.match(benign.stderr, /a command the force block cannot read/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -459,6 +469,18 @@ test("pre-guard: the verify-bypass check is linear in a run of options", () => {
     assert.equal(run(GUARD, dir, bash("plain", `git ${"-a ".repeat(40)}x --no-verify commit`)).status, 0);
     assert.ok(Date.now() - started < 3000);
     assert.equal(run(GUARD, dir, bash("plain", "git -C dir commit --no-verify")).status, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the verify-bypass check stays inside the hook timeout across many git words (R10)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-verify-many-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const guard = (command) => spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(bash("plain", command)), encoding: "utf8", timeout: 10000, env: { ...process.env, CLAUDE_PROJECT_DIR: dir } });
+    assert.equal(guard(`${"git -a ".repeat(45000)}x; git commit --no-verify -m y`).status, 2);
+    const started = Date.now();
+    assert.equal(guard(`${"git -a ".repeat(45000)}x; git commit -m y`).status, 0);
+    assert.ok(Date.now() - started < 3000);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
