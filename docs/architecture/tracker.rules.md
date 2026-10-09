@@ -3,7 +3,7 @@ area: tracker
 governs: ["scripts/tracker.mjs", "scripts/tracker-sync.mjs", "scripts/digest.mjs", "scripts/run-manifest.mjs"]
 human: docs/architecture/tracker.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: 655e17e28b036ec540800c641ef14b28fcea146a
+verified_at: 256913f42d004100f55ed7bc1115c151b8d9466f
 updated: 2026-10-09
 ---
 # ARCH tracker — enforced rules

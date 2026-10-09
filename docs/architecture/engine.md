@@ -36,7 +36,7 @@ flowchart TD
 ## Decisions
 | id | decision | why | rejected alternatives |
 |---|---|---|---|
-| ARCH-ENGINE-01 | Default `workflow`, falling back to `subagent`; `root` is opt-in | User decision: adopt from day one; root context first | Default `root` until measured |
+| ARCH-ENGINE-01 | *Superseded by ENGINE-12.* Default `workflow`, falling back to `subagent`; `root` is opt-in | User decision: adopt from day one; root context first | Default `root` until measured |
 | ARCH-ENGINE-02 | The default can't land before the 1-unit spike passes | The default is otherwise unproven: guards inside agents, launch, landing | Ship and observe |
 | ARCH-ENGINE-03 | Scripts only orchestrate | The runtime forbids fs/shell and non-determinism | — |
 | ARCH-ENGINE-04 | One unit protocol for both engines | Prevents the engines drifting apart | Separate prompts per engine |
@@ -47,6 +47,7 @@ flowchart TD
 | ARCH-ENGINE-09 | Sequential first | Parallel scope isolation is unproven | Parallel waves now |
 | ARCH-ENGINE-10 | Root-context-first supersedes the total-token rationale | Explicit reversal of CHANGELOG 2.1.0 | Silent change |
 | ARCH-ENGINE-11 | Rename `workflow.test.mjs` | Name collision | — |
+| ARCH-ENGINE-12 | Supersedes ENGINE-01: the `subagent` fallback applies under `/auto` only; a standalone `/orchestrate` stays root-only and says so when Workflow is unavailable | User decision (2026-10-09): the guard deliberately grants unit-runners only to a live `/auto` (ARCH-AUTO-06), matching ENGINE-10 | Grant unit-runners to standalone `/orchestrate` (loosens root-only for interactive runs) |
 
 ## Data & flows
 Workflow input (`args`) is the run manifest `.craftsman/runs/<slug>.json`;
