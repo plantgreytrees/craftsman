@@ -3,7 +3,7 @@ slug: scrutinise-autonomous-e2e-loop
 goal: An unattended /craftsman:auto run records every park and block in the ledger, lands from a linked worktree, and leaves no stale scope, marker or grant behind.
 parent: docs/plans/autonomous-e2e-loop.md
 classification: in-scope # /scrutinise findings on 9b34cc3..01e12a7; every fix stays inside a decided rule
-tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words, force-block-forms, force-block-closed, force-block-bounded]
+tracker_rows: [engine-close, scope-release, auto-marker, mod-goal-since, land-linked-worktree, core-hardening, land-holder, force-block-live, runner-block-trigger, force-block-quoted, land-holder-untracked, force-block-substitution, land-locale, force-block-escape, force-block-shell-words, force-block-forms, force-block-closed, force-block-bounded, verify-bypass-bounded]
 guards:
   blast_radius: done # grep sweep below (CONSUMERS)
   completeness_sweep: done
@@ -254,6 +254,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/force-block.mjs, scripts/lib/shell-words.mjs, scripts/lib/shell-words.test.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
     arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
     tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
+  - id: verify-bypass-bounded
+    scope_id: verify-bypass-bounded
+    project: .
+    depends_on: [force-block-bounded]
+    module: verify-bypass check bounded; force-block test seams
+    language: JavaScript (Node ESM, node:test)
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/force-block.mjs, scripts/arch-check.test.mjs, hooks/hooks.json, docs/plans/autonomous-e2e-loop.md, docs/plans/scrutinise-autonomous-e2e-loop.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/force-block.mjs, docs/plans/scrutinise-autonomous-e2e-loop.md]
+    arch: [ARCH-LAND-05, ARCH-AUTO-06, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [pre-guard, quality-gate] }
 ---
 
 # Plan: scrutinise fixes for autonomous-e2e-loop
@@ -382,6 +395,17 @@ One isolated scrutineer: 0 Critical, 2 Warning (Security), 2 Suggestion. ARCH-LA
 - [x] 18.5 Hook-level tests replace the in-process-only fail-closed check (R9-S2). The 6,000-group case stays in `DESTRUCTIVE`. → accept: every `DESTRUCTIVE` case still exits 2 and every `ALLOWED` case exits 0.
 - [x] 18.6 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`. The worker logic lives in `scripts/lib/force-block.mjs`, and `pre-guard.mjs` comments are trimmed if needed. Full suite exit 0.
 
+## Round 10 — `/scrutinise` of `2d43fbc..6245e57`
+One isolated scrutineer found 0 Critical, 1 Warning (Security) and 3 Suggestions. ARCH-LAND-05, ARCH-STATE-02 and ARCH-AUTO-06 HOLD.
+
+The Warning sits outside /auto. The verify-bypass regex is linear for one `git` word, but `RegExp.test` retries from every `\bgit`. That makes it quadratic in the number of `git` words: a 315 KB command takes 13.9 s, and the hook times out and fails open.
+
+## Step 19 — verify-bypass-bounded (., JavaScript, high)
+- [ ] 19.1 `pre-guard`'s verify-bypass check tests the linear bypass-flag regex first, then blocks outright when the command is over 16 KB. Only a shorter command reaches the commit/push regex (R10-W1). → accept: `("git -a ").repeat(45000) + "x; git commit --no-verify -m y"` with no /auto run exits 2 within the hook timeout, and exits non-2 or runs past 10 s on the pre-change guard. A many-`git` command with no bypass flag exits 0 quickly.
+- [ ] 19.2 `forceBlocked`'s worker takes `execArgv: []`, so inherited flags (`--input-type`) cannot stop it starting. Its size verdict says to split the command (R10-S2, S3). → accept: a child-process test run under `--input-type=module` gets `null` for `git status` from the real worker, and the stall case takes at least its deadline.
+- [ ] 19.3 The R9 hook tests assert which mechanism blocked (R10-S1). Over 16 KB, stderr names the size. A benign `("a git ").repeat(2000)` with no destructive form is unreadable through the word budget. → accept: both stderr assertions pass.
+- [ ] 19.4 Every step of `docs/plans/autonomous-e2e-loop.md` stays within `execution.unitContextBytes`; full suite exit 0.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
@@ -390,6 +414,7 @@ One isolated scrutineer: 0 Critical, 2 Warning (Security), 2 Suggestion. ARCH-LA
 - **Round 7:** `help.autocorrect` subcommand guessing is config (the gitconfig residual); `[[ ]]`, `case`, extglob and an `alias` defined in the same command join the lexical residual. A server-side `receive.denyNonFastForwards` or a pre-push hook would stop force pushes however they are spelled — a decision change for `/architect`, not a fix here.
 - **Round 8:** `MESSAGE_OPERAND`'s nested quantifiers take ~1.2 s on a 20,000-quote input — a slow hook, not a bypass. A brace group whose commas are quoted (`{"a,b"}`) over-expands relative to bash; with the cap and fail-closed it can only over-block.
 - **Round 9:** `MESSAGE_OPERAND` stopping at `(`/`$` anywhere in the prefix over-blocks a later message that names a destructive form. Examples: `git commit -m "feat(guard): x" -m "blocks git push -f now"`, and `git -C "$WT" commit -m "…git reset --hard…"`. This direction is safe and is accepted, like Step 14.1's. The worker adds a few tens of ms to each Bash call, but only while /auto is live.
+- **Round 10:** `mutatesGit` and `commandDirectoryTargets` share the many-`git` shape. They run after the force block and only with a worktree binding, and they guard isolation, not a decided rule here. `pre-guard.mjs:149` exits before the force block when craftsman is off for the project, which is outside this range. Treating a hook timeout as allow is the plan's own assumption; it was not verified at runtime.
 - Step 7 supersedes step 5's "no remote → park" clause: the holder landing replaces the `base-checked-out` park.
 - `workflows/spike.js` still ships: it is ENGINE-02's evidence artefact and the Workflow guard allows only plugin workflows, so it grants nothing `run.js` doesn't.
 - The Stop sampler and the mod both log `{ev:"context"}`, doubling `samples` in stats; peak and final are unaffected.
