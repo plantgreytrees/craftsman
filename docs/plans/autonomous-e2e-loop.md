@@ -305,7 +305,7 @@ Depends on: workflow-spike, engine-guards
 Depends on: engine, baseline-run
 - [x] 9.1 `arch-check.mjs scope`: refuse a step whose `scope.read` + `scope.docs` bytes + task text exceed `execution.unitContextBytes` (ENGINE-08). → accept: `arch-check.test.mjs` refuses an oversized fixture and passes this plan's steps.
 - [x] 9.2 `commands/plan.md` + plan-template: name the size check in the dry-run duty. → accept: text present.
-- [ ] 9.3 Live: run one unit (or the remaining units) through `/craftsman:auto` on the workflow engine; record root-context tokens next to the baseline, and the Phase A round and the final prompt-to-continue observed. → accept: the evidence doc has a "Baseline vs workflow" table with both numbers and the observed `/auto` phases.
+- [x] 9.3 Live: run one unit (or the remaining units) through `/craftsman:auto` on the workflow engine; record root-context tokens next to the baseline, and the Phase A round and the final prompt-to-continue observed. → accept: the evidence doc has a "Baseline vs workflow" table with both numbers and the observed `/auto` phases.
 
 ### Step 10 — run-manifest-parked (., JS, normal)
 Depends on: engine

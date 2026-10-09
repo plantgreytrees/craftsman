@@ -53,3 +53,30 @@ Findings to carry into `engine-guards` and `engine`:
 4. A run only gets the new hooks after `/reload-plugins` or a new session. `/auto` should check that the loaded hooks match the installed version before it launches.
 
 **Verdict: GO.** Every ENGINE-02 item is recorded from live workflow runs: hooks fire inside agents (PreToolUse blocks, PostToolUse quality-gate events), worktree-keyed scope activation, the quality gate, repo-exec prepare and merge (`9d7f500`), tracker transitions, and the park path with a decision. Root tokens were sampled too. Enforcing the unit's scope with the *installed* hooks inside agents is verified by replay; it needs a session that loaded them, and `/auto` should check for that (finding 4). The workflow default may land in `engine` (ARCH-ENGINE-01/02).
+
+## Baseline vs workflow
+
+Unit 10 (run-manifest-parked) ran on the workflow engine: `workflows/run.js` (`craftsman:run`, run `wf_c1102f43-c75`) took it through `agents/unit-runner.md`. One implement agent, one fresh review agent (APPROVED on the first round) and one land agent ran it. Each root sample comes from the telemetry CLI against the root transcript, as in the baseline.
+
+| run | root tokens before | root tokens after | root growth for the unit | spent outside root |
+|---|---|---|---|---|
+| baseline, root-only: auto-command | 107,160 | 154,205 | +47,045 | — |
+| baseline, root-only: mod-launcher | 154,205 | 262,695 | +108,490 | — |
+| workflow engine: run-manifest-parked | 226,518 | 246,459 | **+19,941** | 245,831 (3 agents, 70 tool uses) |
+
+- **Root cost.** The workflow unit grew root by 19,941 tokens. That is 2.4× less than the smaller baseline unit and 5.4× less than the larger, for a unit of comparable size (9 files, +501 lines, 12 new tests). About 8k of the 19,941 is the launch args (the inline protocol and the task). The rest is the per-unit summary (well under ARCH-ENGINE-06's 2k-token cap) plus root's own verify-and-land work.
+- **Implementation context.** The unit's reads, diffs and test runs (245,831 tokens) stayed in the agents' fresh contexts and never reached root.
+
+### Observed `/auto` phases
+
+This session's loaded plugin (5cb343437661) predates `/craftsman:auto`, so the pass followed the installed `commands/auto.md` (a7a62f0d56b7) step by step rather than invoking it. The `/goal` mod launch (Phase B.3) was not exercised, because this session already ran under a `/goal`.
+
+- **Phase A (ask).** Idea, architecture and plan all existed and no decision was open, so the round asked **zero questions**. Nothing was defaulted (ARCH-AUTO-02).
+- **Phase B (run).** `execution.engine` is `workflow`, so `craftsman:run` ran the unit.
+- **Phase C (ask again).** The tracker showed no PARKED row and no ledger decision, so the consolidated round was empty.
+- **Finish.** Remaining rows: plan-fit-and-measure IN_PROGRESS, description-diet PENDING, release-notes PENDING. The prompt to continue: "`/craftsman:auto autonomous-e2e-loop` runs the next Phase B → C pass" (ARCH-AUTO-03).
+
+### Findings
+
+5. **Land blocked in a linked-worktree root.** The land agent's `repo-exec merge` ran `git checkout main` inside `project_root`. That root is itself a linked worktree (`.claude/worktrees/idea-autonomous-e2e-loop`) and `main` is checked out by the primary checkout, so git refused with "'main' is already used by worktree". The agent returned BLOCKED, kept the branch, released its scope binding and reverted its acceptance ticks. Root then verified the suite (293/293) and fast-forwarded `main` with `git push origin HEAD:main` (`e125c60`). `repo-exec` needs a merge path that never checks the base out, such as a temporary worktree or an ff-only push.
+6. **Stale stop-gate during the run.** The stale stop-gate blocked twice while the workflow was in flight, on the runner's live binding and worktree (finding 3). The installed `stop-gate.mjs` defers only the acceptance block for in-flight tasks (ARCH-STATE-04). Binding and sweep checks still fire for a worktree an in-flight agent holds, so root must not act on them until the run reports back.
