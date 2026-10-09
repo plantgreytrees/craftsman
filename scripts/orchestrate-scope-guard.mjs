@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PostToolUse (SlashCommand|Skill) and UserPromptSubmit: the moment
-// /orchestrate or /scrutinise (bare or craftsman:-namespaced) is invoked — by
+// /orchestrate, /auto or /scrutinise (bare or craftsman:-namespaced) is invoked — by
 // the model as a tool call, or typed straight into the prompt by the user,
 // which never reaches a tool hook at all.
 //
@@ -20,7 +20,7 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, sessionDir, acceptancePath, recordAcceptanceOwnership, grantAgent } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 
 let input = {};
@@ -39,7 +39,7 @@ const command = typeof toolInput.command === "string" ? toolInput.command
 // Anchored deliberately: this must match an *invocation*, never a mention.
 // compact-nudge.mjs matched /orchestrate-style names anywhere in a command's
 // text and hard-locked sessions that had merely talked about the script.
-const invocation = /^\/(?:craftsman:)?(orchestrate|scrutinise|idea|architect)(?=\s|$)(.*)/s.exec(command.trim());
+const invocation = /^\/(?:craftsman:)?(orchestrate|auto|scrutinise|idea|architect)(?=\s|$)(.*)/s.exec(command.trim());
 const invoked = invocation?.[1];
 if (!invoked) process.exit(0);
 const args = invocation[2] || "";
@@ -48,7 +48,8 @@ const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context)) process.exit(0);
 
-if (invoked === "orchestrate") {
+// /auto executes a plan exactly as /orchestrate does (ARCH-AUTO-06).
+if (invoked === "orchestrate" || invoked === "auto") {
   // Use scope.mjs's own path function directly — this must land at EXACTLY
   // the path pre-guard.mjs's requiredFile(input) reads, and duplicating that
   // path computation by hand would risk drifting apart from it silently.
@@ -57,6 +58,16 @@ if (invoked === "orchestrate") {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, new Date().toISOString() + "\n");
   } catch { /* best-effort — falls back to /orchestrate's own prose-driven require call */ }
+}
+
+// /auto's marker: pre-guard.mjs blocks destructive git while it exists
+// (ARCH-LAND-05). Root session dir, same (sid) input on both sides (STATE-02).
+if (invoked === "auto") {
+  try {
+    const dir = sessionDir(sidOf(input));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "auto-active"), new Date().toISOString() + "\n");
+  } catch { /* best-effort — the guard simply stays unarmed */ }
 }
 
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
@@ -76,7 +87,8 @@ if (invoked === "idea" || invoked === "architect") process.exit(0);
 // plan (a later one, or after /clear) never did, and the Stop gate's
 // acceptance check stayed silent for the whole run. /orchestrate ("I am
 // executing this plan") and /scrutinise ("I am verifying it") are the two
-// explicit signals, so ownership moves to whichever session runs them.
+// explicit signals (with /auto, which runs /orchestrate's loop), so ownership
+// moves to whichever session runs them.
 if (fs.existsSync(acceptancePath(context))) {
   try { recordAcceptanceOwnership(sidOf(input), context); } catch { /* best-effort */ }
 }

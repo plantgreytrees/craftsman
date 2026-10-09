@@ -86,6 +86,26 @@ says so).
 
 Never use `--no-verify`, `--force` or `git worktree remove --force`.
 
+## 5a. Under /auto
+
+- **Standing approval.** Invoking `/craftsman:auto` is standing approval to
+  commit, branch, merge base in, push, land and clean up worktrees and branches
+  across every registered workspace project — no per-repo confirmation
+  (ARCH-LAND-01).
+- **One repo at a time, in plan-graph order.** Each repo lands through its own
+  `repo-exec.mjs` `merge` (`direct` or `pr`), in the order `plan-graph.mjs`
+  returns for the plan's units; never one merge spanning repos (ARCH-LAND-02).
+- **Submodules.** A parent repo's submodule pointer bump is an explicit
+  dependent unit in the parent, landed after the submodule's own unit;
+  `repo-exec` stays single-repo (ARCH-LAND-03).
+- **Only registered projects.** Touch only projects in `craftsman.workspace.json`
+  plus the submodules `git submodule status` reports on those roots — never
+  find repos by scanning directories (ARCH-LAND-04).
+- **No force.** `pre-guard.mjs` blocks force pushes (flags or `+refspec`),
+  `reset --hard` and `worktree remove --force` while `/auto` is active
+  (ARCH-LAND-05). A conflict, ff-only failure, rejected push or PR auto-merge
+  error PARKs the unit with a decision for `/auto`'s Phase C (ARCH-LAND-06).
+
 ## 6. Report
 
 From the JSON result, report:

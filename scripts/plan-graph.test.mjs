@@ -22,3 +22,16 @@ test("orderSteps: rejects dependency cycles", () => {
 test("validateSteps: keeps project as an explicit repository boundary", () => {
   assert.equal(validateSteps([step("a", [], "services/payments")])[0].project, "services/payments");
 });
+
+// ARCH-LAND-02/03: each repo lands in plan-graph order, and a submodule
+// pointer bump is its own parent unit after the sub-repo lands.
+test("orderSteps: sub-repo unit, then the parent's pointer bump, then the consumer", () => {
+  const workspace = { projects: { lib: { path: "vendor/lib" }, app: { path: "." } } };
+  const steps = validateSteps([
+    step("consumer", ["bump-lib"], "app"),
+    step("bump-lib", ["lib-change"], "app"),
+    step("lib-change", [], "lib"),
+  ], { workspace });
+  assert.deepEqual(orderSteps(steps).map(({ id, project }) => `${project}:${id}`), ["lib:lib-change", "app:bump-lib", "app:consumer"]);
+  assert.throws(() => validateSteps([step("x", [], "unregistered")], { workspace }), /unknown workspace project/, "only registered projects are touched (LAND-04)");
+});

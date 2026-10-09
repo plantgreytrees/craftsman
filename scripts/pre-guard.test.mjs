@@ -310,3 +310,42 @@ test("pre-guard: the root TRACKER.md's generated block can't be hand-edited; the
     fs.rmSync(main, { recursive: true, force: true });
   }
 });
+
+// ARCH-LAND-05: destructive git is blocked only while /auto's marker exists.
+const DESTRUCTIVE = [
+  "git push --force origin feat/x",
+  "git push -f origin main",
+  "git push -uf origin main",
+  "git push --force-with-lease origin main",
+  "git push --force-with-lease=main:abc123 origin main",
+  "git push origin +main",
+  "git push origin +HEAD:main",
+  "git fetch origin && git reset --hard origin/main",
+  "git -C /tmp/repo reset --hard",
+  "git worktree remove --force .worktrees/u1",
+  "git worktree remove -f .worktrees/u1",
+];
+const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status"];
+const bash = (sid, command) => ({ session_id: sid, tool_name: "Bash", tool_input: { command } });
+
+test("pre-guard: while /auto is active, force pushes, hard resets and forced worktree removal are blocked", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-force-")));
+  try {
+    const sid = "auto-run";
+    fs.mkdirSync(path.join(dir, ".craftsman", "sessions", sid), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), "now\n");
+    for (const command of DESTRUCTIVE) {
+      const r = run(GUARD, dir, bash(sid, command));
+      assert.equal(r.status, 2, command);
+      assert.match(r.stderr, /BLOCKED while \/auto is active \(ARCH-LAND-05\)/, command);
+    }
+    for (const command of ALLOWED) assert.equal(run(GUARD, dir, bash(sid, command)).status, 0, command);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: without /auto the destructive git forms are unchanged (not blocked here)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-no-auto-")));
+  try {
+    for (const command of [...DESTRUCTIVE, ...ALLOWED]) assert.equal(run(GUARD, dir, bash("plain", command)).status, 0, command);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

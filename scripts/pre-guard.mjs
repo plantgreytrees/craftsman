@@ -26,6 +26,32 @@ function mutatesGit(value) {
   return /(?:^|[;&|]\s*)\s*git\s+(?:(?:-[A-Za-z]+\s+[^\s]+)\s+)*(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|(?:^|[;&|]\s*)\s*git\s+branch\s+-[dD]\b|(?:^|[;&|]\s*)\s*git\s+worktree\s+(?:remove|move|prune)\b/.test(command);
 }
 
+// Each `git …` in a compound command, as its words after the global options.
+function gitInvocations(value) {
+  const invocations = [];
+  for (const segment of value.split(/&&|\|\||[;|\n]/)) {
+    const words = segment.trim().split(/\s+/).filter(Boolean);
+    const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
+    if (at < 0) continue;
+    let i = at + 1;
+    while (i < words.length && words[i].startsWith("-")) i += /^-[Cc]$|^--(?:git-dir|work-tree|namespace)$/.test(words[i]) ? 2 : 1;
+    invocations.push(words.slice(i));
+  }
+  return invocations;
+}
+
+const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z]*${letter}[A-Za-z]*$`).test(word);
+
+// The destructive git forms /auto must never run (ARCH-LAND-05), or null.
+function destructiveGit(value) {
+  for (const [sub, ...rest] of gitInvocations(value)) {
+    if (sub === "push" && rest.some((w) => /^--force(?:-with-lease|-if-includes)?(?:=|$)/.test(w) || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
+    if (sub === "reset" && rest.includes("--hard")) return "git reset --hard";
+    if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === "--force" || shortFlag(w, "f"))) return "git worktree remove --force";
+  }
+  return null;
+}
+
 function commandDirectoryTargets(command, worktree) {
   const targets = [];
   for (const match of command.matchAll(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/g)) {
@@ -198,6 +224,23 @@ if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|pus
     `hard rule, not a suggestion.\n`
   );
   process.exit(2);
+}
+
+// ARCH-LAND-05: /auto holds standing git authority (LAND-01) but never a
+// destructive one. While its marker exists, force pushes (flags or a
+// +refspec), hard resets and forced worktree removal are blocked; a plain
+// `git push origin HEAD:main` is not. orchestrate-scope-guard.mjs writes the
+// marker at this same (sid) path.
+if (tool === "Bash" && fs.existsSync(path.join(sessionDir(sidOf(input)), "auto-active"))) {
+  const destructive = destructiveGit(command);
+  if (destructive) {
+    logEvent({ ev: "auto_force_blocked", sid: sidOf(input), command });
+    process.stderr.write(
+      `craftsman: ${destructive} is BLOCKED while /auto is active (ARCH-LAND-05). Land with a plain ` +
+      `push or repo-exec merge; a rejected push or conflict PARKs the unit with a decision for Phase C.\n`
+    );
+    process.exit(2);
+  }
 }
 
 if (tool === "Bash" && binding && mutatesGit(command)) {

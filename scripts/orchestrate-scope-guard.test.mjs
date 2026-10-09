@@ -146,3 +146,38 @@ test("orchestrate-scope-guard: a different command that merely starts with the s
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ARCH-AUTO-06: /auto is treated like /orchestrate — scope-required, acceptance
+// ownership — and also arms the auto-active marker pre-guard reads (LAND-05).
+const autoPayloads = {
+  typed: { session_id: "auto-typed", prompt: "/auto autonomous-e2e-loop" },
+  namespaced: { session_id: "auto-ns", prompt: "/craftsman:auto autonomous-e2e-loop" },
+  skill: { session_id: "auto-skill", tool_name: "Skill", tool_input: { skill: "craftsman:auto", args: "autonomous-e2e-loop" } },
+  slash: { session_id: "auto-slash", tool_name: "SlashCommand", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
+};
+for (const [shape, input] of Object.entries(autoPayloads)) {
+  test(`orchestrate-scope-guard: /auto (${shape}) arms scope-required, acceptance ownership and auto-active`, () => {
+    const dir = tmpProject();
+    try {
+      fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] [unit:u1] it works\n");
+      assert.equal(run(dir, input).status, 0);
+      const session = path.join(dir, ".craftsman", "sessions", sidOf(input));
+      assert.equal(fs.existsSync(requiredFile(dir, input)), true, "scope-required armed");
+      assert.equal(fs.existsSync(path.join(session, "acceptance.ref")), true, "acceptance adopted");
+      assert.equal(fs.existsSync(path.join(session, "auto-active")), true, "auto-active armed");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+test("orchestrate-scope-guard: a prompt that merely mentions /auto, or /automate, arms nothing", () => {
+  const dir = tmpProject();
+  try {
+    for (const prompt of ["please run /auto later", "/automate the thing", "/craftsman:autonomous"]) {
+      const input = { session_id: "mention", prompt };
+      assert.equal(run(dir, input).status, 0);
+      assert.equal(fs.existsSync(requiredFile(dir, input)), false, prompt);
+      assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", "mention", "auto-active")), false, prompt);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
