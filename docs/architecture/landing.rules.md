@@ -3,7 +3,7 @@ area: landing
 governs: ["scripts/repo-exec.mjs", "scripts/lib/land.mjs", "scripts/workspace-init.mjs", "scripts/plan-graph.mjs", "scripts/lib/plan-submodules.mjs", "commands/merge.md", "commands/workspace-init.md"]
 human: docs/architecture/landing.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: 5fab1545491bae481c79541a12e4e22bb9f6b2fb
+verified_at: d7da89f424960b24ee235b043673a1e2a2a78849
 updated: 2026-10-09
 ---
 # ARCH landing — enforced rules

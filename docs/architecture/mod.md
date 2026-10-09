@@ -3,7 +3,7 @@
 > and `/architect --update mod` should be run.
 
 # Mod architecture
-_Last verified: 2026-10-09 at `655e17e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Craftsman ships a small Claude Code mod (`hooks/register.js`, v2.1.287+). It
