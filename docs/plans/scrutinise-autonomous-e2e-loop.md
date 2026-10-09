@@ -436,10 +436,10 @@ The Warning sits outside /auto. The verify-bypass regex is linear for one `git` 
 A fresh check of all 42 rules found 39 HOLD, none VIOLATED. ARCH-ENGINE-01 is superseded by ENGINE-12. ARCH-ENGINE-02 cites the idea doc, not the spike evidence. ARCH-LAND-03 is UNPROVEN: only `commands/merge.md` §5a states it, and `plan-graph.mjs` orders steps with no knowledge of submodules. The user chose to enforce LAND-03 in code.
 
 ## Step 20 — land-submodule-bump (., JavaScript, normal)
-- [ ] 20.1 `plan-graph.mjs` `validateSteps` (through `scripts/lib/plan-submodules.mjs`, keeping `plan-graph.mjs` inside the `auto-command` step budget) treats a registered project whose `root` lies inside another registered project's root as a submodule of the nearest enclosing one. A step may declare `bumps: "<submodule id>"`. It refuses: a `bumps` naming a project that is not a submodule of the step's own project; a plan with steps in a submodule but no bump step in its parent; and a bump step that does not depend, directly or transitively, on every step of that submodule. With no workspace manifest it checks nothing new (ARCH-LAND-03, LAND-04). → accept: `scripts/lib/plan-submodules.test.mjs` cases for each refusal fail on the pre-change code; the valid sub → bump → consumer order passes.
-- [ ] 20.2 `commands/merge.md` §5a and `plan-template.md` name the `bumps` field and say `plan-graph.mjs` refuses a plan without the bump unit; `auto-command.test.mjs` phrases still match. → accept: full suite exit 0.
-- [ ] 20.3 LAND-03 cites the new check; ENGINE-02 cites the spike evidence (`docs/plans/autonomous-e2e-loop-evidence.md`). → accept: `arch-check lint` PASS.
-- [ ] 20.4 Moved to Step 26 (R18-W1).
+- [x] 20.1 `plan-graph.mjs` `validateSteps` (through `scripts/lib/plan-submodules.mjs`, keeping `plan-graph.mjs` inside the `auto-command` step budget) treats a registered project whose `root` lies inside another registered project's root as a submodule of the nearest enclosing one. A step may declare `bumps: "<submodule id>"`. It refuses: a `bumps` naming a project that is not a submodule of the step's own project; a plan with steps in a submodule but no bump step in its parent; and a bump step that does not depend, directly or transitively, on every step of that submodule. With no workspace manifest it checks nothing new (ARCH-LAND-03, LAND-04). → accept: `scripts/lib/plan-submodules.test.mjs` cases for each refusal fail on the pre-change code; the valid sub → bump → consumer order passes.
+- [x] 20.2 `commands/merge.md` §5a and `plan-template.md` name the `bumps` field and say `plan-graph.mjs` refuses a plan without the bump unit; `auto-command.test.mjs` phrases still match. → accept: full suite exit 0.
+- [x] 20.3 LAND-03 cites the new check; ENGINE-02 cites the spike evidence (`docs/plans/autonomous-e2e-loop-evidence.md`). → accept: `arch-check lint` PASS.
+- [x] 20.4 Moved to Step 26 (R18-W1).
 
 ## Round 13 — `/scrutinise` of `8e9f06d..fd258d0`
 One isolated scrutineer: 0 Critical, 2 Warning, 2 Suggestion; the criterion is MET; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
@@ -449,9 +449,9 @@ One isolated scrutineer: 0 Critical, 2 Warning, 2 Suggestion; the criterion is M
 - R13-S2 [Correctness] A bump step's `project` must be the parent's registered id; "." is refused, and nothing says so.
 
 ## Step 21 — land-submodule-bump, round 13 fixes (., JavaScript, normal)
-- [ ] 21.1 A nested pair counts as a submodule only when the parent's index holds a gitlink (mode 160000) at the child's relative path; the check is injectable (`isGitlink`) for tests (R13-W1). → accept: a nested project with no gitlink, and a project rooted at the workspace root, need no bump; a real `git init` parent with a gitlink child is detected.
-- [ ] 21.2 `commands/orchestrate.md:29` names `bumps` and the bump refusals (R13-W2), within its size budget.
-- [ ] 21.3 `plan-graph.test.mjs`'s LAND-02/03 test uses `root` and `bumps` (R13-S1); `plan-template.md` says the bump's `project` is the parent's registered id (R13-S2). → accept: full suite exit 0; lint PASS.
+- [x] 21.1 A nested pair counts as a submodule only when the parent's index holds a gitlink (mode 160000) at the child's relative path; the check is injectable (`isGitlink`) for tests (R13-W1). → accept: a nested project with no gitlink, and a project rooted at the workspace root, need no bump; a real `git init` parent with a gitlink child is detected.
+- [x] 21.2 `commands/orchestrate.md:29` names `bumps` and the bump refusals (R13-W2), within its size budget.
+- [x] 21.3 `plan-graph.test.mjs`'s LAND-02/03 test uses `root` and `bumps` (R13-S1); `plan-template.md` says the bump's `project` is the parent's registered id (R13-S2). → accept: full suite exit 0; lint PASS.
 
 ## Round 14 — `/scrutinise` of `8e9f06d..3951593`
 One isolated scrutineer: 0 Critical, 1 Warning, 4 Suggestion; the criterion is MET; LAND-02, LAND-03 (for registered parents), LAND-04, ENGINE-02 and ENGINE-08 HOLD.
@@ -459,16 +459,16 @@ One isolated scrutineer: 0 Critical, 1 Warning, 4 Suggestion; the criterion is M
 - R14-S2 `gitlinkAt` swallows git errors and returns false (fails open). R14-S3 the path is a pathspec, so `:`-prefixed names are read as magic. R14-S4 `landing.rules.md` `governs` lacks `scripts/lib/plan-submodules.mjs`. R14-S5 the template's `units:` skeleton has no `bumps:` key.
 
 ## Step 22 — land-submodule-bump, round 14 fixes (., JavaScript, normal)
-- [ ] 22.1 A registered project with no registered parent, whose gitlink is held by the workspace root (itself unregistered), is refused with "register the superproject" (R14-W1). → accept: test fails on `3951593`.
-- [ ] 22.2 `gitlinkAt` throws when git fails, and passes `--literal-pathspecs` (R14-S2, S3). → accept: real-git test of a `:`-prefixed gitlink and of an unreadable parent.
-- [ ] 22.3 `governs` lists the lib file; the template skeleton shows `bumps:` (R14-S4, S5). → accept: lint PASS; full suite exit 0.
+- [x] 22.1 A registered project with no registered parent, whose gitlink is held by the workspace root (itself unregistered), is refused with "register the superproject" (R14-W1). → accept: test fails on `3951593`.
+- [x] 22.2 `gitlinkAt` throws when git fails, and passes `--literal-pathspecs` (R14-S2, S3). → accept: real-git test of a `:`-prefixed gitlink and of an unreadable parent.
+- [x] 22.3 `governs` lists the lib file; the template skeleton shows `bumps:` (R14-S4, S5). → accept: lint PASS; full suite exit 0.
 
 ## Round 15 — `/scrutinise` of `8e9f06d..08815dc`
 One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is MET; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
 - R15-W1 [Correctness] `plan-submodules.mjs:15-19`: `ls-files -s` without `-z` C-quotes a path with non-ASCII bytes, a tab, `"` or `\`, so `endsWith("\t" + rel)` never matches and such a submodule needs no bump.
 
 ## Step 23 — land-submodule-bump, round 15 fixes (., JavaScript, normal)
-- [ ] 23.1 `gitlinkAt` reads `ls-files -s -z` and splits on NUL (R15-W1). → accept: a real-git test of a gitlink whose name has a non-ASCII byte and a `"` fails on `08815dc`; full suite exit 0.
+- [x] 23.1 `gitlinkAt` reads `ls-files -s -z` and splits on NUL (R15-W1). → accept: a real-git test of a gitlink whose name has a non-ASCII byte and a `"` fails on `08815dc`; full suite exit 0.
 
 ## Round 16 — `/scrutinise` of `8e9f06d..dc50998`
 One isolated scrutineer: 0 Critical, 1 Warning, 2 Suggestion; the criterion is MET (refusal plans probed as accepted on `8e9f06d`); LAND-02, LAND-03, LAND-04 and ENGINE-02 HOLD.
@@ -476,8 +476,8 @@ One isolated scrutineer: 0 Critical, 1 Warning, 2 Suggestion; the criterion is M
 - R16-S3 [Test-coverage] untested: an early second bump step, a bump with no submodule steps, a nested non-gitlink `bumps` target.
 
 ## Step 24 — land-submodule-bump, round 16 fixes (., JavaScript, normal)
-- [ ] 24.1 The manifest no longer reads `core.mjs`, and lists ARCH-ENGINE-08 (R16-W1). → accept: `arch-check.mjs scope` on the manifest with Steps 20–25 as task text PASS.
-- [ ] 24.2 `plan-submodules.test.mjs` covers the three R16-S3 cases. → accept: full suite exit 0.
+- [x] 24.1 The manifest no longer reads `core.mjs`, and lists ARCH-ENGINE-08 (R16-W1). → accept: `arch-check.mjs scope` on the manifest with Steps 20–25 as task text PASS.
+- [x] 24.2 `plan-submodules.test.mjs` covers the three R16-S3 cases. → accept: full suite exit 0.
 
 ## Round 17 — `/scrutinise` of `8e9f06d..cfd10b2`
 One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is UNMET only through the Warning; LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
@@ -485,8 +485,8 @@ One isolated scrutineer: 0 Critical, 1 Warning, 3 Suggestion; the criterion is U
 - R17-S2 the manifest wrote `commands/orchestrate.md` and `CHANGELOG.md` without reading them, so a re-activated unit could not Edit them. R17-S3 the Not-driven note calling LAND-03 UNPROVEN predates Step 20. R17-S4 no projectless-bump test.
 
 ## Step 25 — land-submodule-bump, round 17 fixes (., JavaScript, normal)
-- [ ] 25.1 `bumps` is refused unless it names a known submodule (`parents.has`) of the step's project (R17-W1, S4). → accept: projectless and `.` bump cases fail on `cfd10b2`; full suite exit 0.
-- [ ] 25.2 `read` lists `commands/orchestrate.md` and `CHANGELOG.md` again; the LAND-03 note is marked superseded (R17-S2, S3). → accept: `arch-check.mjs scope` PASS.
+- [x] 25.1 `bumps` is refused unless it names a known submodule (`parents.has`) of the step's project (R17-W1, S4). → accept: projectless and `.` bump cases fail on `cfd10b2`; full suite exit 0.
+- [x] 25.2 `read` lists `commands/orchestrate.md` and `CHANGELOG.md` again; the LAND-03 note is marked superseded (R17-S2, S3). → accept: `arch-check.mjs scope` PASS.
 
 ## Round 18 — `/scrutinise` of `8e9f06d..d04d44f`
 One isolated scrutineer: 0 Critical, 1 Warning, 1 Suggestion (R15-S3 restated); the criterion is MET (4 of 4 refusal tests fail on `8e9f06d`); LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD.
@@ -494,9 +494,15 @@ One isolated scrutineer: 0 Critical, 1 Warning, 1 Suggestion (R15-S3 restated); 
 
 ## Step 26 — land-submodule-bump-changelog (., Markdown, normal)
 Depends on: land-submodule-bump
-- [ ] 26.1 One CHANGELOG clause on the existing `/craftsman:auto` entry (was 20.4; split out by R18-W1). `land-submodule-bump` reads both `plan-submodules` files and no longer reads or writes `CHANGELOG.md`. → accept: `arch-check.mjs scope` PASS for both manifests; full suite exit 0.
+- [x] 26.1 One CHANGELOG clause on the existing `/craftsman:auto` entry (was 20.4; split out by R18-W1). `land-submodule-bump` reads both `plan-submodules` files and no longer reads or writes `CHANGELOG.md`. → accept: `arch-check.mjs scope` PASS for both manifests; full suite exit 0.
+
+## Round 19 — `/scrutinise` of `8e9f06d..939d8fc`
+One isolated scrutineer: 0 Critical, 0 Warning, 0 UNMET; the criterion is MET (4 of 4 refusal tests fail on `8e9f06d`); LAND-02, LAND-03, LAND-04, ENGINE-02 and ENGINE-08 HOLD (manifests 71,915 and 61,531 bytes). Two Suggestions, not driven (see below).
 
 ## Not driven (recorded)
+- **Round 19:**
+  - R19-S1 (Disputed): the claim was that `land-submodule-bump` writes the plan doc without reading it. But `pre-guard.mjs:123-125` allows a Read of the active plan through `orchestrationMetadataAllowed` (`:73`, `candidate === active.plan`).
+  - R19-S2: `orderSteps` re-validates with the default workspace, so the ordering tests in `plan-submodules.test.mjs` and `plan-graph.test.mjs` would fail where `CRAFTSMAN_WORKSPACE_MANIFEST` is set. This predates the range, and the repo has no workspace manifest.
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
 - **Round 5:** the lexical class also covers `$'…'` ANSI-C quoting, line continuations and `${var}` inside a message — same residual, same remedy. The `repo-exec.test` locale case proves the fix only where git's German catalogue is installed (it is on the dev host); a host-conditional skip would be a skipped test, so it stays as is.
