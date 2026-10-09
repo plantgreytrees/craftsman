@@ -174,9 +174,9 @@ units:
     language: JavaScript + Markdown
     security: normal
     scope:
-      read: [scripts/tracker.mjs, scripts/tracker.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, scripts/lib/land.mjs, commands/auto.md, agents/unit-runner.md]
+      read: [scripts/tracker.mjs, scripts/tracker.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, scripts/lib/land.mjs, commands/auto.md, agents/unit-runner.md, scripts/auto-command.test.mjs]
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/auto.rules.md, docs/architecture/engine.rules.md]
-      write: [scripts/tracker.mjs, scripts/run-manifest.mjs, scripts/tracker.test.mjs, scripts/run-manifest.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, commands/auto.md, agents/unit-runner.md]
+      write: [scripts/tracker.mjs, scripts/run-manifest.mjs, scripts/tracker.test.mjs, scripts/run-manifest.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, commands/auto.md, agents/unit-runner.md, scripts/auto-command.test.mjs]  # re-scoped before execution: 10.4 asserts auto.md in auto-command.test.mjs
     arch: [ARCH-TRACKER-01, ARCH-TRACKER-02, ARCH-TRACKER-03, ARCH-TRACKER-04, ARCH-LAND-06, ARCH-AUTO-01, ARCH-ENGINE-07]
     tooling: { implementer: implementer, gates: [], skills: [], guards: [pre-guard, quality-gate] }
   - id: description-diet
