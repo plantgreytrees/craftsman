@@ -1,6 +1,13 @@
 // The force block (ARCH-LAND-05): the destructive git forms /auto must never
 // run, found in a Bash command however it is quoted, split or wrapped.
+import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 import { shellSegments, UNEXPANDED } from "./shell-words.mjs";
+
+const MAX_COMMAND_BYTES = 16 * 1024;
+const MAX_INVOCATION_WORDS = 1 << 20;
+const DEADLINE_MS = 4000;
+const HEAP_MB = 128;
+const UNREADABLE = "a command the force block cannot read";
 
 const skipGlobals = (words, i) => {
   while (i < words.length && words[i].startsWith("-")) i += /^-[Cc]$|^--(?:git-dir|work-tree|namespace|attr-source|config-env)$/.test(words[i]) ? 2 : 1;
@@ -10,15 +17,21 @@ const skipGlobals = (words, i) => {
 // Every invocation a word list may hold: each `git` (or `…/git`) word with its
 // global options skipped, and the word after an option tried as the subcommand
 // too, in case that option takes an argument; each `git-<sub>` program as `<sub>`.
-function invocationsIn(words) {
+// Each invocation copies the rest of its list, so `budget.left` bounds the words
+// copied across a whole command: past it, the command is unreadable (a throw).
+function invocationsIn(words, budget) {
   const found = [];
+  const take = (list) => {
+    if ((budget.left -= list.length) < 0) throw new RangeError("too many git invocations");
+    found.push(list);
+  };
   words.forEach((word, k) => {
     const program = /(?:^|\/)git-([a-z][a-z0-9-]*)$/.exec(word);
-    if (program) found.push([program[1], ...words.slice(k + 1)]);
+    if (program) take([program[1], ...words.slice(k + 1)]);
     if (word !== "git" && !word.endsWith("/git")) return;
     const i = skipGlobals(words, k + 1);
-    found.push(words.slice(i));
-    if (i > k + 1 && words[i - 1].startsWith("-") && i < words.length) found.push(words.slice(skipGlobals(words, i + 1)));
+    take(words.slice(i));
+    if (i > k + 1 && words[i - 1].startsWith("-") && i < words.length) take(words.slice(skipGlobals(words, i + 1)));
   });
   return found;
 }
@@ -34,7 +47,8 @@ function gitInvocations(value) {
   }
   segments.push(...value.split(/&&|\|\||&(?!>)|[;|\n()`]/));
   const lists = segments.map((segment) => (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean));
-  for (const words of [...lists, ...shellSegments(value)]) invocations.push(...invocationsIn(words));
+  const budget = { left: MAX_INVOCATION_WORDS };
+  for (const words of [...lists, ...shellSegments(value)]) invocations.push(...invocationsIn(words, budget));
   return invocations;
 }
 
@@ -77,12 +91,35 @@ export function destructiveGit(value) {
   return null;
 }
 
-// What pre-guard calls: a command the force block cannot read (a throw) is
-// blocked, never let through — a hook that crashes exits 1, which fails open.
-export function forceBlocked(value, check = destructiveGit) {
+// What pre-guard awaits. A hook that crashes (exit 1), runs out of heap
+// (exit 134) or outlives its timeout fails open, and a timer cannot fire while
+// a regex holds the thread. So the check runs in a worker with a deadline and a
+// heap limit; anything but a clean answer in time — a throw, a crash, a miss —
+// blocks, as does a command too large to read in time. `source` (worker code
+// to eval) is the test seam for a stalled or exhausted check.
+export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS } = {}) {
+  if (Buffer.byteLength(value) > MAX_COMMAND_BYTES) return Promise.resolve(`a command over ${MAX_COMMAND_BYTES} bytes`);
+  return new Promise((resolve) => {
+    const options = { workerData: { forceBlock: value }, resourceLimits: { maxOldGenerationSizeMb: HEAP_MB } };
+    const worker = source ? new Worker(source, { ...options, eval: true }) : new Worker(new URL(import.meta.url), options);
+    const settle = (verdict) => {
+      clearTimeout(timer);
+      resolve(verdict);
+      worker.terminate();
+    };
+    const timer = setTimeout(() => settle(UNREADABLE), deadlineMs);
+    worker.once("message", (message) => settle(message.ok ? message.verdict : UNREADABLE));
+    worker.once("error", () => settle(UNREADABLE));
+    worker.once("exit", () => settle(UNREADABLE));
+  });
+}
+
+if (!isMainThread && typeof workerData?.forceBlock === "string") {
+  let message;
   try {
-    return check(value);
+    message = { ok: true, verdict: destructiveGit(workerData.forceBlock) };
   } catch {
-    return "a command the force block cannot read";
+    message = { ok: false };
   }
+  parentPort.postMessage(message);
 }

@@ -175,26 +175,14 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
   }
 }
 
-// A hook rejection is fixed, never bypassed (--no-verify is forbidden):
-// unconditional, for every commit/push with or without a worktree binding.
-if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|push)\b/.test(command)
-    && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)) {
-  logEvent({ ev: "verify_bypass_blocked", sid: sidOf(input), command });
-  process.stderr.write(
-    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +
-    `core.hooksPath override). Fix the underlying hook failure instead of skipping it — this is a ` +
-    `hard rule, not a suggestion.\n`
-  );
-  process.exit(2);
-}
-
 // ARCH-LAND-05: /auto holds standing git authority (LAND-01) but never a
 // destructive one. While its run lasts (core.mjs autoForceBlock, Phase C
 // included), force pushes (flags or a +refspec), hard resets and forced
 // worktree removal are blocked; a plain `git push origin HEAD:main` is not.
 // orchestrate-scope-guard.mjs writes the marker at this same (sid) path.
+// It runs before every other Bash check, so none can stall it past the timeout.
 if (tool === "Bash" && autoForceBlock(sidOf(input))) {
-  const destructive = forceBlocked(command);
+  const destructive = await forceBlocked(command);
   if (destructive) {
     logEvent({ ev: "auto_force_blocked", sid: sidOf(input), command });
     process.stderr.write(
@@ -203,6 +191,19 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
     );
     process.exit(2);
   }
+}
+
+// A hook rejection is fixed, never bypassed (--no-verify is forbidden):
+// unconditional, for every commit/push with or without a worktree binding.
+if (tool === "Bash" && /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command)
+    && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)) {
+  logEvent({ ev: "verify_bypass_blocked", sid: sidOf(input), command });
+  process.stderr.write(
+    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +
+    `core.hooksPath override). Fix the underlying hook failure instead of skipping it — this is a ` +
+    `hard rule, not a suggestion.\n`
+  );
+  process.exit(2);
 }
 
 if (tool === "Bash" && binding && mutatesGit(command)) {

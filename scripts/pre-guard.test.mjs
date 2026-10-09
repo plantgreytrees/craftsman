@@ -414,10 +414,52 @@ test("pre-guard: while /auto is active, force pushes, hard resets and forced wor
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("pre-guard: a command the force block cannot read is blocked, not let through (fail closed)", () => {
-  assert.equal(forceBlocked("git status", () => { throw new RangeError("stack"); }), "a command the force block cannot read");
-  assert.equal(forceBlocked("git status"), null);
-  assert.equal(forceBlocked("git push -f origin main"), "git push --force");
+test("pre-guard: a check that throws, stalls or exhausts its heap blocks inside the deadline (fail closed)", async () => {
+  const unreadable = "a command the force block cannot read";
+  assert.equal(await forceBlocked("git status", { source: "throw new RangeError('stack')" }), unreadable);
+  assert.equal(await forceBlocked("git status"), null);
+  assert.equal(await forceBlocked("git push -f origin main"), "git push --force");
+  // In a child process, exiting as pre-guard does: a stalled check and an
+  // exhausted heap each end in exit 2 well inside the hook timeout.
+  const module = JSON.stringify(path.join(ROOT, "lib", "force-block.mjs"));
+  for (const source of ["for (;;) {}", "const a = []; for (;;) a.push(new Array(1e5).fill(Math.random()));"]) {
+    const child = `const { forceBlocked } = await import(${module}); process.exit((await forceBlocked("git status", { source: ${JSON.stringify(source)}, deadlineMs: 2000 })) ? 2 : 0);`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", child], { encoding: "utf8", timeout: 8000 });
+    assert.equal(r.status, 2, source);
+  }
+});
+
+test("pre-guard: payloads that stalled or crashed the force block exit 2 inside the hook timeout (R9)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-bounded-")));
+  try {
+    const sid = "auto-run";
+    fs.mkdirSync(path.join(dir, ".craftsman", "sessions", sid), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), JSON.stringify({ plan: "p", at: new Date().toISOString() }));
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const payloads = [
+      `git ${"-a ".repeat(40)}x; git push -f origin main`,
+      `${"git ".repeat(20000)}push -f`,
+      `echo ${"{".repeat(26000)}a,b${"}".repeat(26000)}; git push -f origin main`,
+      `echo ${"{".repeat(32000)}a,b${"}".repeat(32000)}; git push -f origin main`,
+      // Under the size cap, so the worker reads them: the word budget and the deadline.
+      `${"git ".repeat(3900)}push -f`,
+      `echo ${"{".repeat(7000)}a,b${"}".repeat(7000)}; git push -f origin main`,
+    ];
+    for (const command of payloads) {
+      const r = spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(bash(sid, command)), encoding: "utf8", timeout: 10000, env: { ...process.env, CLAUDE_PROJECT_DIR: dir } });
+      assert.equal(r.status, 2, command.slice(0, 60));
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the verify-bypass check is linear in a run of options", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-verify-linear-")));
+  try {
+    const started = Date.now();
+    assert.equal(run(GUARD, dir, bash("plain", `git ${"-a ".repeat(40)}x --no-verify commit`)).status, 0);
+    assert.ok(Date.now() - started < 3000);
+    assert.equal(run(GUARD, dir, bash("plain", "git -C dir commit --no-verify")).status, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("pre-guard: the force block lapses once the /auto run is over (ARCH-LAND-05)", () => {
