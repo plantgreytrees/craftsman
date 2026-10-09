@@ -166,10 +166,8 @@ function findGateCommand(worktree, cfg) {
   return null;
 }
 
-// Re-runs the test command in the worktree right before the merge, so the
-// GATE is verified here, not self-reported. No per-call skip flag: only
-// config (`repoExec.verifyTestsBeforeMerge: false` or `stopGate.enabled:
-// false`) disables it — a visible, auditable edit.
+// Re-runs the tests in the worktree before merging; only config
+// (`repoExec.verifyTestsBeforeMerge` / `stopGate.enabled` false) skips it.
 function verifyGateBeforeMerge(context, worktree) {
   const cfg = loadConfig(context);
   if (cfg.stopGate?.enabled === false || cfg.repoExec?.verifyTestsBeforeMerge === false) return;
@@ -185,11 +183,8 @@ function verifyGateBeforeMerge(context, worktree) {
   }
 }
 
-// How a finished unit reaches the base branch — `repoExec.land` in config,
-// never a per-call input, for the same reason as verifyGateBeforeMerge:
-// "direct" merges locally and pushes base (today's behaviour); "pr" pushes
-// only the unit's branch and hands the merge to the host's own review flow,
-// for base branches protected against direct pushes.
+// `repoExec.land` (config only): "direct" merges and pushes base; "pr" pushes
+// the unit branch and leaves the merge to the host's review flow.
 function landMode(cfg) {
   const land = cfg.repoExec?.land || "direct";
   if (land !== "direct" && land !== "pr") throw new Error(`repoExec.land must be "direct" or "pr" (got ${land})`);
@@ -213,35 +208,42 @@ function merge(context, input, info, deps = {}) {
   verifyGateBeforeMerge(context, worktree);
   if (land === "pr") return landPullRequest(context, input, info, { worktree, branch, cfg, runner: deps.runner });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
-  if (holder) return landDetached(context, input, info, { worktree, branch, holder });
+  if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
+  // Otherwise the merge lands in the checkout that has base: this root, or
+  // the other worktree holding it — never a dirty or mid-merge one.
+  const at = holder || context.root;
+  if (holder && (run(holder, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })
+    || run(holder, ["status", "--porcelain", "--untracked-files=no"]))) {
+    throw new Error(`${info.base_branch} is checked out in ${holder}, which has uncommitted changes or a merge in progress`);
+  }
   const lock = acquireLock(info, input);
-  const originalBranch = run(context.root, ["branch", "--show-current"]);
+  const originalBranch = holder ? null : run(context.root, ["branch", "--show-current"]);
   let mergeStarted = false;
   let step = null; // the landing step that PARKs instead of throwing (ARCH-LAND-06)
   try {
     heartbeat(lock);
-    run(context.root, ["checkout", info.base_branch]);
+    if (!holder) run(at, ["checkout", info.base_branch]);
     if (info.has_remote && input.pull !== false) {
       heartbeat(lock);
       step = "ff-only";
-      run(context.root, ["pull", "--ff-only", "origin", info.base_branch]);
+      run(at, ["pull", "--ff-only", "origin", info.base_branch]);
     }
     heartbeat(lock);
     mergeStarted = true;
     step = "conflict";
-    run(context.root, ["merge", "--no-ff", branch]);
+    run(at, ["merge", "--no-ff", "--no-edit", branch]);
     step = null;
     heartbeat(lock);
-    run(context.root, ["merge-base", "--is-ancestor", branch, info.base_branch]);
+    run(at, ["merge-base", "--is-ancestor", branch, info.base_branch]);
     if (info.has_remote && input.push !== false) {
       heartbeat(lock);
       step = "rejected-push";
-      run(context.root, ["push", "origin", info.base_branch]);
+      run(at, ["push", "origin", info.base_branch]);
       step = null;
     }
   } catch (error) {
     if (mergeStarted && step !== "rejected-push") {
-      try { run(context.root, ["merge", "--abort"], { allowFailure: true }); } catch {}
+      try { run(at, ["merge", "--abort"], { allowFailure: true }); } catch {}
     }
     if (!step) throw error;
     // A refused push comes after the local merge, so local base holds it.
@@ -270,14 +272,10 @@ function baseHeldElsewhere(root, base) {
   return null;
 }
 
-// Merges in a temporary detached worktree at origin's base and pushes
-// HEAD:<base>, never moving a ref another worktree holds. No remote → PARK
-// (ARCH-LAND-06). The temporary worktree goes on every path.
-function landDetached(context, input, info, { worktree, branch, holder }) {
+// Base held elsewhere, pushing: merge in a temporary detached worktree at
+// origin's base (removed on every path), push HEAD:<base>.
+function landDetached(context, input, info, { worktree, branch }) {
   const result = { ...info, branch, land: "direct", merged: false, merged_locally: false, worktree_path: worktree };
-  if (!info.has_remote) {
-    return landingPark("base-checked-out", { ...result, holder }, new Error(`${info.base_branch} is checked out in ${holder}`));
-  }
   const lock = acquireLock(info, input);
   const temp = path.join(info.common_git_dir, ".craftsman", "land", `${branch.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
   let added = false;
@@ -293,12 +291,10 @@ function landDetached(context, input, info, { worktree, branch, holder }) {
     run(temp, ["merge", "--no-ff", "--no-edit", branch]);
     step = null;
     run(temp, ["merge-base", "--is-ancestor", branch, "HEAD"]);
-    if (input.push !== false) {
-      heartbeat(lock);
-      step = "rejected-push";
-      run(temp, ["push", "origin", `HEAD:${info.base_branch}`]);
-      step = null;
-    }
+    heartbeat(lock);
+    step = "rejected-push";
+    run(temp, ["push", "origin", `HEAD:${info.base_branch}`]);
+    step = null;
   } catch (error) {
     if (added && step === "conflict") run(temp, ["merge", "--abort"], { allowFailure: true });
     if (!step) throw error;
@@ -312,10 +308,8 @@ function landDetached(context, input, info, { worktree, branch, holder }) {
   return cleanupAfterLanding(context, input, info, { ...result, merged: true });
 }
 
-// The four landing failures that PARK a unit instead of failing the run
-// (ARCH-LAND-06) come back as {parked:true, decision} for /auto's Phase C,
-// worktree and branch kept so the answer can be acted on. The caller records
-// it with tracker.mjs PARKED + this decision.
+// The four landing failures that PARK (ARCH-LAND-06): {parked:true, decision},
+// worktree and branch kept, recorded as tracker PARKED with the decision.
 const PARK_DECISIONS = {
   "conflict": (r) => ({
     question: `Merging ${r.branch} into ${r.base_branch} conflicts (the merge was aborted; nothing landed). How should it be resolved?`,
@@ -339,11 +333,6 @@ const PARK_DECISIONS = {
     options: ["Merge the pull request by hand on the host", "Enable auto-merge for the repository and retry", "Leave the pull request open for review"],
     recommended: "Merge the pull request by hand on the host",
   }),
-  "base-checked-out": (r) => ({
-    question: `${r.base_branch} is checked out in ${r.holder} and ${r.project} has no remote, so ${r.branch} cannot land without moving that checkout's branch. How should it land?`,
-    options: [`Merge ${r.branch} from ${r.holder} by hand`, `Add an origin remote so it lands with push HEAD:${r.base_branch}`, "Leave the unit unmerged for the user"],
-    recommended: `Merge ${r.branch} from ${r.holder} by hand`,
-  }),
 };
 
 function landingPark(reason, result, error) {
@@ -352,11 +341,8 @@ function landingPark(reason, result, error) {
   return { ...result, parked: true, reason, error: detail, cleaned: false, decision: PARK_DECISIONS[reason](result) };
 }
 
-// The "pr" land mode. It never touches the primary checkout or the base
-// branch, so it needs no merge lock: it pushes the unit's own branch, then
-// finds or opens its pull/merge request and asks the host to auto-merge it.
-// Everything that can refuse (no remote, unknown host, missing or logged-out
-// CLI, unsupported merge method) is checked before the push.
+// "pr" mode: no lock, base untouched; push the unit branch, open or reuse its
+// PR and ask for auto-merge. Every refusal is checked before the push.
 function landPullRequest(context, input, info, { worktree, branch, cfg, runner }) {
   if (!info.has_remote) throw new Error(`repoExec.land is "pr" but ${info.project} has no origin remote`);
   const host = detectHost(info.origin, cfg.repoExec?.host);
@@ -391,12 +377,8 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner }
   });
 }
 
-// A landed worktree has nothing left to do. Cleanup used to be a separate
-// step the model had to remember, and skipping it is exactly how merged
-// worktrees lingered — so it happens here, after any lock is released.
-// Opt out only with cleanup:false. A cleanup failure never un-lands: it is
-// reported, and the session ledger keeps the path so Stop's sweep catches it.
-// In "pr" mode the branch is not in base yet, so cleanup keeps it.
+// A landed worktree is cleaned here (opt out: cleanup:false). A cleanup
+// failure is reported, never un-lands; Stop's sweep catches the path.
 function cleanupAfterLanding(context, input, info, result) {
   if (input.cleanup === false) return { ...result, cleaned: false };
   try {
@@ -415,17 +397,12 @@ function cleanup(context, input, info) {
   run(context.root, ["worktree", "remove", worktree]);
   forgetSessionWorktree(input, worktree, context);
   run(context.root, ["worktree", "prune"]);
-  // Not `branch -d`: that judges "merged" against the primary checkout's HEAD,
-  // which merge() restores to whatever was checked out before — often not the
-  // base — so it failed after the worktree was already gone. Decide against
-  // the base branch explicitly; an unmerged (parked) branch is kept. A
-  // detached landing (landDetached) leaves the merge on origin's base only.
+  // "Merged" is judged against base (and origin's, for a detached landing),
+  // not HEAD as `branch -d` would; an unmerged (parked) branch is kept.
   const bases = info.has_remote ? [info.base_branch, `refs/remotes/origin/${info.base_branch}`] : [info.base_branch];
   const branchDeleted = Boolean(mergedInto(context.root, branch, bases));
   if (branchDeleted) run(context.root, ["branch", "-D", branch]);
-  // A branch that was also pushed (for review, or by a session that couldn't
-  // merge) would otherwise outlive its merge on the host. Best-effort: the
-  // merge already landed, so a failed remote delete is reported, not thrown.
+  // A pushed branch goes too; best-effort, the merge already landed.
   let remoteBranchDeleted = false;
   if (branchDeleted && info.has_remote
     && run(context.root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`], { allowFailure: true })) {

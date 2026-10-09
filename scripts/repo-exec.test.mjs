@@ -71,9 +71,7 @@ test("repo-exec: prepares, merges, and cleans a selected repository locally", ()
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
-// The session ledger is what makes stop-gate.mjs's worktree sweep session-local:
-// only a worktree this session prepared is ever swept, and cleanup must retract
-// it so a finished unit stops being the session's responsibility.
+// The ledger keeps Stop's sweep session-local; cleanup retracts the entry.
 test("repo-exec: prepare records the worktree in the session ledger and cleanup forgets it", () => {
   const data = fixture();
   try {
@@ -145,10 +143,8 @@ test("repo-exec: reclaims an ownerless stale merge lock", () => {
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
-// Before, cleanup ran `git branch -d`, which judges "merged" against the
-// primary checkout's HEAD. merge() restores whatever branch was checked out,
-// so with the primary checkout on another branch -d refused AFTER the
-// worktree was removed, stranding the branch and the session ledger entry.
+// `branch -d` judged "merged" against HEAD, stranding the branch when the
+// primary checkout was on another branch.
 test("repo-exec: merge cleans up even when the primary checkout is not on the base branch", () => {
   const data = fixture();
   try {
@@ -198,8 +194,7 @@ test("repo-exec: cleanup:false keeps the worktree; cleanup of an unmerged branch
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
-// repoExec.land:"pr" — for a base branch the host protects against direct
-// pushes. The host CLI is faked; git, the push and the bare origin are real.
+// repoExec.land:"pr" — host CLI faked; git, push and bare origin real.
 function usePrLanding(root, repoExec = {}) {
   fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ repoExec: { land: "pr", host: "github", ...repoExec } }));
 }
@@ -255,8 +250,7 @@ test("repo-exec: a direct merge of a pushed branch pushes base and deletes the r
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
-// /craftsman:merge lands branches no plan unit prepared — e.g. a Claude Code
-// session worktree — by path and branch alone, with no unit or slug.
+// /craftsman:merge lands a session worktree by path and branch alone.
 test("repo-exec: merges a plain .claude/worktrees worktree by path, with no unit or slug", () => {
   const data = fixture();
   try {
@@ -364,8 +358,7 @@ test("repo-exec: land:pr refuses before any push without a remote, host or CLI",
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
-// ARCH-LAND-06: the four landing failures come back as a park with a decision
-// for /auto's Phase C — never a throw, never a half-landed unit.
+// ARCH-LAND-06: the four landing failures park with a decision, never throw.
 function assertPark(result, reason) {
   assert.equal(result.parked, true, JSON.stringify(result));
   assert.equal(result.reason, reason);
@@ -448,7 +441,7 @@ function linked(data, remote = true) {
   const info = inspectRepo(context, { base_branch: base });
   const dir = path.join(info.common_git_dir, ".craftsman", "land");
   const temps = () => (fs.existsSync(dir) ? fs.readdirSync(dir) : []);
-  const land = (slug) => merge(context, { ...commitUnit(context, info, slug), unit: slug, slug }, info);
+  const land = (slug, extra = {}) => merge(context, { ...commitUnit(context, info, slug), unit: slug, slug, ...extra }, info);
   return { primary, origin, base, context, info, temps, land };
 }
 
@@ -498,17 +491,48 @@ test("repo-exec: from a linked-worktree root, a conflict or refused push parks a
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
-test("repo-exec: from a linked-worktree root with no remote, a base checked out elsewhere parks with a decision", () => {
+// No remote, or push:false: nothing to push to, so the merge lands in the
+// checkout holding base — no fifth park reason (ARCH-LAND-06).
+test("repo-exec: from a linked-worktree root with no remote, the unit lands in the checkout holding base", () => {
   const data = fixture();
   try {
     withManifest(data.manifest, () => {
-      const { primary, base, temps, land } = linked(data, false);
+      const { primary, base, context, info, temps, land } = linked(data, false);
+      const landed = land("local-only");
+      assert.equal(landed.merged, true, JSON.stringify(landed));
+      assert.equal(git(primary.root, ["log", "-1", "--format=%s", `${base}^2`]), "feat: local-only through a pull request");
+      assert.equal(git(primary.root, ["branch", "--show-current"]), base);
+      assert.equal(git(primary.root, ["status", "--porcelain", "--untracked-files=no"]), "");
+      assert.equal(landed.branch_deleted, true);
+      assert.deepEqual(temps(), []);
+
+      const clash = commitUnit(context, info, "clash");
+      fs.writeFileSync(path.join(clash.worktree_path, "README.md"), "unit side\n");
+      git(clash.worktree_path, ["commit", "-q", "-am", "feat: unit side"]);
+      fs.writeFileSync(path.join(primary.root, "README.md"), "base side\n");
+      git(primary.root, ["commit", "-q", "-am", "chore: base side"]);
       const before = git(primary.root, ["rev-parse", base]);
-      const result = land("local-only");
-      assertPark(result, "base-checked-out");
-      assert.equal(result.holder, primary.root);
-      assert.match(result.decision.question, /no remote/);
-      assert.equal(git(primary.root, ["rev-parse", base]), before, "base not moved");
+      assertPark(merge(context, { ...clash, unit: "clash", slug: "clash" }, info), "conflict");
+      assert.equal(git(primary.root, ["rev-parse", base]), before);
+      assert.equal(git(primary.root, ["status", "--porcelain", "--untracked-files=no"]), "", "the holder's merge was aborted");
+
+      fs.writeFileSync(path.join(primary.root, "README.md"), "someone's edit\n");
+      assert.throws(() => land("dirty"), /uncommitted changes/);
+      assert.equal(git(primary.root, ["rev-parse", base]), before, "a dirty holder is never merged into");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: from a linked-worktree root with push:false, the unit lands locally in the holder and origin is untouched", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { primary, origin, base, temps, land } = linked(data);
+      const originBefore = git(origin, ["rev-parse", base]);
+      const landed = land("unpushed", { push: false });
+      assert.equal(landed.merged, true, JSON.stringify(landed));
+      assert.equal(git(primary.root, ["log", "-1", "--format=%s", `${base}^2`]), "feat: unpushed through a pull request");
+      assert.equal(git(origin, ["rev-parse", base]), originBefore);
       assert.deepEqual(temps(), []);
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
