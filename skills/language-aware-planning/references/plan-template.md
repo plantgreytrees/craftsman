@@ -35,6 +35,7 @@ units:
     scope_id: <stable scope-step id>
     project: <selected repository or project root, relative to the workspace>
     depends_on: []
+    # bumps: <submodule project id>   # only on a parent's submodule bump step (ARCH-LAND-03)
     module: <path or component>
     language: <detected>
     security: high | normal

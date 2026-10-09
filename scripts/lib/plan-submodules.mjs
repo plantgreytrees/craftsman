@@ -1,24 +1,34 @@
 // ARCH-LAND-03: a submodule's pointer bump is an explicit step in its parent
 // (`bumps: "<submodule>"`) that lands after every step in the submodule.
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 // True when the parent repo's index records a gitlink (mode 160000) at the
 // child's path: what `git submodule status` reports, read from a registered
-// root only (ARCH-LAND-04).
+// root or the workspace root only (ARCH-LAND-04). A git failure throws, so an
+// unreadable index never silently drops the bump requirement.
 export function gitlinkAt(parentRoot, childRoot) {
   const rel = path.relative(parentRoot, childRoot).split(path.sep).join("/");
+  let out;
   try {
-    const out = execFileSync("git", ["-C", parentRoot, "ls-files", "-s", "--", rel], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return out.split("\n").some((line) => line.startsWith("160000 ") && line.endsWith(`\t${rel}`));
-  } catch { return false; }
+    out = execFileSync("git", ["--literal-pathspecs", "-C", parentRoot, "ls-files", "-s", "--", rel], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    throw new Error(`cannot read the git index of ${parentRoot} to find submodules: ${String(error.stderr || error.message).trim()}`);
+  }
+  return out.split("\n").some((line) => line.startsWith("160000 ") && line.endsWith(`\t${rel}`));
 }
 
 // A registered project is a submodule of the nearest registered project whose
 // root encloses it, when that parent holds a gitlink to it. A nested
-// independent clone, or a project rooted at the workspace root, is not.
+// independent clone, or a project rooted at the workspace root, is not. With
+// no registered parent, a gitlink in an unregistered superproject at the
+// workspace root maps the project to null: it has a parent nothing can bump.
 export function submoduleParents(workspace, isGitlink = gitlinkAt) {
   const entries = Object.entries(workspace?.projects || {}).filter(([, project]) => typeof project?.root === "string");
+  const superRoot = workspace?.workspaceRoot;
+  const superproject = typeof superRoot === "string" && !entries.some(([, project]) => project.root === superRoot)
+    && fs.existsSync(path.join(superRoot, ".git"));
   const parents = new Map();
   for (const [id, { root }] of entries) {
     let parent = null;
@@ -26,7 +36,11 @@ export function submoduleParents(workspace, isGitlink = gitlinkAt) {
       if (other === id || !root.startsWith(outer + path.sep)) continue;
       if (!parent || outer.length > parent.root.length) parent = { id: other, root: outer };
     }
-    if (parent && isGitlink(parent.root, root)) parents.set(id, parent.id);
+    if (parent) {
+      if (isGitlink(parent.root, root)) parents.set(id, parent.id);
+    } else if (superproject && root.startsWith(superRoot + path.sep) && isGitlink(superRoot, root)) {
+      parents.set(id, null);
+    }
   }
   return parents;
 }
@@ -55,6 +69,9 @@ export function checkSubmoduleBumps(steps, workspace, { isGitlink } = {}) {
     }
   }
   for (const submodule of new Set(steps.map((step) => step.project).filter((project) => parents.has(project)))) {
+    if (parents.get(submodule) === null) {
+      throw new Error(`steps in submodule ${submodule} need a bump in its superproject, which is not registered: add the workspace root to craftsman.workspace.json so a step there can carry bumps: "${submodule}" (ARCH-LAND-03)`);
+    }
     const bumps = steps.filter((step) => step.bumps === submodule);
     if (!bumps.length) {
       throw new Error(`steps in submodule ${submodule} need a bump step in ${parents.get(submodule)} with bumps: "${submodule}" (ARCH-LAND-03)`);

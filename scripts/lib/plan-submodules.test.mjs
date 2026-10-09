@@ -50,8 +50,31 @@ test("gitlinkAt: reads a mode-160000 entry from the parent's index, nothing else
     assert.equal(gitlinkAt(parent, path.join(parent, "vendor", "lib")), true);
     assert.equal(gitlinkAt(parent, path.join(parent, "vendor", "plain")), false);
     assert.equal(gitlinkAt(parent, path.join(parent, "vendor")), false);
-    assert.equal(gitlinkAt(path.join(parent, "missing"), path.join(parent, "missing", "x")), false);
+    // A `:`-prefixed name is a literal path, not pathspec magic (R14-S3).
+    git("update-index", "--add", "--cacheinfo", `160000,${"b".repeat(40)},:odd`);
+    assert.equal(gitlinkAt(parent, path.join(parent, ":odd")), true);
+    // An unreadable index fails closed (R14-S2).
+    assert.throws(() => gitlinkAt(path.join(parent, "missing"), path.join(parent, "missing", "x")), /cannot read the git index/);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
+});
+
+test("validateSteps: a gitlink in an unregistered workspace-root superproject is refused, not skipped (R14-W1)", () => {
+  const top = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-super-"));
+  try {
+    execFileSync("git", ["-C", top, "init", "-q"], { stdio: "ignore" });
+    execFileSync("git", ["-C", top, "update-index", "--add", "--cacheinfo", `160000,${"c".repeat(40)},lib`], { stdio: "ignore" });
+    const workspace = { workspaceRoot: top, projects: {
+      lib: { id: "lib", root: path.join(top, "lib") },
+      app: { id: "app", root: path.join(top, "app") },
+    } };
+    assert.throws(() => validateSteps([step("lib-change", [], "lib")], { workspace }), /superproject, which is not registered/);
+    // app has no gitlink in the superproject: no bump needed.
+    assert.equal(validateSteps([step("a", [], "app")], { workspace }).length, 1);
+    // Registering the workspace root makes it the parent that carries the bump.
+    const registered = { ...workspace, projects: { ...workspace.projects, top: { id: "top", root: top } } };
+    assert.throws(() => validateSteps([step("lib-change", [], "lib")], { workspace: registered }), /need a bump step in top/);
+    assert.equal(validateSteps([step("lib-change", [], "lib"), bump("bump-lib", "lib", ["lib-change"], "top")], { workspace: registered }).length, 2);
+  } finally { fs.rmSync(top, { recursive: true, force: true }); }
 });
 
 test("validateSteps: a submodule's steps need a bump step in its parent (ARCH-LAND-03)", () => {

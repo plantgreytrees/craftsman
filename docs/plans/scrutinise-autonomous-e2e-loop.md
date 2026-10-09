@@ -440,6 +440,16 @@ One isolated scrutineer: 0 Critical, 2 Warning, 2 Suggestion; the criterion is M
 - [ ] 21.2 `commands/orchestrate.md:29` names `bumps` and the bump refusals (R13-W2), within its size budget.
 - [ ] 21.3 `plan-graph.test.mjs`'s LAND-02/03 test uses `root` and `bumps` (R13-S1); `plan-template.md` says the bump's `project` is the parent's registered id (R13-S2). → accept: full suite exit 0; lint PASS.
 
+## Round 14 — `/scrutinise` of `8e9f06d..3951593`
+One isolated scrutineer: 0 Critical, 1 Warning, 4 Suggestion; the criterion is MET; LAND-02, LAND-03 (for registered parents), LAND-04, ENGINE-02 and ENGINE-08 HOLD.
+- R14-W1 [Correctness] `plan-submodules.mjs:20-31`: a registered project whose gitlink lives in an unregistered superproject at the workspace root has no registered parent, so its steps pass with no bump.
+- R14-S2 `gitlinkAt` swallows git errors and returns false (fails open). R14-S3 the path is a pathspec, so `:`-prefixed names are read as magic. R14-S4 `landing.rules.md` `governs` lacks `scripts/lib/plan-submodules.mjs`. R14-S5 the template's `units:` skeleton has no `bumps:` key.
+
+## Step 22 — land-submodule-bump, round 14 fixes (., JavaScript, normal)
+- [ ] 22.1 A registered project with no registered parent, whose gitlink is held by the workspace root (itself unregistered), is refused with "register the superproject" (R14-W1). → accept: test fails on `3951593`.
+- [ ] 22.2 `gitlinkAt` throws when git fails, and passes `--literal-pathspecs` (R14-S2, S3). → accept: real-git test of a `:`-prefixed gitlink and of an unreadable parent.
+- [ ] 22.3 `governs` lists the lib file; the template skeleton shows `bumps:` (R14-S4, S5). → accept: lint PASS; full suite exit 0.
+
 ## Not driven (recorded)
 - **Round 2:** `unit-runner` `block` releases the claim while `_shared-execution.md` step 11 keeps a PARKED/BLOCKED claim until the hand-off records the branch — align in a later pass. Residual risks: `session.usage.startedAt` availability in the real mod runtime; `autoActive` reads the ledger per Bash call; a stale `.spent-` file adds a 200 ms deny delay.
 - **Round 3:** the force block stays lexical — a heredoc into `bash`, a script file, `GIT_*` env tricks and persistent `~/.gitconfig` aliases escape it; only runtime enforcement would close that. The holder's cleanliness is checked once before the merge lock, so a concurrent human edit is caught only by git's own refusal. `autoForceBlock` stays live up to 24 h while CANCELLED/PARKED/BLOCKED rows remain (intended: Phase C answers them).
