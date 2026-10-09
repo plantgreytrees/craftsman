@@ -244,7 +244,34 @@ export function spendAgentGrant(agent, sid, context = null) {
   try { fs.unlinkSync(spent); } catch {}
   return true;
 }
-export const scrutineerGrantFile = (sid, context = null) => agentGrantFile("scrutineer", sid, context);
+// /auto's per-unit runners (ARCH-AUTO-06): a counted grant, not a flag — one
+// unit needs several dispatches (implement, review rounds, close). The file
+// holds the dispatches left; each spend takes exactly one. Same rename-first
+// claim as spendAgentGrant, so two racing spenders never both take the last.
+export const RUNNER_AGENTS = ["unit-runner", "implementer", "code-reviewer"];
+// implement + up to 3 reviews + 2 fix rounds (ARCH-ENGINE-05) + close.
+export const RUNNER_DISPATCHES_PER_UNIT = 7;
+export function grantRunnerDispatches(count, sid, context = null) {
+  const grant = agentGrantFile("runner", sid, context);
+  try {
+    fs.mkdirSync(path.dirname(grant), { recursive: true });
+    fs.writeFileSync(grant, `${Math.max(0, Math.floor(count))}\n`);
+  } catch {}
+  return grant;
+}
+export function spendRunnerDispatch(sid, context = null) {
+  const grant = agentGrantFile("runner", sid, context);
+  const held = `${grant}.spent-${process.pid}-${Date.now()}`;
+  try { fs.renameSync(grant, held); } catch { return false; }
+  let left = 0;
+  try { left = Number.parseInt(fs.readFileSync(held, "utf8"), 10) || 0; } catch {}
+  try {
+    if (left > 1) fs.writeFileSync(held, `${left - 1}\n`), fs.renameSync(held, grant);
+    else fs.unlinkSync(held);
+  } catch {}
+  return left >= 1;
+}
+export const scrutineerGrantFile =(sid, context = null) => agentGrantFile("scrutineer", sid, context);
 export const grantScrutineer = (sid, context = null) => grantAgent("scrutineer", sid, context);
 export const spendScrutineerGrant = (sid, context = null) => spendAgentGrant("scrutineer", sid, context);
 export function sharedStateDir(context = null) {

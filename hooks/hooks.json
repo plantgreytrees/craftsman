@@ -8,7 +8,7 @@
     "PreToolUse": [
       { "matcher": "Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-guard.mjs\"", "timeout": 10 } ] },
-      { "matcher": "Task|Agent",
+      { "matcher": "Task|Agent|Workflow",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/agent-mode-guard.mjs\"", "timeout": 10 } ] },
       { "matcher": "Skill",
         "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/builtin-skill-context.mjs\"", "timeout": 10 } ] }

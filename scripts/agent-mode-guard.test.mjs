@@ -267,3 +267,86 @@ test("agent-mode-guard: a sub-project grant lives in the root session dir, keyed
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ARCH-STATE-05: Workflow runs only the plugin's own workflows/ scripts, and
+// only while execution.engine is "workflow". A fixture plugin root stands in
+// for ${CLAUDE_PLUGIN_ROOT} so the allowed script exists before it ships.
+function fixturePlugin() {
+  const plugin = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plugin-")));
+  fs.mkdirSync(path.join(plugin, "workflows"));
+  fs.copyFileSync(path.join(ROOT, "..", "craftsman.config.json"), path.join(plugin, "craftsman.config.json"));
+  fs.writeFileSync(path.join(plugin, "workflows", "run.js"), "export const meta = { name: 'run', description: 'x' }\n");
+  fs.writeFileSync(path.join(plugin, "elsewhere.js"), "export const meta = { name: 'x', description: 'x' }\n");
+  return plugin;
+}
+
+test("agent-mode-guard: hooks.json routes Task|Agent|Workflow to the guard and registers no SubagentStop (ARCH-STATE-05/07)", () => {
+  const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, "..", "hooks", "hooks.json"), "utf8")).hooks;
+  const entry = hooks.PreToolUse.find((h) => h.hooks.some((c) => c.command.includes("agent-mode-guard.mjs")));
+  assert.equal(entry.matcher, "Task|Agent|Workflow");
+  assert.equal("SubagentStop" in hooks, false);
+});
+
+test("agent-mode-guard: Workflow blocks an inline script and allows workflows/run.js only under engine=workflow", () => {
+  const dir = tmpProject();
+  const plugin = fixturePlugin();
+  try {
+    const env = { CLAUDE_PLUGIN_ROOT: plugin };
+    const call = (tool_input) => hook("agent-mode-guard.mjs", dir, dir, { session_id: "s1", tool_name: "Workflow", tool_input }, env);
+    const runJs = { scriptPath: path.join(plugin, "workflows", "run.js") };
+
+    assert.equal(call(runJs).status, 2, "engine unset: even the plugin's workflow is blocked");
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ execution: { engine: "subagent" } }));
+    assert.equal(call(runJs).status, 2, "engine=subagent blocks it");
+
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ execution: { engine: "workflow", agentMode: "subagents" } }));
+    assert.equal(call(runJs).status, 0);
+    assert.equal(call({ name: "craftsman:run" }).status, 0, "the plugin's named workflow");
+    assert.equal(call({ ...runJs, resumeFromRunId: "wf_abc123" }).status, 0);
+    const inline = call({ script: "export const meta = { name: 'x', description: 'x' }\nawait agent('do anything')" });
+    assert.equal(inline.status, 2, "an inline script is blocked even under agentMode=subagents");
+    assert.match(inline.stderr, /inline or ad-hoc/);
+    assert.equal(call({ ...runJs, script: "await agent('x')" }).status, 2, "a script alongside a plugin path is still ad-hoc");
+    assert.equal(call({ scriptPath: path.join(plugin, "elsewhere.js") }).status, 2, "outside workflows/");
+    assert.equal(call({ scriptPath: path.join(plugin, "workflows", "..", "elsewhere.js") }).status, 2, "../ out of workflows/");
+    assert.equal(call({ name: "../elsewhere" }).status, 2);
+    assert.equal(call({ name: "missing" }).status, 2, "a name with no such workflow");
+    fs.symlinkSync(path.join(plugin, "elsewhere.js"), path.join(plugin, "workflows", "link.js"));
+    assert.equal(call({ name: "link" }).status, 2, "a symlink out of workflows/");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+});
+
+// ARCH-AUTO-06: /auto grants its per-unit runner dispatches, one per grant,
+// spent on use; a session that never ran /auto gets none.
+test("agent-mode-guard: an /auto session gets one runner dispatch per grant; a non-/auto session is blocked", () => {
+  const dir = tmpProject();
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "two-units.md"), "---\nsteps:\n  - id: a\n    project: .\n  - id: b\n    project: .\n---\n");
+    const dispatch = (sid, subagent_type) => run(dir, { session_id: sid, tool_name: "Agent", tool_input: { subagent_type } });
+
+    for (const type of ["craftsman:unit-runner", "craftsman:implementer", "code-reviewer"]) {
+      assert.equal(dispatch("plain", type).status, 2, `${type} without /auto`);
+    }
+    assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "plain", prompt: "/orchestrate two-units" }).status, 0);
+    assert.equal(dispatch("plain", "craftsman:unit-runner").status, 2, "/orchestrate outside an /auto run grants nothing");
+
+    assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "auto", prompt: "/craftsman:auto two-units" }).status, 0);
+    const grant = path.join(dir, ".craftsman", "sessions", "auto", "runner-grant");
+    assert.equal(fs.readFileSync(grant, "utf8").trim(), "14", "2 units × 7 dispatches");
+    fs.writeFileSync(grant, "1\n");
+    assert.equal(dispatch("auto", "craftsman:unit-runner").status, 0, "one grant, one dispatch");
+    assert.equal(dispatch("auto", "craftsman:implementer").status, 2, "spent on use");
+    assert.equal(dispatch("auto", "craftsman:scrutineer").status, 2, "runner grants never unlock other agents");
+
+    // The /goal's /orchestrate inside the /auto run re-arms it, sized afresh.
+    assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "auto", tool_name: "Skill", tool_input: { skill: "craftsman:orchestrate", args: "two-units" } }).status, 0);
+    assert.equal(fs.readFileSync(grant, "utf8").trim(), "14");
+    assert.equal(dispatch("plain", "craftsman:unit-runner").status, 2, "another session's grant is not this one's");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -246,10 +246,10 @@ Depends on: state-root-pin, telemetry, auto-command (merged and installed)
 
 ### Step 7 — engine-guards (., JavaScript, high)
 Depends on: workflow-spike
-- [ ] 7.1 `hooks/hooks.json` matcher `Task|Agent|Workflow`; `agent-mode-guard.mjs` allows Workflow only for a script under `${CLAUDE_PLUGIN_ROOT}/workflows/` (or the plugin's named workflow) while `execution.engine` is `"workflow"`, and blocks ad-hoc scripts. → accept: test blocks an inline script and allows `workflows/run.js` only under engine=workflow.
-- [ ] 7.2 `stop-gate.mjs`: when Stop input `background_tasks` lists an in-flight workflow or subagent, skip only the acceptance block; the secrets and regression checks stay armed. → accept: `stop-gate.test.mjs` case with `background_tasks` shows the acceptance block skipped and the secrets block still firing.
-- [ ] 7.3 `/auto` grants its per-unit runner dispatches (`unit-runner`, `implementer`, reviewer) through the grant mechanism; spent on use (AUTO-06). → accept: guard test shows an `/auto` session allowed one runner dispatch per grant, and a non-`/auto` session blocked.
-- [ ] 7.4 STATE-07 test still green; full suite exit 0.
+- [x] 7.1 `hooks/hooks.json` matcher `Task|Agent|Workflow`; `agent-mode-guard.mjs` allows Workflow only for a script under `${CLAUDE_PLUGIN_ROOT}/workflows/` (or the plugin's named workflow) while `execution.engine` is `"workflow"`, and blocks ad-hoc scripts. → accept: test blocks an inline script and allows `workflows/run.js` only under engine=workflow.
+- [x] 7.2 `stop-gate.mjs`: when Stop input `background_tasks` lists an in-flight workflow or subagent, skip only the acceptance block; the secrets and regression checks stay armed. → accept: `stop-gate.test.mjs` case with `background_tasks` shows the acceptance block skipped and the secrets block still firing.
+- [x] 7.3 `/auto` grants its per-unit runner dispatches (`unit-runner`, `implementer`, reviewer) through the grant mechanism; spent on use (AUTO-06). → accept: guard test shows an `/auto` session allowed one runner dispatch per grant, and a non-`/auto` session blocked.
+- [x] 7.4 STATE-07 test still green; full suite exit 0.
 
 ### Step 8 — engine (., JS + Markdown + JSON, normal)
 Depends on: workflow-spike, engine-guards

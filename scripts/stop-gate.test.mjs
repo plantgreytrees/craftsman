@@ -45,7 +45,7 @@ function cleanup(dir) {
 // Spawns `node scripts/stop-gate.mjs` with cwd=dir and the given session_id
 // on stdin, matching real invocation shape. Returns stdout/stderr/exit code
 // plus the parsed `.craftsman/events.jsonl` lines for this session.
-function runStopGate(dir, sid) {
+function runStopGate(dir, sid, extra = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [STOP_GATE_PATH], { cwd: dir });
     let stdout = "";
@@ -63,7 +63,7 @@ function runStopGate(dir, sid) {
       } catch { /* no events file — fine, some scenarios log nothing */ }
       resolve({ code, stdout, stderr, events });
     });
-    child.stdin.end(JSON.stringify({ session_id: sid }));
+    child.stdin.end(JSON.stringify({ session_id: sid, ...extra }));
   });
 }
 
@@ -604,6 +604,39 @@ test("stop-gate: a [unit:<id>] criterion binds only the session that worked that
     const blocked = await runStopGate(dir, sid);
     assert.match(blocked.stdout, /mine, still open/);
     assert.doesNotMatch(blocked.stdout, /someone else's unit/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ARCH-STATE-04: a turn ending with its workflow still running defers only the
+// acceptance block; the secrets scan and regression checks still fire.
+test("stop-gate: in-flight background_tasks skip only the acceptance block; secrets and regressions still fire", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
+    stopGate: { requireAcceptanceCriteria: true, extraChecks: ['node -e "process.exit(1)"'] },
+  });
+  try {
+    const sid = "bg-session";
+    writeAcceptance(dir, sid, "- [ ] still open criterion\n");
+    fs.writeFileSync(path.join(dir, ".env.local"), `aws_secret_access_key="${"A".repeat(40)}"\n`);
+    const running = await runStopGate(dir, sid, {
+      background_tasks: [{ id: "w1", type: "local_workflow", status: "running" }, { id: "b1", type: "local_bash", status: "running" }],
+    });
+    assert.match(running.stdout, /"decision":"block"/);
+    assert.match(running.stdout, /SECRETS \(built-in fallback/);
+    assert.match(running.stdout, /GUARD FAILED/);
+    assert.doesNotMatch(running.stdout, /ACCEPTANCE CRITERIA/);
+    assert.ok(running.events.some((e) => e.ev === "stop-acceptance-deferred"));
+
+    // Finished tasks, or only shell tasks, defer nothing.
+    for (const background_tasks of [
+      [{ id: "a1", type: "local_agent", status: "completed" }],
+      [{ id: "b1", type: "local_bash", status: "running" }],
+    ]) {
+      const settled = await runStopGate(dir, sid, { background_tasks });
+      assert.match(settled.stdout, /still open criterion/);
+    }
   } finally {
     cleanup(dir);
   }

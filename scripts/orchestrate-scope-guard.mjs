@@ -20,8 +20,20 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, sessionDir, acceptancePath, recordAcceptanceOwnership, grantAgent } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, sessionDir, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, RUNNER_DISPATCHES_PER_UNIT } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
+
+// Units in the invoked plan (its header's `- id:` steps); 1 when the slug
+// names no plan yet — /auto's Phase A may still be writing it.
+function planUnitCount(args, context) {
+  const slug = (args.trim().split(/\s+/).find((a) => !a.startsWith("-")) || "")
+    .replace(/^docs\/plans\//, "").replace(/\.md$/, "");
+  if (!/^[A-Za-z0-9._-]+$/.test(slug)) return 1;
+  try {
+    const plan = fs.readFileSync(path.join(context.root, "docs", "plans", `${slug}.md`), "utf8");
+    return Math.max(1, (plan.match(/^\s+- id: /gm) || []).length);
+  } catch { return 1; }
+}
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
@@ -68,6 +80,14 @@ if (invoked === "auto") {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "auto-active"), new Date().toISOString() + "\n");
   } catch { /* best-effort — the guard simply stays unarmed */ }
+}
+
+// /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
+// itself, and on the /orchestrate its unattended /goal starts with (the
+// auto-active marker says this session belongs to an /auto run). Sized from
+// the plan's units; a fresh invocation re-arms, never accumulates.
+if (invoked === "auto" || (invoked === "orchestrate" && fs.existsSync(path.join(sessionDir(sidOf(input)), "auto-active")))) {
+  grantRunnerDispatches(planUnitCount(args, context) * RUNNER_DISPATCHES_PER_UNIT, sidOf(input), context);
 }
 
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs

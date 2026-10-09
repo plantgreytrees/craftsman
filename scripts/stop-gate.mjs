@@ -286,7 +286,17 @@ try {
   const reconciled = reconcileAcceptance(context, input);
   if (reconciled?.completed.length) logEvent({ ev: "stop-tracker-auto-complete", sid, units: reconciled.completed.map((c) => c.unit) });
 } catch { /* bookkeeping — never block Stop on it */ }
-if (cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync(acPath)) {
+// A turn that ends while a workflow or subagent it launched is still running
+// is not "done" — the units are mid-flight, and their criteria are theirs to
+// meet. Skip only this block (ARCH-STATE-04); secrets and regressions above
+// stay armed, and the next Stop, once the work lands, checks acceptance again.
+const DONE = new Set(["completed", "complete", "done", "failed", "error", "killed", "stopped", "cancelled", "canceled"]);
+const inFlight = (Array.isArray(input?.background_tasks) ? input.background_tasks : []).filter((task) => {
+  const kind = String(task?.type ?? task?.kind ?? "").toLowerCase();
+  return /workflow|agent/.test(kind) && !DONE.has(String(task?.status ?? "").toLowerCase());
+});
+if (inFlight.length) logEvent({ ev: "stop-acceptance-deferred", sid, tasks: inFlight.length });
+if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync(acPath)) {
   const ac = fs.readFileSync(acPath, "utf8");
   if (ownsAcceptance(sid, ac, context)) {
     const touchedUnits = new Set();
