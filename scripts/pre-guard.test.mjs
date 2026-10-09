@@ -324,6 +324,14 @@ const DESTRUCTIVE = [
   "git -C /tmp/repo reset --hard",
   "git worktree remove --force .worktrees/u1",
   "git worktree remove -f .worktrees/u1",
+  // Wrapped forms (S1): a nested shell, a subshell, $( ), backticks, an alias.
+  "bash -c 'git push -f origin main'",
+  "sh -c \"git reset --hard origin/main\"",
+  "(git push --force origin main)",
+  "echo $(git reset --hard)",
+  "echo `git push -f origin main`",
+  "git -c alias.p='push --force' p origin main",
+  "git -c alias.r=\"!git reset --hard\" r",
 ];
 const ALLOWED = ["git push origin HEAD:main", "git push -u origin feat/x", "git reset --soft HEAD~1", "git worktree remove .worktrees/u1", "git status"];
 const bash = (sid, command) => ({ session_id: sid, tool_name: "Bash", tool_input: { command } });
@@ -333,13 +341,33 @@ test("pre-guard: while /auto is active, force pushes, hard resets and forced wor
   try {
     const sid = "auto-run";
     fs.mkdirSync(path.join(dir, ".craftsman", "sessions", sid), { recursive: true });
-    fs.writeFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), "now\n");
+    fs.writeFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), JSON.stringify({ plan: "p", at: new Date().toISOString() }));
     for (const command of DESTRUCTIVE) {
       const r = run(GUARD, dir, bash(sid, command));
       assert.equal(r.status, 2, command);
       assert.match(r.stderr, /BLOCKED while \/auto is active \(ARCH-LAND-05\)/, command);
     }
     for (const command of ALLOWED) assert.equal(run(GUARD, dir, bash(sid, command)).status, 0, command);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the force block lapses once the /auto run is over (ARCH-LAND-05)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-lapsed-")));
+  const marker = (sid, body) => {
+    fs.mkdirSync(path.join(dir, ".craftsman", "sessions", sid), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), body);
+  };
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman", "tracker"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "tracker", "events.jsonl"),
+      JSON.stringify({ key: ".::docs/plans/done.md::u1", plan: "docs/plans/done.md", unit: "u1", status: "PENDING" }) + "\n" +
+      JSON.stringify({ key: ".::docs/plans/done.md::u1", plan: "docs/plans/done.md", unit: "u1", status: "MERGED", evidence: "x" }) + "\n");
+    marker("finished", JSON.stringify({ plan: "done", at: new Date().toISOString() }));
+    marker("aged", JSON.stringify({ plan: "p", at: new Date(Date.now() - 25 * 3600 * 1000).toISOString() }));
+    marker("legacy", "2026-10-09T00:00:00.000Z\n");
+    for (const sid of ["finished", "aged", "legacy"]) {
+      assert.equal(run(GUARD, dir, bash(sid, "git push --force origin main")).status, 0, sid);
+    }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

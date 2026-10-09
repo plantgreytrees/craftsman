@@ -271,6 +271,56 @@ export function spendRunnerDispatch(sid, context = null) {
   } catch {}
   return left >= 1;
 }
+// /auto's marker (ARCH-AUTO-06, ARCH-LAND-05): `{plan, at}` in the root
+// session dir. It is live only while its run is: younger than a day, and its
+// plan has no ledger rows yet (Phase A still writing it) or an open one
+// (PENDING/IN_PROGRESS). Once every row is MERGED, PARKED, BLOCKED or
+// COMPLETE, runner grants and the force block lapse on their own.
+export const AUTO_MARKER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const OPEN_STATUSES = new Set(["PENDING", "IN_PROGRESS"]);
+export const autoMarkerFile = (sid) => path.join(sessionDir(sid), "auto-active");
+// The plan slug a command's arguments name: its first non-flag word, with an
+// optional docs/plans/ prefix and .md suffix. null when it isn't slug-shaped.
+export function planSlugOf(args) {
+  const slug = (String(args || "").trim().split(/\s+/).find((a) => !a.startsWith("-")) || "")
+    .replace(/^docs\/plans\//, "").replace(/\.md$/, "");
+  return /^[A-Za-z0-9._-]+$/.test(slug) ? slug : null;
+}
+export function writeAutoMarker(sid, plan, at = new Date().toISOString()) {
+  const file = autoMarkerFile(sid);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ plan: plan || null, at }) + "\n");
+  } catch {}
+  return file;
+}
+export function readAutoMarker(sid) {
+  try {
+    const marker = JSON.parse(fs.readFileSync(autoMarkerFile(sid), "utf8"));
+    return marker && typeof marker === "object" && Number.isFinite(Date.parse(marker.at)) ? marker : null;
+  } catch { return null; } // absent, or a legacy timestamp-only marker
+}
+function planStatuses(plan, context) {
+  const ledger = path.join(mainCheckoutRoot(context?.root || PROJECT_ROOT), ".craftsman", "tracker", "events.jsonl");
+  const latest = new Map();
+  let text = "";
+  try { text = fs.readFileSync(ledger, "utf8"); } catch { return []; }
+  for (const line of text.split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event.plan === `docs/plans/${plan}.md`) latest.set(event.key, event.status);
+    } catch {}
+  }
+  return [...latest.values()];
+}
+export function autoActive(sid, context = null, now = Date.now()) {
+  const marker = readAutoMarker(sid);
+  if (!marker || now - Date.parse(marker.at) > AUTO_MARKER_MAX_AGE_MS) return false;
+  if (!marker.plan) return true;
+  const statuses = planStatuses(marker.plan, context);
+  return !statuses.length || statuses.some((status) => OPEN_STATUSES.has(status));
+}
+
 export const scrutineerGrantFile =(sid, context = null) => agentGrantFile("scrutineer", sid, context);
 export const grantScrutineer = (sid, context = null) => grantAgent("scrutineer", sid, context);
 export const spendScrutineerGrant = (sid, context = null) => spendAgentGrant("scrutineer", sid, context);

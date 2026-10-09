@@ -20,18 +20,18 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, sessionDir, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, RUNNER_DISPATCHES_PER_UNIT } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, RUNNER_DISPATCHES_PER_UNIT, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 
-// Units in the invoked plan (its header's `- id:` steps); 1 when the slug
-// names no plan yet — /auto's Phase A may still be writing it.
-function planUnitCount(args, context) {
-  const slug = (args.trim().split(/\s+/).find((a) => !a.startsWith("-")) || "")
-    .replace(/^docs\/plans\//, "").replace(/\.md$/, "");
-  if (!/^[A-Za-z0-9._-]+$/.test(slug)) return 1;
+// Units in the invoked plan (the `- id:` steps of its front matter only, not
+// any list further down the doc); 1 when the slug names no plan yet — /auto's
+// Phase A may still be writing it.
+function planUnitCount(slug, context) {
+  if (!slug) return 1;
   try {
     const plan = fs.readFileSync(path.join(context.root, "docs", "plans", `${slug}.md`), "utf8");
-    return Math.max(1, (plan.match(/^\s+- id: /gm) || []).length);
+    const header = /^---\n([\s\S]*?)\n---\s*$/m.exec(plan)?.[1] || "";
+    return Math.max(1, (header.match(/^\s+- id: /gm) || []).length);
   } catch { return 1; }
 }
 
@@ -72,23 +72,24 @@ if (invoked === "orchestrate" || invoked === "auto") {
   } catch { /* best-effort — falls back to /orchestrate's own prose-driven require call */ }
 }
 
-// /auto's marker: pre-guard.mjs blocks destructive git while it exists
-// (ARCH-LAND-05). Root session dir, same (sid) input on both sides (STATE-02).
-if (invoked === "auto") {
-  try {
-    const dir = sessionDir(sidOf(input));
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "auto-active"), new Date().toISOString() + "\n");
-  } catch { /* best-effort — the guard simply stays unarmed */ }
+// /auto's marker {plan, at}: pre-guard.mjs blocks destructive git and
+// agent-mode-guard.mjs spends runner grants only while it is live (core.mjs
+// autoActive; ARCH-LAND-05). Root session dir, same (sid) on every side
+// (STATE-02). The /orchestrate an /auto goal starts with re-points a live
+// marker at that plan, since /auto's own argument may be an idea or request.
+const slug = planSlugOf(args);
+const sid = sidOf(input);
+let autoRun = invoked === "auto";
+if (autoRun) writeAutoMarker(sid, slug);
+else if (invoked === "orchestrate" && autoActive(sid, context)) {
+  autoRun = true;
+  if (slug) writeAutoMarker(sid, slug, readAutoMarker(sid).at);
 }
 
 // /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
-// itself, and on the /orchestrate its unattended /goal starts with (the
-// auto-active marker says this session belongs to an /auto run). Sized from
-// the plan's units; a fresh invocation re-arms, never accumulates.
-if (invoked === "auto" || (invoked === "orchestrate" && fs.existsSync(path.join(sessionDir(sidOf(input)), "auto-active")))) {
-  grantRunnerDispatches(planUnitCount(args, context) * RUNNER_DISPATCHES_PER_UNIT, sidOf(input), context);
-}
+// itself, and on the /orchestrate its unattended /goal starts with. Sized
+// from the plan's units; a fresh invocation re-arms, never accumulates.
+if (autoRun) grantRunnerDispatches(planUnitCount(slug, context) * RUNNER_DISPATCHES_PER_UNIT, sid, context);
 
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
 // spends it). Re-arming on a repeat invocation is intended — each run of

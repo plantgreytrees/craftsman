@@ -327,7 +327,8 @@ test("agent-mode-guard: an /auto session gets one runner dispatch per grant; a n
   const dir = tmpProject();
   try {
     fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
-    fs.writeFileSync(path.join(dir, "docs", "plans", "two-units.md"), "---\nsteps:\n  - id: a\n    project: .\n  - id: b\n    project: .\n---\n");
+    // The body list is not a unit: only the front matter's `- id:` steps count.
+    fs.writeFileSync(path.join(dir, "docs", "plans", "two-units.md"), "---\nsteps:\n  - id: a\n    project: .\n  - id: b\n    project: .\n---\n\n## Notes\n  - id: not-a-unit\n");
     const dispatch = (sid, subagent_type) => run(dir, { session_id: sid, tool_name: "Agent", tool_input: { subagent_type } });
 
     for (const type of ["craftsman:unit-runner", "craftsman:implementer", "code-reviewer"]) {
@@ -348,6 +349,18 @@ test("agent-mode-guard: an /auto session gets one runner dispatch per grant; a n
     assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "auto", tool_name: "Skill", tool_input: { skill: "craftsman:orchestrate", args: "two-units" } }).status, 0);
     assert.equal(fs.readFileSync(grant, "utf8").trim(), "14");
     assert.equal(dispatch("plain", "craftsman:unit-runner").status, 2, "another session's grant is not this one's");
+
+    // Once every row of the plan has landed the run is over: a later
+    // /orchestrate re-grants nothing and a leftover grant is never spent.
+    fs.mkdirSync(path.join(dir, ".craftsman", "tracker"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "tracker", "events.jsonl"), ["a", "b"].flatMap((u) => [
+      { key: `.::docs/plans/two-units.md::${u}`, plan: "docs/plans/two-units.md", unit: u, status: "PENDING" },
+      { key: `.::docs/plans/two-units.md::${u}`, plan: "docs/plans/two-units.md", unit: u, status: "MERGED", evidence: "x" },
+    ]).map((e) => JSON.stringify(e)).join("\n") + "\n");
+    fs.writeFileSync(grant, "5\n");
+    assert.equal(hook("orchestrate-scope-guard.mjs", dir, dir, { session_id: "auto", prompt: "/orchestrate two-units" }).status, 0);
+    assert.equal(fs.readFileSync(grant, "utf8").trim(), "5", "no re-grant after the run");
+    assert.equal(dispatch("auto", "craftsman:unit-runner").status, 2, "a leftover grant lapses with its run");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

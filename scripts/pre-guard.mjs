@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot } from "./lib/core.mjs";
+import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoActive } from "./lib/core.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 
@@ -27,10 +27,12 @@ function mutatesGit(value) {
 }
 
 // Each `git …` in a compound command, as its words after the global options.
+// Subshells, $( ) and backticks split segments too, and quotes are stripped
+// from each word, so `(git push -f)` reads like `git push -f`.
 function gitInvocations(value) {
   const invocations = [];
-  for (const segment of value.split(/&&|\|\||[;|\n]/)) {
-    const words = segment.trim().split(/\s+/).filter(Boolean);
+  for (const segment of value.split(/&&|\|\||[;|\n()`]/)) {
+    const words = segment.trim().split(/\s+/).map((word) => word.replace(/^["']+|["']+$/g, "")).filter(Boolean);
     const at = words.findIndex((word) => word === "git" || word.endsWith("/git"));
     if (at < 0) continue;
     let i = at + 1;
@@ -43,7 +45,19 @@ function gitInvocations(value) {
 const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z]*${letter}[A-Za-z]*$`).test(word);
 
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
+// A quoted string (`bash -c '…'`) is checked as a command of its own, and a
+// `git -c alias.<name>=<value>` is checked as the git command it defines.
 function destructiveGit(value) {
+  for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
+    const inner = quoted[1] ?? quoted[2];
+    const found = inner !== value && /\bgit\b/.test(inner) && destructiveGit(inner);
+    if (found) return found;
+  }
+  for (const alias of value.matchAll(/\balias\.[\w.-]+=(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
+    const defined = (alias[1] ?? alias[2] ?? alias[3]).replace(/^!/, "");
+    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`);
+    if (found) return found;
+  }
   for (const [sub, ...rest] of gitInvocations(value)) {
     if (sub === "push" && rest.some((w) => /^--force(?:-with-lease|-if-includes)?(?:=|$)/.test(w) || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.includes("--hard")) return "git reset --hard";
@@ -227,11 +241,11 @@ if (tool === "Bash" && /\bgit\s+(?:(?:-[A-Za-z]+(?:[=\s]\S+)?)\s+)*(?:commit|pus
 }
 
 // ARCH-LAND-05: /auto holds standing git authority (LAND-01) but never a
-// destructive one. While its marker exists, force pushes (flags or a
-// +refspec), hard resets and forced worktree removal are blocked; a plain
-// `git push origin HEAD:main` is not. orchestrate-scope-guard.mjs writes the
-// marker at this same (sid) path.
-if (tool === "Bash" && fs.existsSync(path.join(sessionDir(sidOf(input)), "auto-active"))) {
+// destructive one. While its marker is live (core.mjs autoActive), force
+// pushes (flags or a +refspec), hard resets and forced worktree removal are
+// blocked; a plain `git push origin HEAD:main` is not.
+// orchestrate-scope-guard.mjs writes the marker at this same (sid) path.
+if (tool === "Bash" && autoActive(sidOf(input))) {
   const destructive = destructiveGit(command);
   if (destructive) {
     logEvent({ ev: "auto_force_blocked", sid: sidOf(input), command });

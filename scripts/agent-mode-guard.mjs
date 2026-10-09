@@ -27,7 +27,7 @@
 // "workflow". An inline or ad-hoc script is always blocked.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS, PLUGIN_ROOT, RUNNER_AGENTS, spendRunnerDispatch } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS, PLUGIN_ROOT, RUNNER_AGENTS, spendRunnerDispatch, autoActive } from "./lib/core.mjs";
 
 // The plugin workflow a Workflow call runs (path relative to the plugin), or
 // null for anything else: an inline script, a path outside workflows/, or a
@@ -88,7 +88,8 @@ const builtinAgents = Array.isArray(cfg.execution?.builtinAgents) ? cfg.executio
 if (subagentType && builtinAgents.includes(subagentType)) process.exit(0);
 
 const sid = sidOf(input);
-if (RUNNER_AGENTS.includes(agent) && spendRunnerDispatch(sid, context)) {
+// A leftover runner grant lapses with its /auto run (ARCH-AUTO-06).
+if (RUNNER_AGENTS.includes(agent) && autoActive(sid, context) && spendRunnerDispatch(sid, context)) {
   logEvent({ ev: "runner_dispatched", sid, subagent_type: subagentType }, context);
   process.exit(0);
 }

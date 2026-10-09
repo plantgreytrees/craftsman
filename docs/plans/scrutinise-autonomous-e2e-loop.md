@@ -115,10 +115,10 @@ Fix round for `/scrutinise autonomous-e2e-loop` (range `9b34cc3..01e12a7`, one i
 - [x] 2.3 Full suite exit 0.
 
 ## Step 3 — auto-marker (., JavaScript, high)
-- [ ] 3.1 `/auto` writes `auto-active` as JSON `{plan, at}`. One `core.mjs` helper `autoActive(sid, context)` says it is live only when it is younger than 24 h and that plan's ledger has a PENDING or IN_PROGRESS row; a legacy timestamp-only marker is not live (W4). `orchestrate-scope-guard` and `pre-guard` read it only through the helper. → accept: core.test cases for live, aged-out, plan-finished and legacy markers.
-- [ ] 3.2 `orchestrate-scope-guard` re-grants runners on `/orchestrate` only while the marker is live; `agent-mode-guard` spends a runner grant only while it is live. `planUnitCount` counts `- id:` lines inside the front matter only (S5). → accept: guard tests — `/orchestrate` after the plan's rows are all MERGED grants nothing and a leftover grant is not spent.
-- [ ] 3.3 `pre-guard`'s force block applies while the marker is live, and also catches `git` inside `bash -c`/`sh -c` strings, after `(`/`$(`/backtick, and a `git -c alias.*=` whose value holds a blocked form (S1, LAND-05). → accept: pre-guard.test cases for each form blocked while live, and plain `git push` allowed once the marker is dead.
-- [ ] 3.4 Full suite exit 0.
+- [x] 3.1 `/auto` writes `auto-active` as JSON `{plan, at}`. One `core.mjs` helper `autoActive(sid, context)` says it is live only when it is younger than 24 h and that plan's ledger has a PENDING or IN_PROGRESS row; a legacy timestamp-only marker is not live (W4). `orchestrate-scope-guard` and `pre-guard` read it only through the helper. → accept: core.test cases for live, aged-out, plan-finished and legacy markers.
+- [x] 3.2 `orchestrate-scope-guard` re-grants runners on `/orchestrate` only while the marker is live; `agent-mode-guard` spends a runner grant only while it is live. `planUnitCount` counts `- id:` lines inside the front matter only (S5). → accept: guard tests — `/orchestrate` after the plan's rows are all MERGED grants nothing and a leftover grant is not spent.
+- [x] 3.3 `pre-guard`'s force block applies while the marker is live, and also catches `git` inside `bash -c`/`sh -c` strings, after `(`/`$(`/backtick, and a `git -c alias.*=` whose value holds a blocked form (S1, LAND-05). → accept: pre-guard.test cases for each form blocked while live, and plain `git push` allowed once the marker is dead.
+- [x] 3.4 Full suite exit 0.
 
 ## Step 4 — mod-goal-since (., JavaScript, high)
 - [ ] 4.1 `register.js`: with no `session.usage.startedAt`, launch nothing — a goal file counts as new only when written after the session started (W5; auto.md Phase B step 3 "written this session"). → accept: register.test.ts case — no startedAt, a goal file present, nothing launched.
