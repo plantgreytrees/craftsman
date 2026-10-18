@@ -10,7 +10,7 @@
 // go without losing anything or pulling a worktree out from under a live
 // session:
 //
-//   removable = on a named branch, fully merged into the base branch, no
+//   removable = on a named branch (never feature/*, which is long-lived), fully merged into the base branch, no
 //               uncommitted/untracked changes, not the caller's own cwd, and
 //               either unlocked or locked by a process that no longer exists.
 //
@@ -108,6 +108,7 @@ export function listWorktrees(root, { cwd = process.cwd() } = {}) {
     let keep = null;
     if (!exists || entry.prunable) keep = null; // stale admin entry — `worktree prune` handles it
     else if (!entry.branch) keep = "detached HEAD";
+    else if (entry.branch.startsWith("feature/")) keep = "feature branch"; // long-lived (ARCH-LAND-09)
     else if (!merged_into) keep = "not merged into the base branch";
     else if (dirty === null) keep = "status unreadable";
     else if (dirty > 0) keep = `${dirty} uncommitted change(s)`;

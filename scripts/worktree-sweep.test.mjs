@@ -93,3 +93,22 @@ test("worktree-sweep: an explicitly named worktree that must be kept is skipped 
     assert.equal(fs.existsSync(unmerged), true);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test("worktree-sweep: a merged feature/ branch is never swept", () => {
+  const root = fixture();
+  try {
+    const worktree = path.join(root, ".worktrees", "plan-f1");
+    git(root, ["worktree", "add", "-q", "-b", "feature/plan-f1", worktree]);
+    const entry = byName(listWorktrees(root))["plan-f1"];
+    assert.equal(entry.removable, false);
+    assert.equal(entry.keep_reason, "feature branch");
+    const result = sweep(root, { all_merged: true });
+    assert.deepEqual(result.removed, []);
+    assert.equal(fs.existsSync(worktree), true);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("worktree-sweep: .gitignore ignores .claude/worktrees/", () => {
+  const ignore = fs.readFileSync(new URL("../.gitignore", import.meta.url), "utf8");
+  assert.match(ignore, /^\.claude\/worktrees\/$/m);
+});

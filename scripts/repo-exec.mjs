@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { atomicWrite, forgetSessionWorktree, loadConfig, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
+import { atomicWrite, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 
@@ -28,7 +28,7 @@ function inspectRepo(context, input = {}) {
     ? remoteHead.slice("origin/".length)
     : advertised || branch);
   if (!branch) throw new Error(`selected repository is detached: ${context.id}`);
-  if (!input.base_branch && /^((feat|fix|chore|docs|refactor)\/|wip[/-])/.test(base)) {
+  if (!input.base_branch && /^((feat|feature|fix|chore|docs|refactor)\/|wip[/-])/.test(base)) {
     throw new Error(`cannot infer a safe base branch from ${base}; provide base_branch explicitly`);
   }
   return {
@@ -118,7 +118,73 @@ function heartbeat(lock) {
   try { const now = new Date(); fs.utimesSync(lock, now, now); } catch {}
 }
 
+// Plan files the feature must find on origin/<base> before its worktree exists:
+// the plan doc, each `parent:` ancestor and every rollup (ARCH-LAND-16).
+function planGateFiles(root, planSlug) {
+  const files = [];
+  const seen = new Set();
+  for (let slug = planSlug; slug && !seen.has(slug); ) {
+    seen.add(slug);
+    const doc = `docs/plans/${slug}.md`;
+    files.push(doc, `docs/plans/${slug}/TRACKER.md`);
+    let text = "";
+    try { text = fs.readFileSync(path.join(root, doc), "utf8"); } catch {}
+    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] || "";
+    const parent = /^parent:\s*(\S+)/m.exec(front)?.[1];
+    slug = parent ? path.basename(parent.replace(/^["']|["']$/g, ""), ".md") : "";
+  }
+  return files;
+}
+
+function planGate(context, input, info, planSlug) {
+  const ref = `origin/${info.base_branch}`;
+  const differing = [];
+  for (const file of planGateFiles(context.root, planSlug)) {
+    const abs = path.join(context.root, file);
+    const local = fs.existsSync(abs) ? run(context.root, ["hash-object", abs], { allowFailure: true }) : "";
+    const remote = run(context.root, ["rev-parse", "--verify", "--quiet", `${ref}:${file}`], { allowFailure: true });
+    if (local !== remote) differing.push(file);
+  }
+  logEvent({ ev: "plan_gate", plan: planSlug, base: info.base_branch, ok: differing.length === 0, differing }, context);
+  if (differing.length) {
+    throw new Error(`plan gate: ${differing.join(", ")} differ from ${ref}; land them through /craftsman:merge before preparing a feature`);
+  }
+}
+
+// A feature session owns one long-lived worktree under the MAIN checkout, never
+// under the linked .claude/worktrees directory the session runs in
+// (ARCH-LAND-13); the branch is pushed at creation (ARCH-LAND-09).
+function prepareFeature(context, input, info) {
+  const main = mainCheckoutRoot(context.root);
+  const anchored = { ...context, root: main, stateDir: path.join(main, ".craftsman") };
+  const planSlug = path.basename(String(input.plan || ""), ".md");
+  if (!planSlug) throw new Error("feature prepare requires plan");
+  const slug = `${planSlug}-${input.feature}`;
+  const branch = `feature/${slug}`;
+  const worktree = path.join(main, ".worktrees", slug);
+  const baseRef = info.has_remote ? `origin/${info.base_branch}` : info.base_branch;
+  if (info.has_remote && input.fetch !== false) run(main, ["fetch", "origin", info.base_branch]);
+  if (info.has_remote) planGate(anchored, input, info, planSlug);
+  let reattached = false;
+  if (fs.existsSync(worktree)) {
+    if (!sameRepository(worktree, main)) throw new Error(`worktree belongs to another repository: ${worktree}`);
+    const current = run(worktree, ["branch", "--show-current"], { allowFailure: true });
+    if (current !== branch) throw new Error(`worktree already exists on ${current || "detached HEAD"}: ${worktree}`);
+    reattached = true;
+  } else {
+    fs.mkdirSync(path.dirname(worktree), { recursive: true });
+    const existing = run(main, ["show-ref", "--verify", `refs/heads/${branch}`], { allowFailure: true });
+    if (existing) run(main, ["worktree", "add", worktree, branch]);
+    else run(main, ["worktree", "add", "-b", branch, worktree, baseRef]);
+    if (info.has_remote) run(worktree, ["push", "-u", "origin", branch]);
+  }
+  recordSessionWorktree(input, worktree, anchored);
+  logEvent({ ev: "feature_worktree", plan: planSlug, feature: input.feature, branch, worktree, reattached }, anchored);
+  return { ...info, worktree_path: worktree, branch, base_ref: baseRef, reattached };
+}
+
 function prepare(context, input, info) {
+  if (input.feature && loadConfig(context).planning?.featureBranches) return prepareFeature(context, input, info);
   const slug = input.slug || input.unit;
   if (!slug) throw new Error("prepare requires slug or unit");
   const worktree = safeWorktree(context, input.worktree_path, slug);

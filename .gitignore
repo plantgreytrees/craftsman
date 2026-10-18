@@ -4,6 +4,9 @@
 # orchestrate's per-unit worktrees (never committed)
 .worktrees/
 
+# Claude Code's own linked worktrees (never committed)
+.claude/worktrees/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
