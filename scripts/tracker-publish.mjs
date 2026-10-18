@@ -17,11 +17,19 @@ const ARCHIVE = "docs/plans/TRACKER-archive.md";
 
 // A real archive event is a tracker_archived or doc_retired line in the event log;
 // a checkout merely behind origin differs in TRACKER-archive.md but logs neither.
+// Only events after the last tracker_published count (an earlier one was already
+// published); a log with no tracker_published counts every archive event. Without a
+// stateDir nothing is read, so the process cwd is never consulted.
 function hasArchiveEvent(context) {
-  const lines = read(path.join(context.stateDir || "", "events.jsonl")).split("\n");
-  return lines.some((line) => {
-    try { const ev = JSON.parse(line).ev; return ev === "tracker_archived" || ev === "doc_retired"; } catch { return false; }
-  });
+  if (!context?.stateDir) return false;
+  const lines = read(path.join(context.stateDir, "events.jsonl")).split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let ev;
+    try { ev = JSON.parse(lines[i]).ev; } catch { continue; }
+    if (ev === "tracker_published") return false;
+    if (ev === "tracker_archived" || ev === "doc_retired") return true;
+  }
+  return false;
 }
 
 function read(file) {
