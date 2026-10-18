@@ -319,6 +319,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-xargs-git
+    scope_id: guard-xargs-git
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -442,6 +455,11 @@ Depends on: none
 - [ ] 23.1 `find … -exec git rm|mv` hands its words (minus `{}`) to the same git branch as a direct `git rm`, so pathspec magic, `--icase-pathspecs`, exclude-only lists and the icase env flag apply; the `{}` start-path check stays (`pre-guard.mjs:437-445`) → accept: pre-guard.test: `find build -exec git rm -r ':!src' \;`, `find build -exec git --icase-pathspecs rm -r DOCS \;`, `find build -exec git rm -r ':(icase)DOCS' \;`, `GIT_ICASE_PATHSPECS=1 find build -exec git rm -r DOCS \;` blocked without the grant and allowed with it; `find build -exec git rm {} +` stays allowed
 - [ ] 23.2 A bare `GIT_ICASE_PATHSPECS=<truthy>` segment, and `export`/`declare -x NAME` after an earlier assignment, set the icase flag for the rest of the command (over-blocking a non-exported assignment is accepted); `xargs git rm|mv` is checked against the seen words like `xargs rm` (`pre-guard.mjs:369,384,387-391,457-462`) → accept: pre-guard.test: `GIT_ICASE_PATHSPECS=1; export GIT_ICASE_PATHSPECS; git rm -r DOCS`, `export GIT_ICASE_PATHSPECS; GIT_ICASE_PATHSPECS=1; git rm -r DOCS`, `set -a; GIT_ICASE_PATHSPECS=1; git rm -r DOCS`, `echo docs | xargs git rm -r` blocked without the grant and allowed with it; `export GIT_ICASE_PATHSPECS=1; export GIT_ICASE_PATHSPECS=0; git rm -r DOCS` and `typeset -x GIT_ICASE_PATHSPECS=1; git rm -r DOCS` behave as stated (the second blocked)
 
+### Step 24 — guard-xargs-git (., javascript, high) — round 12
+Depends on: none
+- [ ] 24.1 `xargs git rm|mv` with a visible input passes the seen words as pathspecs to the same git branch as a direct `git rm` (`gitRmMv([...inner.slice(1), ...seenWords], cwd, icaseEnv || innerIcaseFlag)`), so magic, exclude-only lists and icase apply (`pre-guard.mjs:468-476`) → accept: pre-guard.test: `echo ':!src' | xargs git rm -r`, `printf '%s\n' ':!src' | xargs git rm -r`, `echo ':(icase)DOCS' | xargs git rm -r`, `echo ':/docs' | xargs git rm -r`, `echo DOCS | GIT_ICASE_PATHSPECS=1 xargs git rm -r`, `echo DOCS | xargs git --icase-pathspecs rm -r` blocked without the grant and allowed with it; `echo build | xargs git rm -r` stays allowed
+- [ ] 24.2 A `GIT_ICASE_PATHSPECS=<truthy>` assignment sets the icase flag whatever shell keyword, `{` or `!` precedes it (over-blocking accepted) (`pre-guard.mjs:406-410`) → accept: pre-guard.test: `export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS`, `export GIT_ICASE_PATHSPECS; if true; then GIT_ICASE_PATHSPECS=1; fi; git rm -r DOCS`, `export GIT_ICASE_PATHSPECS; for i in 1; do GIT_ICASE_PATHSPECS=1; done; git rm -r DOCS`, `export GIT_ICASE_PATHSPECS; ! GIT_ICASE_PATHSPECS=1; git rm -r DOCS` blocked without the grant and allowed with it
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
@@ -493,3 +511,5 @@ Round 9 Suggestions, flagged not driven: git `--work-tree`, `--git-dir` and `GIT
 Round 10 Suggestions, flagged not driven: on a case-insensitive filesystem (macOS default) `rm -rf DOCS` and `git rm -r DOCS` reach the guarded docs and are allowed (predates the rounds, untested on this host); an empty `if` branch at `pre-guard.mjs:266` is a style point; the 21 test lacks `--icase-pathspecs` combined with `:` magic and `env VAR=1 git`.
 
 Round 11 Suggestions, flagged not driven: the icase flag does not reach a shell function body (`f() { git rm -r DOCS; }; GIT_ICASE_PATHSPECS=1 f`); `local`/`readonly`/`declare` without `-x` also switch the flag on (errs closed).
+
+Round 12 (Step 24, ninth /scrutinise on 78b9947..8ad7d0b) closes the two Warnings. Suggestions, flagged not driven: `find -exec sh -c '<body>'` is never walked; `-execdir` resolves `..` against the wrong directory; function bodies, `--work-tree`/`--git-dir` and case-insensitive filesystems stay unmodelled.
