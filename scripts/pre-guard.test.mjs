@@ -570,3 +570,24 @@ test("pre-guard: rm / git rm of a guarded doc is blocked without the grant, chai
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("pre-guard: terminal allow and block events carry numeric ms", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
+  try {
+    const sid = "ms-test";
+    const allowed = path.join(dir, "src", "needed.ts");
+    fs.mkdirSync(path.dirname(allowed), { recursive: true });
+    fs.writeFileSync(allowed, "export {}\n");
+    const manifest = { session_id: sid, plan: "docs/plans/example.md", unit: "unit-1", project: ".", scope: { read: ["src/needed.ts"], docs: [], write: ["src/needed.ts"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: sid, tool_name: "Read", tool_input: { file_path: allowed } }).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: sid, tool_name: "Read", tool_input: { file_path: path.join(dir, "src", "other.ts") } }).status, 2);
+    const events = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const pass = events.find((e) => e.ev === "preguard" && e.result === "allowed");
+    const block = events.find((e) => e.ev === "scope_blocked");
+    assert.ok(pass && Number.isFinite(pass.ms) && pass.ms >= 0, "allow event has ms");
+    assert.ok(block && Number.isFinite(block.ms) && block.ms >= 0, "block event has ms");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

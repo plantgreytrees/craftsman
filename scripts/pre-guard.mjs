@@ -15,6 +15,7 @@ import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
+const T0 = Date.now();
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
 const file = input?.tool_input?.file_path;
@@ -207,7 +208,7 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
       `source/doc path to the plan scope, then refresh it with ` +
       `node "${process.env.CLAUDE_PLUGIN_ROOT || "<plugin-root>"}/scripts/scope.mjs" ` +
       `using the session scope JSON before retrying. Repository-wide searches are forbidden.`;
-    logEvent({ ev: "scope_blocked", sid: sidOf(input), tool, unit: activeScope.unit, target: violation });
+    logEvent({ ms: Date.now() - T0, ev: "scope_blocked", sid: sidOf(input), tool, unit: activeScope.unit, target: violation });
     process.stderr.write(message + "\n");
     process.exit(2);
   }
@@ -222,7 +223,7 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
 if (tool === "Bash" && autoForceBlock(sidOf(input))) {
   const destructive = await forceBlocked(command);
   if (destructive) {
-    logEvent({ ev: "auto_force_blocked", sid: sidOf(input), command });
+    logEvent({ ms: Date.now() - T0, ev: "auto_force_blocked", sid: sidOf(input), command });
     process.stderr.write(
       `craftsman: ${destructive} is BLOCKED while /auto is active (ARCH-LAND-05). Land with a plain ` +
       `push or repo-exec merge; a rejected push or conflict PARKs the unit with a decision for Phase C.\n`
@@ -237,7 +238,7 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
 // command under 16 KB reaches it — a larger one with a bypass flag is blocked.
 if (tool === "Bash" && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
     && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command))) {
-  logEvent({ ev: "verify_bypass_blocked", sid: sidOf(input), command });
+  logEvent({ ms: Date.now() - T0, ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
     `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +
     `core.hooksPath override). Fix the underlying hook failure instead of skipping it — this is a ` +
@@ -250,7 +251,7 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
   const cwd = path.resolve(process.cwd());
   const worktree = path.resolve(binding.worktree_path);
   if ((cwd !== worktree && !cwd.startsWith(worktree + path.sep)) || commandDirectoryTargets(command, worktree) || usesAlternateGitRoot(command)) {
-    logEvent({ ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command });
+    logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command });
     process.stderr.write(
       `craftsman: Git mutation blocked outside the active worktree (${binding.worktree_path}). ` +
       `Run implementation Git commands from that worktree, or release the binding before the locked merge.\n`
@@ -260,7 +261,7 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
   let branch = "";
   try { branch = execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8" }).trim(); } catch {}
   if (!branch || branch !== binding.branch) {
-    logEvent({ ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, branch });
+    logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, branch });
     process.stderr.write(
       `craftsman: Git mutation blocked because the active worktree is on branch "${branch || "(detached)"}", ` +
       `not the bound branch "${binding.branch}".\n`
@@ -283,7 +284,7 @@ if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
   const docPaths = cfg.docWriteGuard?.docPaths || ["docs/**"];
   const hit = removedDocs(command, docPaths);
   if (hit.length && !hasDocWriteGrant({ sid: sidOf(input), claim: true }, { ...activeContext, grantStateDir: STATE_DIR })) {
-    logEvent({ ev: "docguard", file: hit[0], sid: sidOf(input), result: "blocked" });
+    logEvent({ ms: Date.now() - T0, ev: "docguard", file: hit[0], sid: sidOf(input), result: "blocked" });
     process.stderr.write(
       `craftsman: "${hit[0]}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths); ` +
       `removing it with rm / git rm needs doc-write authority. Hand the change to /plan, or if you ARE ` +
@@ -293,7 +294,7 @@ if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
   }
 }
 
-if (!file) process.exit(0);
+if (!file) process.exit(0); // no file: nothing to time or log
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
 //    written, and the root's generated ledger block is never hand-edited.
@@ -301,7 +302,7 @@ const tracker = ["Write", "Edit", "MultiEdit"].includes(tool) ? trackerTarget(pa
 if (tracker) {
   if (path.resolve(tracker.main) !== path.resolve(tracker.root)) {
     const rootDoc = path.join(tracker.main, "docs", "plans", "TRACKER.md");
-    logEvent({ ev: "tracker_guard", sid: sidOf(input), file: tracker.real, result: "worktree-copy" });
+    logEvent({ ms: Date.now() - T0, ev: "tracker_guard", sid: sidOf(input), file: tracker.real, result: "worktree-copy" });
     process.stderr.write(
       `craftsman: this worktree's docs/plans/TRACKER.md is BLOCKED — the tracker lives only in the main ` +
       `checkout so every session sees it: ${rootDoc}. Register or move rows with ` +
@@ -315,7 +316,7 @@ if (tracker) {
     try { current = fs.readFileSync(tracker.real, "utf8"); } catch {}
     const next = afterEdit(current);
     if (next !== null && generatedBlock(next) !== generatedBlock(current)) {
-      logEvent({ ev: "tracker_guard", sid: sidOf(input), file: tracker.real, result: "generated-block" });
+      logEvent({ ms: Date.now() - T0, ev: "tracker_guard", sid: sidOf(input), file: tracker.real, result: "generated-block" });
       process.stderr.write(
         `craftsman: edit BLOCKED — it changes TRACKER.md's generated ledger block (between the ` +
         `craftsman:ledger markers). That block is rendered from .craftsman/tracker/events.jsonl: move the ` +
@@ -333,7 +334,7 @@ if (rollup) {
   try { current = fs.readFileSync(rollup.real, "utf8"); } catch {}
   const next = afterEdit(current);
   if (next !== null && rollupBlock(next) !== rollupBlock(current)) {
-    logEvent({ ev: "tracker_guard", sid: sidOf(input), file: rollup.real, result: "rollup-block" });
+    logEvent({ ms: Date.now() - T0, ev: "tracker_guard", sid: sidOf(input), file: rollup.real, result: "rollup-block" });
     process.stderr.write(
       `craftsman: edit BLOCKED — it changes a generated rollup block (between the craftsman:rollup markers) ` +
       `in ${rollup.real}. It is rendered from the tracker ledger: move a row with ` +
@@ -346,7 +347,7 @@ if (rollup) {
 // 1) Protected paths — generated / vendored / lock / secret.
 const hit = (cfg.protectedPaths || []).find((p) => globToRe(p).test(rel));
 if (hit) {
-  logEvent({ ev: "preguard", file: rel, pattern: hit, result: "blocked" });
+  logEvent({ ms: Date.now() - T0, ev: "preguard", file: rel, pattern: hit, result: "blocked" });
   process.stderr.write(
     `craftsman: ${rel} is a protected path (matches "${hit}") — generated, vendored, ` +
     `lock, or secret file. Do not edit it directly. Change the source that generates it, ` +
@@ -370,7 +371,7 @@ if (g.enabled !== false && writeTool) {
     const ok = hasDocWriteGrant({ sid, claim: true }, { ...activeContext, grantStateDir: STATE_DIR });
 
     if (!ok) {
-      logEvent({ ev: "docguard", file: rel, sid, result: "blocked" });
+      logEvent({ ms: Date.now() - T0, ev: "docguard", file: rel, sid, result: "blocked" });
       process.stderr.write(
         `craftsman: "${rel}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths). ` +
         `Do NOT write it directly. Hand the change to /plan (plan docs + tracker rows) — or whichever ` +
@@ -382,4 +383,5 @@ if (g.enabled !== false && writeTool) {
   }
 }
 
+logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), file: rel, result: "allowed" });
 process.exit(0);
