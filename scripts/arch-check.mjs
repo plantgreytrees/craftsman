@@ -191,6 +191,9 @@ function lineCount(file) {
 
 // Full validation: structure, unique ids, supersession targets, human-doc
 // pairing, and that every `cite: file:line` still resolves in the tree.
+// ARCH-DOCS-03: only these explicit sentinels skip the source: file check.
+const SOURCE_SENTINELS = new Set(["init", "backfill"]);
+
 export function lintRules(root, docs, dir = DEFAULT_DIR) {
   const errors = docs.flatMap((doc) => doc.errors);
   const seen = new Map();
@@ -214,7 +217,7 @@ export function lintRules(root, docs, dir = DEFAULT_DIR) {
         else if (cite.to > lines) errors.push(`${doc.file}:${rule.line}: ${rule.id} cites ${cite.file}:${cite.to}, past its ${lines} lines`);
       }
     }
-    if (doc.source && !fs.existsSync(path.join(root, doc.source))) errors.push(`${doc.file}: source ${doc.source} is missing`);
+    if (doc.source && !SOURCE_SENTINELS.has(doc.source) && !fs.existsSync(path.join(root, doc.source))) errors.push(`${doc.file}: source ${doc.source} is missing`);
     const human = doc.human || doc.file.replace(/\.rules\.md$/, ".md");
     if (!fs.existsSync(path.join(root, human))) errors.push(`${doc.file}: human doc ${human} is missing`);
   }
