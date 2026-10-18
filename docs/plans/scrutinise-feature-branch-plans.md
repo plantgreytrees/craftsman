@@ -176,6 +176,45 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: retire-rollup-parent
+    scope_id: retire-rollup-parent
+    project: .
+    depends_on: []
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/lib/plan-index.mjs, scripts/lib/plan-index.test.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/plan.rules.md, docs/architecture/tracker.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/lib/plan-index.mjs, scripts/lib/plan-index.test.mjs]
+    arch: [ARCH-DOCS-09, ARCH-DOCS-02, ARCH-TRACKER-10, ARCH-PLAN-02]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-regress
+    scope_id: guard-regress
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-vars
+    scope_id: guard-vars
+    project: .
+    depends_on: [guard-regress]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -241,11 +280,30 @@ Depends on: guard-overblock
 - [ ] 12.1 `stripPrefixes` also strips shell keywords `then`, `do`, `else`, `elif` and `!`, and the wrappers `nice`, `timeout <n>`, `busybox`, `stdbuf`, `ionice`; a `find` with no start path is treated as `.` (`pre-guard.mjs:118-131,149-163`) → accept: pre-guard.test: `if true; then rm docs/plans/x.md; fi`, `! rm docs/plans/x.md`, `for x in a; do rm docs/plans/x.md; done`, `nice rm …`, `timeout 5 rm …`, `busybox rm …`, `find -name x.md -delete` each blocked without the grant and allowed with it
 - [ ] 12.2 Removal with an argument the parser cannot see fails closed: `xargs rm`/`xargs unlink` whose input is not a visible non-guarded producer (a pipe from an unknown command, `< file`, `-a file`), an `rm`/`unlink`/`mv` argument containing command substitution, a backtick, a leading `~`, `$PWD` or `$HOME`, and an `rm` with a `$name` argument in a chain that also names a guarded path → accept: pre-guard.test: `git ls-files | xargs rm`, `xargs rm < list`, `rm -rf ~`, `rm -rf "$PWD/docs"`, `rm -rf $(git rev-parse --show-toplevel)/docs`, `for f in docs/plans/*.md; do rm "$f"; done` blocked without the grant and allowed with it; `rm -rf "$TMPDIR/x"` and `echo a | xargs echo` stay allowed
 
+### Step 13 — retire-rollup-parent (., javascript, high) — round 6
+Depends on: none
+- [ ] 13.1 Retiring a child commits the parent's regenerated rollup `docs/plans/<parent>/TRACKER.md` in the same commit and restores it on rollback; the parent doc is pushed onto the rollback set before it is written (`doc-retire.mjs:209-223`) → accept: doc-retire.test: after retiring a child of an open epic `git status --porcelain` is empty and a later retire of the parent is not refused; a forced `git add` failure leaves the parent doc and rollup unchanged
+- [ ] 13.2 `plan-index.mjs` exports the `children:` edit (`removeChild(text, slug)`, built on its own parser and accepting every form `loadIndex` accepts: trailing comment, scalar, block items with comments); `doc-retire` calls it and keeps no `children:` parser of its own (`doc-retire.mjs:61-78`, ARCH-PLAN-02) → accept: plan-index.test covers each form; doc-retire.test retires a child whose parent has `children: [beta, gamma] # kids`, and one whose `loadIndex` fails after the edit is refused with an unchanged snapshot
+- [ ] 13.3 A rows-less sibling's heading takes the sibling's own front-matter or H1 goal, as a rows-less descendant does (`doc-retire.mjs:219` vs `:129`) → accept: doc-retire.test: both headings carry their own doc's goal
+
+### Step 14 — guard-regress (., javascript, high) — round 6
+Depends on: none
+- [ ] 14.1 `<<` is a heredoc only when it is not part of `<<<` and not inside `$((`/`((` or a `#` comment (`pre-guard.mjs:95-97`) → accept: pre-guard.test: `cat <<< hi\nrm docs/plans/x.md`, `echo $((1<<2))\nrm docs/plans/x.md` and `# see <<EOF\nrm docs/plans/x.md` blocked without the grant and allowed with it; the 11.2 heredoc cases still pass
+- [ ] 14.2 `find` is passed over only for the single form `[-type x] -name P … -delete|-exec rm` whose patterns cannot match a guarded path; any `-o`/`-or`/`,`, a `-delete`/`-exec` before the last `-name`, and a start path beginning `..` fail closed (`pre-guard.mjs:224-254`) → accept: pre-guard.test: `find . -name "*.log" -o -type f -delete`, `find . -name "*.log" -or -type f -delete`, `find . -delete -name nothing`, `find . -type f -exec rm {} + -name zz`, `find .. -name x.md -delete` blocked without the grant and allowed with it; the 11.1 allowed `find` forms stay allowed
+- [ ] 14.3 For `git rm`/`git mv` a glob argument keeps pathspec semantics (matches across `/`), so `git rm "*.md"` and `git rm -r "*.md"` are blocked; for a `docPaths` entry without `**`, a glob argument is tested against the real directory entries instead of an `x` sample (`pre-guard.mjs:184-201`) → accept: pre-guard.test: `git rm "*.md"`, `git rm -r "*.md"` blocked; with `docPaths: ["docs/plans/*.md"]`, `rm docs/plans/*` and `rm -f docs/plans/*.m?` blocked, `rm docs/other/*` allowed
+
+### Step 15 — guard-vars (., javascript, high) — round 6
+Depends on: guard-regress
+- [ ] 15.1 A `NAME=value` word (plain assignment, or after `export`/`local`/`declare`/`readonly`) adds its value to the seen words before it is stripped, so `rm "$f"` or `rm -rf $D` in a chain that assigned a guarded path fails closed (`pre-guard.mjs:270,285`) → accept: pre-guard.test: `f=docs/plans/x.md; rm "$f"` and `export D=docs; rm -rf $D` blocked without the grant and allowed with it; `f=build/x; rm "$f"` stays allowed
+- [ ] 15.2 `if`, `while`, `until`, `time` and `coproc` are stripped like `then`, and `mv` with a `$name` argument in a loop over a guarded glob fails closed like `rm` (`pre-guard.mjs:156,291`) → accept: pre-guard.test: `if rm docs/plans/x.md; then :; fi`, `while rm docs/plans/x.md; do :; done`, `time rm docs/plans/x.md`, `for f in docs/plans/*.md; do mv "$f" /x; done` blocked without the grant and allowed with it
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
 
 Round 5 (Steps 10–12, second /scrutinise on 4931876..c4d686d): 11 → 12 share `pre-guard.mjs`; 10 is independent.
+
+Round 6 (Steps 13–15, third /scrutinise on c4d686d..e56a6be): 14 → 15 share `pre-guard.mjs`; 13 is independent. Steps 14 and 15 also close the UNMET 11.1 and 12.2 criteria.
 
 ## Verification background
 - Test job checkout has no `fetch-depth` — `.github/workflows/ci.yml:79`; size step — `ci.yml:97-107`
@@ -268,3 +326,5 @@ ARCH-DOCS-09 (rollup removal, refusing a parent with live children, full archive
 Round 4 (/scrutinise on 7e441ff..9549971) Suggestions, flagged not driven: `tracker.mjs:449,457` lookupArchive uses one key for plan and slug, so a pruned idea heading can hide a retired plan's record; `pre-guard.mjs:18` and `stop-gate.mjs:16` start the `ms` clock after module load (use `performance.now()`); three cap tables diverge (`wiring.test.mjs:1071-1083`, `doc-size-policy.mjs` FILE_CAPS, `auto-command.test.mjs:61,128`); the size ratchet compares with `merge-base(HEAD, origin/main)` and skips on main or a shallow clone; the doc-retire rollup test fixture is a stub and always sets a goal; stale cites in `docs.rules.md` (ARCH-DOCS-02/07/08) and `slim.rules.md` (ARCH-SLIM-01) are refreshed by `/architect --update`, never here. Rules are not edited.
 
 Round 5 (second /scrutinise on 4931876..c4d686d) Suggestions, flagged not driven: `doc-retire.mjs:131,135` builds the parent path from the slug and judges only the working-tree `children:` copy (use the index path and HEAD); the `hierarchy: true` flag of `tracker.mjs archive` (:472, :508) is caller-trusted (confirm epic/story level through plan-index); `pre-guard.mjs:114` resolves against `process.cwd()`, not the hook input cwd (realpath both sides); `_sync-docs-prune.md:18` lost "State the round count." in the size trim; `stats.test.mjs:69` asserts a tautology (spawn stats.mjs and assert the block count); older `preguard` events lack `result` and are no longer counted as blocks. The pre-guard parser is a best-effort denylist: forms beyond Steps 11–12 (for example `eval`, `python -c`, `perl -e unlink`) are not covered; that is a decision for the user, not a defect of these units.
+
+Round 6 (third /scrutinise on c4d686d..e56a6be) Suggestions, flagged not driven: `eval`, `python -c`, `find -exec sh -c`, `-ok rm` and the `setsid`/`flock` wrappers remain outside the best-effort pre-guard parser (a decision for the user); `findNamesMiss` reads the live filesystem, so races and very large `docs/` trees show only at runtime.
