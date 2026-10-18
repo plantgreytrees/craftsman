@@ -90,7 +90,18 @@ function stripHeredocs(text) {
     }
     if (c === "'") { sq = true; out += c; continue; }
     if (c === '"') { stack.push("dq"); out += c; continue; }
+    // Arithmetic `$(( ))` / `(( ))`: its `<<` is a shift, never a heredoc.
+    if ((c === "$" && text[i + 1] === "(" && text[i + 2] === "(") || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+      let j = c === "$" ? i + 1 : i, depth = 0;
+      for (; j < text.length; j++) { if (text[j] === "(") depth++; else if (text[j] === ")" && --depth === 0) break; }
+      out += text.slice(i, j + 1); i = j; continue;
+    }
+    if (c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) { // comment: to end of line
+      let j = text.indexOf("\n", i); if (j === -1) j = text.length;
+      out += text.slice(i, j); i = j - 1; continue;
+    }
     if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); out += "$("; i++; continue; }
+    if (c === "<" && text.startsWith("<<<", i)) { out += "<<<"; i += 2; continue; } // here-string
     if (c === ")" && stack.length > 1) { stack.pop(); out += c; continue; }
     if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
       const m = /^<<(-?)\s*(?:'([^'\n]*)'|"([^"\n]*)"|(\\?)([\w.-]+))/.exec(text.slice(i));
@@ -192,12 +203,46 @@ function lastSegmentGlob(arg, cwd, docPaths) {
   const dirParts = rel === "" ? [] : rel.split("/");
   const re = segmentRe(seg);
   const sample = [...dirParts, seg.replace(/[*?[\]{},!]/g, "x")].join("/");
+  let entries = null;
+  try { entries = fs.readdirSync(path.join(activeRoot, ...dirParts)); } catch { entries = []; }
   for (const p of docPaths) {
-    if (globToRe(p).test(sample) || globToRe(p).test("./" + sample)) return sample;
+    if (!p.includes("**")) {
+      // No `**`: test the real directory entries the glob expands to, not a sample.
+      const hit = entries.find((e) => re.test(e) && [[...dirParts, e].join("/"), "./" + [...dirParts, e].join("/")].some((c) => globToRe(p).test(c)));
+      if (hit !== undefined) return [...dirParts, hit].join("/");
+    } else if (globToRe(p).test(sample) || globToRe(p).test("./" + sample)) return sample;
     const base = guardedBase(p).split("/").filter(Boolean);
     if (base.length > dirParts.length && dirParts.every((d, k) => base[k] === d) && re.test(base[dirParts.length])) return [...dirParts, base[dirParts.length]].join("/");
   }
   return null;
+}
+
+// git pathspec globs match across `/` (`*.md` reaches docs/plans/x.md). The
+// glob is tested against every guarded base, its ancestors and its real contents.
+function pathspecHit(arg, cwd, docPaths) {
+  if (!/[*?[]/.test(arg)) return null;
+  const pre = path.relative(activeRoot, cwd).split(path.sep).join("/");
+  if (pre === ".." || pre.startsWith("../")) return null;
+  let re = "";
+  for (const c of (pre ? pre + "/" : "") + arg.replace(/^\.\//, "")) re += c === "*" ? ".*" : c === "?" ? "." : c === "[" || c === "]" ? c : c.replace(/[.+^${}()|\\]/g, "\\$&");
+  let rx;
+  try { rx = new RegExp("^" + re + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
+  let budget = 20000, found = null;
+  const visit = (rel) => {
+    if (found || --budget < 0) return;
+    if (rx.test(rel)) { found = rel; return; }
+    let entries;
+    try { entries = fs.readdirSync(path.join(activeRoot, rel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) visit(rel + "/" + e.name);
+  };
+  for (const p of docPaths) {
+    const base = guardedBase(p).split("/").filter(Boolean);
+    for (let n = 1; n <= base.length && !found; n++) { const r = base.slice(0, n).join("/"); if (rx.test(r)) found = r; }
+    if (!found && base.length) visit(base.join("/"));
+    if (found) break;
+  }
+  if (budget < 0 && !found) return "(git pathspec too broad to scan: " + arg + ")";
+  return found;
 }
 
 function touchesGuarded(arg, cwd, docPaths) {
@@ -223,14 +268,16 @@ function touchesGuarded(arg, cwd, docPaths) {
 // or a start inside a guarded path fails closed (false).
 function findNamesMiss(exprs, start, cwd, docPaths) {
   const names = [];
+  let lastName = -1, action = -1;
   for (let k = 0; k < exprs.length; k++) {
     const w = exprs[k];
-    if (/^-(?:i?path|i?wholename|i?regex|not)$/.test(w) || w === "!") return false;
-    if (/^-i?name$/.test(w) && exprs[k + 1] !== undefined) names.push(segmentRe(exprs[k + 1], w === "-iname" ? "i" : ""));
+    if (/^-(?:i?path|i?wholename|i?regex|not|o|or)$/.test(w) || w === "!" || w === "," || w === "(" || w === ")") return false;
+    if (/^-i?name$/.test(w) && exprs[k + 1] !== undefined) { names.push(segmentRe(exprs[k + 1], w === "-iname" ? "i" : "")); lastName = k; }
+    if (action === -1 && (w === "-delete" || /^-exec(?:dir)?$/.test(w))) action = k;
   }
-  if (!names.length) return false;
+  if (!names.length || action < lastName) return false; // the delete must come after every -name
   const startRel = path.relative(activeRoot, path.resolve(cwd, start)).split(path.sep).join("/");
-  if (startRel.startsWith("..") && startRel !== "..") return false;
+  if (startRel.startsWith("..")) return false;
   const inside = (r) => docPaths.some((p) => [r, "./" + r, r + "/x"].some((c) => globToRe(p).test(c)));
   if (startRel && inside(startRel)) return false;
   let budget = 20000;
@@ -300,7 +347,7 @@ function removedDocs(cmd, docPaths) {
         if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
         else i += rest[i] === "-c" ? 2 : 1;
       }
-      if (rest[i] === "rm" || rest[i] === "mv") for (const a of args(rest.slice(i + 1))) check(a, cwd);
+      if (rest[i] === "rm" || rest[i] === "mv") for (const a of args(rest.slice(i + 1))) { check(a, cwd); const h = pathspecHit(a, cwd, docPaths); if (h) hits.push(h); }
       return;
     }
     if (verb === "find") {
