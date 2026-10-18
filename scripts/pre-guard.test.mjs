@@ -754,3 +754,17 @@ test("pre-guard: terminal allow and block events carry numeric ms", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("pre-guard: assignments reach a nested walk, env, += and arrays (18.1)", () => {
+  grantedPair("craftsman-env18-", "env18", null, [
+    `sh -c 'cd build && f=../docs/plans && rm -rf "$f"'`, "env D=docs sh -c 'rm -rf $D'", `env D=docs/plans/x.md bash -c 'rm "$D"'`,
+    'f+=docs/plans/x.md; rm "$f"', "f=(docs); rm -rf $f",
+  ], ['f=build/x; rm "$f"']);
+});
+
+test("pre-guard: coproc, function and exec -a run the command they wrap (18.2)", () => {
+  grantedPair("craftsman-coproc18-", "coproc18", null, [
+    "coproc foo { rm docs/plans/x.md; }", "function f { rm docs/plans/x.md; }; f", "exec -a name rm docs/plans/x.md", "coproc rm docs/plans/x.md",
+    "unlink ~/x", 'unlink "$PWD/docs/plans/x.md"', "unlink $(pwd)/docs/plans/x.md", "mv ~/x /tmp/y", 'mv "$PWD/docs" /tmp/y', "mv $(pwd)/docs /tmp/y",
+  ]);
+});
