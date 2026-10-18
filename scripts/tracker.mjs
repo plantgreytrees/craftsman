@@ -17,10 +17,11 @@ const TRANSITIONS = {
   IN_PROGRESS: new Set(["MERGED", "FEATURE_MERGED", "BLOCKED", "PARKED", "CANCELLED"]),
   MERGED: new Set(["COMPLETE", "BLOCKED"]),
   // Landed on its feature branch; only land-feature promotes it (ARCH-TRACKER-06).
-  FEATURE_MERGED: new Set(["COMPLETE", "BLOCKED"]),
+  // A land-feature park (ARCH-LAND-06) may park it, and it re-enters from PARKED.
+  FEATURE_MERGED: new Set(["COMPLETE", "BLOCKED", "PARKED"]),
   COMPLETE: new Set(),
   BLOCKED: new Set(["PENDING", "IN_PROGRESS", "CANCELLED"]),
-  PARKED: new Set(["PENDING", "IN_PROGRESS", "CANCELLED"]),
+  PARKED: new Set(["PENDING", "IN_PROGRESS", "FEATURE_MERGED", "CANCELLED"]),
   CANCELLED: new Set(),
 };
 
