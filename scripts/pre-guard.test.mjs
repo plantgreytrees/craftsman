@@ -815,7 +815,7 @@ test("pre-guard: assignments reach a nested walk, env, += and arrays (18.1)", ()
 test("pre-guard: coproc, function and exec -a run the command they wrap (18.2)", () => {
   grantedPair("craftsman-coproc18-", "coproc18", null, [
     "coproc foo { rm docs/plans/x.md; }", "function f { rm docs/plans/x.md; }; f", "exec -a name rm docs/plans/x.md", "coproc rm docs/plans/x.md",
-    "unlink ~/x", 'unlink "$PWD/docs/plans/x.md"', "unlink $(pwd)/docs/plans/x.md", "mv ~/x /tmp/y", 'mv "$PWD/docs" /tmp/y', "mv $(pwd)/docs /tmp/y",
+    "unlink ~user/x", 'unlink "$PWD/docs/plans/x.md"', "unlink $(pwd)/docs/plans/x.md", "mv ~user/x /tmp/y", 'mv "$PWD/docs" /tmp/y', "mv $(pwd)/docs /tmp/y",
   ]);
 });
 
@@ -830,14 +830,14 @@ test("pre-guard: # after ) or a closing backtick is not a comment (19.2)", () =>
 test("pre-guard: a command holding a removal word is blocked unless the parser proves it safe (24.1)", () => {
   grantedPair("craftsman-safe24a-", "safe24a", null, [
     "FOO=1 rm build/x", "rm build/x |& cat", "(rm build/x)", "{ rm build/x; }", "f() { rm build/x; }; f", "if true; then rm build/x; fi",
-    "while true; do rm build/x; done", "case x in x) rm build/x;; esac", "rm \"$X\"", "rm ~/x", "rm $(echo build/x)",
+    "while true; do rm build/x; done", "case x in x) rm build/x;; esac", "rm \"$X\"", "rm ~user/x", "rm $(echo build/x)",
     "rm -rf \"$TMPDIR/x\"", "for f in a b; do rm \"$f\"; done", 'f=build/x; rm "$f"', "bash -c \"$CMD\"", "eval \"$X\"", 'cd "$D" && rm build/x',
     "cd && rm build/x", "echo rm | bash", "bash <<< 'rm build/x'", "echo \"unclosed; rm build/x",
     "shred docs/plans/x.md", "truncate -s 0 docs/plans/x.md", "rmdir docs/plans", "rsync -a --delete empty/ docs/plans/",
     "git clean -fdx", "echo x > docs/plans/x.md", ": > docs/plans/x.md", "echo x > \"$OUT\"; rm build/x", "cd docs/plans && echo x > y.md",
     "echo \"rm build/x\" | $SHELL", "git -c alias.zap='!rm build/x' zap",
   ], [
-    "rm -f *.log", "rm -rf build", "cd src && rm x.md", "git commit -m \"chore: rm docs/plans\"", "echo \"a > b\"; rm build/x",
+    "rm -f *.log", "rm -rf build", "rm ~/x", "cd src && rm x.md", "git commit -m \"chore: rm docs/plans\"", "echo \"a > b\"; rm build/x",
     "echo hi > out.txt; rm build/x", "rm build/x 2>&1 | tail -1", "rm build/x 2>/dev/null || true", "git clean -fd src",
     "find build -name x -delete", "sudo -u x rm build/x", "ls | xargs echo", "git commit -F - <<'EOF'\nrm docs/plans/x.md\nEOF",
     "git rm src/x.md; mv a.txt b.txt", "echo \"$(pwd)\"; rm build/x",
@@ -926,4 +926,31 @@ test("pre-guard: block messages tell an unprovable command from a redirect from 
   grantedPair("craftsman-allow25-", "allow25", null, [], [
     "grep -rn rm docs/", 'grep -n "rm" docs/plans/x.md', "cd ~/scratch/foo && rm -rf build",
   ]);
+});
+
+test("pre-guard: a heredoc delimiter is a full shell word with quote removal (26.1)", () => {
+  grantedPair("craftsman-here26-", "here26", null, [
+    'cat <<E"OF"\nEOF\nrm -rf docs\nEOF', "cat <<E@F\nE@F\nrm -rf docs\nE",
+  ], ["git commit -F - <<'EOF'\nrm docs/plans/x.md\nEOF", 'git commit -F - <<"EOF"\nrm docs/plans/x.md\nEOF']);
+});
+
+test("pre-guard: env -C/--chdir, sudo -D/--chdir and env -S are unsafe (26.2)", () => {
+  grantedPair("craftsman-env26-", "env26", null, [
+    "env -C docs rm -rf plans", "env --chdir=docs rm -rf plans", "env -S 'rm -rf docs'",
+    "sudo -D docs rm -rf plans", "sudo --chdir=docs rm -rf plans",
+  ], ["env -u HOME rm -rf build"]);
+});
+
+test("pre-guard: a ~ or dynamic redirect target needs a removal word to fire the gate (26.3)", () => {
+  grantedPair("craftsman-redir26-", "redir26", null, [
+    "echo x > $D/x; rm -rf docs", "echo x > ~user/x; rm -rf build",
+  ], ["npm test > ~/scratch/log.txt 2>&1", 'node --test scripts/x.test.mjs > "$TMPDIR/out" 2>&1', "echo x > $D/x"]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-msg26-"));
+  try {
+    const r = run(GUARD, dir, { session_id: "msg26", tool_name: "Bash", tool_input: { command: "echo x > $D/x; rm -rf build" } });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /redirects to a target the guard cannot resolve/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

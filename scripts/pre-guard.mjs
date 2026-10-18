@@ -83,6 +83,26 @@ function arithmeticEnd(text, i) { // index of the `)` / `]` closing arithmetic o
   return j;
 }
 
+// The heredoc delimiter at `from`: a full shell word, quotes and backslashes removed
+// (`E"OF"` is EOF, `E@F` is E@F). `quoted` when any of it was quoted or escaped.
+function heredocWord(text, from) {
+  let tag = "", quoted = false, j = from;
+  while (j < text.length) {
+    const c = text[j];
+    if (c === "'") { const e = text.indexOf("'", j + 1); if (e === -1) return null; tag += text.slice(j + 1, e); quoted = true; j = e + 1; }
+    else if (c === '"') {
+      let k = j + 1, body = "";
+      while (k < text.length && text[k] !== '"') { if (text[k] === "\\" && /["\\$`]/.test(text[k + 1] ?? "")) k++; body += text[k++]; }
+      if (k >= text.length) return null;
+      tag += body; quoted = true; j = k + 1;
+    }
+    else if (c === "\\") { if (j + 1 >= text.length || text[j + 1] === "\n") return null; tag += text[j + 1]; quoted = true; j += 2; }
+    else if (/[\s;&|<>()]/.test(c)) break;
+    else { tag += c; j++; }
+  }
+  return tag === "" && !quoted ? null : { tag, quoted, end: j };
+}
+
 function stripHeredocs(text) {
   let out = "", pending = [];
   const stack = ["cmd"]; // "cmd" | "dq"
@@ -114,8 +134,9 @@ function stripHeredocs(text) {
     if (c === "<" && text.startsWith("<<<", i)) { out += "<<<"; i += 2; continue; } // here-string
     if (c === ")" && stack.length > 1) { stack.pop(); out += c; continue; }
     if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
-      const m = /^<<(-?)\s*(?:'([^'\n]*)'|"([^"\n]*)"|(\\?)([\w.-]+))/.exec(text.slice(i));
-      if (m) { pending.push({ tabs: m[1] === "-", tag: m[2] ?? m[3] ?? m[5], quoted: m[2] !== undefined || m[3] !== undefined || m[4] === "\\" }); out += m[0]; i += m[0].length - 1; continue; }
+      const m = /^<<(-?)[ \t]*/.exec(text.slice(i));
+      const w = m && heredocWord(text, i + m[0].length);
+      if (w) { pending.push({ tabs: m[1] === "-", tag: w.tag, quoted: w.quoted }); out += text.slice(i, w.end); i = w.end - 1; continue; }
     }
     if (c === "\n" && pending.length) {
       out += c;
@@ -239,6 +260,8 @@ function pathspecHit(arg, cwd, docPaths) {
   if (budget < 0 && !found) return "(git pathspec too broad to scan: " + arg + ")";
   return found;
 }
+
+function expandHome(arg) { return arg === "~" || arg?.startsWith("~/") ? path.join(os.homedir(), arg.slice(1)) : arg; }
 
 function touchesGuarded(arg, cwd, docPaths) {
   if (!arg) return null;
@@ -424,7 +447,8 @@ function removedDocs(cmd, docPaths) {
   // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
   const bare = cmd.replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
-  const redirectBad = (t) => t && (DYNAMIC.test(t) || touchesGuarded(t, process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(t)));
+  // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
+  const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))));
   const redirectsOntoDocs = () => {
     for (const m of cmd.matchAll(/>>?\|?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>()]*))/g)) {
       if (redirectBad(m[1] ?? m[2] ?? m[3] ?? "")) return true;
@@ -451,6 +475,7 @@ function removedDocs(cmd, docPaths) {
     if (env.execdir && env.roots && !path.isAbsolute(arg) && env.roots.some(ancestorOfGuarded)) {
       return hits.push("(" + label + " target relative to a find -execdir directory under a root above a guarded path: " + arg + ")");
     }
+    arg = expandHome(arg);
     if (DYNAMIC.test(arg)) return hits.push("(" + label + " target the parser cannot resolve: " + arg + ")");
     if (!st.cwds) return hits.push("(" + label + " in a directory the parser cannot resolve)");
     if (env.execdir && /(?:^|\/)\.\.(?:\/|$)/.test(arg)) return hits.push("(" + label + " target above a find -execdir directory: " + arg + ")");
@@ -630,7 +655,20 @@ function removedDocs(cmd, docPaths) {
       return;
     }
     if (WRAPPERS.has(head) && w.some((a) => /[$`]/.test(a))) return unsafe("a wrapped command the parser cannot resolve");
-    dispatch(w, c, prev, st, depth, env);
+    // `env -C`/`sudo -D` change the working directory; `env -S` splits a string into a command.
+    let at = st;
+    if (WRAPPERS.has(head)) {
+      let wrapper = "";
+      for (const a of w) {
+        const b = path.basename(a);
+        if (CANDIDATES.has(b)) break;
+        if (b === "env" || b === "sudo") { wrapper = b; continue; }
+        if (!a.startsWith("-") || a === "--") continue;
+        if (wrapper === "env" && /^(?:-[A-Za-z]*S|--split-string)/.test(a)) return unsafe("env -S splits a string into a command");
+        if ((wrapper === "env" && /^(?:-[A-Za-z]*C|--chdir)/.test(a)) || (wrapper === "sudo" && /^(?:-[A-Za-z]*D|--chdir)/.test(a))) at = { cwds: null };
+      }
+    }
+    dispatch(w, c, prev, at, depth, env);
   }
 
   function analyze(text, st, depth, env) {
@@ -852,7 +890,10 @@ if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
     logEvent({ ms: Date.now() - T0, ev: "docguard", file: hit[0], sid: sidOf(input), result: "blocked" });
     const first = hit[0], ask = `Hand the change to /plan, or if you ARE that command, first run: node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`;
     process.stderr.write(
-      first.startsWith("(")
+      first.startsWith("(redirect target the parser cannot resolve")
+        ? `craftsman: this command holds a removal word and redirects to a target the guard cannot resolve ${first}; ` +
+          `without doc-write authority it is blocked. Redirect to a literal path, or: ${ask}`
+      : first.startsWith("(")
         ? `craftsman: this command holds a removal word and the guard cannot prove it safe ${first}; ` +
           `without doc-write authority it is blocked. Rewrite it with literal targets, or: ${ask}`
         : first.startsWith("redirect:")
