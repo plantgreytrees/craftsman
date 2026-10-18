@@ -13,6 +13,7 @@ import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionD
 import { forceBlocked } from "./lib/force-block.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
+import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
@@ -88,6 +89,18 @@ function trackerTarget(absolute) {
   const real = path.resolve(fs.realpathSync(dir), path.relative(dir, absolute));
   if (path.relative(root, real).split(path.sep).join("/") !== "docs/plans/TRACKER.md") return null;
   return { root, main: mainCheckoutRoot(root), real };
+}
+
+// A generated rollup docs/plans/<slug>/TRACKER.md (ARCH-TRACKER-10), or null.
+function rollupTarget(absolute) {
+  if (!/(?:^|[\\/])docs[\\/]plans[\\/][^\\/]+[\\/]TRACKER\.md$/.test(absolute)) return null;
+  let dir = path.dirname(absolute);
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  try {
+    const root = execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const real = path.resolve(fs.realpathSync(dir), path.relative(dir, absolute));
+    return /^docs\/plans\/[^/]+\/TRACKER\.md$/.test(path.relative(root, real).split(path.sep).join("/")) ? { root, real } : null;
+  } catch { return null; }
 }
 
 // The file as it would read after this Write/Edit/MultiEdit, or null when the
@@ -271,6 +284,22 @@ if (tracker) {
       );
       process.exit(2);
     }
+  }
+}
+
+const rollup = ["Write", "Edit", "MultiEdit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
+if (rollup) {
+  let current = "";
+  try { current = fs.readFileSync(rollup.real, "utf8"); } catch {}
+  const next = afterEdit(current);
+  if (next !== null && rollupBlock(next) !== rollupBlock(current)) {
+    logEvent({ ev: "tracker_guard", sid: sidOf(input), file: rollup.real, result: "rollup-block" });
+    process.stderr.write(
+      `craftsman: edit BLOCKED — it changes a generated rollup block (between the craftsman:rollup markers) ` +
+      `in ${rollup.real}. It is rendered from the tracker ledger: move a row with ` +
+      `node "\${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs" (or its rollup action) and it updates itself.\n`
+    );
+    process.exit(2);
   }
 }
 

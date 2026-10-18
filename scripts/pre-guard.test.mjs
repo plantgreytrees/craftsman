@@ -312,6 +312,33 @@ test("pre-guard: the root TRACKER.md's generated block can't be hand-edited; the
   }
 });
 
+test("pre-guard: a rollup docs/plans/<slug>/TRACKER.md fence can't be hand-edited; the generator and the rest are allowed", async () => {
+  const { main } = gitRepoWithWorktree();
+  try {
+    const { writeRollups } = await import("./lib/tracker-rollup.mjs");
+    const { buildIndex } = await import("./lib/plan-index.mjs");
+    const index = buildIndex([{ slug: "e", text: "---\nslug: e\nlevel: epic\n---\n" }]);
+    assert.equal(writeRollups(main, index, []).length, 1, "the generator writes it (no tool hook involved)");
+    const file = path.join(main, "docs", "plans", "e", "TRACKER.md");
+    fs.appendFileSync(file, "\nHand notes.\n");
+    assert.equal(run(DOC_WRITE, main, {}).status, 0);
+    const blocked = run(GUARD, main, {
+      session_id: "rollup", tool_name: "Edit",
+      tool_input: { file_path: file, old_string: "Status: PENDING", new_string: "Status: COMPLETE" },
+    });
+    assert.equal(blocked.status, 2);
+    assert.match(blocked.stderr, /rollup/);
+    assert.equal(run(GUARD, main, { session_id: "rollup", tool_name: "Write", tool_input: { file_path: file, content: "x\n" } }).status, 2);
+    const allowed = run(GUARD, main, {
+      session_id: "rollup", tool_name: "Edit",
+      tool_input: { file_path: file, old_string: "Hand notes.", new_string: "Better." },
+    });
+    assert.equal(allowed.status, 0, allowed.stderr);
+  } finally {
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
 // ARCH-LAND-05: destructive git is blocked only while /auto's marker exists.
 const DESTRUCTIVE = [
   "git push --force origin feat/x",

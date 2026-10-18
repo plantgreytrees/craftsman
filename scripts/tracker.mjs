@@ -8,6 +8,8 @@ import {
   mainCheckoutRoot,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
+import { loadIndex } from "./lib/plan-index.mjs";
+import { writeRollups } from "./lib/tracker-rollup.mjs";
 
 export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "FEATURE_MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
 const TRANSITIONS = {
@@ -196,8 +198,18 @@ export function syncTrackerDoc(context = projectContext(".")) {
   return { file, changed: true };
 }
 
+// Re-render the epic/story rollups (ARCH-TRACKER-10) from the ledger. Never
+// touches the root TRACKER.md block.
+export function syncRollups(context = projectContext(".")) {
+  const root = trackerRoot(context);
+  const files = writeRollups(root, loadIndex(root), renderState(context));
+  if (files.length) logEvent({ ev: "tracker_rollup_synced", files: files.length }, context);
+  return { files, changed: files.length > 0 };
+}
+
 // Bookkeeping after a ledger write — must never fail the write itself.
 function syncQuietly(context) {
+  try { syncRollups(context); } catch { /* a malformed plan index never blocks the ledger */ }
   try { return syncTrackerDoc(context); } catch { return null; }
 }
 
@@ -425,9 +437,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       if (!fs.existsSync(file)) atomicWrite(file, "");
       output = { ledger: file };
     } else if (input.action === "compact") output = compactLedger(context);
+    else if (input.action === "rollup") output = syncRollups(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
     else if (input.action === "archive") output = archivePlan(input, context);
-    else throw new Error("action must be init, transition, status, list, compact, sync, or archive");
+    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, or archive");
     process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
