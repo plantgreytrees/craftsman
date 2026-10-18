@@ -251,6 +251,27 @@ test("lint: plan-index refusals fail lint with the plan path; a clean plan set p
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("10.2 lint names the right file for a renamed slug and a duplicate slug", () => {
+  const plan = (fm) => `---\n${fm}\n---\n# plan\n`;
+  const dir = project({
+    "docs/plans/a.md": plan("slug: renamed\nlevel: epic\nparent: ghost"),
+    "docs/plans/b.md": plan("slug: other"),
+  });
+  try {
+    const errors = lintPlans(dir);
+    assert.equal(errors.length, 1, errors.join("\n"));
+    assert.match(errors[0], /^docs\/plans\/a\.md: renamed: dangling parent/);
+    fs.writeFileSync(path.join(dir, "docs/plans/a.md"), plan("slug: same"));
+    fs.writeFileSync(path.join(dir, "docs/plans/b.md"), plan("slug: same"));
+    const dup = lintPlans(dir);
+    assert.equal(dup.length, 1, dup.join("\n"));
+    assert.match(dup[0], /^docs\/plans\/b\.md: duplicate plan slug: same \(also docs\/plans\/a\.md\)/);
+    fs.writeFileSync(path.join(dir, "docs/plans/b.md"), plan('slug: "../.."'));
+    const bad = lintPlans(dir);
+    assert.match(bad[0], /^docs\/plans\/b\.md: invalid plan slug/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("lint: the repo's current plans pass", () => {
   assert.deepEqual(lintPlans(path.resolve(ROOT, "..")), []);
 });

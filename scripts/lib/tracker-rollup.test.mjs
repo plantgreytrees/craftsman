@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { buildIndex } from "./plan-index.mjs";
-import { renderRollup, rollupBlock, rollupStatus, rollupSlugs, writeRollups } from "./tracker-rollup.mjs";
+import { rollupPath, renderRollup, rollupBlock, rollupStatus, rollupSlugs, writeRollups } from "./tracker-rollup.mjs";
 
 const idx = () => buildIndex([
   { slug: "e", text: "---\nslug: e\nlevel: epic\nchildren: [s, f2]\n---\n" },
@@ -75,4 +75,17 @@ test("10.1 writeRollups writes epics and stories only, idempotently, keeping tex
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("10.1 rollupPath and writeRollups never write outside docs/plans for slug ../..", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rollup-"));
+  try {
+    assert.throws(() => rollupPath(root, "../.."), /outside docs\/plans/);
+    assert.throws(() => rollupPath(root, ".."), /outside docs\/plans/);
+    assert.throws(() => buildIndex([{ slug: "x", text: "---\nslug: ../..\nlevel: epic\n---\n" }]), /invalid plan slug/);
+    const evil = { nodes: new Map([["../..", { slug: "../..", level: "epic", derived: false, children: [], features: [] }]]), get: (s) => (s === "../.." ? { slug: s, level: "epic", children: [], features: [] } : undefined) };
+    assert.throws(() => writeRollups(root, evil, []), /outside docs\/plans/);
+    assert.deepEqual(fs.readdirSync(root), []);
+    assert.match(rollupPath(root, "ok"), /docs\/plans\/ok\/TRACKER\.md$/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
