@@ -59,18 +59,31 @@ units:
       write: [scripts/tracker.mjs, scripts/tracker.test.mjs]
     arch: [ARCH-TRACKER-01, ARCH-TRACKER-09, ARCH-DOCS-05]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: retire-guard
+    scope_id: retire-guard
+    project: .
+    depends_on: [doc-retire]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/lib/core.mjs, scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
   - id: doc-retire-tree
     scope_id: doc-retire-tree
     project: .
-    depends_on: [doc-retire, tracker-lookup]
+    depends_on: [retire-guard, tracker-lookup]
     module: scripts/doc-retire.mjs
     language: javascript
     security: high
     scope:
-      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/lib/plan-index.mjs, scripts/lib/core.mjs, scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
-      docs: [docs/architecture/docs.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
-    arch: [ARCH-DOCS-07, ARCH-DOCS-09, ARCH-STATE-02, ARCH-STATE-06]
+      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/lib/plan-index.mjs]
+      docs: [docs/architecture/docs.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs]
+    arch: [ARCH-DOCS-09]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
   - id: source-lint
     scope_id: source-lint
@@ -153,7 +166,7 @@ units:
   - id: hook-timing
     scope_id: hook-timing
     project: .
-    depends_on: [doc-retire-tree, stats-latency]
+    depends_on: [retire-guard, stats-latency]
     module: scripts/pre-guard.mjs
     language: javascript
     security: normal
@@ -186,50 +199,53 @@ Depends on: none
 - [ ] 2.3 Order: check every refusal (grant, referrers, open siblings keep the plan) → record `doc_sha` = HEAD (must contain the files) → `git rm` plan + closed `scrutinise-`/`investigate-` siblings (staged) → `tracker.mjs archive` with `{plan, goal, doc_sha, landed_sha}`; if archive throws, restore the staged files → commit `docs: retire <plan>` → accept: test covers success, archive refusal leaving files and ledger unchanged, and the commit holding the removal + archive
 - [ ] 2.4 `logEvent` `doc_retired {plan, sha, siblings}` and `doc_prune_refused {path, cited_by}` → accept: test reads both events
 
-### Step 3 — tracker-lookup (., javascript, normal) — BLOCKED on plan-hierarchy
+### Step 3 — tracker-lookup (., javascript, normal)
 Depends on: none
 - [ ] 3.1 One `formatArchiveHeading`/`parseArchiveHeading` pair: `## <plan> (<date>) — <goal> · doc <sha> · landed <sha>`, where `goal` has ` · ` and ` — ` replaced by `; `; `archivePlan` (`tracker.mjs:402`) writes it when given the fields, the legacy `## <plan> (<date>)` otherwise → accept: tracker.test round-trips a goal containing both separators and covers the legacy form
 - [ ] 3.2 Idea index heading `## idea <slug> (<date>) — <verdict> · <deciding fact> · doc <sha>` in the same pair; action `lookup {plan|slug}` returns the parsed record or `null` → accept: tracker.test covers full, legacy, idea and miss
 
-### Step 4 — doc-retire-tree (., javascript, high) — BLOCKED on plan-hierarchy
-Depends on: doc-retire, tracker-lookup
-- [ ] 4.1 Move the grant check into `core.mjs` `hasDocWriteGrant({sid}, context)`; `pre-guard.mjs:301-302` and `doc-retire.mjs` both call it → accept: core.test covers pending, session and none; pre-guard.test unchanged and green
-- [ ] 4.2 `pre-guard.mjs`: block `git rm`/`rm` (including chained commands) of a `docWriteGuard.docPaths` file without the grant, beside the Write-tool check (`pre-guard.mjs:289-305`) → accept: pre-guard.test covers blocked, chained-blocked and granted
+### Step 4a — retire-guard (., javascript, high)
+Depends on: doc-retire (split from Step 4 for the unit budget, ARCH-ENGINE-08)
+- [ ] 4.1 Move the grant check into `core.mjs` `hasDocWriteGrant({sid}, context)`; `pre-guard.mjs:318-333` and `doc-retire.mjs` (`grantValid`/`hasGrant`) both call it → accept: core.test covers pending, session and none; pre-guard.test unchanged and green
+- [ ] 4.2 `pre-guard.mjs`: block `git rm`/`rm` (including chained commands) of a `docWriteGuard.docPaths` file without the grant, beside the Write-tool check (`pre-guard.mjs:318-333`) → accept: pre-guard.test covers blocked, chained-blocked and granted
+
+### Step 4b — doc-retire-tree (., javascript, high)
+Depends on: retire-guard, tracker-lookup
 - [ ] 4.3 `doc-retire.mjs`: refuse a parent whose descendants are live (`plan-index` `descendantSlugs`) and remove the plan's `docs/plans/<slug>/TRACKER.md` rollup → accept: doc-retire.test covers both; a successful retire writes the full DOCS-09 heading
 
-### Step 5 — source-lint (., javascript, normal) — BLOCKED on plan-hierarchy
+### Step 5 — source-lint (., javascript, normal)
 Depends on: none
 - [ ] 5.1 `arch-check lint` fails a rules doc whose `source:` file is missing, naming the path (`arch-check.mjs:216-217`) → accept: arch-check.test covers it; `lint` on this repo still PASSes
 
-### Step 6 — sync-docs-modes (., markdown, normal) — BLOCKED on plan-hierarchy
+### Step 6 — sync-docs-modes (., markdown, normal)
 Depends on: doc-retire-tree
 - [ ] 6.1 New `commands/_sync-docs-prune.md`, read only under `--archive`/`--prune`: archive retires COMPLETE plans via `doc-retire.mjs`; prune dry-runs, confirms each round of ≤15, skips docs named by a live row/claim/hand-off, touches non-craftsman folders only when named, prunes an uncited rejected/deferred idea to its index heading (3.2), and is never covered by `/goal` pre-approval → accept: wiring.test asserts the flags, dry run, ≤15, skip list and /goal exception
 - [ ] 6.2 Add its cap to `doc-size-policy.mjs` in this merge; `sync-docs.md` gets one pointer line, net bytes ≤ 0 → accept: `wc -c` not larger than before; size policy green
 
-### Step 7 — lookup-callers (., markdown, normal) — BLOCKED on plan-hierarchy
+### Step 7 — lookup-callers (., markdown, normal)
 Depends on: tracker-lookup
 - [ ] 7.1 `idea.md` Phase 1 overlap scan lists `TRACKER-archive.md` (`idea.md:30`) → accept: auto-command.test asserts it
 - [ ] 7.2 `auto.md`, `instruction.md`, `orchestrate.md`: resolve an unknown slug through `tracker.mjs lookup` before treating it as new work; each of the four files net bytes ≤ 0 → accept: auto-command.test asserts each; arch-check.test unit-budget case still passes
 
-### Step 8 — trim-at-cap (., markdown, normal) — BLOCKED on plan-hierarchy
+### Step 8 — trim-at-cap (., markdown, normal)
 Depends on: lookup-callers, sync-docs-modes
 - [ ] 8.1 Record `stats.mjs` block rates, then trim every loadable `.md` within 1% of its cap (today: `_shared-execution`, `sync-docs`, `plan`, `orchestrate`, `_architecture`, `unit-runner`) to ≤ 95%: delete only hook/script-enforced prose or move it into a doc the command already reads; conditional detail never moves into an always-read doc; keep the unit-runner smoke step (ARCH-TRACKER-05); each removed MUST names its enforcer → accept: each file ≤ 95% of cap; suite + descriptions.test green; before/after block rates in the merge evidence
 
-### Step 9 — size-policy (., javascript, normal) — BLOCKED on plan-hierarchy
+### Step 9 — size-policy (., javascript, normal)
 Depends on: trim-at-cap
 - [ ] 9.1 Per-file caps for every loadable `.md` (commands, `_*`, agents, SKILL.md, skill references) set to current size; an unmatched file is a finding (`doc-size-policy.mjs:53`) → accept: doc-size-policy.test covers an unmatched skill reference failing and a file 1 byte over
 - [ ] 9.2 Per-invocation total per command (command + shared docs it reads unconditionally) with its own cap; the ratchet test compares each cap with the merge-base's `doc-size-policy.mjs` (`git show`), skipping when no git → accept: test fails when a cap rises or a command's total exceeds its cap
 
-### Step 10 — changelog-cut (., markdown, normal) — BLOCKED on plan-hierarchy
+### Step 10 — changelog-cut (., markdown, normal)
 Depends on: size-policy, hook-timing, source-lint
 - [ ] 10.1 Cut `## [2.2.0] - <date>` from `[Unreleased]` (next SemVer minor after `[2.1.0]`, `CHANGELOG.md:521`; chosen in /architect), add one bullet for this plan, and `scripts/changelog.test.mjs` caps `[Unreleased]` at 8 KB → accept: test passes; descriptions.test total ≤ 8500 unchanged
 
-### Step 11 — hook-timing (., javascript, normal) — BLOCKED on plan-hierarchy
+### Step 11 — hook-timing (., javascript, normal)
 Depends on: doc-retire-tree, stats-latency
 - [ ] 11.1 Add `ms` to pre-guard's and stop-gate's terminal `logEvent` calls (`stop-gate.mjs:323-325`; pre-guard's allow/block exits) so 1.1 reports them; no change to decisions → accept: pre-guard.test and stop-gate.test read `ms` on pass and block; behaviour tests unchanged
 
 ## Sequencing
-Units 1–2 now (new files or no overlap). Then plan-hierarchy lands. Then 3, 5 (independent) → 4 → 6, 7, 11 → 8 → 9 → 10. Caps are set after the trims so the ratchet starts from the final sizes; units 4 and 11 both write `pre-guard.mjs`, so 11 follows 4.
+Units 1–2 landed in pass 1; plan-hierarchy is COMPLETE. Pass 2: 3, 5 (independent) → 4a → 4b → 6, 7, 11 → 8 → 9 → 10. Caps are set after the trims so the ratchet starts from the final sizes; units 4a and 11 both write `pre-guard.mjs`, so 11 follows 4a.
 
 ## Verification background
 - Archive heading is written today without goal or shas, before any file removal — `scripts/tracker.mjs:384-403`
