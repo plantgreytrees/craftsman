@@ -112,6 +112,46 @@ test("publish: refuses to blank a committed non-empty block without an archive e
   assert.equal(git(bare, "show", "main:docs/plans/TRACKER.jsonl"), "");
 });
 
+test("publish: a checkout merely behind origin cannot blank the block; a real archive event can", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  assert.equal(publishTracker({}, a).published, true);
+  // Another checkout changes the archive file on origin; `fresh` is cloned before and stays behind.
+  const fresh = clone(bare);
+  fs.mkdirSync(path.dirname(ledgerPath(fresh)), { recursive: true });
+  fs.writeFileSync(ledgerPath(fresh), "");
+  const other = clone(bare);
+  fs.writeFileSync(path.join(other.root, "docs/plans/TRACKER-archive.md"), "archived elsewhere\n");
+  git(other.root, "add", "."); git(other.root, "commit", "-m", "archive"); git(other.root, "push", "origin", "main");
+  const refused = publishTracker({}, fresh);
+  assert.equal(refused.published, false);
+  assert.match(refused.refused, /blank/);
+  fs.mkdirSync(fresh.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(fresh.stateDir, "events.jsonl"), JSON.stringify({ ts: 1, ev: "tracker_archived", plan: "p", units: 2 }) + "\n");
+  assert.equal(publishTracker({}, fresh).published, true);
+  assert.equal(git(bare, "show", "main:docs/plans/TRACKER.jsonl"), "");
+});
+
+test("publish: a failed worktree remove then a retry succeeds", () => {
+  const { bare } = remote();
+  const a = clone(bare), other = clone(bare);
+  seedLedger(a);
+  const result = publishTracker({}, a, {
+    beforePush(attempt) {
+      if (attempt !== 1) return;
+      // An untracked file makes `git worktree remove` fail, leaving a stale registration after rm.
+      const dir = path.join(a.root, ".git", ".craftsman", "publish");
+      fs.writeFileSync(path.join(dir, fs.readdirSync(dir)[0], "junk.txt"), "x\n");
+      fs.writeFileSync(path.join(other.root, "other.txt"), "x\n");
+      git(other.root, "add", "."); git(other.root, "commit", "-m", "competing");
+      git(other.root, "push", "origin", "main");
+    },
+  });
+  assert.equal(result.published, true);
+  assert.equal(result.attempt, 2);
+});
+
 test("init: rehydrates an absent local ledger from TRACKER.jsonl", () => {
   const { bare } = remote();
   const a = clone(bare);
