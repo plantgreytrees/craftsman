@@ -81,7 +81,7 @@ units:
     language: Markdown + JavaScript
     security: high
     scope:
-      read: [commands/instruction.md, commands/orchestrate.md, commands/merge.md, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/plan-graph.mjs, scripts/repo-exec.mjs, scripts/orchestrate-scope-guard.test.mjs, scripts/pre-guard.test.mjs, scripts/plan-graph.test.mjs]
+      read: [commands/instruction.md, commands/orchestrate.md, commands/merge.md, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/plan-graph.mjs, scripts/repo-exec.mjs, scripts/pre-guard.test.mjs, scripts/plan-graph.test.mjs]
       docs: [docs/architecture/auto.rules.md, docs/architecture/landing.rules.md, docs/architecture/state.rules.md]
       write: [commands/auto.md, commands/instruction.md, commands/merge.md, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/orchestrate-scope-guard.test.mjs, scripts/pre-guard.test.mjs, scripts/plan-graph.test.mjs, scripts/auto-command.test.mjs]
     arch: [ARCH-AUTO-01, ARCH-AUTO-02, ARCH-AUTO-03, ARCH-AUTO-04, ARCH-AUTO-05, ARCH-AUTO-06, ARCH-AUTO-07, ARCH-LAND-01, ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-LAND-05, ARCH-STATE-06]
