@@ -53,6 +53,52 @@ function usesAlternateGitRoot(command) {
   return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_DIR\s*=|\bGIT_WORK_TREE\s*=/.test(command);
 }
 
+// Drop heredoc bodies (and their terminator lines) so their text is never
+// parsed as shell. Quote-aware: a `<<` inside single quotes is not a heredoc,
+// while one inside `"$( ... )"` is. Unterminated bodies run to the end, as in sh.
+function stripHeredocs(text) {
+  let out = "", pending = [];
+  const stack = ["cmd"]; // "cmd" | "dq"
+  let sq = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], top = stack[stack.length - 1];
+    if (sq) { out += c; if (c === "'") sq = false; continue; }
+    if (c === "\\" && i + 1 < text.length) { out += c + text[++i]; continue; }
+    if (top === "dq") {
+      if (c === '"') stack.pop();
+      else if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); out += "$("; i++; continue; }
+      out += c; continue;
+    }
+    if (c === "'") { sq = true; out += c; continue; }
+    if (c === '"') { stack.push("dq"); out += c; continue; }
+    if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); out += "$("; i++; continue; }
+    if (c === ")" && stack.length > 1) { stack.pop(); out += c; continue; }
+    if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
+      const m = /^<<(-?)\s*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/.exec(text.slice(i));
+      if (m) { pending.push({ tabs: m[1] === "-", tag: m[2] ?? m[3] ?? m[4] }); out += m[0]; i += m[0].length - 1; continue; }
+    }
+    if (c === "\n" && pending.length) {
+      out += c;
+      let pos = i + 1;
+      for (const { tabs, tag } of pending) {
+        for (;;) {
+          if (pos >= text.length) break;
+          let end = text.indexOf("\n", pos);
+          if (end === -1) end = text.length;
+          const line = text.slice(pos, end);
+          pos = Math.min(end + 1, text.length);
+          if ((tabs ? line.replace(/^\t+/, "") : line) === tag) break;
+        }
+      }
+      pending = [];
+      i = pos - 1;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
 // Quote-aware split of a shell command into segments of words. `;` `&` `|`
 // newline ( ) and backticks separate segments; a leading `\` on a word is
 // dropped (`\rm`). `ok` is false when a quote never closes.
@@ -90,8 +136,44 @@ function guardedBase(glob) {
 
 // Does removing/moving this path delete or alter a guarded doc? True for a
 // guarded path itself, anything under it, or any ancestor of one (incl. ".").
+// A glob in the LAST path segment (`*.log`, `d*`) matches against the guarded
+// bases instead of collapsing to its parent directory.
+function segmentRe(seg, flags = "") {
+  let re = "";
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (c === "*") re += "[^/]*";
+    else if (c === "?") re += "[^/]";
+    else if (c === "[" && seg.indexOf("]", i + 2) !== -1) { const e = seg.indexOf("]", i + 2); re += "[" + seg.slice(i + 1, e).replace(/^!/, "^").replace(/\\/g, "\\\\") + "]"; i = e; }
+    else if (c === "{" && seg.indexOf("}", i) !== -1) { const e = seg.indexOf("}", i); re += "(?:" + seg.slice(i + 1, e).split(",").map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")"; i = e; }
+    else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp("^" + re + "$", flags);
+}
+
+function lastSegmentGlob(arg, cwd, docPaths) {
+  const slash = arg.lastIndexOf("/");
+  const dir = slash === -1 ? "" : arg.slice(0, slash + 1), seg = arg.slice(slash + 1);
+  if (!/[*?[{]/.test(seg) || /[*?[{]/.test(dir)) return undefined; // not a last-segment-only glob
+  const rel = path.relative(activeRoot, path.resolve(cwd, dir || ".")).split(path.sep).join("/");
+  if (rel === ".." || rel.startsWith("../")) {
+    return path.relative(path.resolve(cwd, dir || "."), activeRoot).startsWith("..") ? null : (rel || ".");
+  }
+  const dirParts = rel === "" ? [] : rel.split("/");
+  const re = segmentRe(seg);
+  const sample = [...dirParts, seg.replace(/[*?[\]{},!]/g, "x")].join("/");
+  for (const p of docPaths) {
+    if (globToRe(p).test(sample) || globToRe(p).test("./" + sample)) return sample;
+    const base = guardedBase(p).split("/").filter(Boolean);
+    if (base.length > dirParts.length && dirParts.every((d, k) => base[k] === d) && re.test(base[dirParts.length])) return [...dirParts, base[dirParts.length]].join("/");
+  }
+  return null;
+}
+
 function touchesGuarded(arg, cwd, docPaths) {
   if (!arg) return null;
+  const lastSeg = lastSegmentGlob(arg, cwd, docPaths);
+  if (lastSeg !== undefined) return lastSeg;
   const cut = arg.search(/[*?[{]/);
   const literal = cut === -1 ? arg : arg.slice(0, cut).replace(/[^/]*$/, "") || ".";
   const rel = path.relative(activeRoot, path.resolve(cwd, literal)).split(path.sep).join("/");
@@ -103,6 +185,42 @@ function touchesGuarded(arg, cwd, docPaths) {
   if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) return rel;
   if (docPaths.some((p) => { const base = guardedBase(p); return base === rel || base.startsWith(rel + "/"); })) return rel;
   return null;
+}
+
+// True when a `find` rooted ABOVE the guarded docs (never inside them) selects
+// only by -name/-iname and no existing guarded file or directory matches any
+// pattern. Any other predicate that can reach a path (-path, -regex, negation)
+// or a start inside a guarded path fails closed (false).
+function findNamesMiss(exprs, start, cwd, docPaths) {
+  const names = [];
+  for (let k = 0; k < exprs.length; k++) {
+    const w = exprs[k];
+    if (/^-(?:i?path|i?wholename|i?regex|not)$/.test(w) || w === "!") return false;
+    if (/^-i?name$/.test(w) && exprs[k + 1] !== undefined) names.push(segmentRe(exprs[k + 1], w === "-iname" ? "i" : ""));
+  }
+  if (!names.length) return false;
+  const startRel = path.relative(activeRoot, path.resolve(cwd, start)).split(path.sep).join("/");
+  if (startRel.startsWith("..") && startRel !== "..") return false;
+  const inside = (r) => docPaths.some((p) => [r, "./" + r, r + "/x"].some((c) => globToRe(p).test(c)));
+  if (startRel && inside(startRel)) return false;
+  let budget = 20000;
+  const visit = (rel) => {
+    if (names.some((re) => re.test(path.basename(rel)))) return true;
+    if (--budget < 0) return true;
+    let entries;
+    try { entries = fs.readdirSync(path.join(activeRoot, rel), { withFileTypes: true }); } catch { return false; }
+    return entries.some((e) => visit(rel + "/" + e.name));
+  };
+  for (const p of docPaths) {
+    const base = guardedBase(p).split("/").filter(Boolean);
+    const sr = startRel ? startRel.split("/") : [];
+    if (!sr.every((d, k) => base[k] === d)) continue;
+    for (let n = sr.length + 1; n <= base.length; n++) {
+      if (names.some((re) => re.test(base[n - 1]))) return false;
+    }
+    if (base.length && visit(base.join("/")) ) return false;
+  }
+  return true;
 }
 
 // Guarded doc paths removed (or moved) by a (chained) command: rm / unlink /
@@ -150,7 +268,10 @@ function removedDocs(cmd, docPaths) {
       const exprAt = rest.findIndex((w) => w.startsWith("-") || w === "(" || w === "!");
       const exprs = exprAt === -1 ? [] : rest.slice(exprAt);
       const deletes = exprs.includes("-delete") || exprs.some((w, k) => /^-exec(?:dir)?$/.test(w) && /^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || "")));
-      if (deletes) for (const a of exprAt === -1 ? rest : rest.slice(0, exprAt)) check(a, state.cwd);
+      if (deletes) for (const a of exprAt === -1 ? rest : rest.slice(0, exprAt)) {
+        const h = touchesGuarded(a, state.cwd, docPaths);
+        if (h && !findNamesMiss(exprs, a, state.cwd, docPaths)) hits.push(h);
+      }
       return;
     }
     if (verb === "xargs") {
@@ -169,6 +290,7 @@ function removedDocs(cmd, docPaths) {
   }
 
   function walk(text, state, depth) {
+    text = stripHeredocs(text);
     const parsed = shellSegments(text);
     if (!parsed.ok && docPaths.some((p) => { const b = guardedBase(p); return b && text.includes(b); })) hits.push("(unparseable command naming a guarded path)");
     for (const words of parsed.segments) segment(words, state, depth);
