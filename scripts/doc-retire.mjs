@@ -47,6 +47,16 @@ function scanReferrers(context, plan, slug) {
   return [...hits];
 }
 
+// Fallback goal for a goal-less plan: front-matter `goal:`, else the H1 (ARCH-DOCS-09).
+function planDocGoal(context, plan) {
+  let text = "";
+  try { text = fs.readFileSync(path.join(context.root, plan), "utf8"); } catch { return ""; }
+  const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  const fromFront = front && /^goal:[ \t]*(.+?)[ \t]*$/m.exec(front[1])?.[1].replace(/^(["'])(.*)\1$/, "$2").trim();
+  if (fromFront) return fromFront;
+  return /^#[ \t]+(.+?)[ \t]*$/m.exec(text.replace(/^---\r?\n[\s\S]*?\r?\n---/, ""))?.[1] ?? "";
+}
+
 function refuse(reason, referrers = []) {
   return { refused: true, reason, referrers };
 }
@@ -109,7 +119,7 @@ export function retire(input, context = projectContext(".")) {
   }
 
   const doc_sha = git(context, ["rev-parse", "HEAD"]).trim();
-  const goal = input.goal || rowsOf(plan).find((row) => row.goal)?.goal || "";
+  const goal = input.goal || rowsOf(plan).find((row) => row.goal)?.goal || planDocGoal(context, plan) || slug;
   const landed_sha = input.landed_sha || doc_sha;
 
   const backups = [ledgerPath(context), archivePath(context), trackerDocPath(context)].map((file) => {
