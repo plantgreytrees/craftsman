@@ -16,7 +16,7 @@ try {
   const base = process.argv[2];
   if (!base) throw new Error("no base sha given");
   if (!has(base)) {
-    try { execFileSync("timeout", ["60", "git", "fetch", "--depth=1", "origin", base], { stdio: "ignore" }); } catch { /* handled below */ }
+    try { execFileSync("git", ["fetch", "--depth=1", "origin", base], { stdio: "ignore", timeout: 60000 }); } catch { /* handled below */ }
   }
   if (!has(base)) {
     console.log(`::notice::script size delta skipped: base ${base} unavailable`);
