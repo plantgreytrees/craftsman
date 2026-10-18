@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  acceptanceNotice, archivePath, archivePlan, compactLedger, currentState, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
+  acceptanceNotice, archivePath, archivePlan, compactLedger, currentState, formatArchiveHeading, lookupArchive, parseArchiveHeading, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
   syncTrackerDoc, trackerDocPath, trackerRoot, transition,
 } from "./tracker.mjs";
 
@@ -377,4 +377,41 @@ test("tracker: other FEATURE_MERGED transitions are unchanged", () => {
   }
   assert.equal(transition({ plan, unit: "u2", status: "BLOCKED", evidence: "x" }, selected).status, "BLOCKED");
   assert.equal(transition({ plan, unit: "u3", status: "COMPLETE", evidence: "sha" }, selected).status, "COMPLETE");
+});
+
+test("tracker: archive heading round-trips a goal holding both separators and keeps the legacy form", () => {
+  const f = { plan: "docs/plans/x.md", date: "2026-10-18", goal: "ship a · b — c", doc: "abc1234", landed: "def5678" };
+  const line = formatArchiveHeading(f);
+  assert.equal(line, "## docs/plans/x.md (2026-10-18) — ship a; b; c · doc abc1234 · landed def5678");
+  assert.deepEqual(parseArchiveHeading(line), { kind: "plan", plan: f.plan, date: f.date, goal: "ship a; b; c", doc: "abc1234", landed: "def5678" });
+  const legacy = formatArchiveHeading({ plan: f.plan, date: f.date });
+  assert.equal(legacy, "## docs/plans/x.md (2026-10-18)");
+  assert.deepEqual(parseArchiveHeading(legacy), { kind: "plan", plan: f.plan, date: f.date, goal: null, doc: null, landed: null });
+  assert.equal(parseArchiveHeading("- not a heading"), null);
+});
+
+test("tracker: lookup returns full, legacy and idea records and null on a miss", () => {
+  const selected = context();
+  const idea = { kind: "idea", slug: "fast-thing", date: "2026-10-17", verdict: "rejected", fact: "costs · too much — really", doc: "9999999" };
+  const ideaLine = formatArchiveHeading(idea);
+  assert.deepEqual(parseArchiveHeading(ideaLine), { ...idea, fact: "costs; too much; really" });
+  fs.mkdirSync(path.dirname(archivePath(selected)), { recursive: true });
+  fs.writeFileSync(archivePath(selected), [
+    "# Tracker archive", "",
+    "## docs/plans/old.md (2026-10-01)", "", "- row", "",
+    formatArchiveHeading({ plan: "docs/plans/new.md", date: "2026-10-18", goal: "g", doc: "aaa", landed: "bbb" }), "",
+    ideaLine, "",
+  ].join("\n"));
+  assert.equal(lookupArchive({ plan: "docs/plans/new.md" }, selected).landed, "bbb");
+  assert.equal(lookupArchive({ plan: "old" }, selected).goal, null);
+  assert.equal(lookupArchive({ slug: "fast-thing" }, selected).verdict, "rejected");
+  assert.equal(lookupArchive({ plan: "nope" }, selected), null);
+  assert.equal(lookupArchive({ slug: "fast-thing" }, context()), null);
+});
+
+test("tracker: archivePlan writes the full heading when given goal, doc and landed", () => {
+  const selected = context();
+  transition({ plan: "docs/plans/p.md", unit: "u", status: "COMPLETE", evidence: "abc" }, selected);
+  archivePlan({ plan: "docs/plans/p.md", goal: "g · h", doc: "d1", landed: "l1" }, selected);
+  assert.equal(lookupArchive({ plan: "docs/plans/p.md" }, selected).goal, "g; h");
 });

@@ -417,6 +417,49 @@ export function archivePath(context = projectContext(".")) {
   return path.join(trackerRoot(context), "docs", "plans", "TRACKER-archive.md");
 }
 
+const headField = (value) => String(value ?? "").replace(/\s+/g, " ").trim().replaceAll(" · ", "; ").replaceAll(" — ", "; ");
+
+// One heading grammar for TRACKER-archive.md (ARCH-TRACKER-09):
+//   ## <plan> (<date>) [— <goal> · doc <sha> · landed <sha>]
+//   ## idea <slug> (<date>) — <verdict> · <deciding fact> · doc <sha>
+export function formatArchiveHeading(f) {
+  if (f.kind === "idea" || f.slug) {
+    return `## idea ${f.slug} (${f.date}) — ${headField(f.verdict)} · ${headField(f.fact)} · doc ${f.doc}`;
+  }
+  if (f.goal && f.doc && f.landed) return `## ${f.plan} (${f.date}) — ${headField(f.goal)} · doc ${f.doc} · landed ${f.landed}`;
+  return `## ${f.plan} (${f.date})`;
+}
+
+export function parseArchiveHeading(line) {
+  let m = /^## idea (\S+) \((\d{4}-\d{2}-\d{2})\) — (.*) · (.*) · doc (\S+)$/.exec(line);
+  if (m) {
+    // verdict never holds " · " (sanitised), so the first separator ends it
+    const [verdict, ...rest] = `${m[3]} · ${m[4]}`.split(" · ");
+    return { kind: "idea", slug: m[1], date: m[2], verdict, fact: rest.join("; "), doc: m[5] };
+  }
+  m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\) — (.*) · doc (\S+) · landed (\S+)$/.exec(line);
+  if (m) return { kind: "plan", plan: m[1], date: m[2], goal: m[3], doc: m[4], landed: m[5] };
+  m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\)$/.exec(line);
+  if (m) return { kind: "plan", plan: m[1], date: m[2], goal: null, doc: null, landed: null };
+  return null;
+}
+
+// Parsed archive heading for a plan path/basename or an idea slug; null on a miss.
+export function lookupArchive(input, context = projectContext(".")) {
+  const key = input.plan ?? input.slug;
+  if (typeof key !== "string" || !key.trim()) throw new Error("lookup needs plan or slug");
+  let text = "";
+  try { text = fs.readFileSync(archivePath(context), "utf8"); } catch { return null; }
+  let found = null;
+  for (const line of text.split("\n")) {
+    const rec = parseArchiveHeading(line);
+    if (!rec) continue;
+    const hit = rec.kind === "idea" ? rec.slug === key : rec.plan === key || path.posix.basename(rec.plan, ".md") === key;
+    if (hit) found = rec;
+  }
+  return found;
+}
+
 // Retire a finished plan: every row must be COMPLETE or CANCELLED. Its rows
 // leave the ledger and the live TRACKER.md block; a one-line entry per unit,
 // with the criteria it closed on, goes to the committed TRACKER-archive.md.
@@ -438,7 +481,7 @@ export function archivePlan(input, context = projectContext(".")) {
     const doc = archivePath(context);
     let text = "";
     try { text = fs.readFileSync(doc, "utf8"); } catch { text = "# Tracker archive\n\nRows retired from the live ledger by `tracker.mjs archive`.\n"; }
-    atomicWrite(doc, `${text.trimEnd()}\n\n## ${input.plan} (${day})\n\n${entries.join("\n")}\n`);
+    atomicWrite(doc, `${text.trimEnd()}\n\n${formatArchiveHeading({ plan: input.plan, date: day, goal: input.goal, doc: input.doc, landed: input.landed })}\n\n${entries.join("\n")}\n`);
     atomicWrite(file, kept.length ? kept.map((e) => JSON.stringify(e)).join("\n") + "\n" : "");
     return rows.map((row) => row.unit);
   });
@@ -462,8 +505,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (input.action === "rollup") output = syncRollups(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
     else if (input.action === "archive") output = archivePlan(input, context);
+    else if (input.action === "lookup") output = lookupArchive(input, context);
     else if (input.action === "publish") output = await (await import("./tracker-publish.mjs")).publishTracker(input, context);
-    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, or publish");
+    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, lookup, or publish");
     process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
