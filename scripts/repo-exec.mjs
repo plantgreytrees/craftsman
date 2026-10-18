@@ -3,8 +3,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { atomicWrite, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
-import { loadIndex } from "./lib/plan-index.mjs";
+import { atomicWrite, featureCriteria, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
+import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
@@ -453,6 +453,15 @@ function landFeature(context, input, info, deps = {}) {
   if (!rows.length) throw new Error(`land-feature: no tracker rows for feature ${input.feature} of ${input.plan}`);
   const open = rows.filter((row) => row.status !== "FEATURE_MERGED");
   if (open.length) throw new Error(`land-feature refused: ${open.map((row) => `${row.unit} is ${row.status}`).join(", ")}; every unit must be FEATURE_MERGED`);
+  // ARCH-TRACKER-08: open [feature:<id>] criteria (and, for the plan's last feature, untagged ones) refuse the landing.
+  const main = mainCheckoutRoot(context.root);
+  const acceptanceFile = path.join(main, ".craftsman", "acceptance.md");
+  if (fs.existsSync(acceptanceFile)) {
+    let isLast = false;
+    try { isLast = resolvePlan(planSlug, { level: "epic", root: main }).features.at(-1)?.id === String(input.feature); } catch { isLast = false; }
+    const openCriteria = featureCriteria(fs.readFileSync(acceptanceFile, "utf8"), input.feature, isLast).filter((c) => !c.done);
+    if (openCriteria.length) throw new Error(`land-feature refused: open acceptance criteria for feature ${input.feature}: ${openCriteria.map((c) => c.line.trim()).join(" | ")}`);
+  }
   const slug = `${planSlug}-${input.feature}`;
   const feature = input.feature_branch || rows.find((row) => row.feature_branch)?.feature_branch || `feature/${slug}`;
   if (!run(context.root, ["rev-parse", "--verify", "--quiet", `refs/heads/${feature}`], { allowFailure: true })) {
