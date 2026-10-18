@@ -109,3 +109,22 @@ test("merge.md: /auto's standing authority, per-repo plan-graph landing and subm
   assert.match(under, /submodule pointer bump is an explicit\s+dependent unit in the parent/);
   assert.match(under, /submodules whose gitlinks their indexes record[\s\S]*never find repos by\s+scanning directories \(ARCH-LAND-07\)/);
 });
+
+test("hierarchy flags: --level/--feature on orchestrate and auto, detail in _features.md, files within budget (ARCH-PLAN-03/06, SLIM-04)", () => {
+  const features = read("commands/_features.md");
+  for (const f of ["orchestrate", "auto", "instruction"]) {
+    const doc = read(`commands/${f}.md`);
+    assert.match(doc.split("\n").find((l) => l.startsWith("argument-hint")), /--level epic\|story\|feature\|unit\] \[--feature <id>\]/, f);
+    assert.match(doc, /_features\.md/, `${f} points at the detail doc`);
+  }
+  assert.match(features, /## levels and flags/);
+  assert.match(features, /default feature/);
+  assert.match(features, /`unit` is `--step`/);
+  assert.match(features, /wave allowance/);
+  assert.match(features, /`level`, `parent`, `children`, `priority`/);
+  assert.match(read("commands/plan.md"), /`level`, `parent`, `children`, `priority`/);
+  const tmpl = read("skills/language-aware-planning/references/plan-template.md");
+  for (const k of ["level:", "parent:", "children:", "priority:"]) assert.ok(tmpl.includes(`\n${k}`), `template ${k}`);
+  const caps = { "commands/orchestrate.md": 9911, "commands/auto.md": 4620, "commands/instruction.md": 8781, "commands/plan.md": 9969, "commands/_features.md": 3500 };
+  for (const [rel, max] of Object.entries(caps)) assert.ok(fs.statSync(path.join(ROOT, rel)).size <= max, `${rel} within ${max}`);
+});

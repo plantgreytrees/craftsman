@@ -1,6 +1,6 @@
 ---
 description: Executor — implement an existing plan doc (from /plan, /investigate, or a tracker slug); gate, review, and merge each unit to the base branch. Does NOT plan.
-argument-hint: "<plan-doc path | tracker slug | feature request> [--step <tracker-id>]"
+argument-hint: "<plan-doc path | tracker slug | feature request> [--step <tracker-id>] [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
 allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand
 ---
@@ -11,7 +11,7 @@ allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashComman
 
 You **execute a documented plan** — a plan doc already decided what to build (planning is `/plan`/`/investigate`; you are execution only). Plan nothing, delegate implementation, gate, review, and merge — one unit at a time.
 
-Input `$ARGUMENTS`, resolved in Phase A. Before Phase B, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md` (Standing constraints + MCP conventions + tooling-manifest contract, deliberately light). The heavier per-unit protocol — `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md` — is read only at the start of Phase C, once execution actually starts. Exception: `--step`'s pre-approval summary defers both reads until after user approval (Phase A.1).
+Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--feature <id>`, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_features.md` § levels and flags first. Before Phase B, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md` (Standing constraints + MCP conventions + tooling-manifest contract, deliberately light). The heavier per-unit protocol — `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md` — is read only at the start of Phase C, once execution actually starts. Exception: `--step`'s pre-approval summary defers both reads until after user approval (Phase A.1).
 
 ## Phase A — Resolve the plan (no decomposition here)
 
@@ -20,7 +20,7 @@ Input `$ARGUMENTS`, resolved in Phase A. Before Phase B, `Read` `${CLAUDE_PLUGIN
 3. **Tracker slug** with a linked plan doc → as (2).
 4. **Free-form request, no doc** → nothing to execute yet. Pick the right planner via SlashCommand first, then continue at (2): bug/symptom → `/investigate`; anything else → `/plan`. A doc always exists before code.
 
-**Resume rule:** at every loop iteration (and after any compaction), re-read the tracker — the **main checkout's** `docs/plans/TRACKER.md` ledger block (never a worktree's copy, which is stale), or `printf '%s' '{"action":"status"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"` — + your lock files — cheap, authoritative, always happens. **Tracker state on disk is truth, not conversation memory.** Skip MERGED units; resume IN_PROGRESS units whose lock you own; rest per Phase L. Re-read the full plan doc's task text only when first resolving the request, right after a compaction, or right before Phase C executes that unit — not every iteration once a row reads MERGED. Predates recent merges → verify Background `file:line` cites still resolve. Recall memory per target area if available.
+**Resume rule:** at every loop iteration (and after any compaction), re-read the tracker — the **main checkout's** `docs/plans/TRACKER.md` ledger block (never a worktree's copy, which is stale), or `printf '%s' '{"action":"status"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"` — + your lock files — cheap, authoritative, always happens. **Tracker state on disk is truth, not conversation memory.** Skip MERGED units; resume IN_PROGRESS units whose lock you own; rest per Phase L. Re-read the full plan doc's task text only when first resolving the request, right after a compaction, or right before Phase C executes that unit — not every iteration once a row reads MERGED. Predates recent merges → verify Background `file:line` cites still resolve.
 
 ## Phase B — Ready the units
 
@@ -47,7 +47,7 @@ Input `$ARGUMENTS`, resolved in Phase A. Before Phase B, `Read` `${CLAUDE_PLUGIN
 
 ## Phase E — Finalization
 
-Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero survive — integration build if defined, tracker consistency via `phase-tracker`). Before marking feature rows → COMPLETE, write the phase hand-off (`scripts/handoff.mjs`, JSON: plan, completed units, tracker state, remaining units, changed files, next action), then start the next phase straight away, re-reading the tracker + that phase's scope manifests. Never stop to ask for `/compact`: it's a built-in the model can't invoke. Claude Code's auto-compact handles context, and SessionStart restores the hand-off after any compaction or `/clear` (pass the real `session_id`, or it lands under `"shared"` and isn't restored).
+Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero survive — integration build if defined, tracker consistency via `phase-tracker`). Before marking feature rows → COMPLETE, write the phase hand-off (`scripts/handoff.mjs`, JSON: plan, completed units, tracker state, remaining units, changed files, next action), then start the next phase straight away, re-reading the tracker + that phase's scope manifests. Never ask for `/compact`; auto-compact handles context and SessionStart restores the hand-off after any compaction or `/clear` (pass the real `session_id`, or it lands under `"shared"` and isn't restored).
 
 ## Phase F — Whole-request verification (mandatory before COMPLETE)
 
@@ -55,8 +55,7 @@ Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero sur
 0. **Mechanical pre-filter:** run the project's full check suite on the merged base.
 1. Re-read the plan's user-visible outcomes. Per feature, delegate a completeness investigation (`general-purpose`, or `code-reviewer` integration-mode with a completeness mandate): the whole path exists end-to-end — every contract consumer updated, every endpoint guarded, every UI call site rendering, tests on the new path, no dangling half-implementation. Hunt for **what the plan didn't mention**.
 2. In-scope gap → loop back to Phase C and close it; out-of-scope adjacent → PENDING row. No COMPLETE while an in-scope gap remains.
-3. **Record memory:** tooling/gotchas learned, contracts touched → consumers, decisions made.
-4. **Recommend the closing steps:** `/scrutinise <slug>` (isolated logic/security/architecture/cross-unit review; its fixes run as `/orchestrate scrutinise-<slug>`), then `/sync-docs --all <slug>` (docs, tracker and architecture reconciled to shipped reality), then `/craftsman:merge` (lands the session's branch with its plan/tracker/doc edits and anything still unlanded) — closes PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE.
+3. **Recommend the closing steps:** `/scrutinise <slug>` (isolated logic/security/architecture/cross-unit review; its fixes run as `/orchestrate scrutinise-<slug>`), then `/sync-docs --all <slug>` (docs, tracker and architecture reconciled to shipped reality), then `/craftsman:merge` (lands the session's branch with its plan/tracker/doc edits and anything still unlanded) — closes PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE.
 
 ## Summary
 

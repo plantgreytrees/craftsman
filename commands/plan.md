@@ -1,6 +1,6 @@
 ---
 description: Planner — decompose a request into a lean, executable plan doc (docs/plans/<slug>.md), register its tracker rows, and hand off to the executor. Writes NO code; the only planner that persists docs.
-argument-hint: "<feature or list of features>"
+argument-hint: "<feature or list of features> [--level epic|story|feature]"
 model: sonnet
 allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand
 ---
@@ -15,7 +15,7 @@ Request: `$ARGUMENTS`
 
 If a prior `/understand` or `/investigate` analysis is already in this conversation (they auto-delegate to you), **build the plan from it** — reuse its findings; re-verify only what's stale. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md` for the optional-MCP conventions and the completeness-dimension checklist referenced below — read once, before Phase 0.
 
-**"Trivial"** = one file · one module · no shared-contract / exported-type change · no migration · no security-sensitive surface. For a trivial request, skip the decomposition-alternatives, extra review and blind-re-derivation steps — token waste at that size.
+**"Trivial"** = one file · one module · no shared-contract / exported-type change · no migration · no security-sensitive surface. For a trivial request, skip the decomposition-alternatives, extra review and blind-re-derivation steps.
 
 ## Phase 0 — Intake & analysis
 
@@ -29,7 +29,7 @@ If a prior `/understand` or `/investigate` analysis is already in this conversat
 
 ## Phase 1 — Write the plan
 
-Every plan must declare a one-sentence, user-visible `goal` in its frontmatter. Tracker rows render from the ledger (step 2): keep `module` terse; history belongs in the plan.
+Every plan declares a one-sentence user-visible `goal` plus `level`, `parent`, `children`, `priority` (plan-template.md). Keep `module` terse; history belongs in the plan.
 
 1. Write `docs/plans/<feature-slug>.md` from the **canonical template** — `${CLAUDE_PLUGIN_ROOT}/skills/language-aware-planning/references/plan-template.md`: machine-readable header (the `coverage:` map + scope-specific steps with stable `scope_id`, selected `project`, explicit `depends_on`, a per-step scope allow-list, and a tooling manifest naming *only* what that step needs, so the executor loads exactly those files, docs, checks, and skills and no more), then an executable core of atomic `[ ] N.N.N` tasks each with an inline `accept:` check, verification background placed AFTER the core. One doc per feature. **Persist Phase 0.2's blast-radius findings** into the Verification background as a `CONSUMERS:` block (contract → consumer list, `file:line`, per changed shared contract) — `/orchestrate` reads this instead of re-tracing the same contract. **`CHANGELOG.md`, if this change is user-facing/notable enough to warrant one: at most one task for it, sequenced LAST** (after every other unit's acceptance criteria, so it only fires once the change is confirmed staying — never a per-unit or speculative entry). If `## [Unreleased]` already carries an entry for the same or a connected feature (e.g. a follow-up plan finishing what an earlier plan started), that task **edits the existing bullet** to reflect the fuller picture rather than appending a new one — one entry per feature area, not one per plan.
 2. **Register execution rows via the ledger, never by hand** — per feature × module: `printf '%s' '{"action":"transition","plan":"docs/plans/<slug>.md","unit":"<id>","scope_id":"<sid>","goal":"<goal>","module":"<module>","status":"PENDING"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"`. It renders into the **main checkout's** `TRACKER.md` (even from a worktree), where the executor reads its work. If a feature conflicts with a locked / signed-off invariant or falls outside declared scope, **stop and flag the user** — don't silently plan it.
