@@ -129,3 +129,10 @@ test("orderSteps: sub step, then the parent's bump, then the consumer; no manife
   assert.deepEqual(orderSteps(steps).map(({ id }) => id), ["lib-change", "bump-lib", "consumer"]);
   assert.equal(validateSteps([step("lib-change", [], "lib")], { workspace: null }).length, 1);
 });
+
+test("ARCH-LAND-11: a bump step shares its submodule steps' feature", () => {
+  const feat = (s, feature) => ({ ...s, feature });
+  assert.equal(check([feat(step("lib-a", [], "lib"), "f1"), feat(bump("bump-lib", "lib", ["lib-a"], "app"), "f1")]).length, 2);
+  assert.throws(() => check([feat(step("lib-a", [], "lib"), "f1"), feat(bump("bump-lib", "lib", ["lib-a"], "app"), "f2")]), /share the feature/);
+  assert.throws(() => check([feat(step("lib-a", [], "lib"), "f1"), bump("bump-lib", "lib", ["lib-a"], "app")]), /share the feature/);
+});

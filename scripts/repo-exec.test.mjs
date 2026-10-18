@@ -910,3 +910,32 @@ test("repo-exec land-feature: new code never uses force flags", () => {
   const body = src.slice(src.indexOf("function landFeature"), src.indexOf("const PARK_DECISIONS"));
   assert.doesNotMatch(body, /--force|push["'`, ]+-f\b|reset["'`, ]+--hard|"-f"/);
 });
+
+// ARCH-LAND-12: pr mode, unit PRs target the feature branch; one feature PR targets base.
+test("repo-exec pr mode: a unit PR targets the feature branch, the feature PR targets base", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, base, rows, statuses } = landFeatureFixture(data);
+      fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true }, repoExec: { land: "pr", host: "github" } }));
+      git(context.root, ["commit", "-qam", "pr mode"]);
+      const unit = commitUnit(context, info, "pr-feat-unit");
+      const unitRun = fakeGh();
+      const landed = merge(context, { ...unit, unit: "pr-feat-unit", slug: "pr-feat-unit", feature_branch: "feature/p-f1" }, info, { runner: unitRun.runner });
+      assert.equal(landed.land, "pr");
+      assert.equal(landed.base_branch, "feature/p-f1");
+      assert.match(unitRun.calls.find((line) => line.startsWith("gh pr create")), /--base feature\/p-f1/);
+      assert.ok(!unitRun.calls.some((line) => line.includes(`--base ${base}`)));
+
+      writeLedger(context, rows, statuses.map(() => "FEATURE_MERGED"));
+      const featureRun = fakeGh();
+      const result = landFeature(context, { plan: "docs/plans/p.md", feature: "f1", session_id: "s" }, info, { runner: featureRun.runner });
+      assert.equal(result.land, "pr");
+      assert.equal(result.merged, false);
+      assert.equal(result.pr.url, "https://github.com/o/r/pull/12");
+      const create = featureRun.calls.find((line) => line.startsWith("gh pr create"));
+      assert.match(create, new RegExp(`--base ${base}`));
+      assert.match(create, /--head feature\/p-f1/);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
