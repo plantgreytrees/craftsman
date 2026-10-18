@@ -288,3 +288,15 @@ test("10.2 lint names the right file for a renamed slug and a duplicate slug", (
 test("lint: the repo's current plans pass", () => {
   assert.deepEqual(lintPlans(path.resolve(ROOT, "..")), []);
 });
+
+test("7.1 lintRules skips the source: check only for the init and backfill sentinels", () => {
+  const withSource = (src) => AUTH_RULES.replace(/^---\n/, `---\nsource: ${src}\n`);
+  const run = (src) => {
+    const dir = project({ "docs/architecture/auth.rules.md": withSource(src) });
+    try { return lintRules(dir, loadRules(dir)); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  };
+  assert.deepEqual(run("init"), []);
+  assert.deepEqual(run("backfill"), []);
+  assert.ok(run("docs/ideas/gone.md").some((e) => /source docs\/ideas\/gone\.md is missing/.test(e)));
+  assert.ok(run("gone").some((e) => /source gone is missing/.test(e)));
+});
