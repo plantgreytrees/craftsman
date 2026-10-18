@@ -4,6 +4,7 @@ import { join, basename } from "node:path";
 
 export const LEVELS = ["epic", "story", "feature"];
 const PRIORITIES = ["P0", "P1", "P2", "P3"];
+export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 const DERIVED = /^(scrutinise|investigate)-/;
 
 // ---- minimal YAML subset: maps, block lists, lists of maps, inline [a, b] ----
@@ -86,7 +87,8 @@ export function buildIndex(docs) {
     const fm = parseFrontmatter(doc.text);
     const slug = String(fm.slug || doc.slug || (doc.path ? slugOf(doc.path) : ""));
     if (!slug) throw new Error("plan doc without a slug");
-    if (nodes.has(slug)) throw new Error(`duplicate plan slug: ${slug}`);
+    if (!SLUG_RE.test(slug) || /^\.+$/.test(slug)) throw Object.assign(new Error(`invalid plan slug: ${JSON.stringify(slug)} must match ${SLUG_RE}`), { docPath: doc.path || null });
+    if (nodes.has(slug)) throw Object.assign(new Error(`duplicate plan slug: ${slug} (also ${nodes.get(slug).path || "an earlier doc"})`), { docPath: doc.path || null });
     const level = fm.level == null ? "feature" : String(fm.level);
     if (!LEVELS.includes(level)) throw new Error(`${slug}: invalid level '${level}'`);
     if (fm.priority != null && !PRIORITIES.includes(String(fm.priority))) throw new Error(`${slug}: invalid priority '${fm.priority}'`);

@@ -44,3 +44,15 @@ test("digest: empty ledger yields empty buckets, not an error", () => {
   const digest = buildDigest(selected);
   assert.deepEqual(digest, { done: [], decisions: [], next: [], plans: [] });
 });
+
+test("digest: FEATURE_MERGED rows count with the open work, not as complete", () => {
+  const selected = context();
+  transition({ plan: "docs/plans/a.md", unit: "unit-1", status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/a.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  transition({ plan: "docs/plans/a.md", unit: "unit-1", status: "FEATURE_MERGED", evidence: "sha1" }, selected);
+
+  const digest = buildDigest(selected);
+  assert.deepEqual(digest.next.map((r) => r.unit), ["unit-1"]);
+  assert.equal(digest.done.length, 0);
+  assert.equal(digest.plans[0].percent, 0);
+});

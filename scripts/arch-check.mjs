@@ -23,7 +23,7 @@
 // `--root <dir>` overrides the project root (defaults to the current project).
 import fs from "node:fs";
 import path from "node:path";
-import { buildIndex } from "./lib/plan-index.mjs";
+import { buildIndex, parseFrontmatter as parsePlanFrontmatter } from "./lib/plan-index.mjs";
 import { PROJECT_ROOT, globToRe, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
 
 export const DEFAULT_DIR = "docs/architecture";
@@ -234,12 +234,14 @@ export function lintPlans(root) {
   const dir = path.join(root, "docs", "plans");
   let names;
   try { names = fs.readdirSync(dir).filter((n) => n.endsWith(".md")).sort(); } catch { return []; }
-  let docs = names.map((n) => ({ path: `docs/plans/${n}`, slug: n.slice(0, -3), text: fs.readFileSync(path.join(dir, n), "utf8") }));
+  let docs = names.map((n) => ({ path: `docs/plans/${n}`, slug: n.slice(0, -3), text: fs.readFileSync(path.join(dir, n), "utf8") }))
+    .map((d) => ({ ...d, fmSlug: String(parsePlanFrontmatter(d.text).slug || d.slug) }));
   const errors = [];
   while (docs.length) {
     try { buildIndex(docs); break; } catch (e) {
       const slug = /^([^:\s]+):/.exec(e.message)?.[1] || /plan slug: (\S+)/.exec(e.message)?.[1];
-      const bad = docs.find((d) => d.slug === slug) || docs[0];
+      // Errors name the frontmatter slug, which may differ from the filename.
+      const bad = (e.docPath && docs.find((d) => d.path === e.docPath)) || docs.find((d) => d.fmSlug === slug) || docs[0];
       errors.push(`${bad.path}: ${e.message}`);
       docs = docs.filter((d) => d !== bad);
     }

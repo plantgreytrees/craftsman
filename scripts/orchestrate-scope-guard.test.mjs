@@ -201,3 +201,40 @@ test("orchestrate-scope-guard: /auto on an epic slug resolving to two features g
     assert.equal(fs.readFileSync(path.join(session, grants[0]), "utf8").trim(), "16");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ARCH-AUTO-08: --level/--feature reach plan-index resolve; the grant is every
+// resolved feature's units plus one extra per feature.
+function epicProject() {
+  const dir = tmpProject();
+  const plans = path.join(dir, "docs", "plans");
+  fs.mkdirSync(plans, { recursive: true });
+  fs.writeFileSync(path.join(plans, "big-epic.md"), "---\nslug: big-epic\nlevel: epic\nchildren: [feat-a, feat-b]\n---\n");
+  fs.writeFileSync(path.join(plans, "feat-a.md"), "---\nslug: feat-a\nparent: big-epic\nunits:\n  - id: a1\n  - id: a2\n---\n");
+  fs.writeFileSync(path.join(plans, "feat-b.md"), "---\nslug: feat-b\nparent: big-epic\nunits:\n  - id: b1\n---\n");
+  return dir;
+}
+function grantOf(dir, sid) {
+  const session = path.join(dir, ".craftsman", "sessions", sid);
+  const grants = fs.readdirSync(session).filter((f) => f.includes("runner"));
+  assert.equal(grants.length, 1, grants.join());
+  return Number(fs.readFileSync(path.join(session, grants[0]), "utf8").trim());
+}
+test("orchestrate-scope-guard: /auto --level epic over two features grants all units plus one per feature", () => {
+  const dir = epicProject();
+  try {
+    for (const [sid, args] of [["lvl-sp", "--level epic big-epic"], ["lvl-eq", "big-epic --level=epic"]]) {
+      assert.equal(run(dir, { session_id: sid, prompt: `/auto ${args}` }).status, 0);
+      assert.equal(grantOf(dir, sid), 3 * 8 + 2, args);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(dir, ".craftsman", "sessions", sid, "auto-active"), "utf8")).plan, "feat-a");
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test("orchestrate-scope-guard: --feature narrows the grant; a bare slug is unchanged", () => {
+  const dir = epicProject();
+  try {
+    run(dir, { session_id: "ft", prompt: "/auto big-epic --level epic --feature feat-b" });
+    assert.equal(grantOf(dir, "ft"), 8 + 1);
+    run(dir, { session_id: "bare", prompt: "/auto big-epic" });
+    assert.equal(grantOf(dir, "bare"), 16);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

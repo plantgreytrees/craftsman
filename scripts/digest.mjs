@@ -8,7 +8,7 @@ import { currentState } from "./tracker.mjs";
 
 const DONE_STATUSES = new Set(["COMPLETE", "MERGED"]);
 const DECISION_STATUSES = new Set(["BLOCKED", "PARKED"]);
-const NEXT_STATUSES = new Set(["PENDING", "IN_PROGRESS"]);
+const NEXT_STATUSES = new Set(["PENDING", "IN_PROGRESS", "FEATURE_MERGED"]);
 
 function byRecency(a, b) {
   return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);

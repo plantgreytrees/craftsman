@@ -205,3 +205,13 @@ test("init update stamps level: feature into canonical plans only, and a second 
 
   assert.deepEqual(buildUpdatePlan(root, { checkTools: false }).update.planChanges, []);
 });
+
+test("init update treats a FEATURE_MERGED tracker row as active", () => {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs", "plans", "feat.md"), "---\nslug: feat\nclassification: in-scope\n---\n\n- [x] 1.1 done\n");
+  fs.writeFileSync(path.join(root, "docs", "plans", "TRACKER.md"), "| 1 | [feat](./feat.md) | work | JS | normal | FEATURE_MERGED | feat | 2026-09-07 |\n");
+  const audit = buildUpdatePlan(root, { checkTools: false }).update.planAudit.find((p) => p.slug === "feat");
+  assert.deepEqual(audit.statuses, ["FEATURE_MERGED"]);
+  assert.equal(audit.active, true);
+});

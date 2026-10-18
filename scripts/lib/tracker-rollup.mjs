@@ -15,7 +15,12 @@ export function rollupBlock(text) {
 }
 
 export function rollupPath(root, slug) {
-  return path.join(root, "docs", "plans", slug, "TRACKER.md");
+  const base = path.resolve(root, "docs", "plans");
+  const file = path.resolve(base, String(slug), "TRACKER.md");
+  if (!/^[A-Za-z0-9._-]+$/.test(String(slug)) || String(slug).split(".").every((x) => x === "") || !file.startsWith(base + path.sep)) {
+    throw new Error(`refusing rollup path outside docs/plans for slug: ${JSON.stringify(slug)}`);
+  }
+  return file;
 }
 
 const STATUS_ORDER = ["PENDING", "IN_PROGRESS", "MERGED", "FEATURE_MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];

@@ -267,7 +267,7 @@ function trackerPlanState(root) {
   if (!fs.existsSync(file)) return states;
   for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
     const slug = line.match(/\[([^\]]+)\]\([^)]*\.md\)/)?.[1];
-    const status = line.match(/\b(IN_PROGRESS|BLOCKED|PARKED|PENDING|MERGED|COMPLETE)\b/)?.[1];
+    const status = line.match(/\b(FEATURE_MERGED|IN_PROGRESS|BLOCKED|PARKED|PENDING|MERGED|COMPLETE)\b/)?.[1];
     const date = line.match(/\b(20\d{2}-\d{2}-\d{2})\s*\|?\s*$/)?.[1] || "";
     if (!slug || !status) continue;
     const state = states.get(slug) || { statuses: new Set(), updated: "" };
@@ -290,7 +290,7 @@ function planDocuments(root, version) {
       const frontmatter = text.match(/^---\n([\s\S]*?)\n---\n/);
       const slug = frontmatter?.[1].match(/^slug:\s*([^\s#]+)/m)?.[1] || path.basename(entry.name, ".md");
       const state = states.get(slug) || { statuses: new Set(), updated: "" };
-      const active = [...state.statuses].some((status) => ["IN_PROGRESS", "BLOCKED", "PARKED", "PENDING"].includes(status));
+      const active = [...state.statuses].some((status) => ["FEATURE_MERGED", "IN_PROGRESS", "BLOCKED", "PARKED", "PENDING"].includes(status));
       const openTasks = (text.match(/^\s*- \[ \]/gm) || []).length;
       const canonical = Boolean(frontmatter);
       let updated = text;
