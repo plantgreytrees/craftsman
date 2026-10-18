@@ -313,7 +313,7 @@ scopable by feature, story or epic; and `merge` made a specialist that runs all 
    `/architect` open with its own scrutiny of the idea doc: re-verify every cited
    `file:line` and URL, re-run the overlap scan, and record what it disputes, rather than
    inheriting the verdict. Keep `/plan` on `sonnet` (execution-shaped, many runs).
-3. **Plans stay feature-based.** This idea does not touch the plan format, the tracker or
+3. **Plans stay feature-based (superseded: epic/story levels are now proposed in docs/ideas/plan-hierarchy.md; the plan format changes there).** This idea does not touch the plan format, the tracker or
    `scope_id` rules, because another session is changing them (`feature-branch-plans`).
    Everything here keys on a `slug` and treats the plan as an opaque feature doc.
 4. **Session focus (feature now; story and epic later).** Add a per-session `focus`
@@ -431,7 +431,7 @@ recommendations above are amended where these differ.
    `/clear` is shown to change it, fall back to keying on the Claude Code process (parent
    pid plus start time, as `worktree-sweep.mjs:68` already does for locks).
    `CRAFTSMAN_FOCUS=<kind>:<slug>` is accepted as a launch-time seed that wins when set.
-   Only `kind: feature` is accepted today; `story` and `epic` are rejected with "not yet
+   Only `kind: feature` is accepted today; `story` and `epic` are rejected with "not yet (the types are now specified in docs/ideas/plan-hierarchy.md)
    supported" until the other session defines them.
 6. **Merge has full git rights over registered repos, submodules, worktrees and branches.**
    `/craftsman:merge` gets `allowed-tools: Bash(git *), Bash(gh *), Bash(az *)` plus the
