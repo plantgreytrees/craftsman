@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { retire } from "./doc-retire.mjs";
+import { grantValid, retire } from "./doc-retire.mjs";
 import { archivePath, ledgerPath, transition } from "./tracker.mjs";
 
 const fixtures = new Set();
@@ -162,4 +162,94 @@ test("doc-retire: logs doc_retired {plan, sha, siblings}", () => {
   assert.equal(event.plan, PLAN);
   assert.equal(event.sha, out.sha);
   assert.deepEqual(event.siblings, [SIB]);
+});
+
+test("doc-retire: an uncommitted referrer refuses with no change", () => {
+  const context = repo({ files: { "notes.md": "plain\n" } });
+  fs.writeFileSync(path.join(context.root, "notes.md"), "see docs/plans/alpha.md\n");
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.deepEqual(out.referrers, ["notes.md"]);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: a staged referrer refuses with no change", () => {
+  const context = repo({ files: { "notes.md": "plain\n" } });
+  fs.writeFileSync(path.join(context.root, "notes.md"), "see docs/plans/alpha.md\n");
+  run(context.root, "add", "notes.md");
+  fs.writeFileSync(path.join(context.root, "notes.md"), "plain\n");
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.deepEqual(out.referrers, ["notes.md"]);
+  assert.deepEqual(snapshot(context), before);
+});
+
+test("doc-retire: an injected git failure refuses 'referrer scan failed' with no change", () => {
+  const context = repo();
+  const before = snapshot(context);
+  context.git = () => { throw Object.assign(new Error("boom"), { status: 128 }); };
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /referrer scan failed/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: a linked worktree refuses; a main checkout under a symlinked path does not", () => {
+  const context = repo();
+  const linked = path.join(context.root, "..", path.basename(context.root) + "-wt");
+  fixtures.add(linked);
+  run(context.root, "worktree", "add", "-q", "-b", "wt", linked);
+  const wtContext = { id: ".", root: linked, stateDir: path.join(linked, ".craftsman") };
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, wtContext);
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /run doc-retire from the main checkout/);
+  assert.deepEqual(snapshot(context), before);
+
+  const link = context.root + "-link";
+  fixtures.add(link);
+  try { fs.symlinkSync(context.root, link, "junction"); } catch { return; }
+  const viaLink = { id: ".", root: link, stateDir: path.join(link, ".craftsman") };
+  const res = retire({ plan: PLAN }, viaLink);
+  assert.equal(res.retired, PLAN, JSON.stringify(res));
+});
+
+test("doc-retire: grantValid honours pending ttl, session ttl and refuses malformed ttls", () => {
+  const now = 10_000_000;
+  const base = { now, pendingTtlMs: 1800000, ttlMs: 3600000, sessionMtime: null };
+  assert.equal(grantValid({ ...base, pendingMtime: now - 45 * 60000 }), false);
+  assert.equal(grantValid({ ...base, pendingMtime: now - 1000 }), true);
+  assert.equal(grantValid({ ...base, pendingMtime: now - 120000, pendingTtlMs: 60000 }), false);
+  assert.equal(grantValid({ ...base, pendingMtime: null, sessionMtime: now - 45 * 60000 }), true);
+  for (const bad of [0, -1, NaN, Infinity, "5", null]) {
+    assert.equal(grantValid({ ...base, pendingMtime: now, pendingTtlMs: bad }), false);
+    assert.equal(grantValid({ ...base, pendingMtime: now, ttlMs: bad }), false);
+  }
+});
+
+test("doc-retire: a 45-minute pending marker is refused, a fresh one accepted, even with the guard disabled", () => {
+  const context = repo();
+  const pending = path.join(context.stateDir, "doc-write-pending");
+  const old = new Date(Date.now() - 45 * 60000);
+  fs.utimesSync(pending, old, old);
+  const before = snapshot(context);
+  assert.match(retire({ plan: PLAN }, context).reason, /no doc-write grant/);
+  assert.deepEqual(snapshot(context), before);
+  fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { enabled: false, pendingTtlMs: 60000 } }));
+  const stale = new Date(Date.now() - 120000);
+  fs.utimesSync(pending, stale, stale);
+  assert.match(retire({ plan: PLAN }, context).reason, /no doc-write grant/);
+  const now = new Date();
+  fs.utimesSync(pending, now, now);
+  assert.equal(retire({ plan: PLAN }, context).retired, PLAN);
+});
+
+test("doc-retire: a malformed configured ttl refuses", () => {
+  const context = repo();
+  fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { pendingTtlMs: "soon" } }));
+  assert.match(retire({ plan: PLAN }, context).reason, /no doc-write grant/);
 });
