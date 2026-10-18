@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { cleanup, inspectRepo, merge, prepare, sync } from "./repo-exec.mjs";
+import { cleanup, inspectRepo, landUnit, merge, prepare, sync } from "./repo-exec.mjs";
 import { plainArgs } from "./lib/land.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
 
@@ -712,5 +712,82 @@ test("repo-exec: a base is never inferred from a feature/ branch", () => {
     const root = path.join(data.workspace, "one");
     git(root, ["checkout", "-q", "-b", "feature/x"]);
     assert.throws(() => inspectRepo({ id: ".", root }), /cannot infer a safe base/);
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// land-unit (ARCH-LAND-14): feature worktree + unit branch, real git, bare origin.
+function landUnitFixture(data) {
+  const context = projectContext("one");
+  
+  const { origin, base } = addOrigin(data.workspace, context.root);
+  const info = inspectRepo(context);
+  const feature = prepare(context, { unit: "feat-x", slug: "feat-x", branch: "feature/x" }, info);
+  git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/x"]);
+  return { context, info, feature, origin, base };
+}
+
+function landUnitBranch(context, info, feature, name, file, text) {
+  const unit = prepare(context, { unit: name, slug: name }, info);
+  fs.writeFileSync(path.join(unit.worktree_path, file), text);
+  git(unit.worktree_path, ["add", file]);
+  git(unit.worktree_path, ["commit", "-q", "-m", `feat: ${name}`]);
+  return unit;
+}
+
+test("repo-exec land-unit: happy path merges --no-ff, pushes the feature branch, deletes the unit branch", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, origin } = landUnitFixture(data);
+      const unit = landUnitBranch(context, info, feature, "u1", "u1.txt", "u1\n");
+      const result = landUnit(context, { unit: "u1", worktree_path: feature.worktree_path, unit_worktree: unit.worktree_path }, info);
+      assert.equal(result.merged, true);
+      assert.equal(result.pushed, true);
+      assert.equal(git(feature.worktree_path, ["branch", "--show-current"]), "feature/x");
+      assert.equal(git(feature.worktree_path, ["rev-list", "--parents", "-n", "1", "HEAD"]).split(" ").length, 3, "no-ff merge commit");
+      assert.equal(git(context.root, ["branch", "--list", "feat/u1"]), "");
+      assert.equal(fs.existsSync(unit.worktree_path), false);
+      assert.equal(git(origin, ["rev-parse", "feature/x"]), git(feature.worktree_path, ["rev-parse", "HEAD"]));
+      assert.ok(fs.existsSync(path.join(feature.worktree_path, "u1.txt")));
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-unit: a conflict PARKs with a decision, keeps the unit branch and leaves the feature clean", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature } = landUnitFixture(data);
+      const unit = landUnitBranch(context, info, feature, "u2", "shared.txt", "unit\n");
+      fs.writeFileSync(path.join(feature.worktree_path, "shared.txt"), "feature\n");
+      git(feature.worktree_path, ["add", "shared.txt"]);
+      git(feature.worktree_path, ["commit", "-q", "-m", "feat: feature side"]);
+      const before = git(feature.worktree_path, ["rev-parse", "HEAD"]);
+      const result = landUnit(context, { unit: "u2", worktree_path: feature.worktree_path }, info);
+      assert.equal(result.parked, true);
+      assert.equal(result.reason, "conflict");
+      assert.ok(result.decision.question && result.decision.options.length >= 2);
+      assert.equal(git(feature.worktree_path, ["status", "--porcelain"]), "");
+      assert.equal(git(feature.worktree_path, ["branch", "--show-current"]), "feature/x");
+      assert.equal(git(feature.worktree_path, ["rev-parse", "HEAD"]), before);
+      assert.ok(git(context.root, ["branch", "--list", "feat/u2"]));
+      assert.ok(fs.existsSync(unit.worktree_path));
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-unit: a red gate blocks, keeping the unit branch and a clean feature checkout", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature } = landUnitFixture(data);
+      landUnitBranch(context, info, feature, "u3", "u3.txt", "u3\n");
+      fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ stopGate: { commands: { "README.md": "false" } } }));
+      const before = git(feature.worktree_path, ["rev-parse", "HEAD"]);
+      assert.throws(() => landUnit(context, { unit: "u3", worktree_path: feature.worktree_path }, info), /pre-merge gate failed/);
+      assert.equal(git(feature.worktree_path, ["rev-parse", "HEAD"]), before);
+      assert.equal(git(feature.worktree_path, ["status", "--porcelain"]), "");
+      assert.ok(git(context.root, ["branch", "--list", "feat/u3"]));
+    });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });

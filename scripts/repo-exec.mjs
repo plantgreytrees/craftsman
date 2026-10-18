@@ -375,6 +375,63 @@ function landDetached(context, input, info, { worktree, branch }) {
   return cleanupAfterLanding(context, input, info, { ...result, merged: true });
 }
 
+// ARCH-LAND-14: a unit lands inside its feature's worktree (input.worktree_path):
+// gate re-run, feature branch checked out, unit branch merged --no-ff, feature
+// branch pushed, unit branch deleted. A conflict or refused push PARKs
+// (ARCH-LAND-06); a PARKED or BLOCKED unit keeps its branch and the feature
+// worktree is left clean on the feature branch.
+function landUnit(context, input, info) {
+  const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
+  if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
+  if (!input.unit && !input.branch) throw new Error("land-unit requires unit or branch");
+  const unitBranch = input.branch || `feat/${input.unit}`;
+  const feature = input.feature_branch || run(worktree, ["branch", "--show-current"]);
+  if (!feature) throw new Error("land-unit needs a feature branch: worktree is detached");
+  if (feature === unitBranch) throw new Error(`feature branch and unit branch are both ${feature}`);
+  if (!run(context.root, ["rev-parse", "--verify", "--quiet", `refs/heads/${unitBranch}`], { allowFailure: true })) {
+    throw new Error(`unit branch ${unitBranch} does not exist`);
+  }
+  if (run(worktree, ["status", "--porcelain"])) throw new Error("feature worktree is not clean before land-unit");
+  if (run(worktree, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) throw new Error("feature worktree has a merge in progress");
+  const gateDir = input.unit_worktree ? safeWorktree(context, input.unit_worktree, input.unit) : worktree;
+  verifyGateBeforeMerge(context, gateDir);
+  if (run(worktree, ["branch", "--show-current"]) !== feature) run(worktree, ["checkout", feature]);
+  const result = { ...info, base_branch: feature, branch: unitBranch, feature_branch: feature, land: "unit", merged: false, merged_locally: false, worktree_path: worktree };
+  let step = "conflict";
+  try {
+    run(worktree, ["merge", "--no-ff", "--no-edit", unitBranch]);
+    step = null;
+  } catch (error) {
+    run(worktree, ["merge", "--abort"], { allowFailure: true });
+    if (/untracked working tree files would be overwritten/.test(`${error?.stderr || ""}${error?.message || ""}`)) throw error;
+    logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "conflict" }, context);
+    return landingPark("conflict", result, error);
+  }
+  run(worktree, ["merge-base", "--is-ancestor", unitBranch, "HEAD"]);
+  const hasRemoteFeature = info.has_remote && input.push !== false;
+  if (hasRemoteFeature) {
+    try { run(worktree, ["push", "-u", "origin", feature]); }
+    catch (error) {
+      logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "rejected-push" }, context);
+      return landingPark("rejected-push", { ...result, merged_locally: true }, error);
+    }
+  }
+  if (input.unit_worktree && fs.existsSync(gateDir) && gateDir !== worktree) {
+    run(context.root, ["worktree", "remove", gateDir]);
+    forgetSessionWorktree(input, gateDir, context);
+  }
+  run(context.root, ["branch", "-D", unitBranch]); // merged into feature, verified above;
+  let remoteDeleted = false;
+  if (info.has_remote && run(context.root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${unitBranch}`], { allowFailure: true })) {
+    try {
+      execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", unitBranch], { stdio: "ignore", env: { ...process.env, LC_ALL: "C" } });
+      remoteDeleted = true;
+    } catch {}
+  }
+  logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: true, pushed: Boolean(hasRemoteFeature) }, context);
+  return { ...result, merged: true, merged_locally: true, pushed: Boolean(hasRemoteFeature), branch_deleted: true, remote_branch_deleted: remoteDeleted, cleaned: false };
+}
+
 // The four landing failures that PARK (ARCH-LAND-06): {parked:true, decision},
 // worktree and branch kept, recorded as tracker PARKED with the decision.
 const PARK_DECISIONS = {
@@ -491,8 +548,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (input.action === "prepare") result = prepare(context, input, info);
     else if (input.action === "sync") result = sync(context, input, info);
     else if (input.action === "merge") result = merge(context, input, info);
+    else if (input.action === "land-unit") result = landUnit(context, input, info);
     else if (input.action === "cleanup") result = cleanup(context, input, info);
-    else throw new Error("action must be inspect, prepare, sync, merge, or cleanup");
+    else throw new Error("action must be inspect, prepare, sync, merge, land-unit, or cleanup");
     process.stdout.write(JSON.stringify(result) + "\n");
   } catch (error) {
     process.stderr.write(`craftsman: repository execution failed: ${error.message}\n`);
@@ -500,4 +558,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 }
 
-export { inspectRepo, prepare, sync, merge, cleanup };
+export { inspectRepo, prepare, sync, merge, landUnit, cleanup };
