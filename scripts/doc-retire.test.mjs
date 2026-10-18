@@ -583,3 +583,44 @@ test("doc-retire 13.3: a rows-less sibling and a rows-less descendant each carry
   assert.equal(lookupArchive({ plan: SIB }, context).goal, "Sibling own goal");
   assert.equal(lookupArchive({ plan: "docs/plans/scrutinise-beta.md" }, context).goal, "Descendant own goal");
 });
+
+test("doc-retire 16.1: a column-0 comment inside the child list does not make the parent a referrer", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren:\n  - gamma\n# note\n  - beta\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  assert.ok(!fs.readFileSync(path.join(context.root, PLAN), "utf8").includes("beta"));
+});
+
+test("doc-retire 16.2: a sibling with rows writes its own goal; an unrelated stale rollup stays untouched", () => {
+  const context = repo({ goal: "Plan goal", files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta, gamma]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+    [SIB]: "---\ngoal: Sibling doc goal\n---\n# scrutinise alpha\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  // an unrelated stale rollup: an epic with its own committed (stale) rollup
+  const other = "docs/plans/zeta.md";
+  fs.writeFileSync(path.join(context.root, other), "---\nlevel: epic\nchildren: []\n---\n# zeta\n");
+  fs.mkdirSync(path.join(context.root, "docs/plans/zeta"), { recursive: true });
+  const stale = "<!-- craftsman:rollup:begin -->\nstale\n<!-- craftsman:rollup:end -->\n";
+  fs.writeFileSync(path.join(context.root, "docs/plans/zeta/TRACKER.md"), stale);
+  run(context.root, "add", "-A"); run(context.root, "commit", "-q", "-m", "zeta");
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/zeta/TRACKER.md"), "utf8"), stale);
+  assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+});
+
+test("doc-retire 16.2: a sibling that has rows archives under its own goal", () => {
+  const context = repo({ goal: "Shared goal", files: { [SIB]: "---\ngoal: Sibling doc goal\n---\n# scrutinise alpha\n" } });
+  const out = retire({ plan: PLAN, goal: "Explicit plan goal" }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  assert.equal(lookupArchive({ plan: SIB }, context).goal, "Shared goal");
+  assert.equal(lookupArchive({ plan: PLAN }, context).goal, "Explicit plan goal");
+});

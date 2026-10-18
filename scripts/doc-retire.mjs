@@ -113,7 +113,7 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: cannot read the plan hierarchy: ${error.message}`);
   }
 
-  // Rows-less siblings take their own doc's goal; read before the docs leave the tree.
+  // Every sibling takes its own goal (rows, else doc); read before the docs leave the tree.
   const siblingGoal = new Map(siblings.map((p) => [p, rowsOf(p).find((row) => row.goal)?.goal || planDocGoal(context, p) || path.posix.basename(p, ".md")]));
   const rollupOf = (s) => path.posix.join("docs/plans", s, "TRACKER.md");
   const rollup = rollupOf(slug);
@@ -128,7 +128,7 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: uncommitted changes in ${removing.join(", ")}`);
   }
 
-  // The parent's generated rollup and the `children:` list of its doc only describe the hierarchy; they are not referrers.
+  // The parent's generated rollup and the child list of its doc only describe the hierarchy; they are not referrers.
   const parentSlug = (() => { try { return loadIndex(context.root).get(slug)?.parent ?? null; } catch { return null; } })();
   const parentDoc = parentSlug ? path.posix.join(dir, `${parentSlug}.md`) : null;
   const parentRollup = parentSlug ? rollupOf(parentSlug) : null;
@@ -138,15 +138,14 @@ export function retire(input, context = projectContext(".")) {
     const index = loadIndex(context.root);
     for (let p = parentSlug; p; p = index.get(p)?.parent) ancestorRollups.push(rollupOf(p));
   } catch { /* the index check below decides */ }
+  // plan-index decides whether the parent still names the child; anything else mentioning it is a referrer.
   const onlyChildrenList = (file, targets) => {
     let text = "";
     try { text = fs.readFileSync(path.join(context.root, file), "utf8"); } catch { return false; }
-    const front = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(text);
-    if (!front) return false;
-    const body = front[2].replace(/^children:[^\n]*(?:\n(?:[ \t]+[^\n]*|-[^\n]*))*/m, "");
-    return !targets.some((t) => body.includes(t) || text.slice(front[0].length).includes(t));
+    const next = removeChild(text, slug);
+    return next !== null && !targets.some((t) => next.includes(t));
   };
-  // The parent's `children:` list drops this plan in the same commit so the index still loads (ARCH-TRACKER-10).
+  // The parent's child list drops this plan in the same commit so the index still loads (ARCH-TRACKER-10).
   let parentEdit = null;
   if (parentDoc && tryGit(context, ["ls-files", "--error-unmatch", "--", parentDoc]) !== null) {
     if (git(context, ["status", "--porcelain", "--", parentDoc]).trim()) {
@@ -182,6 +181,16 @@ export function retire(input, context = projectContext(".")) {
   const goal = input.goal || rowsOf(plan).find((row) => row.goal)?.goal || planDocGoal(context, plan) || slug;
   const landed_sha = input.landed_sha || doc_sha;
 
+  // Archiving re-renders every rollup; only the ancestors' are ours, so the rest are put back as found.
+  const ancestorSet = new Set(ancestorRollups);
+  const unrelated = (tryGit(context, ["ls-files", "--", "docs/plans/*/TRACKER.md"]) ?? "").split("\n").filter((f) => f && !ancestorSet.has(f) && !removing.includes(f))
+    .map((f) => { const file = path.join(context.root, f); try { return { file, text: fs.readFileSync(file, "utf8") }; } catch { return { file, text: null }; } });
+  const restoreUnrelated = () => {
+    for (const { file, text } of unrelated) {
+      if (text === null) fs.rmSync(file, { force: true });
+      else if (fs.readFileSync(file, "utf8") !== text) fs.writeFileSync(file, text);
+    }
+  };
   const backups = [ledgerPath(context), archivePath(context), trackerDocPath(context), ...ancestorRollups.map((r) => path.join(context.root, r))].map((file) => {
     let text = null;
     try { text = fs.readFileSync(file, "utf8"); } catch { /* absent */ }
@@ -204,7 +213,8 @@ export function retire(input, context = projectContext(".")) {
     }
     archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(plan) }, context);
     for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(d.plan) }, context);
-    for (const sibling of siblings) archivePlan({ plan: sibling, goal: rowsOf(sibling).length ? goal : siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, hierarchy: !rowsOf(sibling).length }, context);
+    for (const sibling of siblings) archivePlan({ plan: sibling, goal: siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, hierarchy: !rowsOf(sibling).length }, context);
+    restoreUnrelated();
     const extra = [archivePath(context), trackerDocPath(context), ...ancestorRollups.map((r) => path.join(context.root, r))]
       .filter((file) => fs.existsSync(file)).map((file) => path.relative(fs.realpathSync(trackerRoot(context)), file));
     git(context, ["add", "--", ...extra]);
@@ -222,6 +232,7 @@ export function retire(input, context = projectContext(".")) {
       if (text === null) fs.rmSync(file, { force: true });
       else fs.writeFileSync(file, text);
     }
+    try { restoreUnrelated(); } catch { /* best effort */ }
     return refuse(`retire refused: ${error.message}${restoreFailure}`);
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
