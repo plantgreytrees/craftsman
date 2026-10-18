@@ -631,3 +631,86 @@ test("repo-exec: a refused pr auto-merge parks the unit with a decision and keep
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
+
+// ---- feature worktrees (ARCH-LAND-09, -13, -16) ----
+
+function featureFixture() {
+  const data = fixture();
+  const root = path.join(data.workspace, "one");
+  fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true } }));
+  fs.mkdirSync(path.join(root, "docs", "plans", "epic1"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs", "plans", "plan-a.md"), "---\nslug: plan-a\nparent: epic1\n---\nplan\n");
+  fs.writeFileSync(path.join(root, "docs", "plans", "epic1.md"), "---\nslug: epic1\nlevel: epic\n---\nepic\n");
+  fs.writeFileSync(path.join(root, "docs", "plans", "epic1", "TRACKER.md"), "rollup\n");
+  git(root, ["add", "docs"]);
+  git(root, ["commit", "-q", "-m", "plans"]);
+  const { origin, base } = addOrigin(data.workspace, root);
+  return { ...data, root, origin, base };
+}
+
+// A session context rooted at a linked .claude/worktrees checkout.
+function linkedContext(data) {
+  const linked = path.join(data.root, ".claude", "worktrees", "sess");
+  git(data.root, ["worktree", "add", "-q", "-b", "worktree-sess", linked]);
+  fs.writeFileSync(path.join(linked, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true } }));
+  return { id: ".", root: linked, stateDir: path.join(linked, ".craftsman") };
+}
+
+test("repo-exec: feature prepare anchors at the main checkout, pushes the branch, and reattaches", () => {
+  const data = featureFixture();
+  try {
+    const context = linkedContext(data);
+    const info = inspectRepo(context);
+    const input = { plan: "docs/plans/plan-a.md", feature: "f1", unit: "u1" };
+    const first = prepare(context, input, info);
+    const expected = path.join(fs.realpathSync(data.root), ".worktrees", "plan-a-f1");
+    assert.equal(fs.realpathSync(first.worktree_path), expected);
+    assert.equal(first.branch, "feature/plan-a-f1");
+    assert.equal(first.reattached, false);
+    assert.equal(git(first.worktree_path, ["branch", "--show-current"]), "feature/plan-a-f1");
+    assert.equal(git(data.origin, ["rev-parse", "feature/plan-a-f1"]), git(first.worktree_path, ["rev-parse", "HEAD"]), "pushed at creation");
+    const second = prepare(context, { ...input, unit: "u2" }, info);
+    assert.equal(second.reattached, true);
+    assert.equal(second.worktree_path, first.worktree_path);
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: feature prepare is ignored while planning.featureBranches is off", () => {
+  const data = featureFixture();
+  try {
+    fs.writeFileSync(path.join(data.root, "craftsman.config.json"), "{}");
+    const context = { id: ".", root: data.root, stateDir: path.join(data.root, ".craftsman") };
+    const prepared = prepare(context, { plan: "plan-a", feature: "f1", unit: "u1", slug: "u1" }, inspectRepo(context));
+    assert.equal(prepared.branch, "feat/u1");
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: plan gate refuses a plan doc, parent or rollup that differs from origin, and passes when equal", () => {
+  const data = featureFixture();
+  try {
+    const context = { id: ".", root: data.root, stateDir: path.join(data.root, ".craftsman") };
+    const info = inspectRepo(context);
+    const input = { plan: "plan-a", feature: "f1", unit: "u1" };
+    for (const file of ["docs/plans/plan-a.md", "docs/plans/epic1.md", "docs/plans/epic1/TRACKER.md"]) {
+      const abs = path.join(data.root, file);
+      const before = fs.readFileSync(abs, "utf8");
+      fs.writeFileSync(abs, before + "edited\n");
+      assert.throws(() => prepare(context, input, info), /plan gate: .*differ/, file);
+      assert.equal(fs.existsSync(path.join(data.root, ".worktrees", "plan-a-f1")), false, "no worktree on refusal");
+      fs.writeFileSync(abs, before);
+    }
+    assert.equal(prepare(context, input, info).reattached, false);
+    const events = fs.readFileSync(path.join(data.root, ".craftsman", "events.jsonl"), "utf8");
+    assert.match(events, /"ev":"plan_gate"/);
+    assert.match(events, /"ev":"feature_worktree"/);
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: a base is never inferred from a feature/ branch", () => {
+  const data = fixture();
+  try {
+    const root = path.join(data.workspace, "one");
+    git(root, ["checkout", "-q", "-b", "feature/x"]);
+    assert.throws(() => inspectRepo({ id: ".", root }), /cannot infer a safe base/);
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
