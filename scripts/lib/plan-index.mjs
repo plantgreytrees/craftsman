@@ -76,6 +76,43 @@ export function parseFrontmatter(text) {
   return Array.isArray(parsed) ? {} : parsed;
 }
 
+// Drops `slug` from the front-matter `children:` value, in every form parseFrontmatter reads
+// (inline list, scalar, block items; comments kept). Returns the new text, or null when nothing changes.
+export function removeChild(text, slug) {
+  const front = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(String(text));
+  if (!front) return null;
+  const lines = front[2].split("\n");
+  const code = (l) => stripComment(l.replace(/\r$/, "")).replace(/\s+$/, "");
+  const at = lines.findIndex((l) => /^children:(\s|$)/.test(code(l)));
+  if (at < 0) return null;
+  const eol = lines[at].endsWith("\r") ? "\r" : "";
+  const head = code(lines[at]);
+  const comment = lines[at].replace(/\r$/, "").slice(head.length);
+  const value = head.slice("children:".length).trim();
+  const matches = (v) => slugOf(scalar(v)) === slug;
+  let next;
+  if (value !== "") {
+    const items = asList(scalar(value)).map(String);
+    const kept = items.filter((v) => slugOf(v) !== slug);
+    if (kept.length === items.length) return null;
+    next = [...lines.slice(0, at), `children: [${kept.join(", ")}]${comment}${eol}`, ...lines.slice(at + 1)];
+  } else {
+    let end = at + 1;
+    const drop = [];
+    for (; end < lines.length; end++) {
+      const c = code(lines[end]).trim();
+      if (c === "" ) continue;
+      if (!(c === "-" || c.startsWith("- "))) break;
+      if (matches(c.slice(1).trim())) drop.push(end);
+    }
+    if (!drop.length) return null;
+    const rest = lines.slice(at + 1, end).filter((_, i) => !drop.includes(at + 1 + i));
+    const remaining = rest.some((l) => code(l).trim() !== "");
+    next = [...lines.slice(0, at), ...(remaining ? [lines[at], ...rest] : [`children: []${comment}${eol}`, ...rest]), ...lines.slice(end)];
+  }
+  return front[1] + next.join("\n") + front[3] + String(text).slice(front[0].length);
+}
+
 const slugOf = (ref) => basename(String(ref).trim(), ".md");
 const asList = (v) => (Array.isArray(v) ? v : v == null || v === "" ? [] : [v]);
 

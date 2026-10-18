@@ -489,3 +489,97 @@ test("doc-retire: a rows-less derived descendant is judged like a rows-less sibl
   const archive = fs.readFileSync(archivePath(context), "utf8");
   assert.match(archive, /## docs\/plans\/scrutinise-beta\.md \(.*\) — .* · doc \S+ · landed \S+/);
 });
+
+test("doc-retire 13.1: retiring a child commits the parent's rollup and doc, leaves the tree clean, and the parent retires later", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta, gamma]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+  assert.ok(run(context.root, "show", "--name-status", "--format=", "HEAD").includes("M\tdocs/plans/alpha/TRACKER.md"));
+  assert.ok(!/beta/.test(fs.readFileSync(path.join(context.root, "docs/plans/alpha/TRACKER.md"), "utf8").replace(/Counts[^\n]*/g, "")));
+});
+
+test("doc-retire 13.1: a retired child leaves a parent that can itself be retired", () => {
+  const context = repo({ files: { [PLAN]: EPIC, "docs/plans/beta.md": CHILD } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  assert.equal(retire({ plan: "docs/plans/beta.md" }, context).retired, "docs/plans/beta.md");
+  fs.mkdirSync(context.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(context.stateDir, "doc-write-pending"), "granted\n");
+  const next = retire({ plan: PLAN }, context);
+  assert.equal(next.retired, PLAN, JSON.stringify(next));
+});
+
+test("doc-retire 13.1: a forced git add failure leaves the parent doc and rollup unchanged", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta, gamma]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const rollup = path.join(context.root, "docs/plans/alpha/TRACKER.md");
+  const before = { doc: fs.readFileSync(path.join(context.root, PLAN), "utf8"), rollup: fs.readFileSync(rollup, "utf8"), snap: snapshot(context) };
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-fakegit-"));
+  fixtures.add(bin);
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\ncase " $* " in *" add "*docs/plans/alpha/TRACKER.md*) echo forced >&2; exit 1;; esac\nexec ${realGit} "$@"\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  let out;
+  try { out = retire({ plan: "docs/plans/beta.md" }, context); } finally { process.env.PATH = oldPath; }
+  assert.ok(out.refused, JSON.stringify(out));
+  assert.equal(fs.readFileSync(path.join(context.root, PLAN), "utf8"), before.doc);
+  assert.equal(fs.readFileSync(rollup, "utf8"), before.rollup);
+  assert.deepEqual(snapshot(context), before.snap);
+});
+
+test("doc-retire 13.2: a parent with a trailing comment on children: is healed", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta, gamma] # kids\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  assert.deepEqual(loadIndex(context.root).get("alpha").children, ["gamma"]);
+  assert.ok(fs.readFileSync(path.join(context.root, PLAN), "utf8").includes("children: [gamma] # kids"));
+});
+
+test("doc-retire 13.2: a loadIndex failure after the edit is refused with an unchanged snapshot", () => {
+  // delta names alpha as parent but is not listed: removing beta leaves an index that cannot load.
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta, delta]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/delta.md": "---\nparent: alpha\nlevel: epic\n---\n# delta\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const before = snapshot(context);
+  const doc = fs.readFileSync(path.join(context.root, PLAN), "utf8");
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.ok(out.refused, JSON.stringify(out));
+  assert.deepEqual(snapshot(context), before);
+  assert.equal(fs.readFileSync(path.join(context.root, PLAN), "utf8"), doc);
+});
+
+test("doc-retire 13.3: a rows-less sibling and a rows-less descendant each carry their own doc's goal", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD,
+    [SIB]: "---\ngoal: Sibling own goal\n---\n# scrutinise alpha\n",
+    "docs/plans/scrutinise-beta.md": "---\nparent: beta\ngoal: Descendant own goal\n---\n# scrutinise beta\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  const kept = fs.readFileSync(ledgerPath(context), "utf8").split("\n").filter((l) => l && !l.includes("scrutinise-alpha"));
+  fs.writeFileSync(ledgerPath(context), kept.join("\n") + "\n");
+  settle(context);
+  const out = retire({ plan: PLAN, goal: "Plan goal" }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  assert.equal(lookupArchive({ plan: SIB }, context).goal, "Sibling own goal");
+  assert.equal(lookupArchive({ plan: "docs/plans/scrutinise-beta.md" }, context).goal, "Descendant own goal");
+});
