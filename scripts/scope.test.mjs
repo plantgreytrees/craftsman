@@ -112,3 +112,35 @@ test("scope: a session with no worktree falls back to the session scope", () => 
     assert.equal(hook("pre-guard.mjs", root, root, edit("s2", path.join(root, "d.txt"))).status, 2);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// ARCH-STATE-09: one shared feature worktree, units run one after another.
+test("scope: activating unit B in a shared worktree replaces unit A's scope", () => {
+  const { root, trees: [w] } = repoWithWorktrees("feature");
+  const dir = path.join(root, ".craftsman", "sessions", "s4");
+  const scopeFiles = () => fs.readdirSync(dir).filter((n) => n.startsWith("scope") && !n.startsWith("scope-required"));
+  try {
+    assert.equal(hook("scope.mjs", w, root, manifest("s4", "unit-a", ["a.txt"], w)).status, 0);
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s4", path.join(w, "a.txt"))).status, 0);
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s4", path.join(w, "b.txt"))).status, 2);
+    assert.equal(hook("scope.mjs", w, root, manifest("s4", "unit-b", ["b.txt"], w)).status, 0);
+    assert.equal(scopeFiles().length, 1, "same worktree key: one scope file");
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s4", path.join(w, "a.txt"))).status, 2, "a.txt now blocked");
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s4", path.join(w, "b.txt"))).status, 0, "b.txt now allowed");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("scope: release between units in a shared worktree clears the scope", () => {
+  const { root, trees: [w] } = repoWithWorktrees("feature");
+  const dir = path.join(root, ".craftsman", "sessions", "s5");
+  const scopeFiles = () => fs.readdirSync(dir).filter((n) => n.startsWith("scope"));
+  try {
+    assert.equal(hook("scope.mjs", w, root, manifest("s5", "unit-a", ["a.txt"], w)).status, 0);
+    assert.equal(hook("scope.mjs", root, root, { action: "release", session_id: "s5", project: ".", worktree_path: w }).status, 0);
+    assert.equal(scopeFiles().length, 0, "release removes unit-a's scope");
+    assert.equal(hook("scope.mjs", w, root, { action: "require", session_id: "s5", worktree_path: w }).status, 0);
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s5", path.join(w, "a.txt"))).status, 2, "armed, no scope: blocked");
+    assert.equal(hook("scope.mjs", w, root, manifest("s5", "unit-b", ["b.txt"], w)).status, 0);
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s5", path.join(w, "b.txt"))).status, 0);
+    assert.equal(hook("pre-guard.mjs", w, root, edit("s5", path.join(w, "a.txt"))).status, 2);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
