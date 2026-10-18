@@ -159,3 +159,19 @@ test("wiring: both engines follow agents/unit-runner.md and fall back to subagen
     assert.match(text, /Workflow unavailable → `subagent`[^.]*never silently `root`/, file);
   }
 });
+
+test("wiring: sync-docs points at _sync-docs-prune, which keeps the archive/prune safeguards (ARCH-DOCS-04/05)", () => {
+  const main = fs.readFileSync(path.join(PLUGIN_ROOT, "commands/sync-docs.md"), "utf8");
+  const prune = fs.readFileSync(path.join(PLUGIN_ROOT, "commands/_sync-docs-prune.md"), "utf8");
+  assert.match(main, /--archive\b.*--prune/);
+  assert.match(main, /_sync-docs-prune\.md/);
+  assert.match(prune, /--archive/);
+  assert.match(prune, /--prune/);
+  assert.match(prune, /doc-retire\.mjs/);
+  assert.match(prune, /Dry run first/);
+  assert.match(prune, /at most 15 docs/);
+  assert.match(prune, /Skip list.*ledger row, a claim or a hand-off/);
+  assert.match(prune, /only when the user names it/);
+  assert.match(prune, /index heading/);
+  assert.match(prune, /`\/goal` or any pre-approval does \*\*not\*\* cover/);
+});
