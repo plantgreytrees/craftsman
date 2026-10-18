@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { orderSteps, validateSteps, waves } from "./plan-graph.mjs";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { orderSteps, tagFeatures, validateSteps, waves } from "./plan-graph.mjs";
 
 const step = (id, depends_on = [], project = "repo-a") => ({ id, scope_id: id, project, depends_on });
 
@@ -55,7 +60,8 @@ test("validateSteps: steps without a feature share one implicit feature", () => 
   const plain = (id, depends_on = []) => ({ id, scope_id: id, depends_on });
   const steps = [plain("a", ["c"]), plain("b"), plain("c")];
   assert.equal(validateSteps(steps, NO_WS).length, 3);
-  assert.throws(() => validateSteps(steps, { ...NO_WS, featureUnitCap: 2 }), /implicit/);
+  assert.throws(() => validateSteps(steps, { ...NO_WS, featureUnitCap: 2, featureBranches: true }), /implicit/);
+  assert.equal(validateSteps(steps, { ...NO_WS, featureUnitCap: 2 }).length, 3, "implicit feature uncapped without featureBranches");
 });
 
 const ids = (batches) => batches.map((b) => b.map((s) => s.id));
@@ -79,4 +85,34 @@ test("waves: cap 2 splits steps with overlapping writes", () => {
 test("waves: cap 2 splits dependent steps", () => {
   const steps = [fstep("a", "f", [], ["x"]), fstep("b", "f", ["a"], ["y"])];
   assert.deepEqual(ids(waves(steps, { maxSubagents: 2 })), [["a"], ["b"]]);
+});
+
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "plan-graph.mjs");
+const runCli = (input, config) => {
+  const dir = fs.mkdtempSync(path.join(os.homedir(), ".plan-graph-test-"));
+  try {
+    if (config) fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify(config));
+    return spawnSync("node", [CLI], { input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir }, cwd: dir });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+};
+const nine = Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, scope_id: `s${i}`, depends_on: [] }));
+
+test("cli: 9 untagged steps pass by default, fail with featureBranches, and a configured cap is read", () => {
+  assert.equal(runCli({ steps: nine }).status, 0);
+  const capped = runCli({ steps: nine }, { planning: { featureBranches: true } });
+  assert.equal(capped.status, 2);
+  assert.match(capped.stderr, /cap of 8/);
+  const three = runCli({ steps: nine.slice(0, 4) }, { planning: { featureBranches: true, featureUnitCap: 3 } });
+  assert.match(three.stderr, /cap of 3/);
+});
+
+test("cli: accepts the field set orchestrate.md sends (id, scope_id, project, depends_on, bumps, feature)", () => {
+  const r = runCli({ steps: [{ id: "a", scope_id: "a", project: ".", depends_on: [], feature: "f" }] });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("tagFeatures: takes membership from a plan's features groups, leaving explicit tags", () => {
+  const groups = [{ id: "one", units: ["a"] }, { id: "two", units: ["b"] }, { id: "slug", units: ["c"], implicit: true }];
+  const out = tagFeatures([{ id: "a" }, { id: "b", feature: "x" }, { id: "c" }], groups);
+  assert.deepEqual(out.map((s) => s.feature), ["one", "x", undefined]);
 });
