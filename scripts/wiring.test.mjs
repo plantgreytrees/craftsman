@@ -168,6 +168,8 @@ test("wiring: sync-docs points at _sync-docs-prune, which keeps the archive/prun
   assert.match(prune, /--archive/);
   assert.match(prune, /--prune/);
   assert.match(prune, /doc-retire\.mjs/);
+  assert.match(prune, /"plan":"docs\/plans\/<slug>\.md"/);
+  assert.match(prune, /action `status`, not `lookup`/);
   assert.match(prune, /Dry run first/);
   assert.match(prune, /at most 15 docs/);
   assert.match(prune, /Skip list.*ledger row, a claim or a hand-off/);
