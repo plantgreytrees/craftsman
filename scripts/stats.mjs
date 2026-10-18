@@ -2,7 +2,53 @@
 // /craftsman:stats — cost/benefit report. Shows how often each gate blocks
 // and how long it takes, so you can delete the layers that don't earn their
 // tokens. This is the empirical answer to "which tools pay for themselves?".
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { loadConfig, readEvents, topRules } from "./lib/core.mjs";
+
+// Event type -> hook script whose hooks.json timeout bounds it (ARCH-SLIM-07).
+const EV_SCRIPT = { gate: "quality-gate.mjs", preguard: "pre-guard.mjs", stop: "stop-gate.mjs" };
+const SMALL_N = 20;
+const BUDGET = 0.8;
+
+export function pct(arr, p) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
+}
+
+export function hookTimeouts(file = fileURLToPath(new URL("../hooks/hooks.json", import.meta.url))) {
+  const out = {};
+  try {
+    const hooks = JSON.parse(fs.readFileSync(file, "utf8")).hooks || {};
+    for (const groups of Object.values(hooks)) for (const g of groups) for (const h of g.hooks || []) {
+      for (const script of Object.values(EV_SCRIPT)) {
+        if (String(h.command).includes(`/${script}`) && typeof h.timeout === "number") out[script] = h.timeout;
+      }
+    }
+  } catch { /* no hooks.json: nothing to flag against */ }
+  return out;
+}
+
+// p50/p95 per event type carrying numeric `ms`; flags p95 > 80% of timeout.
+export function latencySection(events, timeouts = hookTimeouts()) {
+  const byEv = new Map();
+  for (const e of events) {
+    if (typeof e.ms !== "number") continue;
+    if (!byEv.has(e.ev)) byEv.set(e.ev, []);
+    byEv.get(e.ev).push(e.ms);
+  }
+  const lines = [`Hook latency (nearest-rank): ${byEv.size} event types with ms`];
+  if (!byEv.size) lines.push("  No latency samples yet.");
+  for (const [ev, arr] of byEv) {
+    const p95 = pct(arr, 95);
+    const small = arr.length < SMALL_N ? " n<20" : "";
+    const limit = (timeouts[EV_SCRIPT[ev]] || 0) * 1000;
+    const flag = limit && p95 > BUDGET * limit ? ` FLAG p95 over ${BUDGET * 100}% of ${limit / 1000}s timeout` : "";
+    lines.push(`  ${String(ev).padEnd(12)} n=${arr.length} · p50 ${pct(arr, 50)}ms · p95 ${p95}ms${small}${flag}`);
+  }
+  return lines.join("\n");
+}
 
 // Root context per run (ARCH-MOD-03): one row per session from its
 // {ev:"context"} samples, in first-seen order.
@@ -37,12 +83,6 @@ function main() {
   const events = readEvents();
   if (!events.length) { console.log("No craftsman events yet. Do some work, then re-run."); return; }
 
-  function pct(arr, p) {
-    if (!arr.length) return 0;
-    const s = [...arr].sort((a, b) => a - b);
-    return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
-  }
-
   const gate = events.filter((e) => e.ev === "gate");
   const stop = events.filter((e) => e.ev === "stop");
   const pre = events.filter((e) => e.ev === "preguard");
@@ -64,6 +104,8 @@ function main() {
   console.log(`  block rate (new issues found): ${blockRate}%`);
   const cacheRate = gate.length ? Math.round((100 * (gr.cached || 0)) / gate.length) : 0;
   console.log(`  cache hit rate: ${cacheRate}%\n`);
+
+  console.log(`${latencySection(events)}\n`);
 
   console.log(`PreToolUse protected-path blocks: ${pre.length}`);
   console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);

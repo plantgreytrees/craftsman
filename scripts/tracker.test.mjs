@@ -321,3 +321,24 @@ test("tracker: FEATURE_MERGED needs ticked criteria, is never auto-promoted, car
   assert.equal(row.feature_branch, "feat/f1");
   assert.equal(transition({ plan, unit: "u1", status: "COMPLETE", evidence: "landing sha" }, selected).status, "COMPLETE");
 });
+
+// ARCH-TRACKER-10: rollups follow descendant transitions; the root block is untouched.
+test("tracker: a descendant transition re-renders the rollups and leaves the root block unchanged", async () => {
+  const { syncRollups } = await import("./tracker.mjs");
+  const selected = context();
+  fs.mkdirSync(path.join(selected.root, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(path.join(selected.root, "docs", "plans", "e.md"), "---\nslug: e\nlevel: epic\nchildren: [f]\n---\n");
+  fs.writeFileSync(path.join(selected.root, "docs", "plans", "f.md"), "---\nslug: f\nparent: e\nunits:\n  - id: u\n---\n");
+  const base = { plan: "docs/plans/f.md", unit: "u", goal: "g" };
+  transition({ ...base, status: "PENDING" }, selected);
+  const rollup = path.join(selected.root, "docs", "plans", "e", "TRACKER.md");
+  assert.match(fs.readFileSync(rollup, "utf8"), /Status: PENDING/);
+  const rootBefore = generatedBlock(fs.readFileSync(trackerDocPath(selected), "utf8"));
+  assert.equal(rootBefore, renderBlock(currentState(selected)));
+  transition({ ...base, status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  assert.match(fs.readFileSync(rollup, "utf8"), /Status: IN_PROGRESS/);
+  assert.equal(generatedBlock(fs.readFileSync(trackerDocPath(selected), "utf8")), renderBlock(currentState(selected)));
+  fs.writeFileSync(rollup, "stale");
+  assert.equal(syncRollups(selected).changed, true);
+  assert.match(fs.readFileSync(rollup, "utf8"), /Status: IN_PROGRESS/);
+});
