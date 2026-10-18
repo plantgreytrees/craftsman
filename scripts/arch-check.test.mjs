@@ -126,6 +126,19 @@ test("lintRules: passes a well-formed pair; catches stale cites, duplicates, mis
   } finally { fs.rmSync(bad, { recursive: true, force: true }); }
 });
 
+test("5.1 lintRules fails a rules doc whose source: file is missing, naming the path", () => {
+  const withSource = (src) => AUTH_RULES.replace(/^---\n/, `---\nsource: ${src}\n`);
+  const bad = project({ "docs/architecture/auth.rules.md": withSource("docs/ideas/gone.md") });
+  try {
+    const errors = lintRules(bad, loadRules(bad));
+    assert.ok(errors.some((e) => /auth\.rules\.md: source docs\/ideas\/gone\.md is missing/.test(e)), errors.join("\n"));
+  } finally { fs.rmSync(bad, { recursive: true, force: true }); }
+  const good = project({ "docs/architecture/auth.rules.md": withSource("docs/ideas/here.md"), "docs/ideas/here.md": "# idea\n" });
+  try {
+    assert.deepEqual(lintRules(good, loadRules(good)), []);
+  } finally { fs.rmSync(good, { recursive: true, force: true }); }
+});
+
 test("unmanagedDocs: lists unpaired prose (nested too), never the pairs, README, or rules files", () => {
   const dir = project({
     "docs/architecture/README.md": "# Index\n",

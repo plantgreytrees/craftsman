@@ -94,7 +94,7 @@ export function parseRulesDoc(rel, text) {
     });
   });
   if (!rules.length) errors.push(`${rel}: no rule lines (\`- **ARCH-<AREA>-NN** [decided] ...\`)`);
-  return { file: rel, area: fm?.area || null, governs, human: fm?.human ? norm(fm.human) : null, rules, errors };
+  return { file: rel, area: fm?.area || null, governs, human: fm?.human ? norm(fm.human) : null, source: fm?.source ? norm(String(fm.source)) : null, rules, errors };
 }
 
 export function rulesDirFor(root, cfg) {
@@ -214,6 +214,7 @@ export function lintRules(root, docs, dir = DEFAULT_DIR) {
         else if (cite.to > lines) errors.push(`${doc.file}:${rule.line}: ${rule.id} cites ${cite.file}:${cite.to}, past its ${lines} lines`);
       }
     }
+    if (doc.source && !fs.existsSync(path.join(root, doc.source))) errors.push(`${doc.file}: source ${doc.source} is missing`);
     const human = doc.human || doc.file.replace(/\.rules\.md$/, ".md");
     if (!fs.existsSync(path.join(root, human))) errors.push(`${doc.file}: human doc ${human} is missing`);
   }
