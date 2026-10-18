@@ -95,3 +95,10 @@ test("1.3 epic resolves children: order, else priority then slug; descendantSlug
   const auto = buildIndex([doc("e", "level: epic\n"), doc("z", "parent: e\npriority: P1\n"), doc("b", "parent: e\npriority: P1\n"), doc("a", "parent: e\npriority: P0\n")]);
   assert.deepEqual(auto.get("e").children, ["a", "b", "z"]);
 });
+
+test("10.1 buildIndex refuses a frontmatter slug that could leave docs/plans", () => {
+  for (const bad of ["../..", "a/b", "..", "a b"]) {
+    assert.throws(() => buildIndex([{ path: "docs/plans/x.md", slug: "x", text: `---\nslug: "${bad}"\n---\n` }]), /invalid plan slug/, bad);
+  }
+  assert.doesNotThrow(() => buildIndex([doc("ok.v1_2-x")]));
+});
