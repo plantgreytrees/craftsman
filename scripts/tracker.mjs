@@ -468,7 +468,8 @@ export function archivePlan(input, context = projectContext(".")) {
   const file = ledgerPath(context);
   const archived = withLock(file, () => {
     const rows = currentState(context).filter((row) => row.plan === input.plan);
-    if (!rows.length) throw new Error(`archive refused: no tracker rows for ${input.plan}`);
+    // An epic or story with no rows is vacuously closed; doc-retire vouches for it with `hierarchy`.
+    if (!rows.length && input.hierarchy !== true) throw new Error(`archive refused: no tracker rows for ${input.plan}`);
     const open = rows.filter((row) => !["COMPLETE", "CANCELLED"].includes(row.status));
     if (open.length) throw new Error(`archive refused: ${open.map((r) => `${r.unit}=${r.status}`).join(", ")} not COMPLETE or CANCELLED`);
     const keys = new Set(rows.map((row) => row.key));

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { grantValid, retire } from "./doc-retire.mjs";
-import { archivePath, ledgerPath, transition } from "./tracker.mjs";
+import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
 
 const fixtures = new Set();
 afterEach(() => {
@@ -347,4 +347,77 @@ test("doc-retire: a goal-less row still writes the full heading, goal from front
     const archive = fs.readFileSync(archivePath(context), "utf8");
     assert.ok(archive.includes(`## ${PLAN} (${date}) — ${want} · doc ${docSha} · landed ${docSha}`), archive);
   }
+});
+
+const EPIC = "---\nlevel: epic\nchildren: [beta]\n---\n# alpha\n";
+const CHILD = "---\nparent: alpha\n---\n# beta\n";
+function addBetaRows(context, status) {
+  const beta = "docs/plans/beta.md";
+  transition({ plan: beta, unit: "u1", goal: "Ship beta", status: "PENDING" }, context);
+  if (status === "PENDING") return;
+  transition({ plan: beta, unit: "u1", status: "IN_PROGRESS", evidence: "claimed" }, context);
+  if (status === "IN_PROGRESS") return;
+  transition({ plan: beta, unit: "u1", status: "MERGED", evidence: "abc" }, context);
+  transition({ plan: beta, unit: "u1", status: "COMPLETE", evidence: "abc" }, context);
+}
+// Transitions regenerate rollups in the tree; commit them so the tree is clean.
+const settle = (context) => { run(context.root, "add", "-A"); try { run(context.root, "commit", "-q", "-m", "rollups"); } catch { /* nothing to commit */ } };
+
+test("doc-retire: an epic with a COMPLETE child retires both docs and both rollups in one commit", () => {
+  const files = {
+    [PLAN]: EPIC, "docs/plans/beta.md": CHILD,
+    "docs/plans/alpha/TRACKER.md": "alpha rollup\nbeta\n", "docs/plans/beta/TRACKER.md": "beta rollup\n",
+  };
+  const context = repo({ files });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  const gone = run(context.root, "show", "--name-status", "--format=", "HEAD");
+  for (const f of [PLAN, SIB, "docs/plans/beta.md", "docs/plans/alpha/TRACKER.md", "docs/plans/beta/TRACKER.md"]) {
+    assert.ok(gone.includes(`D\t${f}`), `${f} in ${gone}`);
+  }
+  assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+  const archive = fs.readFileSync(archivePath(context), "utf8");
+  assert.match(archive, /## docs\/plans\/beta\.md \(.*\) — Ship beta · doc \S+ · landed \S+/);
+  assert.equal(fs.readFileSync(ledgerPath(context), "utf8").trim(), "");
+});
+
+test("doc-retire: an epic with an open child is refused naming it", () => {
+  const context = repo({ files: { [PLAN]: EPIC, "docs/plans/beta.md": CHILD } });
+  addBetaRows(context, "IN_PROGRESS");
+  settle(context);
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /live descendants: beta/);
+  assert.deepEqual(snapshot(context), before);
+});
+
+test("doc-retire: a child is not refused for its parent's rollup or children list", () => {
+  const context = repo({
+    files: {
+      [PLAN]: EPIC, "docs/plans/beta.md": CHILD,
+      "docs/plans/alpha/TRACKER.md": "rollup mentions docs/plans/beta.md\n",
+    },
+  });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: a rows-less epic archives with the full heading and lookup round-trips", () => {
+  const context = repo({ files: { [PLAN]: EPIC.replace("children: [beta]\n", ""), "docs/plans/alpha/TRACKER.md": "r\n" } });
+  fs.rmSync(ledgerPath(context), { force: true });
+  settle(context);
+  const docSha = run(context.root, "rev-parse", "HEAD").trim();
+  const out = retire({ plan: PLAN, goal: "Ship the epic" }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  assert.ok(!fs.existsSync(path.join(context.root, "docs/plans/alpha/TRACKER.md")));
+  const found = lookupArchive({ plan: PLAN }, context);
+  assert.equal(found.doc, docSha);
+  assert.equal(found.goal, "Ship the epic");
+  assert.equal(found.landed, docSha);
 });
