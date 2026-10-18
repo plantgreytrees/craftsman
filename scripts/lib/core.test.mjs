@@ -15,6 +15,7 @@ import {
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
   renderKnownIssuesDoc, gitTrackedFiles, pruneSessions, recordFailure, topRules,
   writeRootPin, rootPinPath, resolveProjectRoot, agentGrantFile, grantRunnerDispatches, spendRunnerDispatch,
+  acceptanceCriteria, featureCriteria, runnerDispatchCount,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -495,4 +496,62 @@ test("hooks never resolve a project from process.cwd()", () => {
 
 test("ARCH-STATE-07: craftsman registers no SubagentStop hook", () => {
   assert.equal("SubagentStop" in JSON.parse(fs.readFileSync(HOOKS_JSON, "utf8")).hooks, false);
+});
+
+// ARCH-TRACKER-08: feature-tagged, untagged and mixed criteria.
+const FC_TEXT = [
+  "- [ ] [feature:a] gate a", "- [x] [feature:b] gate b", "- [ ] untagged", "- [ ] [unit:u1] unit only",
+  "- [ ] [unit:u2] [feature:a] both",
+].join("\n");
+test("featureCriteria: tagged lines gate only their feature", () => {
+  assert.equal(acceptanceCriteria(FC_TEXT)[0].feature, "a");
+  assert.deepEqual(featureCriteria(FC_TEXT, "b").map((c) => c.line), ["- [x] [feature:b] gate b"]);
+});
+test("featureCriteria: untagged lines gate only the last feature", () => {
+  assert.deepEqual(featureCriteria("- [ ] x\n- [ ] y", "a", false), []);
+  assert.deepEqual(featureCriteria("- [ ] x\n- [ ] y", "z", true).map((c) => c.line), ["- [ ] x", "- [ ] y"]);
+});
+test("featureCriteria: mixed lines - last feature gets its tagged plus untagged, not unit-only", () => {
+  assert.deepEqual(featureCriteria(FC_TEXT, "a", false).map((c) => c.line), ["- [ ] [feature:a] gate a", "- [ ] [unit:u2] [feature:a] both"]);
+  assert.deepEqual(featureCriteria(FC_TEXT, "a", true).map((c) => c.line), ["- [ ] [feature:a] gate a", "- [ ] untagged", "- [ ] [unit:u2] [feature:a] both"]);
+  assert.equal(acceptanceCriteria(FC_TEXT)[4].unit, "u2");
+});
+
+// ARCH-AUTO-08, ARCH-AUTO-09
+function autoRun(events, docs, markers, expr) {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-feat-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: repo });
+    fs.mkdirSync(path.join(repo, ".craftsman", "tracker"), { recursive: true });
+    fs.writeFileSync(path.join(repo, ".craftsman", "tracker", "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    fs.mkdirSync(path.join(repo, "docs", "plans"), { recursive: true });
+    for (const [name, text] of Object.entries(docs)) fs.writeFileSync(path.join(repo, "docs", "plans", `${name}.md`), text);
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e",
+      `const m = await import(${JSON.stringify(pathToFileURL(CORE).href)}); ` +
+      markers.map(([sid, plan]) => `m.writeAutoMarker(${JSON.stringify(sid)}, ${JSON.stringify(plan)}); `).join("") + expr,
+    ], { cwd: repo, env: cleanEnv({ CLAUDE_PROJECT_DIR: repo }), encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+}
+test("autoActive/autoForceBlock: FEATURE_MERGED is open; grant adds +1 per feature", () => {
+  const ev = (status) => [{ key: "k", plan: "docs/plans/p.md", unit: "u", status }];
+  const [active, force] = autoRun(ev("FEATURE_MERGED"), {}, [["s", "p"]], `console.log(JSON.stringify([m.autoActive("s"), m.autoForceBlock("s")]));`);
+  assert.equal(active, true);
+  assert.equal(force, true);
+  const [landedActive, landedForce] = autoRun(ev("COMPLETE"), {}, [["s", "p"]], `console.log(JSON.stringify([m.autoActive("s"), m.autoForceBlock("s")]));`);
+  assert.equal(landedActive, false);
+  assert.equal(landedForce, false);
+  assert.equal(runnerDispatchCount(2, 0), 16);
+  assert.equal(runnerDispatchCount(2, 3), 19);
+});
+test("autoActive: an epic slug resolves through plan-index; COMPLETE children release the marker", () => {
+  const docs = {
+    epic: "---\nslug: epic\nlevel: epic\nchildren: [story]\n---\n# e\n",
+    story: "---\nslug: story\nlevel: story\nparent: epic\n---\n# s\n",
+  };
+  const row = (status) => [{ key: "k", plan: "docs/plans/story.md", unit: "u", status }];
+  const expr = `console.log(JSON.stringify([m.autoActive("s"), m.autoForceBlock("s")]));`;
+  assert.deepEqual(autoRun(row("COMPLETE"), docs, [["s", "epic"]], expr), [false, false]);
+  assert.deepEqual(autoRun(row("PENDING"), docs, [["s", "epic"]], expr), [true, true]);
 });
