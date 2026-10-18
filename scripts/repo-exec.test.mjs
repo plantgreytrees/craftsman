@@ -958,3 +958,25 @@ test("repo-exec pr mode: a unit PR targets the feature branch, the feature PR ta
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
+
+test("repo-exec land-unit: lands from a linked .claude/worktrees session; a path outside the main checkout is refused", () => {
+  const data = featureFixture();
+  try {
+    const context = linkedContext(data);
+    const info = inspectRepo(context);
+    const feature = prepare(context, { plan: "docs/plans/plan-a.md", feature: "f1", unit: "u1" }, info);
+    const unitPath = path.join(fs.realpathSync(data.root), ".worktrees", "u1");
+    git(data.root, ["worktree", "add", "-q", "-b", "feat/u1", unitPath, feature.branch]);
+    fs.writeFileSync(path.join(unitPath, "u1.txt"), "u1\n");
+    git(unitPath, ["add", "u1.txt"]);
+    git(unitPath, ["commit", "-q", "-m", "feat: u1"]);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-outside-"));
+    try {
+      assert.throws(() => landUnit(context, { unit: "u1", worktree_path: outside }, info), /escapes selected repository/);
+      assert.throws(() => landUnit(context, { unit: "u1", worktree_path: feature.worktree_path, unit_worktree: outside }, info), /escapes selected repository/);
+    } finally { fs.rmSync(outside, { recursive: true, force: true }); }
+    const result = landUnit(context, { unit: "u1", worktree_path: feature.worktree_path, unit_worktree: unitPath }, info);
+    assert.equal(result.merged, true);
+    assert.ok(fs.existsSync(path.join(feature.worktree_path, "u1.txt")));
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
