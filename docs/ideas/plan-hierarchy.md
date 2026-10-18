@@ -305,3 +305,76 @@ Ask it to: keep ARCH-TRACKER-01/02; add rules for `parent:`/`level:`, generated 
 batched publish and the plan-lands-first gate; decide whether the renderer takes an output
 root; and sequence the shared-worktree scope spike first. Sibling part B (doc retirement)
 can go to `/plan` now. Nothing here is implemented.
+
+## Addendum: a session coordinator (checked 2026-10-18)
+Question: can one session coordinate other sessions by task priority, running one, two
+or more at a time, and is that what "mods" are for? Answer: yes, it is possible. Mods are
+one of three ways to do it, and the cheapest one.
+
+**What the docs and the installed CLI (2.1.302) provide.**
+- **Background sessions** — https://code.claude.com/docs/en/agent-view. `claude --bg
+  --name <n> "<prompt>"` starts a session; `claude agents --json [--all]` returns `state`,
+  `status` and `waitingFor` for a script to poll; `claude logs`, `stop`, `respawn` manage
+  them. Confirmed present in the installed CLI. The docs state no maximum; each session
+  draws on the same quota, and an unattended finished session is stopped after about an
+  hour. The page was truncated, so a cap in the unread part is UNPROVEN either way.
+- **Cross-session messaging** — https://code.claude.com/docs/en/cross-session-messaging
+  (v2.1.224+). `ListAgents` and `SendMessage`; `notify_when_idle` asks for one notice when
+  another local session next goes idle and, on its own, "without starting a turn or
+  spending tokens in the watched session". Limits: plain text, local sessions only for
+  subscriptions, 12-hour expiry, and a message can never approve a permission prompt for
+  the receiver. A delivered message counts as usage like a typed prompt. A `-p` worker
+  must be started with `crossSessionInbound: accept` to receive anything.
+- **Agent teams** — https://code.claude.com/docs/en/agent-teams. A lead with teammates,
+  a shared task list with dependencies and self-claiming. Experimental
+  (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`), "significantly more tokens", one team per
+  session, no resume, and teammates edit the same checkout, so it does not give a
+  worktree per feature.
+- **Mods** — https://code.claude.com/docs/en/plugins/mods/reference. JavaScript running
+  inside Claude Code, no model tokens. The API table lists `$.process.run/spawn`,
+  `$.clock.every`, `$.store` (a key-value store shared by every session on the machine),
+  `$.session.send` and the `session.receive` event, `$.agent.list`, `$.prompt.submit`.
+  Craftsman already ships one (`hooks/register.js`, `docs/architecture/mod.md`). Mods run
+  unsandboxed with the user's permissions.
+
+**Options.**
+- **A. Deterministic dispatcher (recommended).** A script, optionally driven from the
+  mod's timer, reads the ledger and plan frontmatter, picks the next ready features up to
+  `execution.maxSessions`, starts each with `claude --bg --name feat-<slug>
+  "/craftsman:orchestrate <slug> --level feature"` in its own feature worktree, polls
+  `claude agents --json`, and starts the next one when a slot frees. It surfaces PARKED
+  decisions and sessions that need input. The coordinator spends **zero** model tokens.
+- **B. LLM coordinator session.** A session that uses `ListAgents`, `SendMessage` and
+  `notify_when_idle`. It can re-prioritise and answer a worker's question, but every
+  notice and reply costs tokens. Use it only for judgement, not for scheduling.
+- **C. Agent teams.** Built in but experimental, token-heavy and not worktree-isolated.
+
+**What it needs in Craftsman.**
+1. A `priority:` field (P0–P3) on feature plans; epics and stories supply a default, so a
+   parent orders its children. No such field exists today (`plan-template.md`,
+   `commands/plan.md`, `scripts/plan-graph.mjs` have no `priority`).
+2. `execution.maxSessions`, default 1 (this session only), set per launch like the
+   sub-agent cap. It is a different limit from the sub-agent cap and never raises it.
+3. Dispatch rules: never start two features whose `depends_on` chain or `scope.write`
+   paths overlap; at most N running; a feature that parks or needs input does not hold
+   a slot while it waits.
+4. Workers must run unattended: permissions pre-granted through `allowed-tools`, with
+   `/craftsman:auto`'s park-and-ask behaviour for decisions, since a coordinator cannot
+   answer a permission prompt for a worker.
+5. An amendment to ARCH-MOD-01 ("launch, observe and draw only") if the mod does the
+   scheduling, plus a decision on whether the dispatcher is a script the user runs or
+   the mod's timer.
+
+**Honest cost note.** Running sessions one at a time does not save tokens compared with
+one session doing the same work. The saving is a small root context per feature and
+smoother quota use. Running more at once finishes sooner but spends quota faster (the
+agent-view page says ten parallel sessions use it about ten times faster).
+
+**UNPROVEN until a spike:** that a mod's `$.process.spawn` can start `claude --bg`
+cleanly; that `claude agents --json` is stable enough to poll; that several sessions
+landing to main from separate worktrees stay safe under `repo-exec`'s merge lock and
+ARCH-ENGINE-09 (units are sequential within one session only).
+
+**Suggested place in the order of work:** after the shared-worktree scope spike and
+`parent:`/`priority:`, as its own small idea (`/idea session-dispatcher`) rather than
+part of this one.
