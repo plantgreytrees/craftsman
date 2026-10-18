@@ -862,6 +862,68 @@ test("pre-guard: the ninth-review probes and flagged forms are blocked without t
     "for i in 1; do export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS; done",
     "! export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS",
     "find build -exec sh -c 'git rm -r docs' \\;", "find build -execdir git rm -r ../docs \\;",
-    "f() { git rm -r DOCS; }; GIT_ICASE_PATHSPECS=1 f", "git --work-tree=. rm -r docs", "git --git-dir=.git rm -r docs",
+    "f() { git rm -r DOCS; }; GIT_ICASE_PATHSPECS=1 f", "git --work-tree=docs rm -r plans", "GIT_WORK_TREE=docs git rm -r plans", "git --git-dir=.git rm -r docs",
   ], ["git rm src/x.md", "find build -execdir git rm {} \\;"]);
+});
+
+test("pre-guard: the removal-word gate reads de-quoted tokens and redirect targets (25.1)", () => {
+  grantedPair("craftsman-gate25-", "gate25", null, [
+    "r''m -rf docs", "r\\m -rf docs", '"r"m -rf docs', 'echo x > "do"cs/plans/x.md', "echo x > d\\ocs/plans/x.md",
+  ], ["echo x > out.txt", "ls docs"]);
+});
+
+test("pre-guard: an argument naming a removal word to an unlisted command is unsafe (25.2)", () => {
+  grantedPair("craftsman-arg25-", "arg25", null, [
+    `perl -e 'unlink "docs/plans/x.md"'`, `python3 -c 'import os; os.rmdir("docs/plans")'`, `awk 'BEGIN{system("rm -rf docs")}'`,
+    `node -e 'require("child_process").execSync("rm -rf docs")'`, "git config alias.zap '!rm -rf docs'",
+  ], [
+    'git commit -m "chore: rm docs/plans"', "git commit -am 'mv the rm helper'", "echo rm docs", "printf '%s' rm", "grep -rn rm src",
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs" --evidence "rm"',
+  ]);
+});
+
+test("pre-guard: dispatch examines every candidate, reads -c bodies after --, and distrusts script operands (25.3)", () => {
+  grantedPair("craftsman-disp25-", "disp25", null, [
+    "env -u find rm -rf docs", "env -u sh rm -rf docs", "sudo -u find rm -rf docs", "bash -c -- 'rm -rf docs'",
+    "cat > s.sh <<'EOF'\nrm -rf docs\nEOF\nsh s.sh",
+  ], ["sudo -u x rm build/x", "timeout 5 rm build/x", "bash -c -- 'rm build/x'"]);
+});
+
+test("pre-guard: unseen xargs input, declarations and git config overrides are unsafe (25.4)", () => {
+  grantedPair("craftsman-xargs25-", "xargs25", null, [
+    "echo 'a docs' | xargs rm -r", "printf 'do%s' cs | xargs rm -r", "echo -e 'd\\x6fcs' | xargs rm -r", "printf xdocs | xargs -d x rm -r",
+    "export ZAP='!rm -rf docs'; git --config-env=alias.zap=ZAP zap",
+    "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.zap GIT_CONFIG_VALUE_0='!rm -rf docs'; git zap",
+    "echo \"'docs'\" | xargs rm -r", "echo docs | xargs -0 rm -r",
+  ], ["echo build | xargs rm -r", "export FOO; rm build/x"]);
+});
+
+test("pre-guard: targets resolve through realpath and a relative -execdir target is unsafe (25.5)", () => {
+  grantedPair("craftsman-real25-", "real25", (dir) => { fs.symlinkSync("docs", path.join(dir, "d")); }, [
+    "rm -rf d/plans", "rm -rf d/*", "touch docs/a.nomatch; find . -name '*.nomatch' -execdir rm -rf plans \\;",
+  ], ["rm -rf build/*", "find build -name x -execdir rm -rf plans \\;"]);
+});
+
+test("pre-guard: block messages tell an unprovable command from a redirect from a matched target (25.6)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-msg25-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    const bash = (command) => run(GUARD, dir, { session_id: "msg25", tool_name: "Bash", tool_input: { command } });
+    const unprovable = bash("rm \"$X\"");
+    assert.equal(unprovable.status, 2);
+    assert.match(unprovable.stderr, /cannot prove it safe/);
+    const redirect = bash("echo x > docs/plans/x.md");
+    assert.equal(redirect.status, 2);
+    assert.match(redirect.stderr, /writes with a redirect/);
+    assert.doesNotMatch(redirect.stderr, /cannot prove/);
+    const matched = bash("rm -rf docs/plans");
+    assert.equal(matched.status, 2);
+    assert.match(matched.stderr, /removing it with rm \/ git rm/);
+    assert.doesNotMatch(matched.stderr, /cannot prove|redirect/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  grantedPair("craftsman-allow25-", "allow25", null, [], [
+    "grep -rn rm docs/", 'grep -n "rm" docs/plans/x.md', "cd ~/scratch/foo && rm -rf build",
+  ]);
 });
