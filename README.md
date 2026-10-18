@@ -125,6 +125,14 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
 
 ## Good to know
 
+- **Plan levels.** `level: epic|story|feature` in a plan's frontmatter, with
+  `parent:`/`children:`, builds a tree; `/orchestrate` and `/auto` take
+  `--level` and `--feature`. Epics and stories get generated rollup
+  `TRACKER.md` files, and `tracker.publish` pushes progress to the base
+  branch. `planning.featureBranches`, `planning.featureUnitCap`,
+  `execution.maxSubagents` and `execution.maxSessions` default to behaviour
+  that changes nothing; see EXTENDING.md.
+
 - **Protected base branches (GitHub, GitLab, Azure DevOps)** — by default a
   finished unit is merged locally and the base branch is pushed. If your host
   rejects direct pushes, set `repoExec.land: "pr"`: each unit's branch is

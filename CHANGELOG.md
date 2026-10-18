@@ -7,6 +7,14 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
+- **Plan hierarchy: epic, story and feature levels.** Plans take `level`,
+  `parent`, `children` and `priority`; `/orchestrate` and `/auto` accept
+  `--level` and `--feature`. Epics and stories get generated rollup
+  `TRACKER.md` files, and `tracker.publish` pushes progress to the base
+  branch. New keys `planning.featureBranches` (off), `planning.featureUnitCap`,
+  `execution.maxSubagents` (0) and `execution.maxSessions` (reserved) change
+  nothing until set. See EXTENDING.md.
+
 - **`/craftsman:account-switch`: carry a session across an account or org
   switch.** After `/login` to another account, Claude can't read its earlier
   thinking, so the reasoning behind the work is lost even though the

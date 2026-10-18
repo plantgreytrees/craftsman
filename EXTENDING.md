@@ -181,6 +181,48 @@ host merges once its checks and approvals pass:
 - A unit that depends on another unit's still-open request is parked until
   that request merges, because new units branch from `origin/<base>`.
 
+### Plan levels, feature worktrees and published progress
+
+Plans form a tree: an epic has stories, a story has features, a feature has
+units. A plan doc sets `level: epic|story|feature` (absent means feature),
+`parent:`, `children:` and `priority:` (inherited from the parent, default P2)
+in its frontmatter. A plan without a `features:` list is one implicit feature.
+`/orchestrate` and `/auto` take `--level epic|story|feature|unit` (default
+feature) and `--feature <id>` to pick one feature.
+
+Rollups: every epic and story gets a generated `docs/plans/<slug>/TRACKER.md`
+with counts, percent and links, inside `craftsman:rollup` fences. A parent is
+COMPLETE only when every descendant row is COMPLETE. Never edit it by hand;
+the pre-guard blocks it.
+
+All of the following are off or inert by default, so existing runs do not
+change:
+
+```json
+{
+  "planning": { "featureBranches": false, "featureUnitCap": 8 },
+  "tracker": { "publish": "push" },
+  "execution": { "maxSubagents": 0, "maxSessions": 1 }
+}
+```
+
+- `planning.featureBranches` — `false` (dark). `true` gives each feature one
+  long-lived worktree on `feature/<plan>-<id>`; units run one at a time in it
+  and merge into the feature branch with `--no-ff` (status `FEATURE_MERGED`),
+  and the feature then lands on the base branch. Conflicts, ff-only failures
+  and rejected pushes park the unit with a decision; nothing is force-pushed.
+  Prepare refuses while the plan doc, its parents or rollups differ from
+  `origin/<base>`.
+- `planning.featureUnitCap` — `8`; the most units one feature may hold.
+- `tracker.publish` — `"push"` commits the root `TRACKER.md` block, the
+  rollups and `docs/plans/TRACKER.jsonl` to the base branch from a temporary
+  worktree (only those paths, plain push, one retry, never parks). `"off"`
+  disables it.
+- `execution.maxSubagents` — `0` (dark): root-only. A positive number lets
+  that many wave units of one feature run at once, each in its own short-lived
+  worktree.
+- `execution.maxSessions` — `1`; reserved, nothing reads it yet.
+
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
 The generic `language-aware-planning` skill covers idioms; anything domain- or
