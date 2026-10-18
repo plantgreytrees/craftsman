@@ -52,3 +52,6 @@ only surface mid-run still park, which costs a Phase C round.
 
 ## Glossary
 - **Pass**: one Phase B run under one `/goal`.
+
+## Plan-hierarchy additions (2026-10-18)
+ARCH-AUTO-09 supersedes ARCH-AUTO-01: the stop rule covers every descendant row of the slug. See [plan](./plan.md) for the reasoning and rejected alternatives.

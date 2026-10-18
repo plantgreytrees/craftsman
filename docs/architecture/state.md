@@ -60,3 +60,6 @@ matches an agent's shell; the spike checks it.
   dispatch run.
 - **sid**: the session id from hook input.
 - **Spike**: the 1-unit proof run required by ARCH-ENGINE-02.
+
+## Plan-hierarchy additions (2026-10-18)
+ARCH-STATE-09: scope stays keyed by worktree; the next unit replaces and every exit releases. See [plan](./plan.md) for the reasoning and rejected alternatives.

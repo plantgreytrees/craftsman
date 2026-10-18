@@ -37,3 +37,6 @@ flowchart LR
 ## Trade-offs & known limits
 The manifest is a cache, so a crash between a transition and regeneration
 leaves it stale. It is regenerated on the next transition or read.
+
+## Plan-hierarchy additions (2026-10-18)
+ARCH-TRACKER-10..12: generated epic/story rollups, `tracker publish` (the only path that commits progress to base) and the `TRACKER.jsonl` snapshot with refuse-to-blank. See [plan](./plan.md) for the reasoning and rejected alternatives.

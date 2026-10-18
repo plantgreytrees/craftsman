@@ -48,3 +48,6 @@ refused until that root is registered. A superproject that is unregistered
 and not the workspace root is not detected. The bump check runs when the plan
 is checked, not again at landing. A `pr`-mode repo waits on its CI before
 dependants can land.
+
+## Plan-hierarchy additions (2026-10-18)
+ARCH-LAND-13..17: one worktree per feature, `land-unit`, wave worktrees, the plan-lands-first gate and the publish push authority. See [plan](./plan.md) for the reasoning and rejected alternatives.

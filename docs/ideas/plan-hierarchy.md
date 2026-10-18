@@ -1,13 +1,13 @@
 ---
 slug: plan-hierarchy
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
 isolation: isolated
 created: 2026-10-18
 updated: 2026-10-18
-related: [docs/ideas/plugin-overhaul.md, docs/ideas/feature-branch-plans.md (branch worktree-idea-feature-branch-plans, not on main), docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
+related: [docs/architecture/plan.rules.md, docs/ideas/plugin-overhaul.md, docs/ideas/feature-branch-plans.md (branch worktree-idea-feature-branch-plans, not on main), docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
 touches: [commands/plan.md, commands/orchestrate.md, commands/auto.md, commands/instruction.md, commands/merge.md, commands/sync-docs.md, commands/digest.md, commands/init.md, commands/upgrade.md, commands/focus.md (new, from plugin-overhaul), commands/_shared-execution.md, commands/_shared-machinery.md, scripts/tracker.mjs, scripts/tracker-sync.mjs, scripts/run-manifest.mjs, scripts/plan-graph.mjs, scripts/repo-exec.mjs, scripts/scope.mjs, scripts/session-context.mjs, scripts/handoff.mjs, scripts/focus.mjs (new), scripts/merge-tree.mjs (new, from plugin-overhaul), scripts/arch-check.mjs, agents/unit-runner.md, workflows/run.js, skills/language-aware-planning/references/plan-template.md, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/state.rules.md, docs/architecture/engine.rules.md, docs/plans/TRACKER.md, README.md, EXTENDING.md, CHANGELOG.md]
 ---
 

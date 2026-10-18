@@ -65,3 +65,6 @@ restarted run repeats the unit there.
 - **Unit**: one plan step with its own worktree.
 - **Park**: stop a unit with a reason and an optional decision, keeping its
   branch.
+
+## Plan-hierarchy additions (2026-10-18)
+ARCH-ENGINE-16/17 supersede ARCH-ENGINE-09: sequential inside the feature worktree, with spike-gated waves of two or more units. See [plan](./plan.md) for the reasoning and rejected alternatives.
