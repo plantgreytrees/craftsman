@@ -175,7 +175,7 @@ const OPT_ARG = { sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T",
   xargs: new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]) };
 const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas", "nice", "timeout", "busybox", "stdbuf", "ionice"]);
 const KEYWORDS = new Set(["then", "do", "else", "elif", "!", "if", "while", "until", "coproc"]);
-OPT_ARG.nice = new Set(["-n"]); OPT_ARG.timeout = new Set(["-s", "-k"]);
+OPT_ARG.exec = new Set(["-a"]); OPT_ARG.nice = new Set(["-n"]); OPT_ARG.timeout = new Set(["-s", "-k"]);
 OPT_ARG.stdbuf = new Set(["-i", "-o", "-e"]); OPT_ARG.ionice = new Set(["-c", "-n", "-p", "-P", "-u"]);
 
 // Literal directory prefix of a guarded glob: "docs/plans/**" -> "docs/plans".
@@ -351,17 +351,20 @@ function removedDocs(cmd, docPaths) {
   const args = (words) => words.filter((w) => w && !w.startsWith("-"));
 
   // A NAME=value word is stripped, so its value joins the seen words first.
-  const assigned = (w) => { const v = w.slice(w.indexOf("=") + 1); if (v) st.seen.push({ w: v, cwd: st.cwd }); };
+  const assigned = (w, cwd = st.cwd) => { const v = w.slice(w.indexOf("=") + 1); if (v) st.seen.push({ w: v, cwd }); };
 
-  function stripPrefixes(words) {
+  function stripPrefixes(words, cwd = st.cwd) {
     for (;;) {
       if (!words.length) return words;
       const w = words[0], base = path.basename(w);
-      if (/^\w+=/.test(w)) assigned(w);
-      if (/^\w+=/.test(w) || w === "{" || KEYWORDS.has(w)) { words = words.slice(1); continue; }
+      if (/^\w+\+?=/.test(w)) assigned(w, cwd);
+      if (w === "function" && words.length > 2 && words[2] === "{") { words = words.slice(2); continue; } // function NAME {
+      if (w === "coproc" && words.length > 2 && words[2] === "{") { words = words.slice(2); continue; } // coproc NAME {
+      if (/^\w+\+?=/.test(w) || w === "{" || KEYWORDS.has(w)) { words = words.slice(1); continue; }
       if (!WRAPPERS.has(base)) return words;
       words = words.slice(1);
-      while (words.length && (words[0].startsWith("-") || (base === "env" && /^\w+=/.test(words[0])))) {
+      while (words.length && (words[0].startsWith("-") || (base === "env" && /^\w+\+?=/.test(words[0])))) {
+        if (base === "env" && /^\w+\+?=/.test(words[0])) assigned(words[0], cwd);
         words = words.slice(OPT_ARG[base]?.has(words[0]) ? 2 : 1);
       }
       if (base === "timeout" && words.length) words = words.slice(1); // the duration
@@ -369,11 +372,11 @@ function removedDocs(cmd, docPaths) {
   }
 
   function segment(words, state, depth) {
-    words = stripPrefixes(words);
+    words = stripPrefixes(words, state.cwd);
     if (!words.length) return;
     const verb = path.basename(words[0]);
     const rest = words.slice(1);
-    if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+=/.test(a)) assigned(a);
+    if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+\+?=/.test(a)) assigned(a, state.cwd);
     state.seen.push(...args(rest).map((w) => ({ w, cwd: state.cwd })));
     if (verb === "cd" || verb === "pushd") { if (rest[0] && !rest[0].startsWith("-")) state.cwd = path.resolve(state.cwd, rest[0]); return; }
     if (verb === "rm" || verb === "unlink" || verb === "mv") {
@@ -443,6 +446,11 @@ function removedDocs(cmd, docPaths) {
     if (!parsed.ok && docPaths.some((p) => { const b = guardedBase(p); return b && text.includes(b); })) hits.push("(unparseable command naming a guarded path)");
     parsed.segments.forEach((words, i) => {
       state.sep = parsed.seps[i]; state.prev = parsed.segments[i - 1] || null; state.subst = parsed.substs[i];
+      const before = parsed.segments[i - 1];
+      if (before && state.sep === "(" && !state.subst && /^\w+\+?=$/.test(before[before.length - 1])) { // NAME=(a b): the elements are the value
+        for (const w of words) if (w) st.seen.push({ w, cwd: state.cwd });
+        return;
+      }
       segment(words, state, depth);
     });
   }
