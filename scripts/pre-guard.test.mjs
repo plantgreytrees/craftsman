@@ -602,6 +602,48 @@ test("pre-guard: every rm form that removes or moves a guarded doc (or its ances
   }
 });
 
+test("pre-guard: a glob in the last path segment is matched against the guarded bases (11.1)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-glob-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+    const bash = (command) => run(GUARD, dir, { session_id: "glob-forms", tool_name: "Bash", tool_input: { command } });
+    const allowedForms = ["rm -f *.log", "rm -f ./*.tgz", "unlink *.pid", "mv *.log logs/",
+      "find . -name '*.log' -delete", "find . -type f -name '*.o' -exec rm {} +"];
+    const blockedForms = ["rm -rf d*", "rm -rf docs/*", "rm docs/plans/*.md", "find . -delete", "find . -path './docs/*' -delete",
+      "find . -name 'x.md' -delete", "find . -name '*.md' -exec rm {} +", "find . ! -name '*.log' -delete"];
+    for (const command of allowedForms) assert.equal(bash(command).status, 0, `allowed: ${command}`);
+    for (const command of blockedForms) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    for (const command of [...allowedForms, ...blockedForms]) assert.equal(bash(command).status, 0, `granted: ${command}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: heredoc bodies are not parsed as shell, the command after the terminator still is (11.2)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-heredoc-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+    const bash = (command) => run(GUARD, dir, { session_id: "heredoc-forms", tool_name: "Bash", tool_input: { command } });
+    const body = "fix: don't rm docs/plans/x.md";
+    for (const command of [
+      `git commit -F - <<'EOF'\n${body}\nEOF`,
+      `git commit -m "$(cat <<'EOF'\n${body}\nEOF\n)"`,
+      `cat > s.sh <<'EOF'\nrm docs/plans/x.md\nEOF`,
+    ]) assert.equal(bash(command).status, 0, command);
+    assert.equal(bash(`cat <<'EOF'\nhello\nEOF\nrm docs/plans/x.md`).status, 2, "rm after the terminator");
+    assert.equal(bash("cat <<EOF\n$(rm docs/plans/x.md)\nEOF").status, 2, "unquoted $() body");
+    assert.equal(bash("cat <<EOF\n`rm docs/plans/x.md`\nEOF").status, 2, "unquoted backtick body");
+    assert.equal(bash("cat <<'EOF'\n$(rm docs/plans/x.md)\nEOF").status, 0, "quoted body is literal");
+    assert.equal(bash("cat <<EOF\nit's fine, no subst\nEOF").status, 0, "unquoted plain body");
+    assert.equal(bash(`echo '<<EOF'\nrm docs/plans/x.md\nEOF`).status, 2, "quoted << is no heredoc");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
