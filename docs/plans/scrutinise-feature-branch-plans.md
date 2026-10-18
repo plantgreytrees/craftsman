@@ -280,6 +280,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-find-icase
+    scope_id: guard-find-icase
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -388,6 +401,11 @@ Depends on: guard-subshell
 - [ ] 20.1 Exclude pathspec magic (`:!`, `:^`, `:(exclude)`) is never reduced to a bare path: an argument list with only exclusions fails closed (treated as `.`), and an `:(icase)` argument builds its matchers case-insensitively (`pre-guard.mjs:214,237-239,268-284`) → accept: pre-guard.test: `git rm -r ':!src'`, `git rm -r ':(exclude)src'`, `git rm -r ':(icase)D*'`, `git rm -r ':(icase)DOCS/P*'` blocked without the grant and allowed with it; `git rm src/x.md` stays allowed
 - [ ] 20.2 `find … -exec` runs its words through the wrapper stripping, and `mv` joins `rm`/`unlink` (`pre-guard.mjs:410-414`) → accept: pre-guard.test: `find . -name '*.log' -exec env rm -rf docs \;` and `find . -name '*.log' -exec mv docs /x \;` blocked without the grant and allowed with it; `find . -name '*.log' -exec rm {} +` stays allowed
 
+### Step 21 — guard-find-icase (., javascript, high) — round 9
+Depends on: none
+- [ ] 21.1 A `find` whose start path lies inside or above a guarded base is a removal when any `-exec`/`-execdir` runs `rm`, `unlink` or `mv` with `{}` (the `deletes` test no longer excludes `mv`), and a lone `+` ends the `-exec` list only when the word before it is `{}` (`pre-guard.mjs:421-428`) → accept: pre-guard.test: `find docs -name '*.md' -exec mv {} /x \;`, `find docs -execdir mv {} /x \;`, `find docs/plans -exec sudo mv {} /x +`, `find docs -exec mv -t /x {} +`, `find build -exec mv + docs /y \;` blocked without the grant and allowed with it; `find build -name x -exec mv {} /y \;` stays allowed
+- [ ] 21.2 git's global `--icase-pathspecs` option and a `GIT_ICASE_PATHSPECS` assignment in the segment apply `:(icase)` to every pathspec of that command (`pre-guard.mjs:396-398`) → accept: pre-guard.test: `git --icase-pathspecs rm -r DOCS`, `git --icase-pathspecs rm -r 'DOC*'`, `GIT_ICASE_PATHSPECS=1 git rm -r DOCS` blocked without the grant and allowed with it; `git rm src/x.md` stays allowed
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
@@ -399,6 +417,8 @@ Round 6 (Steps 13–15, third /scrutinise on c4d686d..e56a6be): 14 → 15 share 
 Round 7 (Steps 16–18, fourth /scrutinise on e56a6be..5d0c12c, bounded per the user-pending option (a)): 17 → 18 share `pre-guard.mjs`; 16 is independent. Closes UNMET 13.2, 14.1 and the archive-heading criterion. The remaining shell-grammar forms stay a best-effort denylist.
 
 Round 8 (Steps 19–20, fifth /scrutinise on 5d0c12c..ca26733): 19 → 20 share `pre-guard.mjs`. Closes the UNMET 17.2 and two regressions of Step 18.
+
+Round 9 (Step 21, sixth /scrutinise on ca26733..c122a11): single unit in `pre-guard.mjs`; closes the two remaining 20.x-class Warnings.
 
 ## Verification background
 - Test job checkout has no `fetch-depth` — `.github/workflows/ci.yml:79`; size step — `ci.yml:97-107`
@@ -427,3 +447,5 @@ Round 6 (third /scrutinise on c4d686d..e56a6be) Suggestions, flagged not driven:
 Round 7 Suggestions, flagged not driven: `cat <<'EOF' | sh` (a heredoc piped to a shell) is the interpreter class; `typeset` accepted although 15.1 does not list it; `stripPrefixes(state.prev)` re-runs `assigned()` (duplicate seen entries, harmless); `mv ~/x build/` is blocked by the 12.2 leading-`~` rule (over-blocking by spec).
 
 Round 8 Suggestions, flagged not driven: `doc-retire.mjs:186` restores only tracked rollups, so a rollup the archive newly creates could stay untracked; `doc-retire.mjs:146` searches the whole parent text, so a parent naming `beta` and `beta-api` can refuse `beta` (errs closed).
+
+Round 9 Suggestions, flagged not driven: git `--work-tree`, `--git-dir` and `GIT_WORK_TREE` are not modelled in the git option loop; `(true)#` is parsed as a word (errs closed); `pre-guard.test.mjs:674` creates its repos under `os.tmpdir()`.
