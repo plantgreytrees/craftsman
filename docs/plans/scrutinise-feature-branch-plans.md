@@ -254,6 +254,32 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-subshell
+    scope_id: guard-subshell
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-pathspec
+    scope_id: guard-pathspec
+    project: .
+    depends_on: [guard-subshell]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -352,6 +378,16 @@ Depends on: guard-quotes
 - [ ] 18.1 `assigned()` records the nested walk's cwd (`sh -c 'cd build && f=../docs/plans && rm -rf "$f"'`), `env NAME=value …` records its assignments, and `NAME+=value` and `NAME=(…)` count as assignments (`pre-guard.mjs:314,320,324,336`) → accept: pre-guard.test: that `sh -c` form, `env D=docs sh -c 'rm -rf $D'`, `env D=docs/plans/x.md bash -c 'rm "$D"'`, `f+=docs/plans/x.md; rm "$f"` and `f=(docs); rm -rf $f` blocked without the grant and allowed with it; `f=build/x; rm "$f"` stays allowed
 - [ ] 18.2 `coproc NAME {`, `function NAME {` and `exec -a NAME` are stripped to the command they run (`pre-guard.mjs:167,321-322`) → accept: pre-guard.test: `coproc foo { rm docs/plans/x.md; }`, `function f { rm docs/plans/x.md; }; f`, `exec -a name rm docs/plans/x.md` and `coproc rm docs/plans/x.md` blocked without the grant and allowed with it; the 12.2 `unlink` and `mv` forms with `~`, `$PWD` and command substitution each have a blocked case
 
+### Step 19 — guard-subshell (., javascript, high) — round 8
+Depends on: none
+- [ ] 19.1 `NAME=(` array assignment is recognised inside `shellSegments` only when `(` follows a word ending in `=` with nothing between; an empty segment never makes the next `(` an array start (`pre-guard.mjs:163-166,450-453`) → accept: pre-guard.test: `f=; (rm -rf docs)`, `f=\n(rm -rf docs)` and `x= && (rm -rf docs/plans)` blocked without the grant and allowed with it; `f=(docs); rm -rf $f` stays blocked
+- [ ] 19.2 A `#` starts a comment only at position 0 or after whitespace, newline, `;`, `&`, `|` or `(`, never after `)` or a closing backtick, the same rule as `stripHeredocs` (`pre-guard.mjs:159` vs `:108`) → accept: pre-guard.test: `echo $(true)#; rm -rf docs`, ``echo `true`#; rm -rf docs`` and `echo $((1))#; rm -rf docs` blocked without the grant and allowed with it; `# note; rm -rf docs` stays allowed
+
+### Step 20 — guard-pathspec (., javascript, high) — round 8
+Depends on: guard-subshell
+- [ ] 20.1 Exclude pathspec magic (`:!`, `:^`, `:(exclude)`) is never reduced to a bare path: an argument list with only exclusions fails closed (treated as `.`), and an `:(icase)` argument builds its matchers case-insensitively (`pre-guard.mjs:214,237-239,268-284`) → accept: pre-guard.test: `git rm -r ':!src'`, `git rm -r ':(exclude)src'`, `git rm -r ':(icase)D*'`, `git rm -r ':(icase)DOCS/P*'` blocked without the grant and allowed with it; `git rm src/x.md` stays allowed
+- [ ] 20.2 `find … -exec` runs its words through the wrapper stripping, and `mv` joins `rm`/`unlink` (`pre-guard.mjs:410-414`) → accept: pre-guard.test: `find . -name '*.log' -exec env rm -rf docs \;` and `find . -name '*.log' -exec mv docs /x \;` blocked without the grant and allowed with it; `find . -name '*.log' -exec rm {} +` stays allowed
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
@@ -361,6 +397,8 @@ Round 5 (Steps 10–12, second /scrutinise on 4931876..c4d686d): 11 → 12 share
 Round 6 (Steps 13–15, third /scrutinise on c4d686d..e56a6be): 14 → 15 share `pre-guard.mjs`; 13 is independent. Steps 14 and 15 also close the UNMET 11.1 and 12.2 criteria.
 
 Round 7 (Steps 16–18, fourth /scrutinise on e56a6be..5d0c12c, bounded per the user-pending option (a)): 17 → 18 share `pre-guard.mjs`; 16 is independent. Closes UNMET 13.2, 14.1 and the archive-heading criterion. The remaining shell-grammar forms stay a best-effort denylist.
+
+Round 8 (Steps 19–20, fifth /scrutinise on 5d0c12c..ca26733): 19 → 20 share `pre-guard.mjs`. Closes the UNMET 17.2 and two regressions of Step 18.
 
 ## Verification background
 - Test job checkout has no `fetch-depth` — `.github/workflows/ci.yml:79`; size step — `ci.yml:97-107`
@@ -387,3 +425,5 @@ Round 5 (second /scrutinise on 4931876..c4d686d) Suggestions, flagged not driven
 Round 6 (third /scrutinise on c4d686d..e56a6be) Suggestions, flagged not driven: `eval`, `python -c`, `find -exec sh -c`, `-ok rm` and the `setsid`/`flock` wrappers remain outside the best-effort pre-guard parser (a decision for the user); `findNamesMiss` reads the live filesystem, so races and very large `docs/` trees show only at runtime.
 
 Round 7 Suggestions, flagged not driven: `cat <<'EOF' | sh` (a heredoc piped to a shell) is the interpreter class; `typeset` accepted although 15.1 does not list it; `stripPrefixes(state.prev)` re-runs `assigned()` (duplicate seen entries, harmless); `mv ~/x build/` is blocked by the 12.2 leading-`~` rule (over-blocking by spec).
+
+Round 8 Suggestions, flagged not driven: `doc-retire.mjs:186` restores only tracked rollups, so a rollup the archive newly creates could stay untracked; `doc-retire.mjs:146` searches the whole parent text, so a parent naming `beta` and `beta-api` can refuse `beta` (errs closed).
