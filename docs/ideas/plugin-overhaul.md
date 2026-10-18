@@ -8,7 +8,7 @@ isolation: isolated
 created: 2026-10-18
 updated: 2026-10-18
 related: [docs/ideas/autonomous-e2e-loop.md, docs/ideas/feature-branch-plans.md (branch worktree-idea-feature-branch-plans), docs/plans/token-efficiency.md, docs/builtins.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
-touches: [commands/merge.md, commands/idea.md, commands/architect.md, agents/idea-critic.md, scripts/chain.mjs (new), scripts/merge-tree.mjs (new), scripts/digest.mjs, scripts/repo-exec.mjs, scripts/lib/land.mjs, scripts/lib/plan-submodules.mjs, docs/architecture/landing.rules.md, hooks/hooks.json, scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/session-context.mjs, scripts/pre-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/builtin-skill-context.mjs, scripts/init.mjs, scripts/model-policy.mjs, craftsman.config.json, workflows/run.js, workflows/spike.js, commands/*.md, agents/*.md, skills/ (new design-system skill, skill registry), .claude-plugin/plugin.json, docs/builtins.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md, EXTENDING.md, README.md, CHANGELOG.md, scripts/*.test.mjs]
+touches: [scripts/route-model.mjs (new), scripts/focus.mjs (new), commands/focus.md (new), agents/second-look.md (new), skills/second-look/SKILL.md (new), commands/merge.md, commands/idea.md, commands/architect.md, agents/idea-critic.md, scripts/chain.mjs (new), scripts/merge-tree.mjs (new), scripts/digest.mjs, scripts/repo-exec.mjs, scripts/lib/land.mjs, scripts/lib/plan-submodules.mjs, docs/architecture/landing.rules.md, hooks/hooks.json, scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/session-context.mjs, scripts/pre-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/builtin-skill-context.mjs, scripts/init.mjs, scripts/model-policy.mjs, craftsman.config.json, workflows/run.js, workflows/spike.js, commands/*.md, agents/*.md, skills/ (new design-system skill, skill registry), .claude-plugin/plugin.json, docs/builtins.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md, EXTENDING.md, README.md, CHANGELOG.md, scripts/*.test.mjs]
 ---
 
 # Idea: Scope craftsman to opted-in projects, add a per-session agent cap, and tighten skills and tokens
@@ -152,7 +152,7 @@ In a throwaway repo containing only `package.json`, with `CLAUDE_PLUGIN_ROOT` an
 | F2 | high | **The agent guard blocks everyone's agents.** Under the default root-only mode every `subagent_type` outside plan-strategist, granted agents, runner grants and `builtinAgents` exits 2, including other plugins' agents and `general-purpose`; inline `Workflow` scripts (the user's own Claude Code dynamic workflows) are blocked too. Combined with F1 this hits repos that never opted in. | `agent-mode-guard.mjs:60-130`; probe | proven |
 | F3 | high | **Isolated-agent grants are keyed by cwd on main.** `cd` into a nested repo between `/scrutinise`, `/idea` or `/architect --deep` and the dispatch loses the grant ("no unspent grant"). A fix exists but is unmerged. | branch `worktree-grant-project-dir` @ `de87973`; ARCH-STATE-02 | proven (fix pending) |
 | F4 | med | **Guards fail open.** `projectContext()` runs outside try/catch, a throw (for example a malformed `craftsman.workspace.json`) exits non-zero, which Claude Code treats as non-blocking. Fixing this before F1 would make a crash block every repo. | `agent-mode-guard.mjs:57-58`, `core.mjs:103-130`; hooks docs | proven in code, not reproduced |
-| F5 | med | **Docs contradict frontmatter on model routing.** EXTENDING says implementation and specialist review run on sonnet; 15 of 22 agents run on haiku, including `code-reviewer`, which the README says "still owns the verdict". `model-policy.mjs` checks names and command-prose agreement, not this claim. | `EXTENDING.md` "Model routing"; `agents/*.md` | proven |
+| F5 | med | **Docs contradict frontmatter on model routing (resolved by Decision 1, per-dispatch routing).** EXTENDING says implementation and specialist review run on sonnet; 15 of 22 agents run on haiku, including `code-reviewer`, which the README says "still owns the verdict". `model-policy.mjs` checks names and command-prose agreement, not this claim. | `EXTENDING.md` "Model routing"; `agents/*.md` | proven |
 | F6 | med | **Built-ins ledger is 13 releases stale.** Verified on 2.1.289; installed is 2.1.302. `security-review`, `run`, project `verify` wraps are still "deferred". | `docs/builtins.md:7,26,28` | proven |
 | F7 | med | **Possible gate friction in the busiest repo.** Gleam logged 1,270 `scope_blocked` against 1,212 `scope_activated`, 2,013 `stop-tests-skipped` of 3,090 stops, and 1,638 `stop-acceptance-deferred`. Each block is a retry turn, which costs tokens. Cause not investigated. | `Gleam/.craftsman/events.jsonl` | UNPROVEN cause |
 | F8 | low | **Finished spike ships.** `workflows/spike.js` (`craftsman-spike`, "ENGINE-02 spike") appears in the live skill list. | `workflows/spike.js:1-3` | proven |
@@ -235,8 +235,8 @@ Critic claims root softened, with counter-evidence:
    try/catch; only after that consider `onFailure:"block"` on `pre-guard` and
    `agent-mode-guard` (v2.1.295+). Merge `worktree-grant-project-dir` first.
 2. **Slice B, cleanup bundle (about 1 unit).** `disable-model-invocation: true` on the
-   nine user-only commands (not `merge`); delete `workflows/spike.js`; reconcile
-   reviewer models with EXTENDING (decision needed, below); add `maxTurns` to reviewers
+   nine user-only commands (not `merge`); delete `workflows/spike.js`;
+   replace the static reviewer models with per-dispatch routing (Decision 1); add `maxTurns` to reviewers
    and the reviewer-class agents; run `/craftsman:builtin-check` on 2.1.302 and decide
    the deferred `security-review`/`run`/`verify` wraps; add `version` (and
    `homepage`/`repository`) to `plugin.json` and fix the `register.js` `.catch`;
@@ -304,7 +304,7 @@ scopable by feature, story or epic; and `merge` made a specialist that runs all 
    `digest.mjs` and the SessionStart line read `chain.mjs`, so the "path forward" is
    computed, not remembered. No new hook: it runs on demand and inside `digest`, and
    `sync-docs` flags a broken link as drift.
-2. **Strong entrypoints.** `/idea` and `/architect` are the low-frequency, high-leverage
+2. **Strong entrypoints (superseded by Decisions 1 and 4: opus, not fable).** `/idea` and `/architect` are the low-frequency, high-leverage
    steps, so spend tokens there. Both commands are `model: opus` today
    (`commands/idea.md`, `commands/architect.md`); `idea-critic` is `opus`;
    `architect-analyst` is `fable`. Recommend `fable` for both commands and for
@@ -354,23 +354,114 @@ scopable by feature, story or epic; and `merge` made a specialist that runs all 
    `/investigate` for bugs). Do not block edits for lack of a slug: that would be the same
    class of fault as F1/F2.
 
+## Owner decisions (2026-10-18)
+The owner answered the six open questions. Each is applied below; the earlier
+recommendations above are amended where these differ.
+
+1. **Model choice is computed per dispatch from the task, not fixed per agent.**
+   Replaces the F5 "sonnet vs haiku" question. A small deterministic router
+   (`scripts/route-model.mjs`, JSON in, `{tier, model, reasons[]}` out) decides each
+   dispatch from facts the plugin already computes: changed lines and files
+   (`diff-triviality.mjs`, `gate-select.mjs`), the unit's scope bytes (`arch-check.mjs
+   scope`), whether an ARCH `decided` rule governs a touched path (`arch-check.mjs
+   governs`), the plan's `security:` flag, the number of units in the plan (run count), and
+   the fix round.
+   | tier | model | typical case |
+   |---|---|---|
+   | S | haiku | one file, no contract change, small diff, `security: normal`, no governing ARCH rule |
+   | M | sonnet | several files in one module, a public API change, or a small `security: high` change |
+   | L | opus | cross-module work, a governing ARCH rule, migration or high security at size, or the review of a whole feature (`/scrutinise`, `/idea`, `/architect`) |
+   Rules: escalate one tier on a failed review round or a test failure after round 1 and
+   never downgrade mid-unit; a plan with many units raises the bar for opus on S/M units
+   (many cheap runs), while a feature-level review is one run on the largest context and
+   always takes opus; thresholds live in `execution.modelRouting` so they can be tuned.
+   The router's answer is passed as the per-dispatch `model` parameter, which the docs
+   resolve ahead of the agent file's `model` (https://code.claude.com/docs/en/sub-agents,
+   "choose a model"), so no frontmatter has to change for this to work; frontmatter keeps
+   a sensible default. Workflow scripts may not read the clock or filesystem
+   (ARCH-ENGINE-03), so the root computes the tier at dispatch time and passes it in
+   `args`. This avoids adding a field to the plan format that another session is changing;
+   an optional per-unit `model:` override can follow once that format settles.
+   Caveats: `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` or a mod that sets a model in
+   `agent.spawn` overrides the router (init should warn); haiku-tier implementer quality is
+   UNPROVEN, so `/craftsman:stats` must report escalation rate per tier and the thresholds
+   are tuned from it. Kill criterion: if more than about one in four S-tier units escalate,
+   raise the S threshold.
+2. **Opt-in is explicit.** A repo is active only when `craftsman.config.json` contains an
+   explicit marker written by `/craftsman:init` (for example `"optIn": true`). The plugin's
+   default `enabled: true` cannot serve as the marker because deep-merge makes every repo
+   inherit it. Migration: `/craftsman:upgrade` stamps the marker into the four repos that
+   already have a config (Craftsman, Gleam, Loost, Podling) in the same release. For one
+   release, a repo that has a config and `.craftsman/` but no marker runs with a one-line
+   warning ("add the marker with /craftsman:init") instead of going silent, so no secrets
+   scan is disarmed by the change. After that release the grace is removed. A repo with
+   no marker gets no injection, no state directory and no blocking.
+3. **Sub-agents never nest; only the root spawns agents.** Three layers, none needing a new
+   hook event: (a) a tools allowlist: verified that none of the 22 craftsman agents lists
+   `Agent` or `Task`, and a test pins it; (b) the existing `agent-mode-guard` denies any
+   `Agent`/`Task`/`Workflow` call whose hook input carries `agent_id`, a documented field
+   present when the call comes from a subagent (https://code.claude.com/docs/en/hooks,
+   "common input fields"); (c) `/craftsman:init` writes
+   `"env": {"CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"}` into the opted-in project's
+   `.claude/settings.json`, the documented way to turn nesting off
+   (https://code.claude.com/docs/en/sub-agents). Layer (b) is UNPROVEN until a test fires a
+   nested call; layer (c) takes effect at session start only. The cap then counts only
+   sub-agents the root starts.
+4. **`--deep` uses opus; a separate fable "second look" is added.** `/idea --deep`
+   currently passes `fable` to `idea-critic` (`commands/idea.md`) and `architect-analyst` is
+   `fable`; both change to `opus`, keeping the extra adversarial round. New: skill
+   `craftsman:second-look` plus agent `agents/second-look.md` on `fable`, `tools: Read, Grep,
+   Glob` only (no Bash, web or `Agent`), `maxTurns: 8`, one dispatch. Its brief is the final
+   verdict and the critic's report; it returns at most five items the opus pass missed or got
+   wrong, each with `file:line` or a URL, or "nothing material", in a short JSON object. The
+   root verifies each item before recording it under Disputed or Recommendations. It runs
+   once, from `/idea --deep` and `/architect --deep`, through a counted grant added to the
+   existing grant mechanism (`GRANTED_AGENTS`), spent on use. A failure or a hit `maxTurns`
+   limit is noted and skipped; it never blocks the run. Standard (non-deep) runs keep opus
+   and no second look. This adds a second named exception to root-only mode, so the guard
+   rules in `engine.rules.md` / `state.rules.md` need an amendment through `/architect`.
+5. **Session focus persists across `/clear` by session-keyed file plus re-injection.**
+   `/craftsman:focus <slug>` writes `.craftsman/sessions/<sid>/focus.json`, the same place
+   and keying as the existing `handoff.json`, which `session-context.mjs` already restores
+   at SessionStart (`session-context.mjs:129-155`). SessionStart re-announces the focus and
+   its next step on every `source` (`startup`, `resume`, `clear`, `compact`), which is what
+   puts it back into a cleared context. Evidence the id survives: Gleam's log holds 993
+   `session_start` events across only 189 distinct session ids. The docs do not say whether
+   `/clear` keeps the id, so log `source` on each `session_start` event to prove it; if
+   `/clear` is shown to change it, fall back to keying on the Claude Code process (parent
+   pid plus start time, as `worktree-sweep.mjs:68` already does for locks).
+   `CRAFTSMAN_FOCUS=<kind>:<slug>` is accepted as a launch-time seed that wins when set.
+   Only `kind: feature` is accepted today; `story` and `epic` are rejected with "not yet
+   supported" until the other session defines them.
+6. **Merge has full git rights over registered repos, submodules, worktrees and branches.**
+   `/craftsman:merge` gets `allowed-tools: Bash(git *), Bash(gh *), Bash(az *)` plus the
+   `repo-exec.mjs`/`merge-tree.mjs` calls in its own frontmatter, so those run without
+   prompts only while the command runs; no global `permissions.allow` is written, which keeps
+   other work in the repo unaffected. It may create worktrees, branches and missing remote
+   branches (including for submodules), commit, merge, push, open and merge PRs/MRs, bump
+   gitlinks, and delete merged local and remote branches and clean worktrees. The deterministic
+   `scripts/merge-tree.mjs` performs the git, so root reads a small JSON result instead of
+   git output (token-light). Boundaries kept: only registered workspace projects and the
+   submodules in their index gitlinks (ARCH-LAND-07), never a directory scan; history-rewriting
+   and unverifiable-bypass forms stay blocked (`--force`, `+refspec`, `--mirror`, `reset
+   --hard`, `worktree remove --force`, `--no-verify`), because landing never needs them and
+   `force-block.mjs` already fails closed on them. `git branch -D` is used only after the
+   host reports the PR as merged (squash/rebase merges never show as merged locally).
+
 ## Open questions
-1. **Reviewer models (F5).** Move the specialist reviewers and `code-reviewer` to
-   `sonnet` (matches the docs, costs more per review) or correct the docs to say haiku?
-2. **Opt-in rule.** Is "has `craftsman.config.json` or `.craftsman/`" the right marker, or
-   do you want an explicit file written only by `/craftsman:init`?
-3. **Cap semantics.** Should the cap count the root, or only sub-agents (N = 0 root only,
-   N = 3 root + 3)? Recommended: only sub-agents.
-4. **Models for the entrypoints.** Move `/idea`, `/architect` and `idea-critic` to `fable` by
-   default (recommended), or keep `opus` and use `fable` only under `--deep`?
-5. **Focus naming and storage.** Is `/craftsman:focus <slug>` with a per-session
-   `focus.json` right, or do you want focus set from an env var at launch
-   (`CRAFTSMAN_FOCUS=<kind>:<slug>`) so a session starts already scoped?
-6. **Merge reach.** Should `merge` also be allowed to create and push a missing remote
-   branch for a submodule, or only land branches that already exist?
+Only assumptions I made while applying the decisions; none blocks `/architect`.
+1. **Standard-mode models for `/idea` and `/architect`.** I kept `opus` as today (decision 4
+   covers only `--deep`). Should a trivially small idea be routed down a tier by decision 1?
+2. **Force and rewrite operations.** I read "everything else" as the full landing lifecycle
+   and kept destructive history rewriting blocked. Say so if you want them allowed (a
+   `merge.allowForce` switch, default off).
+3. **Router thresholds.** The first numeric thresholds are placeholders until
+   `/craftsman:stats` has data per tier.
 
 ## Next step
-`/architect plugin-overhaul --deep`. It must amend ARCH-ENGINE-09 (read-only fan-out
-exempt; write units still sequential), keep ARCH-STATE-07, and add rules for the opt-in
-marker, the agent cap and the design area. Slices A and B are small enough to go
-straight to `/plan` once the marker decision (question 2) is answered.
+`/architect plugin-overhaul --deep`. It must: amend ARCH-ENGINE-09 (read-only fan-out
+exempt; write units still sequential); keep ARCH-STATE-07; add the `second-look` grant as a
+named exception; amend ARCH-LAND-02/03 for standalone submodule landing; and add rules for the
+explicit opt-in marker, the no-nesting guarantee, the model router, session focus and the
+design area. Slices A (scoping) and B (cleanup) can go straight to `/plan` now: the marker
+decision is made.
