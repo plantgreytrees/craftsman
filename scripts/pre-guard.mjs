@@ -260,10 +260,11 @@ function pathspecHit(arg, cwd, docPaths, icase = false) {
 // A git pathspec starting with `:` carries magic (`:/`, `:!`, `:^`, `:(top,icase,glob,...)`).
 // Decode it to a plain path (top -> project root, icase -> the guarded base's own
 // case); magic it cannot decode fails closed rather than slipping past.
-function decodeMagic(arg, cwd, docPaths) {
-  if (!arg.startsWith(":")) return { arg, cwd };
-  let rest = arg.slice(1), top = false, icase = false, exclude = false;
-  if (rest.startsWith("(")) {
+function decodeMagic(arg, cwd, docPaths, forceIcase = false) {
+  if (!arg.startsWith(":") && !forceIcase) return { arg, cwd };
+  let rest = arg.startsWith(":") ? arg.slice(1) : arg, top = false, icase = forceIcase, exclude = false;
+  if (!arg.startsWith(":")) { /* plain pathspec under --icase-pathspecs */ }
+  else if (rest.startsWith("(")) {
     const e = rest.indexOf(")");
     if (e === -1) return { unreadable: "(git pathspec the parser cannot read: " + arg + ")" };
     for (const m of rest.slice(1, e).split(",")) {
@@ -374,6 +375,8 @@ function removedDocs(cmd, docPaths) {
   }
 
   function segment(words, state, depth) {
+    // GIT_ICASE_PATHSPECS=<truthy> anywhere in the prefix (`VAR=1 git`, `env VAR=1 git`).
+    const icaseEnv = words.some((w) => { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); return m && !/^(?:0|false|no|off|)$/i.test(m[1]); });
     words = stripPrefixes(words, state.cwd);
     if (!words.length) return;
     const verb = path.basename(words[0]);
@@ -392,13 +395,14 @@ function removedDocs(cmd, docPaths) {
       return;
     }
     if (verb === "git") {
-      let cwd = state.cwd, i = 0;
+      let cwd = state.cwd, i = 0, icaseAll = icaseEnv;
       while (i < rest.length && rest[i].startsWith("-")) {
+        if (rest[i] === "--icase-pathspecs") icaseAll = true;
         if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
         else i += rest[i] === "-c" ? 2 : 1;
       }
       if (rest[i] === "rm" || rest[i] === "mv") {
-        const specs = args(rest.slice(i + 1)).map((raw) => decodeMagic(raw, cwd, docPaths));
+        const specs = args(rest.slice(i + 1)).map((raw) => decodeMagic(raw, cwd, docPaths, icaseAll));
         // An exclusion never names a path to keep: with no positive pathspec git
         // acts on everything, so the argument list fails closed as `.`.
         if (specs.length && specs.every((x) => x.exclude)) specs.push({ arg: ".", cwd });
@@ -419,11 +423,12 @@ function removedDocs(cmd, docPaths) {
       for (let k = 0; k < exprs.length; k++) {
         if (!/^-exec(?:dir)?$/.test(exprs[k])) continue;
         let m = k + 1;
-        while (m < exprs.length && exprs[m] !== ";" && exprs[m] !== "+") m++;
+        // `+` ends the list only straight after `{}`; elsewhere it is a word.
+        while (m < exprs.length && exprs[m] !== ";" && !(exprs[m] === "+" && exprs[m - 1] === "{}")) m++;
         const cmdWords = stripPrefixes(exprs.slice(k + 1, m), state.cwd);
         if (/^(?:rm|unlink|mv)$/.test(path.basename(cmdWords[0] || ""))) execs.push({ verb: path.basename(cmdWords[0]), words: cmdWords.slice(1) });
       }
-      const deletes = exprs.includes("-delete") || execs.some((x) => x.verb !== "mv");
+      const deletes = exprs.includes("-delete") || execs.some((x) => x.verb !== "mv" || x.words.some((w) => w.includes("{}")));
       for (const x of execs) for (const w of x.words) { // every literal word handed to rm/unlink/mv, bar `{}`
         if (w !== "{}" && !w.startsWith("-")) { const h = touchesGuarded(w, state.cwd, docPaths); if (h) hits.push(h); }
       }
