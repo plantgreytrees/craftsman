@@ -211,3 +211,16 @@ test("engine: with a cap of 2 independent, disjoint units run as a wave after th
   assert.doesNotMatch(implement("d"), /wave: true/);
   assert.deepEqual(results.map((r) => r.unit), ["a", "b", "c", "d", "e", "feature:f"]);
 });
+
+test("wiring: feature-mode tracker fields and publish/park triggers are stated in the protocol docs", () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const features = fs.readFileSync(path.join(root, "commands/_features.md"), "utf8");
+  const runner = fs.readFileSync(path.join(root, "agents/unit-runner.md"), "utf8");
+  for (const field of ["feature", "feature_branch", "session_id"]) {
+    for (const [name, text] of [["_features.md", features], ["unit-runner.md", runner]]) {
+      assert.match(text, new RegExp(`\`${field}\``), `${name} names ${field}`);
+    }
+  }
+  assert.match(features, /Publish after prepare \(ARCH-TRACKER-11\)/);
+  assert.match(features, /land-feature park → `S tracker` `PARKED` with `decision`/);
+});

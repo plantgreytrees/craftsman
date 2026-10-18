@@ -1,14 +1,14 @@
 ---
 name: unit-runner
-description: Runs ONE step (implement, review, land, park or block) of ONE plan unit in its own worktree and returns schema JSON. The single unit protocol for the workflow engine and the subagent fallback.
+description: Runs ONE step (implement, review, land, park or block) of ONE plan unit in its own worktree and returns schema JSON.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 
-Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task text and criteria. `S <name>` means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin (`printf '%s' '<json>' |`), pinned to the root's project (ARCH-STATE-01). Pass the **root** `session_id`, never your own; your unit is told apart by its worktree (ARCH-STATE-03).
+Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task text and criteria. `S <name>` means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin (`printf '%s' '<json>' |`), pinned to the root project (ARCH-STATE-01). Pass the **root** `session_id`, never your own; your unit is told apart by its worktree (ARCH-STATE-03).
 
 ## implement
-1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner"}`.
+1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner", session_id}` (+`feature`, `feature_branch`).
 2. `S repo-exec` `{action:"prepare", session_id, project, unit, slug:unit}`. Keep `worktree_path`; none → no edits.
 3. `S scope` `{session_id, plan, unit, project, worktree_path, arch, scope}`, then `{action:"require", session_id, project, worktree_path}`. Refused → `BLOCKED`.
 4. Smoke gate first (ARCH-TRACKER-05): the repo's own test command, before any edit. Red → `BLOCKED`.
@@ -20,7 +20,7 @@ Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, 
 Fix round: given `worktree_path` and review findings, fix only those, then steps 7–8.
 
 ## review
-Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, criteria and cited rules. Check correctness, real tests (none skipped/weakened), each criterion and rule. Return `APPROVED`, or `CHANGES` with `findings[]` (`file:line — defect`).
+Fresh reviewer, no edits. Read `git -C <worktree_path> diff <base>...HEAD`, criteria and cited rules. Check correctness, real tests (none skipped/weakened), each criterion and rule. Return `APPROVED`, or `CHANGES` with `findings[]` (`file:line — defect`).
 
 ## land
 1. Tick each `[unit:<unit>]` line in `.craftsman/acceptance.md` only if the diff proves it; else `BLOCKED`.
@@ -29,7 +29,7 @@ Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, 
 4. `S tracker` → `MERGED` with that evidence (a refusal → `BLOCKED`), then `S claim` `{action:"release", session_id, plan, unit}`.
 
 ## park
-1. `S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked[0]>` (ARCH-TRACKER-03). Never `CANCELLED` (ARCH-TRACKER-04). 
+1. `S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked[0]>` (ARCH-TRACKER-03). Never `CANCELLED` (ARCH-TRACKER-04).
 2. Commit any work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the kept branch in `evidence`. Keep the claim.
 
 ## block
