@@ -66,3 +66,35 @@ test("claim: transfer hands a claim to the replacing session, never one owned by
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+test("claim: feature:<id> units are exclusive across sessions and the ':' is sanitised in the lock path", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-claim-"));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const input = { plan: "docs/plans/example.md", unit: "feature:auth", project: ".", session_id: "first" };
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+    const run = (payload) => spawnSync(process.execPath, [CLAIM], { cwd: dir, env, input: JSON.stringify(payload), encoding: "utf8" });
+    const lock = claimPath(input.plan, input.unit, ".", { stateDir: path.join(dir, ".craftsman") });
+    assert.equal(path.basename(lock).includes(":"), false);
+    assert.match(path.basename(lock), /feature_auth\.lock$/);
+
+    assert.equal(run(input).status, 0);
+    assert.equal(fs.existsSync(lock), true);
+    const second = run({ ...input, session_id: "second" });
+    assert.equal(second.status, 2);
+    assert.match(second.stderr, /unit already claimed/);
+    assert.match(run(input).stdout, /already claimed by this session/);
+
+    // A different feature is independent.
+    assert.equal(run({ ...input, unit: "feature:billing", session_id: "second" }).status, 0);
+
+    // Stale recovery is unchanged for feature units.
+    const ownerPath = path.join(lock, "owner.json");
+    const owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+    owner.claimed_at = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+    fs.writeFileSync(ownerPath, JSON.stringify(owner));
+    assert.equal(run({ ...input, action: "recover", confirm: true, session_id: "second" }).status, 0);
+    assert.equal(fs.existsSync(lock), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
