@@ -107,9 +107,9 @@ units:
     security: normal
     scope:
       read: [commands/sync-docs.md, scripts/doc-retire.mjs, scripts/wiring.test.mjs, scripts/doc-size-policy.mjs]
-      docs: [docs/architecture/docs.rules.md, docs/architecture/slim.rules.md]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/architecture/engine.rules.md]
       write: [commands/sync-docs.md, commands/_sync-docs-prune.md, scripts/wiring.test.mjs, scripts/doc-size-policy.mjs]
-    arch: [ARCH-DOCS-04, ARCH-DOCS-05, ARCH-SLIM-01, ARCH-SLIM-04]
+    arch: [ARCH-DOCS-04, ARCH-DOCS-05, ARCH-SLIM-01, ARCH-SLIM-04, ARCH-ENGINE-04]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
   - id: lookup-callers
     scope_id: lookup-callers
@@ -133,9 +133,9 @@ units:
     security: normal
     scope:
       read: [commands/_shared-execution.md, commands/sync-docs.md, commands/plan.md, commands/orchestrate.md, commands/_architecture.md, agents/unit-runner.md, scripts/doc-size-policy.mjs, scripts/wiring.test.mjs, scripts/stats.mjs]
-      docs: [docs/architecture/slim.rules.md, docs/architecture/engine.rules.md, docs/architecture/tracker.rules.md]
+      docs: [docs/architecture/slim.rules.md, docs/architecture/engine.rules.md, docs/architecture/tracker.rules.md, docs/architecture/docs.rules.md, docs/architecture/plan.rules.md]
       write: [commands/_shared-execution.md, commands/sync-docs.md, commands/plan.md, commands/orchestrate.md, commands/_architecture.md, agents/unit-runner.md, scripts/wiring.test.mjs]
-    arch: [ARCH-SLIM-04, ARCH-SLIM-05, ARCH-SLIM-06, ARCH-TRACKER-05]
+    arch: [ARCH-SLIM-04, ARCH-SLIM-05, ARCH-SLIM-06, ARCH-TRACKER-05, ARCH-DOCS-04, ARCH-ENGINE-04, ARCH-PLAN-06]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
   - id: size-policy
     scope_id: size-policy
