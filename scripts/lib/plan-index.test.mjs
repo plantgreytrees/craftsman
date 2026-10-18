@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildIndex, parseFrontmatter, resolve, descendantSlugs } from "./plan-index.mjs";
+import { buildIndex, parseFrontmatter, removeChild, resolve, descendantSlugs } from "./plan-index.mjs";
 
 const doc = (slug, fm = "", body = "") => ({ slug, text: `---\nslug: ${slug}\n${fm}---\n${body}` });
 const storyFm = `level: story
@@ -101,4 +101,31 @@ test("10.1 buildIndex refuses a frontmatter slug that could leave docs/plans", (
     assert.throws(() => buildIndex([{ path: "docs/plans/x.md", slug: "x", text: `---\nslug: "${bad}"\n---\n` }]), /invalid plan slug/, bad);
   }
   assert.doesNotThrow(() => buildIndex([doc("ok.v1_2-x")]));
+});
+
+test("13.2 removeChild edits every children: form loadIndex accepts", () => {
+  const wrap = (fm) => `---\nlevel: epic\n${fm}---\n# e\n`;
+  const kids = (text) => parseFrontmatter(text).children;
+  const cases = [
+    ["children: [a, b, c]\n", ["b", "c"]],
+    ["children: [a, b] # kids\n", ["b"]],
+    ["children: [b.md, 'a']\n", ["b.md"]],
+    ["children: a\n", []],
+    ["children: a # only\n", []],
+    ["children:\n  - a # first\n  # note\n  - b\n", ["b"]],
+    ["children:\n- a\n- b\n", ["b"]],
+    ["children:\n  - b\n  - a\nlevel2: x\n", ["b"]],
+  ];
+  for (const [fm, want] of cases) {
+    const out = removeChild(wrap(fm), "a");
+    assert.ok(out !== null, fm);
+    const got = kids(out);
+    assert.deepEqual(Array.isArray(got) ? got : got == null || got === "" ? [] : [got], want, fm);
+    assert.ok(out.endsWith("---\n# e\n"));
+  }
+  assert.ok(removeChild(wrap("children: [a, b] # kids\n"), "a").includes("# kids"));
+  assert.ok(removeChild(wrap("children:\n  - a\n  - b # keep\n  # note\n"), "a").includes("# keep"));
+  assert.equal(removeChild(wrap("children: [b]\n"), "a"), null);
+  assert.equal(removeChild(wrap("level2: x\n"), "a"), null);
+  assert.equal(removeChild("# no front matter\n", "a"), null);
 });
