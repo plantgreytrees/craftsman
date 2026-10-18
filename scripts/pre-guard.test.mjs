@@ -707,6 +707,14 @@ test("pre-guard: git pathspec globs cross / and docPaths without ** use real ent
   }, ["rm docs/plans/*", "rm -f docs/plans/*.m?"], ["rm docs/other/*"]);
 });
 
+test("pre-guard: assigned values and if/while/until/time/mv-in-loop fail closed (15.1, 15.2)", () => {
+  grantedPair("craftsman-vars15-", "vars15", null, [
+    'f=docs/plans/x.md; rm "$f"', "export D=docs; rm -rf $D",
+    "if rm docs/plans/x.md; then :; fi", "while rm docs/plans/x.md; do :; done", "time rm docs/plans/x.md",
+    'for f in docs/plans/*.md; do mv "$f" /x; done',
+  ], ['f=build/x; rm "$f"']);
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
