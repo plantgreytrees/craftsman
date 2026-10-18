@@ -3,7 +3,7 @@
 import { loadWorkspaceManifest } from "./lib/core.mjs";
 import { checkSubmoduleBumps } from "./lib/plan-submodules.mjs";
 
-export function validateSteps(steps, { workspace = loadWorkspaceManifest(), isGitlink } = {}) {
+export function validateSteps(steps, { workspace = loadWorkspaceManifest(), isGitlink, featureUnitCap = 8 } = {}) {
   if (!Array.isArray(steps) || !steps.length) throw new Error("plan must contain at least one step");
   const ids = new Set();
   for (const step of steps) {
@@ -29,12 +29,68 @@ export function validateSteps(steps, { workspace = loadWorkspaceManifest(), isGi
       if (dependency === step.id) throw new Error(`scope step ${step.id} cannot depend on itself`);
     }
   }
+  checkFeatures(steps, featureUnitCap); // ARCH-ENGINE-18
   if (workspace) checkSubmoduleBumps(steps, workspace, { isGitlink }); // ARCH-LAND-03
   return steps;
 }
 
-export function orderSteps(steps) {
-  validateSteps(steps);
+const IMPLICIT_FEATURE = "";
+
+function featureOf(step) {
+  return step.feature === undefined ? IMPLICIT_FEATURE : step.feature;
+}
+
+// ARCH-ENGINE-18: steps without a feature share one implicit feature; a feature
+// holds at most featureUnitCap steps and never depends on a later feature.
+function checkFeatures(steps, cap) {
+  const rank = new Map();
+  const counts = new Map();
+  for (const step of steps) {
+    if (step.feature !== undefined && (typeof step.feature !== "string" || !step.feature.trim())) {
+      throw new Error(`scope step ${step.id} has an invalid feature`);
+    }
+    const feature = featureOf(step);
+    if (!rank.has(feature)) rank.set(feature, rank.size);
+    counts.set(feature, (counts.get(feature) || 0) + 1);
+  }
+  for (const [feature, count] of counts) {
+    if (count > cap) {
+      throw new Error(`feature ${feature || "(implicit)"} has ${count} units, over the cap of ${cap}`);
+    }
+  }
+  const byId = new Map(steps.map((step) => [step.id, step]));
+  for (const step of steps) {
+    for (const dependency of step.depends_on) {
+      if (rank.get(featureOf(byId.get(dependency))) > rank.get(featureOf(step))) {
+        throw new Error(`scope step ${step.id} depends on ${dependency} in a later feature`);
+      }
+    }
+  }
+}
+
+// ARCH-ENGINE-16: batches of 2+ only when maxSubagents >= 2, with no depends_on
+// between batch members and disjoint scope.write; otherwise one step per batch.
+export function waves(steps, { maxSubagents = 0 } = {}) {
+  const batches = [];
+  const limit = Number.isInteger(maxSubagents) ? maxSubagents : 0;
+  if (limit < 2) return steps.map((step) => [step]);
+  const writes = (step) => step.scope?.write || [];
+  const overlap = (a, b) => writes(a).some((x) => writes(b).some((y) => x === y
+    || x.startsWith(y.endsWith("/") ? y : `${y}/`) || y.startsWith(x.endsWith("/") ? x : `${x}/`)));
+  let batch = [];
+  const flush = () => { if (batch.length) batches.push(batch); batch = []; };
+  for (const step of steps) {
+    const fits = batch.length < limit && batch.every((other) => featureOf(other) === featureOf(step)
+      && !step.depends_on.includes(other.id) && !other.depends_on.includes(step.id) && !overlap(step, other));
+    if (!fits) flush();
+    batch.push(step);
+  }
+  flush();
+  return batches;
+}
+
+export function orderSteps(steps, options) {
+  validateSteps(steps, options);
   const byId = new Map(steps.map((step) => [step.id, step]));
   const state = new Map();
   const ordered = [];
