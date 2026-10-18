@@ -300,6 +300,9 @@ function planDocuments(root, version) {
         updated = marker.test(updated)
           ? updated.replace(marker, replacement)
           : updated.replace(/^slug:.*$/m, (line) => `${line}\n${replacement}`);
+        // ARCH-PLAN-04: stamp the level only; an existing level, a parent (the level is inherited) or any hand-written row stays as written.
+        const head = updated.match(/^---\n([\s\S]*?)\n---\n/)[1];
+        if (!/^(level|parent):/m.test(head)) updated = updated.replace(/^craftsman_version:.*$/m, (line) => `${line}\nlevel: feature`);
       }
       return {
         file, relative: path.relative(root, file).split(path.sep).join("/"), slug,
