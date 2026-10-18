@@ -523,6 +523,7 @@ test("config: execution.maxSessions is reserved, read by nothing yet", () => {
   });
   for (const d of ["scripts", "hooks", "workflows", "commands", "agents", "skills"]) walk(path.join(root, d));
   assert.deepEqual(hits, []);
+});
 
 // ARCH-TRACKER-08: feature-tagged, untagged and mixed criteria.
 const FC_TEXT = [
