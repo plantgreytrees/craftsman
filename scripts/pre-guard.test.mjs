@@ -715,6 +715,25 @@ test("pre-guard: assigned values and if/while/until/time/mv-in-loop fail closed 
   ], ['f=build/x; rm "$f"']);
 });
 
+test("pre-guard: arithmetic in quotes, $[ ] and comment apostrophes do not hide a removal (17.1)", () => {
+  grantedPair("craftsman-quote17-", "quote17", null, [
+    'echo "$((1<<2))"\nrm docs/plans/x.md', 'x="$(( 4 << 1 ))"\nrm -rf docs/plans', "echo $[1<<2]\nrm docs/plans/x.md",
+    "# don't\nrm -rf docs", "ls # it's\ngit rm -rq .",
+  ]);
+});
+
+test("pre-guard: git pathspec magic is decoded (17.2)", () => {
+  grantedPair("craftsman-magic17-", "magic17", null, [
+    "git rm -r :/docs", "git rm -r ':(top)docs'", "git rm -r ':(icase)DOCS/PLANS'",
+  ], ["git rm src/x.md"]);
+});
+
+test("pre-guard: find -exec rm checks its literal words (17.3)", () => {
+  grantedPair("craftsman-exec17-", "exec17", null, [
+    "find . -name '*.log' -exec rm -rf docs \\;", "find . -name '*.log' -exec rm {} docs/plans/x.md +",
+  ], ["find . -name '*.log' -exec rm {} +"]);
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
