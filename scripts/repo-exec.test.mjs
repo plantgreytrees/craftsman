@@ -980,3 +980,28 @@ test("repo-exec land-unit: lands from a linked .claude/worktrees session; a path
     assert.ok(fs.existsSync(path.join(feature.worktree_path, "u1.txt")));
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
+
+test("repo-exec land-feature: acceptance criteria gate the landing (ARCH-TRACKER-08)", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, origin, base, rows } = landFeatureFixture(data);
+      featureCommit(feature, "a.txt", "a\n");
+      git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
+      writeLedger(context, rows, ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      fs.mkdirSync(path.join(context.root, "docs", "plans"), { recursive: true });
+      fs.writeFileSync(path.join(context.root, "docs", "plans", "p.md"), "---\nslug: p\nlevel: story\nfeatures:\n  - id: f0\n    units: [a]\n  - id: f1\n    units: [u0, u1]\n---\n");
+      const acceptance = path.join(context.root, ".craftsman", "acceptance.md");
+      fs.mkdirSync(path.dirname(acceptance), { recursive: true });
+      const before = git(origin, ["rev-parse", base]);
+      fs.writeFileSync(acceptance, "- [ ] [feature:f1] gate f1\n- [x] untagged\n");
+      assert.throws(() => landFeature(context, { plan: "p", feature: "f1" }, info), /open acceptance criteria.*gate f1/);
+      fs.writeFileSync(acceptance, "- [x] [feature:f1] gate f1\n- [ ] untagged open\n");
+      assert.throws(() => landFeature(context, { plan: "p", feature: "f1" }, info), /untagged open/);
+      assert.equal(git(origin, ["rev-parse", base]), before);
+      fs.writeFileSync(acceptance, "- [x] [feature:f1] gate f1\n- [x] untagged open\n");
+      const result = landFeature(context, { plan: "p", feature: "f1" }, info);
+      assert.equal(result.merged, true);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
