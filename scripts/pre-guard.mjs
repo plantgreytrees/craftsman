@@ -75,6 +75,13 @@ function heredocSubstitutions(body) {
 // Drop heredoc bodies (and their terminator lines) so their text is never
 // parsed as shell. Quote-aware: a `<<` inside single quotes is not a heredoc,
 // while one inside `"$( ... )"` is. Unterminated bodies run to the end, as in sh.
+function arithmeticEnd(text, i) { // index of the `)` / `]` closing arithmetic opened at i, else text.length
+  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
+  let j = i + 1, depth = 0;
+  for (; j < text.length; j++) { if (text[j] === "(") depth++; else if (text[j] === ")" && --depth === 0) break; }
+  return j;
+}
+
 function stripHeredocs(text) {
   let out = "", pending = [];
   const stack = ["cmd"]; // "cmd" | "dq"
@@ -84,6 +91,9 @@ function stripHeredocs(text) {
     if (sq) { out += c; if (c === "'") sq = false; continue; }
     if (c === "\\" && i + 1 < text.length) { out += c + text[++i]; continue; }
     if (top === "dq") {
+      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { // arithmetic: a shift, never a heredoc
+        const j = arithmeticEnd(text, i); out += text.slice(i, j + 1); i = j; continue;
+      }
       if (c === '"') stack.pop();
       else if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); out += "$("; i++; continue; }
       out += c; continue;
@@ -91,9 +101,8 @@ function stripHeredocs(text) {
     if (c === "'") { sq = true; out += c; continue; }
     if (c === '"') { stack.push("dq"); out += c; continue; }
     // Arithmetic `$(( ))` / `(( ))`: its `<<` is a shift, never a heredoc.
-    if ((c === "$" && text[i + 1] === "(" && text[i + 2] === "(") || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
-      let j = c === "$" ? i + 1 : i, depth = 0;
-      for (; j < text.length; j++) { if (text[j] === "(") depth++; else if (text[j] === ")" && --depth === 0) break; }
+    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+      const j = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1);
       out += text.slice(i, j + 1); i = j; continue;
     }
     if (c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) { // comment: to end of line
@@ -147,7 +156,8 @@ function shellSegments(cmd) {
       if (c === quote) quote = null;
       else if (c === "\\" && quote === '"' && i + 1 < cmd.length) word += cmd[++i];
       else word += c;
-    } else if (c === '"' || c === "'") { quote = c; word ??= ""; }
+    } else if (c === "#" && word === null) { while (i + 1 < cmd.length && cmd[i + 1] !== "\n") i++; } // comment: never opens a quote
+    else if (c === '"' || c === "'") { quote = c; word ??= ""; }
     else if (c === "\\" && i + 1 < cmd.length) { word = (word ?? "") + cmd[++i]; }
     else if (/\s/.test(c) && c !== "\n") endWord();
     else if ("\n;&|()`".includes(c)) {
@@ -243,6 +253,36 @@ function pathspecHit(arg, cwd, docPaths) {
   }
   if (budget < 0 && !found) return "(git pathspec too broad to scan: " + arg + ")";
   return found;
+}
+
+// A git pathspec starting with `:` carries magic (`:/`, `:!`, `:^`, `:(top,icase,glob,...)`).
+// Decode it to a plain path (top -> project root, icase -> the guarded base's own
+// case); magic it cannot decode fails closed rather than slipping past.
+function decodeMagic(arg, cwd, docPaths) {
+  if (!arg.startsWith(":")) return { arg, cwd };
+  let rest = arg.slice(1), top = false, icase = false;
+  if (rest.startsWith("(")) {
+    const e = rest.indexOf(")");
+    if (e === -1) return { unreadable: "(git pathspec the parser cannot read: " + arg + ")" };
+    for (const m of rest.slice(1, e).split(",")) {
+      if (m === "top") top = true; else if (m === "icase") icase = true;
+      else if (!["glob", "literal", "exclude"].includes(m)) return { unreadable: "(git pathspec magic the parser cannot read: " + arg + ")" };
+    }
+    rest = rest.slice(e + 1);
+  } else {
+    while (/^[/!^]/.test(rest)) { if (rest[0] === "/") top = true; rest = rest.slice(1); }
+    if (rest.startsWith(":")) rest = rest.slice(1);
+  }
+  if (icase) {
+    const bases = docPaths.map((p) => guardedBase(p).split("/").filter(Boolean));
+    const parts = rest.replace(/^\.\//, "").split("/");
+    for (const base of bases) {
+      if (parts.every((x, k) => k >= base.length || x.toLowerCase() === base[k].toLowerCase() || x === "")) {
+        rest = parts.map((x, k) => (k < base.length ? base[k] : x)).join("/"); break;
+      }
+    }
+  }
+  return { arg: rest || ".", cwd: top ? activeRoot : cwd };
 }
 
 function touchesGuarded(arg, cwd, docPaths) {
@@ -352,7 +392,11 @@ function removedDocs(cmd, docPaths) {
         if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
         else i += rest[i] === "-c" ? 2 : 1;
       }
-      if (rest[i] === "rm" || rest[i] === "mv") for (const a of args(rest.slice(i + 1))) { check(a, cwd); const h = pathspecHit(a, cwd, docPaths); if (h) hits.push(h); }
+      if (rest[i] === "rm" || rest[i] === "mv") for (const raw of args(rest.slice(i + 1))) {
+        const spec = decodeMagic(raw, cwd, docPaths);
+        if (spec.unreadable) { hits.push(spec.unreadable); continue; }
+        check(spec.arg, spec.cwd); const h = pathspecHit(spec.arg, spec.cwd, docPaths); if (h) hits.push(h);
+      }
       return;
     }
     if (verb === "find") {
@@ -360,6 +404,12 @@ function removedDocs(cmd, docPaths) {
       const starts = exprAt === -1 ? rest : rest.slice(0, exprAt);
       const exprs = exprAt === -1 ? [] : rest.slice(exprAt);
       const deletes = exprs.includes("-delete") || exprs.some((w, k) => /^-exec(?:dir)?$/.test(w) && /^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || "")));
+      for (let k = 0; k < exprs.length; k++) { // every literal word handed to rm/unlink, bar `{}`
+        if (!/^-exec(?:dir)?$/.test(exprs[k]) || !/^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || ""))) continue;
+        for (let m = k + 2; m < exprs.length && exprs[m] !== ";" && exprs[m] !== "+"; m++) {
+          if (exprs[m] !== "{}" && !exprs[m].startsWith("-")) { const h = touchesGuarded(exprs[m], state.cwd, docPaths); if (h) hits.push(h); }
+        }
+      }
       if (deletes) for (const a of starts.length ? starts : ["."]) {
         const h = touchesGuarded(a, state.cwd, docPaths);
         if (h && !findNamesMiss(exprs, a, state.cwd, docPaths)) hits.push(h);
