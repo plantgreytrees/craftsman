@@ -6,8 +6,11 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-18
+
 ### Added
 
+- Finished plans retire to one archive line with their commit ids, stale docs can be pruned safely, and every craftsman file has an enforced size cap.
 - **Plan hierarchy: epic, story and feature levels.** Plans take `level`,
   `parent`, `children` and `priority`; `/orchestrate` and `/auto` accept
   `--level` and `--feature`. Epics and stories get generated rollup
