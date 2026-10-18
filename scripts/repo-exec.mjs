@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { atomicWrite, featureCriteria, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
+import { acceptanceCriteria, atomicWrite, featureCriteria, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
 import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
@@ -452,6 +452,20 @@ function landUnit(context, input, info) {
   }
 }
 
+/**
+ * Is `feature` the last feature of plan `slug`?
+ * @returns {{ last: boolean } | { error: string }} `{ error }` when the plan
+ *   index cannot be resolved; never folded into `last: false`.
+ */
+function isLastFeature(slug, feature, root) {
+  try {
+    return { last: resolvePlan(slug, { level: "epic", root }).features.at(-1)?.id === String(feature) };
+  } catch (err) {
+    if (!(err instanceof Error)) throw err;
+    return { error: err.message };
+  }
+}
+
 // ARCH-LAND-18: a finished feature lands on base. Refused unless
 // planning.featureBranches and every row of the feature is FEATURE_MERGED.
 // In a detached temp worktree: base merged into the feature, gate re-run, then
@@ -473,9 +487,14 @@ function landFeature(context, input, info, deps = {}) {
   const main = mainCheckoutRoot(context.root);
   const acceptanceFile = path.join(main, ".craftsman", "acceptance.md");
   if (fs.existsSync(acceptanceFile)) {
-    let isLast = false;
-    try { isLast = resolvePlan(planSlug, { level: "epic", root: main }).features.at(-1)?.id === String(input.feature); } catch { isLast = false; }
-    const openCriteria = featureCriteria(fs.readFileSync(acceptanceFile, "utf8"), input.feature, isLast).filter((c) => !c.done);
+    const text = fs.readFileSync(acceptanceFile, "utf8");
+    const lastCheck = isLastFeature(planSlug, input.feature, main);
+    const openCriteria = featureCriteria(text, input.feature, lastCheck.last === true).filter((c) => !c.done);
+    if (lastCheck.error !== undefined) {
+      // Fail closed: an unresolvable index cannot clear an open untagged line.
+      const untagged = acceptanceCriteria(text).filter((c) => c.feature == null && !c.unit && !c.done);
+      if (untagged.length) throw new Error(`land-feature refused: cannot resolve plan index to tell if ${input.feature} is last: ${lastCheck.error}`);
+    }
     if (openCriteria.length) throw new Error(`land-feature refused: open acceptance criteria for feature ${input.feature}: ${openCriteria.map((c) => c.line.trim()).join(" | ")}`);
   }
   const slug = `${planSlug}-${input.feature}`;

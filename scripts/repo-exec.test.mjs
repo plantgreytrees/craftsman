@@ -1006,6 +1006,35 @@ test("repo-exec land-feature: acceptance criteria gate the landing (ARCH-TRACKER
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
+test("repo-exec land-feature: an unresolvable plan index fails closed (14.1)", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, rows } = landFeatureFixture(data);
+      featureCommit(feature, "a.txt", "a\n");
+      git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
+      writeLedger(context, rows, ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      const plans = path.join(context.root, "docs", "plans");
+      fs.mkdirSync(plans, { recursive: true });
+      const acceptance = path.join(context.root, ".craftsman", "acceptance.md");
+      fs.mkdirSync(path.dirname(acceptance), { recursive: true });
+      // no features: -> implicit feature id = slug; the sole (last) feature
+      fs.writeFileSync(path.join(plans, "p.md"), "---\nslug: p\nlevel: story\n---\n- [ ] 1.1 `u0` thing\n");
+      fs.writeFileSync(acceptance, "- [x] [feature:p] gate\n- [ ] untagged open\n");
+      writeLedger(context, rows.map((r) => ({ ...r, feature: "p" })), ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      assert.throws(() => landFeature(context, { plan: "p", feature: "p" }, info), /untagged open/);
+      writeLedger(context, rows, ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      // broken sibling doc breaks the index
+      fs.writeFileSync(path.join(plans, "p.md"), "---\nslug: p\nlevel: story\nfeatures:\n  - id: f1\n    units: [u0, u1]\n---\n");
+      fs.writeFileSync(path.join(plans, "broken.md"), "---\nslug: broken\nlevel: bogus\n---\n");
+      fs.writeFileSync(acceptance, "- [x] [feature:f1] gate f1\n- [ ] untagged open\n");
+      assert.throws(() => landFeature(context, { plan: "p", feature: "f1" }, info), /cannot resolve plan index to tell if f1 is last: .+/);
+      fs.writeFileSync(acceptance, "- [ ] [feature:f1] gate f1\n- [x] untagged\n");
+      assert.throws(() => landFeature(context, { plan: "p", feature: "f1" }, info), /open acceptance criteria.*gate f1/);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 test("repo-exec feature id: unsafe ids are refused in prepare and land-feature, core-1.2 is accepted", () => {
   const data = featureFixture();
   try {
