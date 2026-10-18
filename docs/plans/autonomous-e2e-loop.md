@@ -29,7 +29,7 @@ units:
     # Split by 9.1's ARCH-ENGINE-08 check: as one step it loaded 174,808 bytes (> 122,880).
     # Both halves shipped together in 1e4601b, executed root-only before the check existed.
     scope:
-      read: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs]
+      read: [scripts/lib/core.mjs, scripts/scope.mjs]
       docs: [docs/architecture/state.rules.md]
       write: [scripts/lib/core.mjs, scripts/scope.mjs, scripts/pre-guard.mjs, scripts/session-context.mjs, scripts/lib/core.test.mjs, scripts/scope.test.mjs, scripts/pre-guard.test.mjs, scripts/session-context.test.mjs, scripts/builtin-skill-context.test.mjs, scripts/arch-check.test.mjs]  # re-scoped in execution: non-git test fixtures became git roots (ARCH-STATE-01)
     arch: [ARCH-STATE-01, ARCH-STATE-03, ARCH-STATE-06]
@@ -81,7 +81,7 @@ units:
     language: Markdown + JavaScript
     security: high
     scope:
-      read: [commands/instruction.md, commands/orchestrate.md, commands/merge.md, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/plan-graph.mjs, scripts/repo-exec.mjs, scripts/pre-guard.test.mjs, scripts/plan-graph.test.mjs]
+      read: [commands/orchestrate.md, scripts/plan-graph.mjs, scripts/repo-exec.mjs]
       docs: [docs/architecture/auto.rules.md, docs/architecture/landing.rules.md, docs/architecture/state.rules.md]
       write: [commands/auto.md, commands/instruction.md, commands/merge.md, scripts/orchestrate-scope-guard.mjs, scripts/pre-guard.mjs, scripts/orchestrate-scope-guard.test.mjs, scripts/pre-guard.test.mjs, scripts/plan-graph.test.mjs, scripts/auto-command.test.mjs]
     arch: [ARCH-AUTO-01, ARCH-AUTO-02, ARCH-AUTO-03, ARCH-AUTO-04, ARCH-AUTO-05, ARCH-AUTO-06, ARCH-AUTO-07, ARCH-LAND-01, ARCH-LAND-02, ARCH-LAND-03, ARCH-LAND-04, ARCH-LAND-05, ARCH-STATE-06]
