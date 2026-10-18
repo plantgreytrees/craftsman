@@ -23,6 +23,7 @@
 // `--root <dir>` overrides the project root (defaults to the current project).
 import fs from "node:fs";
 import path from "node:path";
+import { buildIndex } from "./lib/plan-index.mjs";
 import { PROJECT_ROOT, globToRe, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
 
 export const DEFAULT_DIR = "docs/architecture";
@@ -226,6 +227,26 @@ export function lintRules(root, docs, dir = DEFAULT_DIR) {
   return errors;
 }
 
+// ARCH-PLAN-02: run plan-index validation over docs/plans; one error per
+// refusal, prefixed with the plan path. buildIndex stops at its first refusal,
+// so drop the refused plan and rebuild to surface the rest.
+export function lintPlans(root) {
+  const dir = path.join(root, "docs", "plans");
+  let names;
+  try { names = fs.readdirSync(dir).filter((n) => n.endsWith(".md")).sort(); } catch { return []; }
+  let docs = names.map((n) => ({ path: `docs/plans/${n}`, slug: n.slice(0, -3), text: fs.readFileSync(path.join(dir, n), "utf8") }));
+  const errors = [];
+  while (docs.length) {
+    try { buildIndex(docs); break; } catch (e) {
+      const slug = /^([^:\s]+):/.exec(e.message)?.[1] || /plan slug: (\S+)/.exec(e.message)?.[1];
+      const bad = docs.find((d) => d.slug === slug) || docs[0];
+      errors.push(`${bad.path}: ${e.message}`);
+      docs = docs.filter((d) => d !== bad);
+    }
+  }
+  return errors;
+}
+
 // The opening line of every human doc /architect writes.
 export const HUMAN_BANNER = "> **Human reference.**";
 
@@ -261,7 +282,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const [mode, ...rest] = args;
   let problems = [];
   if (mode === "lint") {
-    problems = lintRules(root, docs, dir);
+    problems = [...lintRules(root, docs, dir), ...lintPlans(root)];
     if (!problems.length) console.log(`arch-check: ${docs.length} rules doc(s), ${docs.reduce((n, d) => n + d.rules.length, 0)} rule(s) — PASS`);
     const unmanaged = unmanagedDocs(root, docs, dir).length;
     if (unmanaged) console.log(`arch-check: ${unmanaged} unmanaged doc(s) under ${dir} (no rules pair; /sync-docs maintains them, /architect --backfill pairs them)`);
