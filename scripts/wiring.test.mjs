@@ -175,3 +175,18 @@ test("wiring: sync-docs points at _sync-docs-prune, which keeps the archive/prun
   assert.match(prune, /index heading/);
   assert.match(prune, /`\/goal` or any pre-approval does \*\*not\*\* cover/);
 });
+
+test("wiring: trimmed loadable docs stay at or below 95% of their size cap (ARCH-SLIM-06)", () => {
+  const caps = {
+    "commands/_shared-execution.md": 13500,
+    "commands/sync-docs.md": 10000,
+    "commands/plan.md": 10000,
+    "commands/orchestrate.md": 10000,
+    "commands/_architecture.md": 4000,
+    "agents/unit-runner.md": 3800,
+  };
+  for (const [file, cap] of Object.entries(caps)) {
+    const size = fs.statSync(path.join(PLUGIN_ROOT, file)).size;
+    assert.ok(size <= cap * 0.95, `${file}: ${size} > ${cap * 0.95}`);
+  }
+});
