@@ -141,44 +141,8 @@ function stripHeredocs(text) {
   return out;
 }
 
-// Quote-aware split of a shell command into segments of words. `;` `&` `|`
-// newline ( ) and backticks separate segments; a leading `\` on a word is
-// dropped (`\rm`). `ok` is false when a quote never closes.
-function shellSegments(cmd) {
-  const segments = [], seps = [], substs = [], arrays = [];
-  let words = [], word = null, quote = null, subst = false, arr = false, sep = null;
-  const endWord = () => { if (word !== null) words.push(word); word = null; };
-  // seps[i]: the separator before segment i; substs[i]: it opened a `...` or $(...).
-  const endSegment = () => { endWord(); if (words.length) { segments.push(words); seps.push(sep); substs.push(subst); arrays.push(arr); sep = null; } words = []; subst = false; arr = false; };
-  for (let i = 0; i < cmd.length; i++) {
-    const c = cmd[i];
-    if (quote) {
-      if (c === quote) quote = null;
-      else if (c === "\\" && quote === '"' && i + 1 < cmd.length) word += cmd[++i];
-      else word += c;
-    } else if (c === "#" && word === null && (i === 0 || /[\s;&|(]/.test(cmd[i - 1]))) { while (i + 1 < cmd.length && cmd[i + 1] !== "\n") i++; } // comment: never opens a quote
-    else if (c === '"' || c === "'") { quote = c; word ??= ""; }
-    else if (c === "\\" && i + 1 < cmd.length) { word = (word ?? "") + cmd[++i]; }
-    else if (/\s/.test(c) && c !== "\n") endWord();
-    else if ("\n;&|()`".includes(c)) {
-      if (c === "`" || (c === "(" && word !== null && word.endsWith("$"))) subst = true;
-      const opensArray = c === "(" && word !== null && /^\w+\+?=$/.test(word); // NAME=( with nothing between
-      endSegment();
-      arr = opensArray;
-      if (!(sep === "|" && "()`".includes(c))) sep = c;
-    }
-    else word = (word ?? "") + c;
-  }
-  endSegment();
-  return { segments, seps, substs, arrays, ok: !quote };
-}
-
-const OPT_ARG = { sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"]), env: new Set(["-u", "-C", "-S"]),
-  xargs: new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]) };
 const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas", "nice", "timeout", "busybox", "stdbuf", "ionice"]);
-const KEYWORDS = new Set(["then", "do", "else", "elif", "!", "if", "while", "until", "coproc"]);
-OPT_ARG.exec = new Set(["-a"]); OPT_ARG.nice = new Set(["-n"]); OPT_ARG.timeout = new Set(["-s", "-k"]);
-OPT_ARG.stdbuf = new Set(["-i", "-o", "-e"]); OPT_ARG.ionice = new Set(["-c", "-n", "-p", "-P", "-u"]);
+const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in", "select", "function", "time", "coproc", "!", "{", "}", "[["]);
 
 // Literal directory prefix of a guarded glob: "docs/plans/**" -> "docs/plans".
 function guardedBase(glob) {
@@ -204,10 +168,7 @@ function segmentRe(seg, flags = "") {
   return new RegExp("^" + re + "$", flags);
 }
 
-// A guarded glob as a RegExp; an icase pathspec compares it case-insensitively in full.
-const guardRe = (p, icase) => (icase ? new RegExp(globToRe(p).source, "i") : globToRe(p));
-
-function lastSegmentGlob(arg, cwd, docPaths, icase = false) {
+function lastSegmentGlob(arg, cwd, docPaths) {
   const slash = arg.lastIndexOf("/");
   const dir = slash === -1 ? "" : arg.slice(0, slash + 1), seg = arg.slice(slash + 1);
   if (!/[*?[{]/.test(seg) || /[*?[{]/.test(dir)) return undefined; // not a last-segment-only glob
@@ -216,16 +177,16 @@ function lastSegmentGlob(arg, cwd, docPaths, icase = false) {
     return path.relative(path.resolve(cwd, dir || "."), activeRoot).startsWith("..") ? null : (rel || ".");
   }
   const dirParts = rel === "" ? [] : rel.split("/");
-  const re = segmentRe(seg, icase ? "i" : "");
+  const re = segmentRe(seg);
   const sample = [...dirParts, seg.replace(/[*?[\]{},!]/g, "x")].join("/");
   let entries = null;
   try { entries = fs.readdirSync(path.join(activeRoot, ...dirParts)); } catch { entries = []; }
   for (const p of docPaths) {
     if (!p.includes("**")) {
       // No `**`: test the real directory entries the glob expands to, not a sample.
-      const hit = entries.find((e) => re.test(e) && [[...dirParts, e].join("/"), "./" + [...dirParts, e].join("/")].some((c) => guardRe(p, icase).test(c)));
+      const hit = entries.find((e) => re.test(e) && [[...dirParts, e].join("/"), "./" + [...dirParts, e].join("/")].some((c) => globToRe(p).test(c)));
       if (hit !== undefined) return [...dirParts, hit].join("/");
-    } else if (guardRe(p, icase).test(sample) || guardRe(p, icase).test("./" + sample)) return sample;
+    } else if (globToRe(p).test(sample) || globToRe(p).test("./" + sample)) return sample;
     const base = guardedBase(p).split("/").filter(Boolean);
     if (base.length > dirParts.length && dirParts.every((d, k) => base[k] === d) && re.test(base[dirParts.length])) return [...dirParts, base[dirParts.length]].join("/");
   }
@@ -234,14 +195,14 @@ function lastSegmentGlob(arg, cwd, docPaths, icase = false) {
 
 // git pathspec globs match across `/` (`*.md` reaches docs/plans/x.md). The
 // glob is tested against every guarded base, its ancestors and its real contents.
-function pathspecHit(arg, cwd, docPaths, icase = false) {
+function pathspecHit(arg, cwd, docPaths) {
   if (!/[*?[]/.test(arg)) return null;
   const pre = path.relative(activeRoot, cwd).split(path.sep).join("/");
   if (pre === ".." || pre.startsWith("../")) return null;
   let re = "";
   for (const c of (pre ? pre + "/" : "") + arg.replace(/^\.\//, "")) re += c === "*" ? ".*" : c === "?" ? "." : c === "[" || c === "]" ? c : c.replace(/[.+^${}()|\\]/g, "\\$&");
   let rx;
-  try { rx = new RegExp("^" + re + "$", icase ? "i" : ""); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
+  try { rx = new RegExp("^" + re + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
   let budget = 20000, found = null;
   const visit = (rel) => {
     if (found || --budget < 0) return;
@@ -260,40 +221,9 @@ function pathspecHit(arg, cwd, docPaths, icase = false) {
   return found;
 }
 
-// A git pathspec starting with `:` carries magic (`:/`, `:!`, `:^`, `:(top,icase,glob,...)`).
-// Decode it to a plain path (top -> project root, icase -> the guarded base's own
-// case); magic it cannot decode fails closed rather than slipping past.
-function decodeMagic(arg, cwd, docPaths, forceIcase = false) {
-  if (!arg.startsWith(":") && !forceIcase) return { arg, cwd };
-  let rest = arg.startsWith(":") ? arg.slice(1) : arg, top = false, icase = forceIcase, exclude = false;
-  if (!arg.startsWith(":")) { /* plain pathspec under --icase-pathspecs */ }
-  else if (rest.startsWith("(")) {
-    const e = rest.indexOf(")");
-    if (e === -1) return { unreadable: "(git pathspec the parser cannot read: " + arg + ")" };
-    for (const m of rest.slice(1, e).split(",")) {
-      if (m === "top") top = true; else if (m === "icase") icase = true; else if (m === "exclude") exclude = true;
-      else if (!["glob", "literal"].includes(m)) return { unreadable: "(git pathspec magic the parser cannot read: " + arg + ")" };
-    }
-    rest = rest.slice(e + 1);
-  } else {
-    while (/^[/!^]/.test(rest)) { if (rest[0] === "/") top = true; else exclude = true; rest = rest.slice(1); }
-    if (rest.startsWith(":")) rest = rest.slice(1);
-  }
-  if (icase) {
-    const bases = docPaths.map((p) => guardedBase(p).split("/").filter(Boolean));
-    const parts = rest.replace(/^\.\//, "").split("/");
-    for (const base of bases) {
-      if (parts.every((x, k) => k >= base.length || x.toLowerCase() === base[k].toLowerCase() || x === "")) {
-        rest = parts.map((x, k) => (k < base.length ? base[k] : x)).join("/"); break;
-      }
-    }
-  }
-  return { arg: rest || ".", cwd: top ? activeRoot : cwd, icase, exclude };
-}
-
-function touchesGuarded(arg, cwd, docPaths, icase = false) {
+function touchesGuarded(arg, cwd, docPaths) {
   if (!arg) return null;
-  const lastSeg = lastSegmentGlob(arg, cwd, docPaths, icase);
+  const lastSeg = lastSegmentGlob(arg, cwd, docPaths);
   if (lastSeg !== undefined) return lastSeg;
   const cut = arg.search(/[*?[{]/);
   const literal = cut === -1 ? arg : arg.slice(0, cut).replace(/[^/]*$/, "") || ".";
@@ -303,25 +233,17 @@ function touchesGuarded(arg, cwd, docPaths, icase = false) {
     return path.relative(path.resolve(cwd, literal), activeRoot).startsWith("..") ? null : (rel || ".");
   }
   if (rel === "") return ".";
-  if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => guardRe(p, icase).test(c)))) return rel;
+  if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) return rel;
   if (docPaths.some((p) => { const base = guardedBase(p); return base === rel || base.startsWith(rel + "/"); })) return rel;
   return null;
 }
 
 // True when a `find` rooted ABOVE the guarded docs (never inside them) selects
-// only by -name/-iname and no existing guarded file or directory matches any
-// pattern. Any other predicate that can reach a path (-path, -regex, negation)
-// or a start inside a guarded path fails closed (false).
-function findNamesMiss(exprs, start, cwd, docPaths) {
-  const names = [];
-  let lastName = -1, action = -1;
-  for (let k = 0; k < exprs.length; k++) {
-    const w = exprs[k];
-    if (/^-(?:i?path|i?wholename|i?regex|not|o|or)$/.test(w) || w === "!" || w === "," || w === "(" || w === ")") return false;
-    if (/^-i?name$/.test(w) && exprs[k + 1] !== undefined) { names.push(segmentRe(exprs[k + 1], w === "-iname" ? "i" : "")); lastName = k; }
-    if (action === -1 && (w === "-delete" || /^-exec(?:dir)?$/.test(w))) action = k;
-  }
-  if (!names.length || action < lastName) return false; // the delete must come after every -name
+// only by -name/-iname (`names`, compiled) and no existing guarded file or
+// directory matches any pattern. No name, or a start inside a guarded path,
+// fails closed (false).
+function findNamesMiss(names, start, cwd, docPaths) {
+  if (!names.length) return false;
   const startRel = path.relative(activeRoot, path.resolve(cwd, start)).split(path.sep).join("/");
   if (startRel.startsWith("..")) return false;
   const inside = (r) => docPaths.some((p) => [r, "./" + r, r + "/x"].some((c) => globToRe(p).test(c)));
@@ -346,159 +268,300 @@ function findNamesMiss(exprs, start, cwd, docPaths) {
   return true;
 }
 
-// Guarded doc paths removed (or moved) by a (chained) command: rm / unlink /
-// git rm / git mv / mv / find -delete / xargs rm / sh -c bodies, through
-// `git -C`, `cd`, and command|env|sudo|\ wrappers. Anything unparseable that
-// names a guarded path fails closed.
+// ARCH-DOCS-07: a Bash command whose text holds a removal-capable word (quoted
+// or not) is blocked without the doc-write grant unless proveSafe() understands
+// all of it: simple commands joined by ; && || | & or newline, literal or quoted
+// words, no $ ` or ~ in a removal target, no env-assignment prefix, no shell
+// keyword, { ( or function definition, and every removal target resolved
+// (cwd, `git -C`, `cd X &&`) outside the guarded bases and their ancestors.
+// Anything else with a removal word present is reported as a hit.
+const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval|clean)\b/;
+const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
+const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
+const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const DYNAMIC = /[$`~]/;
+const ASSIGNMENT = /^[A-Za-z_][\w[\]]*\+?=/;
+const XARGS_ARG = new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]);
+const FIND_ACTION = /^-(?:delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)$/;
+const FIND_ARG = new Set(["-name", "-iname", "-type", "-maxdepth", "-mindepth", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-size", "-newer", "-user", "-group", "-perm"]);
+const FIND_FLAG = new Set(["-empty", "-print", "-print0", "-a", "-and", "-depth", "-xdev", "-mount", "-readable", "-writable", "-executable", "-true"]);
+
+// Index of the `)` matching the `(` at i (quote-aware), or -1.
+function matchParen(t, i) {
+  let depth = 0;
+  for (; i < t.length; i++) {
+    const c = t[i];
+    if (c === "\\") i++;
+    else if (c === "'") { i = t.indexOf("'", i + 1); if (i === -1) return -1; }
+    else if (c === '"') {
+      for (i++; i < t.length && t[i] !== '"'; i++) {
+        if (t[i] === "\\") i++;
+        else if (t[i] === "$" && t[i + 1] === "(") { i = matchParen(t, i + 1); if (i === -1) return -1; }
+      }
+      if (i >= t.length) return -1;
+    } else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// Strict tokenizer for the safe subset: [{ words, sep, redirOut, redirIn, substs }]
+// or null (after fail(why)) for anything outside it: `(` `)` a lone `&` `;;`,
+// process substitution, an unclosed quote or substitution.
+function tokenize(text, fail) {
+  const cmds = [], n = text.length;
+  const fresh = (sep) => ({ words: [], sep, redirOut: [], redirIn: false, substs: [] });
+  let cur = fresh(null), word = null, pending = null;
+  const endWord = () => {
+    if (word === null) return;
+    if (pending === "out") cur.redirOut.push(word); else if (!pending) cur.words.push(word);
+    pending = null; word = null;
+  };
+  const endCmd = (op) => {
+    endWord();
+    if (pending) return false;
+    if (cur.words.length || cur.redirOut.length || cur.redirIn) cmds.push(cur);
+    cur = fresh(op);
+    return true;
+  };
+  const redirect = (kind) => { // an operator: an all-digit word before it is its fd
+    if (word !== null && /^\d+$/.test(word)) word = null; else endWord();
+    pending = kind;
+    if (kind !== "out") cur.redirIn = true;
+  };
+  for (let i = 0; i < n; i++) {
+    const c = text[i];
+    if (c === "\\") { if (text[i + 1] === "\n") i++; else word = (word ?? "") + (i + 1 < n ? text[++i] : "\\"); }
+    else if (c === "'") {
+      const j = text.indexOf("'", i + 1);
+      if (j === -1) { fail("an unclosed quote"); return null; }
+      word = (word ?? "") + text.slice(i + 1, j); i = j;
+    } else if (c === '"') {
+      word ??= "";
+      for (i++; i < n && text[i] !== '"'; i++) {
+        const d = text[i];
+        if (d === "\\" && i + 1 < n) { const e = text[++i]; if (e !== "\n") word += '"\\$`'.includes(e) ? e : "\\" + e; }
+        else if (d === "$" && text[i + 1] === "(") {
+          const j = matchParen(text, i + 1);
+          if (j === -1) { fail("an unclosed substitution"); return null; }
+          cur.substs.push(text.slice(i + 2, j)); word += text.slice(i, j + 1); i = j;
+        } else if (d === "`") {
+          let j = i + 1; while (j < n && text[j] !== "`") j += text[j] === "\\" ? 2 : 1;
+          if (j >= n) { fail("an unclosed substitution"); return null; }
+          cur.substs.push(text.slice(i + 1, j)); word += text.slice(i, j + 1); i = j;
+        } else word += d;
+      }
+      if (i >= n) { fail("an unclosed quote"); return null; }
+    } else if (c === "$" && text[i + 1] === "(") {
+      const j = matchParen(text, i + 1);
+      if (j === -1) { fail("an unclosed substitution"); return null; }
+      cur.substs.push(text.slice(i + 2, j)); word = (word ?? "") + text.slice(i, j + 1); i = j;
+    } else if (c === "`") {
+      let j = i + 1; while (j < n && text[j] !== "`") j += text[j] === "\\" ? 2 : 1;
+      if (j >= n) { fail("an unclosed substitution"); return null; }
+      cur.substs.push(text.slice(i + 1, j)); word = (word ?? "") + text.slice(i, j + 1); i = j;
+    } else if (c === "#" && word === null && (i === 0 || /[\s;&|<>]/.test(text[i - 1]))) { while (i + 1 < n && text[i + 1] !== "\n") i++; }
+    else if (c === " " || c === "\t" || c === "\r") endWord();
+    else if (c === "\n") { if (!endCmd("\n")) { fail("a redirect without a target"); return null; } }
+    else if (c === ";") {
+      if (text[i + 1] === ";" || text[i + 1] === "&") { fail("a case terminator"); return null; }
+      if (!endCmd(";")) { fail("a redirect without a target"); return null; }
+    } else if (c === "&") {
+      if (text[i + 1] === "&") { i++; if (!endCmd("&&")) { fail("a redirect without a target"); return null; } }
+      else if (text[i + 1] === ">") { i++; if (text[i + 1] === ">") i++; redirect("out"); }
+      else if (!endCmd("&")) { fail("a redirect without a target"); return null; }
+    } else if (c === "|") {
+      if (text[i + 1] === "&") { fail("a |& pipe"); return null; }
+      const op = text[i + 1] === "|" ? "||" : "|"; if (op === "||") i++;
+      if (!endCmd(op)) { fail("a redirect without a target"); return null; }
+    } else if (c === "(" || c === ")") { fail("a subshell, group or function definition"); return null; }
+    else if (c === "<") {
+      if (text[i + 1] === "(") { fail("process substitution"); return null; }
+      if (text[i + 1] === "<") { i++; if (text[i + 1] === "<") i++; else if (text[i + 1] === "-") i++; redirect("skip"); }
+      else if (text[i + 1] === ">") { i++; redirect("out"); }
+      else if (text[i + 1] === "&") { i++; const m = /^(?:\d+|-)/.exec(text.slice(i + 1)); if (m) i += m[0].length; else redirect("skip"); }
+      else redirect("skip");
+    } else if (c === ">") {
+      if (text[i + 1] === "(") { fail("process substitution"); return null; }
+      if (word !== null && /^\d+$/.test(word)) word = null; else endWord();
+      if (text[i + 1] === ">" || text[i + 1] === "|") i++;
+      if (text[i + 1] === "&") { i++; const m = /^(?:\d+|-)/.exec(text.slice(i + 1)); if (m) i += m[0].length; else pending = "out"; }
+      else pending = "out";
+    } else word = (word ?? "") + c;
+  }
+  if (!endCmd("")) { fail("a redirect without a target"); return null; }
+  return cmds;
+}
+
 function removedDocs(cmd, docPaths) {
   const hits = [];
-  const st = { cwd: process.cwd(), xargsRm: false, seen: [], rmVar: false, sep: null, prev: null, subst: false };
-  const check = (arg, cwd) => { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(h); };
-  const args = (words) => words.filter((w) => w && !w.startsWith("-"));
-
-  // A NAME=value word is stripped, so its value joins the seen words first.
-  const assigned = (w, cwd = st.cwd) => { const v = w.slice(w.indexOf("=") + 1); if (v) st.seen.push({ w: v, cwd }); };
-
-  function stripPrefixes(words, cwd = st.cwd) {
-    for (;;) {
-      if (!words.length) return words;
-      const w = words[0], base = path.basename(w);
-      if (/^\w+\+?=/.test(w)) assigned(w, cwd);
-      if (w === "function" && words.length > 2 && words[2] === "{") { words = words.slice(2); continue; } // function NAME {
-      if (w === "coproc" && words.length > 2 && words[2] === "{") { words = words.slice(2); continue; } // coproc NAME {
-      if (/^\w+\+?=/.test(w) || w === "{" || KEYWORDS.has(w)) { words = words.slice(1); continue; }
-      if (!WRAPPERS.has(base)) return words;
-      words = words.slice(1);
-      while (words.length && (words[0].startsWith("-") || (base === "env" && /^\w+\+?=/.test(words[0])))) {
-        if (base === "env" && /^\w+\+?=/.test(words[0])) assigned(words[0], cwd);
-        words = words.slice(OPT_ARG[base]?.has(words[0]) ? 2 : 1);
-      }
-      if (base === "timeout" && words.length) words = words.slice(1); // the duration
+  const unsafe = (why) => { hits.push("(command the parser cannot prove safe: " + why + ")"); };
+  // A `>` redirect onto a guarded (or unresolvable) path is a removal word too.
+  const redirectsOntoDocs = () => {
+    for (const m of cmd.matchAll(/>>?\|?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>()]*))/g)) {
+      const t = m[1] ?? m[2] ?? m[3] ?? "";
+      if (t && (DYNAMIC.test(t) || touchesGuarded(t, process.cwd(), docPaths) || (/\b(?:cd|pushd)\b/.test(cmd) && !path.isAbsolute(t)))) return true;
     }
-  }
+    return false;
+  };
+  if (!REMOVAL_WORD.test(cmd) && !SHELL_C.test(cmd) && !redirectsOntoDocs()) return hits;
+  const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
-  // `git [opts] rm|mv <pathspecs>` (rest = the words after `git`): pathspec magic,
-  // --icase-pathspecs and the icase env flag all apply.
-  function gitRmMv(rest, cwd, icaseEnv) {
-    let i = 0, icaseAll = icaseEnv;
+  // One removal target, resolved from every directory the command may run in.
+  function target(arg, st, label, env) {
+    if (env.exec && arg.includes("{}")) return;
+    if (DYNAMIC.test(arg)) return hits.push("(" + label + " target the parser cannot resolve: " + arg + ")");
+    if (!st.cwds) return hits.push("(" + label + " in a directory the parser cannot resolve)");
+    if (env.execdir && /(?:^|\/)\.\.(?:\/|$)/.test(arg)) return hits.push("(" + label + " target above a find -execdir directory: " + arg + ")");
+    for (const cwd of st.cwds) { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(h); }
+  }
+  const targetsOf = (rest) => {
+    const out = []; let dashes = false;
+    for (const a of rest) {
+      if (dashes) out.push(a);
+      else if (a === "--") dashes = true;
+      else if (a.startsWith("--") && a.includes("=")) out.push(a.slice(a.indexOf("=") + 1));
+      else if (!a.startsWith("-")) out.push(a);
+    }
+    return out;
+  };
+  const noteRemoval = (verb, rest, env) => {
+    if (!env.exec) return;
+    env.exec.removal = true;
+    if (verb !== "mv") env.exec.mvOnly = false;
+    if (rest.some((a) => a.includes("{}"))) env.exec.brace = true;
+  };
+
+  function git(rest, st, env) {
+    let i = 0, cwds = st.cwds, bad = null;
     while (i < rest.length && rest[i].startsWith("-")) {
-      if (rest[i] === "--icase-pathspecs") icaseAll = true;
-      if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
-      else i += rest[i] === "-c" ? 2 : 1;
-    }
-    if (rest[i] === "rm" || rest[i] === "mv") {
-      const specs = args(rest.slice(i + 1)).map((raw) => decodeMagic(raw, cwd, docPaths, icaseAll));
-      // An exclusion never names a path to keep: with no positive pathspec git
-      // acts on everything, so the argument list fails closed as `.`.
-      if (specs.length && specs.every((x) => x.exclude)) specs.push({ arg: ".", cwd });
-      for (const spec of specs) {
-        if (spec.unreadable) { hits.push(spec.unreadable); continue; }
-        if (spec.exclude && spec.arg !== ".") continue;
-        const h0 = touchesGuarded(spec.arg, spec.cwd, docPaths, spec.icase); if (h0) hits.push(h0); const h = pathspecHit(spec.arg, spec.cwd, docPaths, spec.icase); if (h) hits.push(h);
+      const o = rest[i];
+      if (o === "-C") {
+        const d = rest[i + 1];
+        cwds = d === undefined || DYNAMIC.test(d) || !cwds ? null : cwds.map((c) => path.resolve(c, d));
+        i += 2;
+      } else if (o === "-c") { if (/^alias\./i.test(rest[i + 1] || "")) bad = "a git alias override"; i += 2; }
+      else {
+        if (/^--(?:icase-pathspecs|work-tree|git-dir|separate-git-dir)\b/.test(o)) bad = "git " + o;
+        i += /^--(?:git-dir|work-tree|namespace|super-prefix|config-env)$/.test(o) ? 2 : 1;
       }
+    }
+    const sub = rest[i];
+    if (sub !== "rm" && sub !== "mv" && sub !== "clean") { if (bad === "a git alias override") unsafe(bad); return; }
+    const after = rest.slice(i + 1);
+    noteRemoval(sub, after, env);
+    if (env.unseen) return unsafe("git " + sub + " with input the parser cannot see");
+    if (bad) return unsafe(bad);
+    if (/GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(cmd)) return unsafe("a git environment variable that changes pathspec matching or the work tree");
+    if (after.some((a) => /^--pathspec-from-file/.test(a))) return unsafe("git pathspecs read from a file");
+    const specs = targetsOf(after);
+    if (sub === "clean" && !specs.length) specs.push(".");
+    const at = { cwds };
+    for (const spec of specs) {
+      if (spec.startsWith(":")) { unsafe("git pathspec magic: " + spec); continue; }
+      if (env.exec && spec.includes("{}")) continue;
+      const before = hits.length;
+      target(spec, at, "git " + sub, env);
+      if (hits.length === before && cwds) for (const cwd of cwds) { const h = pathspecHit(spec, cwd, docPaths); if (h) hits.push(h); }
     }
   }
 
-  function segment(words, state, depth, inheritIcase = false) {
-    // GIT_ICASE_PATHSPECS=<truthy> anywhere in the prefix (`VAR=1 git`, `env VAR=1 git`).
-    const icaseEnv = inheritIcase || state.icase || words.some((w) => { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); return m && !/^(?:0|false|no|off|)$/i.test(m[1]); });
-    const originalWords = words;
-    const bare = words.length > 0 && words.every((w) => /^\w+\+?=/.test(w));
-    words = stripPrefixes(words, state.cwd);
-    if (!words.length) {
-      // A bare GIT_ICASE_PATHSPECS=<v> is taken as exported for the rest of the command.
-      if (bare) for (const w of originalWords) { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); if (m) state.icase = !/^(?:0|false|no|off|)$/i.test(m[1]); }
-      return;
-    }
-    const verb = path.basename(words[0]);
-    const rest = words.slice(1);
-    if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+\+?=/.test(a)) {
-      assigned(a, state.cwd);
-      const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(a); // stays set for the later segments
-      if (m) state.icase = !/^(?:0|false|no|off|)$/i.test(m[1]);
-    }
-    state.seen.push(...args(rest).map((w) => ({ w, cwd: state.cwd })));
-    if (verb === "cd" || verb === "pushd") { if (rest[0] && !rest[0].startsWith("-")) state.cwd = path.resolve(state.cwd, rest[0]); return; }
-    if (verb === "rm" || verb === "unlink" || verb === "mv") {
-      for (const a of args(rest)) {
-        check(a, state.cwd);
-        if (/^(?:~|\$\{?(?:PWD|HOME)(?![\w]))/.test(a)) hits.push("(" + verb + " argument the parser cannot resolve: " + a + ")");
-        if (/\$[A-Za-z_{]/.test(a)) st.rmVar = true;
-      }
-      if (state.subst) hits.push("(" + verb + " with a command substitution argument)");
-      else if (rest.some((a) => /\$\(|`/.test(a))) hits.push("(" + verb + " with a command substitution argument)");
-      return;
-    }
-    if (verb === "git") { gitRmMv(rest, state.cwd, icaseEnv); return; }
-    if (verb === "find") {
-      const exprAt = rest.findIndex((w) => w.startsWith("-") || w === "(" || w === "!");
-      const starts = exprAt === -1 ? rest : rest.slice(0, exprAt);
-      const exprs = exprAt === -1 ? [] : rest.slice(exprAt);
-      // Each -exec command, wrappers stripped (`env rm`, `sudo mv`), up to `;` / `+`.
-      const execs = [];
-      for (let k = 0; k < exprs.length; k++) {
-        if (!/^-exec(?:dir)?$/.test(exprs[k])) continue;
-        let m = k + 1;
-        // `+` ends the list only straight after `{}`; elsewhere it is a word.
+  function find(rest, st, depth) {
+    let s = 0; while (s < rest.length && /^-[HLP]$/.test(rest[s])) s++;
+    let e = s; while (e < rest.length && !rest[e].startsWith("-") && rest[e] !== "(" && rest[e] !== "!") e++;
+    const starts = rest.slice(s, e), exprs = rest.slice(e);
+    if (!exprs.some((x) => FIND_ACTION.test(x))) return; // selects only: removes nothing
+    const names = []; let kind = null, execdir = false, execCmd = [];
+    for (let i = 0; i < exprs.length && kind === null;) {
+      const t = exprs[i];
+      if (FIND_ARG.has(t)) {
+        const a = exprs[i + 1];
+        if (a === undefined || DYNAMIC.test(a)) return unsafe("find " + t + " argument");
+        if (t === "-name" || t === "-iname") { try { names.push(segmentRe(a, t === "-iname" ? "i" : "")); } catch { return unsafe("find pattern " + a); } }
+        i += 2;
+      } else if (FIND_FLAG.has(t)) i++;
+      else if (t === "-delete" && i === exprs.length - 1) kind = "delete";
+      else if (t === "-exec" || t === "-execdir") {
+        let m = i + 1;
         while (m < exprs.length && exprs[m] !== ";" && !(exprs[m] === "+" && exprs[m - 1] === "{}")) m++;
-        const cmdWords = stripPrefixes(exprs.slice(k + 1, m), state.cwd);
-        if (/^(?:rm|unlink|mv)$/.test(path.basename(cmdWords[0] || ""))) execs.push({ verb: path.basename(cmdWords[0]), words: cmdWords.slice(1) });
-        else if (path.basename(cmdWords[0] || "") === "git") { // git rm / git mv count as removal verbs
-          let g = 1;
-          while (g < cmdWords.length && cmdWords[g].startsWith("-")) g += cmdWords[g] === "-C" || cmdWords[g] === "-c" ? 2 : 1;
-          if (cmdWords[g] === "rm" || cmdWords[g] === "mv") execs.push({ verb: cmdWords[g], words: cmdWords.slice(g + 1), git: cmdWords.slice(1) });
-        }
-      }
-      const deletes = exprs.includes("-delete") || execs.some((x) => x.verb !== "mv" || x.words.some((w) => w.includes("{}")));
-      for (const x of execs) if (x.git) gitRmMv(x.git.filter((w) => w !== "{}"), state.cwd, icaseEnv); // same branch as a direct git rm|mv
-      for (const x of execs) if (!x.git) for (const w of x.words) { // every literal word handed to rm/unlink/mv, bar `{}`
-        if (w !== "{}" && !w.startsWith("-")) { const h = touchesGuarded(w, state.cwd, docPaths); if (h) hits.push(h); }
-      }
-      if (deletes) for (const a of starts.length ? starts : ["."]) {
-        const h = touchesGuarded(a, state.cwd, docPaths);
-        if (h && !findNamesMiss(exprs, a, state.cwd, docPaths)) hits.push(h);
-      }
-      return;
+        if (m !== exprs.length - 1) return unsafe("find " + t + " not ending the expression");
+        kind = "exec"; execdir = t === "-execdir"; execCmd = exprs.slice(i + 1, m);
+      } else return unsafe("find expression " + t + " outside the -name/-type ... -delete|-exec form");
     }
-    if (verb === "xargs") {
-      let tail = rest;
-      while (tail.length && tail[0].startsWith("-")) tail = tail.slice(OPT_ARG.xargs.has(tail[0]) ? 2 : 1);
-      const inner = stripPrefixes(tail);
-      let xv = inner.length ? path.basename(inner[0]) : "";
-      if (xv === "git") { let g = 1; while (g < inner.length && inner[g].startsWith("-")) g += inner[g] === "-C" || inner[g] === "-c" ? 2 : 1; xv = /^(?:rm|mv)$/.test(inner[g] || "") ? "git " + inner[g] : ""; }
-      if (inner.length && /^(?:rm|unlink|git (?:rm|mv))$/.test(xv)) {
-        st.xargsRm = true;
-        const opts = rest.slice(0, rest.length - tail.length);
-        const prevVerb = state.prev ? path.basename(stripPrefixes(state.prev)[0] || "") : "";
-        const visible = state.sep === "|" && /^(?:echo|printf|find)$/.test(prevVerb);
-        if (!visible || rest.some((w) => w.startsWith("<")) || opts.some((w) => /^-a|^--arg-file/.test(w))) hits.push("(xargs " + xv + " with input the parser cannot see)");
-      }
-      segment(tail, state, depth, icaseEnv);
-      return;
+    if (kind === null) return;
+    const roots = starts.length ? starts : ["."];
+    if (roots.some((r) => DYNAMIC.test(r))) return unsafe("find start path " + roots.join(" "));
+    if (!st.cwds) return unsafe("find in a directory the parser cannot resolve");
+    let deletes = kind === "delete";
+    if (kind === "exec") {
+      const exec = { removal: false, mvOnly: true, brace: false };
+      const cwds = execdir ? [...st.cwds, ...st.cwds.flatMap((d) => roots.map((r) => path.resolve(d, r)))] : st.cwds;
+      dispatch(execCmd, {}, null, { cwds }, depth, { exec, execdir });
+      deletes = exec.removal && (!exec.mvOnly || exec.brace);
     }
-    if (/^(?:ba|z|da|k)?sh$/.test(verb) || verb === "eval") {
-      const at = verb === "eval" ? 0 : rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
-      const body = verb === "eval" ? rest.join(" ") : rest[at + 1];
-      if (at !== -1 && body !== undefined && depth < 5) walk(body, { ...state, seen: state.seen, icase: icaseEnv }, depth + 1);
+    if (deletes) for (const r of roots) for (const cwd of st.cwds) {
+      const h = touchesGuarded(r, cwd, docPaths);
+      if (h && !findNamesMiss(names, r, cwd, docPaths)) hits.push(h);
     }
   }
 
-  function walk(text, state, depth) {
-    text = stripHeredocs(text);
-    const parsed = shellSegments(text);
-    if (!parsed.ok && docPaths.some((p) => { const b = guardedBase(p); return b && text.includes(b); })) hits.push("(unparseable command naming a guarded path)");
-    parsed.segments.forEach((words, i) => {
-      state.sep = parsed.seps[i]; state.prev = parsed.segments[i - 1] || null; state.subst = parsed.substs[i];
-      if (parsed.arrays[i] && !state.subst) { // NAME=(a b): the elements are the value
-        for (const w of words) if (w) st.seen.push({ w, cwd: state.cwd });
-        return;
-      }
-      segment(words, state, depth);
-    });
+  // The command starts at its first candidate word, so `sudo -u x rm`, `nohup`,
+  // `env`, `timeout 5` and the like are read through, not stripped.
+  function dispatch(words, c, prev, st, depth, env) {
+    const k = words.findIndex((w) => CANDIDATES.has(path.basename(w)));
+    if (k === -1) return;
+    const verb = path.basename(words[k]), rest = words.slice(k + 1);
+    if (RM_LIKE.has(verb)) {
+      noteRemoval(verb, rest, env);
+      if (env.unseen) return unsafe(verb + " with input the parser cannot see");
+      for (const t of targetsOf(rest)) target(t, st, verb, env);
+    } else if (verb === "git") git(rest, st, env);
+    else if (verb === "find") find(rest, st, depth);
+    else if (verb === "xargs") {
+      let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += XARGS_ARG.has(rest[i]) ? 2 : 1;
+      const tail = rest.slice(i);
+      if (!tail.length) return; // bare xargs only echoes
+      const feeder = prev && c.sep === "|" ? path.basename(prev.words[0] || "") : "";
+      const visible = (feeder === "echo" || feeder === "printf") && !c.redirIn && !rest.slice(0, i).some((o) => /^-a|^--arg-file/.test(o));
+      const extra = visible ? prev.words.slice(1).filter((x) => !x.startsWith("-")) : [];
+      dispatch([...tail, ...extra], {}, null, st, depth, { ...env, unseen: !visible });
+    } else if (SHELLS.has(verb) || verb === "eval") {
+      const at = verb === "eval" ? -1 : rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
+      let body;
+      if (verb === "eval") body = rest.join(" ");
+      else if (at !== -1) body = rest[at + 1];
+      else if (c.redirIn || c.sep === "|" || rest.includes("-s")) return unsafe("a shell reading commands from input the parser cannot see");
+      if (body !== undefined) analyze(body, fork(st), depth + 1, { exec: env.exec, execdir: env.execdir });
+    }
   }
 
-  walk(cmd, st, 0);
-  if (st.xargsRm || st.rmVar) for (const { w, cwd } of st.seen) check(w, cwd);
+  function run(c, prev, st, depth, env) {
+    for (const s of c.substs) analyze(s, fork(st), depth + 1, {});
+    for (const t of c.redirOut) if (t !== "/dev/null") target(t, st, "redirect", {});
+    const w = c.words;
+    if (!w.length) return;
+    if (ASSIGNMENT.test(w[0])) return unsafe("an environment assignment prefix (" + w[0] + ")");
+    if (KEYWORDS.has(w[0])) return unsafe("the shell keyword " + w[0]);
+    if (/[$`]/.test(w[0])) return unsafe("a command name the parser cannot resolve");
+    const head = path.basename(w[0]);
+    if (head === "cd" || head === "pushd" || head === "popd") {
+      const arg = w.slice(1).find((a) => !a.startsWith("-"));
+      if (head === "popd" || !arg || arg === "-" || DYNAMIC.test(arg)) st.cwds = null;
+      else if (st.cwds) st.cwds = [...new Set([...st.cwds, ...st.cwds.map((d) => path.resolve(d, arg))])];
+      return;
+    }
+    if (WRAPPERS.has(head) && w.some((a) => /[$`]/.test(a))) return unsafe("a wrapped command the parser cannot resolve");
+    dispatch(w, c, prev, st, depth, env);
+  }
+
+  function analyze(text, st, depth, env) {
+    if (depth > 5) return unsafe("nesting too deep");
+    const cmds = tokenize(stripHeredocs(text), unsafe);
+    if (cmds) cmds.forEach((c, i) => run(c, cmds[i - 1] || null, st, depth, env));
+  }
+
+  analyze(cmd, { cwds: [process.cwd()] }, 0, {});
   return hits;
 }
 
