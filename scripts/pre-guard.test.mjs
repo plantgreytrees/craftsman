@@ -670,6 +670,43 @@ test("pre-guard: heredoc bodies are not parsed as shell, the command after the t
   }
 });
 
+function grantedPair(prefix, sid, setup, blocked, allowedForms = []) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "docs", "other"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+    setup?.(dir);
+    const bash = (command) => run(GUARD, dir, { session_id: sid, tool_name: "Bash", tool_input: { command } });
+    for (const c of blocked) assert.equal(bash(c).status, 2, `blocked: ${c}`);
+    for (const c of allowedForms) assert.equal(bash(c).status, 0, `allowed: ${c}`);
+    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    for (const c of [...blocked, ...allowedForms]) assert.equal(bash(c).status, 0, `granted: ${c}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("pre-guard: <<< , arithmetic << and commented << are not heredocs (14.1)", () => {
+  grantedPair("craftsman-here14-", "here14", null, [
+    "cat <<< hi\nrm docs/plans/x.md", "echo $((1<<2))\nrm docs/plans/x.md", "# see <<EOF\nrm docs/plans/x.md",
+  ]);
+});
+
+test("pre-guard: find is passed over only for the single safe form (14.2)", () => {
+  grantedPair("craftsman-find14-", "find14", null, [
+    'find . -name "*.log" -o -type f -delete', 'find . -name "*.log" -or -type f -delete', "find . -delete -name nothing",
+    "find . -type f -exec rm {} + -name zz", "find .. -name x.md -delete",
+  ], ["find . -name '*.log' -delete", "find . -type f -name '*.o' -exec rm {} +"]);
+});
+
+test("pre-guard: git pathspec globs cross / and docPaths without ** use real entries (14.3)", () => {
+  grantedPair("craftsman-git14-", "git14", null, ['git rm "*.md"', 'git rm -r "*.md"']);
+  grantedPair("craftsman-doc14-", "doc14", (dir) => {
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["docs/plans/*.md"] } }));
+  }, ["rm docs/plans/*", "rm -f docs/plans/*.m?"], ["rm docs/other/*"]);
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
