@@ -617,8 +617,8 @@ test("pre-guard: shell keywords, more wrappers and unseen-argument removals fail
       "for f in docs/plans/*.md; do rm \"$f\"; done",
     ];
     for (const command of forms) assert.equal(bash(command).status, 2, `blocked: ${command}`);
-    for (const command of ["rm -rf \"$TMPDIR/x\"", "echo a | xargs echo", "echo a | xargs rm", "nice ls docs", "timeout 5 ls", "find -name x -print",
-      "if true; then ls; fi", "for f in a b; do rm \"$f\"; done"]) {
+    for (const command of ["echo a | xargs echo", "echo a | xargs rm", "nice ls docs", "timeout 5 ls", "find -name x -print",
+      "if true; then ls; fi"]) {
       assert.equal(bash(command).status, 0, `stays allowed: ${command}`);
     }
     assert.equal(run(DOC_WRITE, dir, {}).status, 0);
@@ -712,7 +712,7 @@ test("pre-guard: assigned values and if/while/until/time/mv-in-loop fail closed 
     'f=docs/plans/x.md; rm "$f"', "export D=docs; rm -rf $D",
     "if rm docs/plans/x.md; then :; fi", "while rm docs/plans/x.md; do :; done", "time rm docs/plans/x.md",
     'for f in docs/plans/*.md; do mv "$f" /x; done',
-  ], ['f=build/x; rm "$f"']);
+  ]);
 });
 
 test("pre-guard: arithmetic in quotes, $[ ] and comment apostrophes do not hide a removal (17.1)", () => {
@@ -760,7 +760,7 @@ test("pre-guard: GIT_ICASE_PATHSPECS reaches pipelines, nested shells and export
   grantedPair("craftsman-icase22-", "icase22", null, [
     "echo x | GIT_ICASE_PATHSPECS=1 xargs git rm -r DOCS", "GIT_ICASE_PATHSPECS=1 sh -c 'git rm -r DOCS'",
     "export GIT_ICASE_PATHSPECS=1; git rm -r DOCS", "declare -x GIT_ICASE_PATHSPECS=1; git rm -r DOCS",
-  ], ["GIT_ICASE_PATHSPECS=0 git rm -r DOCS"]);
+  ], ["echo x | xargs echo GIT_ICASE_PATHSPECS"]);
 });
 
 test("pre-guard: icase pathspecs compare globs in full and find -exec git rm|mv is a removal (22.2)", () => {
@@ -781,7 +781,7 @@ test("pre-guard: find -exec git and bare icase assignments reach the git branch 
     "GIT_ICASE_PATHSPECS=1; export GIT_ICASE_PATHSPECS; git rm -r DOCS", "export GIT_ICASE_PATHSPECS; GIT_ICASE_PATHSPECS=1; git rm -r DOCS",
     "set -a; GIT_ICASE_PATHSPECS=1; git rm -r DOCS", "echo docs | xargs git rm -r",
     "typeset -x GIT_ICASE_PATHSPECS=1; git rm -r DOCS",
-  ], ["export GIT_ICASE_PATHSPECS=1; export GIT_ICASE_PATHSPECS=0; git rm -r DOCS"]);
+  ], []);
 });
 
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
@@ -809,7 +809,7 @@ test("pre-guard: assignments reach a nested walk, env, += and arrays (18.1)", ()
   grantedPair("craftsman-env18-", "env18", null, [
     `sh -c 'cd build && f=../docs/plans && rm -rf "$f"'`, "env D=docs sh -c 'rm -rf $D'", `env D=docs/plans/x.md bash -c 'rm "$D"'`,
     'f+=docs/plans/x.md; rm "$f"', "f=(docs); rm -rf $f",
-  ], ['f=build/x; rm "$f"']);
+  ]);
 });
 
 test("pre-guard: coproc, function and exec -a run the command they wrap (18.2)", () => {
@@ -825,4 +825,43 @@ test("pre-guard: NAME=( starts an array only when ( follows the word directly (1
 
 test("pre-guard: # after ) or a closing backtick is not a comment (19.2)", () => {
   grantedPair("craftsman-hash19-", "hash19", null, ["echo $(true)#; rm -rf docs", "echo `true`#; rm -rf docs", "echo $((1))#; rm -rf docs"], ["# note; rm -rf docs"]);
+});
+
+test("pre-guard: a command holding a removal word is blocked unless the parser proves it safe (24.1)", () => {
+  grantedPair("craftsman-safe24a-", "safe24a", null, [
+    "FOO=1 rm build/x", "rm build/x |& cat", "(rm build/x)", "{ rm build/x; }", "f() { rm build/x; }; f", "if true; then rm build/x; fi",
+    "while true; do rm build/x; done", "case x in x) rm build/x;; esac", "rm \"$X\"", "rm ~/x", "rm $(echo build/x)",
+    "rm -rf \"$TMPDIR/x\"", "for f in a b; do rm \"$f\"; done", 'f=build/x; rm "$f"', "bash -c \"$CMD\"", "eval \"$X\"", 'cd "$D" && rm build/x',
+    "cd && rm build/x", "echo rm | bash", "bash <<< 'rm build/x'", "echo \"unclosed; rm build/x",
+    "shred docs/plans/x.md", "truncate -s 0 docs/plans/x.md", "rmdir docs/plans", "rsync -a --delete empty/ docs/plans/",
+    "git clean -fdx", "echo x > docs/plans/x.md", ": > docs/plans/x.md", "echo x > \"$OUT\"; rm build/x", "cd docs/plans && echo x > y.md",
+    "echo \"rm build/x\" | $SHELL", "git -c alias.zap='!rm build/x' zap",
+  ], [
+    "rm -f *.log", "rm -rf build", "cd src && rm x.md", "git commit -m \"chore: rm docs/plans\"", "echo \"a > b\"; rm build/x",
+    "echo hi > out.txt; rm build/x", "rm build/x 2>&1 | tail -1", "rm build/x 2>/dev/null || true", "git clean -fd src",
+    "find build -name x -delete", "sudo -u x rm build/x", "ls | xargs echo", "git commit -F - <<'EOF'\nrm docs/plans/x.md\nEOF",
+    "git rm src/x.md; mv a.txt b.txt", "echo \"$(pwd)\"; rm build/x",
+  ]);
+});
+
+test("pre-guard: the per-form denylist branches are gone, one safe-subset check remains (24.2)", () => {
+  const src = fs.readFileSync(GUARD, "utf8");
+  for (const gone of ["stripPrefixes", "decodeMagic", "shellSegments", "gitRmMv", "xargsRm", "rmVar", "findNamesMiss(exprs", "icaseEnv", "state.icase"]) {
+    assert.ok(!src.includes(gone), `${gone} removed from pre-guard.mjs`);
+  }
+  grantedPair("craftsman-safe24b-", "safe24b", null, [], [
+    "rm -f *.log", "rm -rf build", "echo a | xargs echo", "echo hi | xargs rm", "git commit -F - <<'EOF'\nrm docs/plans/x.md and docs/architecture\nEOF",
+  ]);
+});
+
+test("pre-guard: the ninth-review probes and flagged forms are blocked without the grant (24.3)", () => {
+  grantedPair("craftsman-probe24-", "probe24", null, [
+    "echo ':!src' | xargs git rm -r", "echo ':(icase)DOCS' | xargs git rm -r", "echo DOCS | xargs git --icase-pathspecs rm -r",
+    "export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS",
+    "if true; then export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS; fi",
+    "for i in 1; do export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS; done",
+    "! export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS",
+    "find build -exec sh -c 'git rm -r docs' \\;", "find build -execdir git rm -r ../docs \\;",
+    "f() { git rm -r DOCS; }; GIT_ICASE_PATHSPECS=1 f", "git --work-tree=. rm -r docs", "git --git-dir=.git rm -r docs",
+  ], ["git rm src/x.md", "find build -execdir git rm {} \\;"]);
 });
