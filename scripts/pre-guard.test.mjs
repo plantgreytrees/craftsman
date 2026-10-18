@@ -571,6 +571,37 @@ test("pre-guard: rm / git rm of a guarded doc is blocked without the grant, chai
   }
 });
 
+const RM_FORMS = [
+  // 9.1 ancestors of a guarded path
+  "rm -rf docs", "rm -rf ./docs/", "git rm -r docs", "rm -rf .", "rm -rf ./", "git rm -r .",
+  // 9.2 resolution and wrappers
+  "git -C docs rm plans/x.md", "cd docs/plans && rm x.md", "/bin/rm docs/plans/x.md", "command rm docs/plans/x.md",
+  "\\rm docs/plans/x.md", "env rm docs/plans/x.md", "env FOO=1 rm docs/plans/x.md", "sudo -u x rm docs/plans/x.md",
+  "find docs/plans -name x.md | xargs rm", "find docs/plans -name x.md -delete", "find docs -name x.md -exec rm {} +",
+  "unlink docs/plans/x.md", "bash -c 'rm docs/plans/x.md'", "sh -c \"cd docs && rm -r plans\"",
+  "git mv docs/plans/x.md elsewhere.md", "mv docs/plans/x.md /tmp/y.md", "git -C docs mv plans/x.md ../y.md",
+  "echo \"unclosed && rm docs/plans/x.md",
+];
+
+test("pre-guard: every rm form that removes or moves a guarded doc (or its ancestor) is blocked without the grant and allowed with it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rmforms-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+    const bash = (command) => run(GUARD, dir, { session_id: "rm-forms", tool_name: "Bash", tool_input: { command } });
+    for (const command of RM_FORMS) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    for (const command of ["rm -rf build", "rm src/x.md", "unlink build/x", "/bin/rm build/x", "sudo -u x rm build/x",
+      "find build -name x -delete", "find docs/plans -name x.md | xargs echo", "echo hi | xargs rm", "git -C src rm x.md",
+      "cd src && rm x.md", "bash -c 'rm build/x'", "mv a.txt b.txt", "git mv a.txt b.txt", "ls docs && rm -rf build"]) {
+      assert.equal(bash(command).status, 0, `unrelated stays allowed: ${command}`);
+    }
+    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    for (const command of RM_FORMS) assert.equal(bash(command).status, 0, `granted: ${command}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
