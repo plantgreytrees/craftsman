@@ -57,6 +57,26 @@ function planDocGoal(context, plan) {
   return /^#[ \t]+(.+?)[ \t]*$/m.exec(text.replace(/^---\r?\n[\s\S]*?\r?\n---/, ""))?.[1] ?? "";
 }
 
+// Drops `slug` from the front-matter `children:` list (inline or block form); null when nothing changes.
+function withoutChild(text, slug) {
+  const front = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(text);
+  if (!front) return null;
+  const name = (v) => path.posix.basename(v.trim().replace(/^(["'])(.*)\1$/, "$2"), ".md");
+  let body = front[2];
+  const inline = /^children:[ \t]*\[([^\]\n]*)\][ \t]*$/m.exec(body);
+  if (inline) {
+    const kept = inline[1].split(",").filter((v) => v.trim() && name(v) !== slug);
+    body = body.replace(inline[0], `children: [${kept.map((v) => v.trim()).join(", ")}]`);
+  } else {
+    const block = /^children:[ \t]*\r?\n((?:[ \t]*-[^\n]*(?:\n|$))+)/m.exec(body);
+    if (!block) return null;
+    const lines = block[1].split("\n").filter((l) => l.trim() && name(l.replace(/^\s*-/, "")) !== slug);
+    body = body.replace(block[0], `children:\n${lines.map((l) => `${l}\n`).join("")}`);
+  }
+  if (body === front[2]) return null;
+  return front[1] + body + front[3] + text.slice(front[0].length);
+}
+
 function refuse(reason, referrers = []) {
   return { refused: true, reason, referrers };
 }
@@ -104,7 +124,7 @@ export function retire(input, context = projectContext(".")) {
       const childPlan = node.path;
       const rows = rowsOf(childPlan);
       const open = rows.filter((row) => !CLOSED.includes(row.status));
-      if (open.length || (!rows.length && !isParent(node))) { live.push(child); continue; }
+      if (open.length || (!rows.length && !isParent(node) && !node.derived)) { live.push(child); continue; }
       if (!rows.length) hierarchy.add(childPlan);
       descendants.push({ slug: child, plan: childPlan, goal: rows.find((row) => row.goal)?.goal || planDocGoal(context, childPlan) || child });
     }
@@ -138,6 +158,18 @@ export function retire(input, context = projectContext(".")) {
     const body = front[2].replace(/^children:[^\n]*(?:\n(?:[ \t]+[^\n]*|-[^\n]*))*/m, "");
     return !targets.some((t) => body.includes(t) || text.slice(front[0].length).includes(t));
   };
+  // The parent's `children:` list drops this plan in the same commit so the index still loads (ARCH-TRACKER-10).
+  let parentEdit = null;
+  if (parentDoc && tryGit(context, ["ls-files", "--error-unmatch", "--", parentDoc]) !== null) {
+    if (git(context, ["status", "--porcelain", "--", parentDoc]).trim()) {
+      return refuse(`retire refused: uncommitted changes in ${parentDoc}`);
+    }
+    try {
+      const old = fs.readFileSync(path.join(context.root, parentDoc), "utf8");
+      const next = withoutChild(old, slug);
+      if (next !== null) parentEdit = { file: parentDoc, next };
+    } catch { /* unreadable parent: the post-edit index check decides */ }
+  }
   const found = new Set();
   for (const doc of [{ plan, slug }, ...descendants]) {
     const hits = scanReferrers(context, doc.plan ?? plan, doc.slug ?? slug);
@@ -174,9 +206,17 @@ export function retire(input, context = projectContext(".")) {
   }
   try {
     git(context, ["rm", "-q", "--", ...removing]);
+    if (parentEdit) {
+      fs.writeFileSync(path.join(context.root, parentEdit.file), parentEdit.next);
+      git(context, ["add", "--", parentEdit.file]);
+      removing.push(parentEdit.file);
+    }
+    if (parentSlug) {
+      try { loadIndex(context.root); } catch (error) { throw new Error(`the plan index would not load after retiring: ${error.message}`); }
+    }
     archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(plan) }, context);
     for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(d.plan) }, context);
-    for (const sibling of siblings) if (rowsOf(sibling).length) archivePlan({ plan: sibling, goal, doc: doc_sha, landed: landed_sha }, context);
+    for (const sibling of siblings) archivePlan({ plan: sibling, goal, doc: doc_sha, landed: landed_sha, hierarchy: !rowsOf(sibling).length }, context);
     const extra = [archivePath(context), trackerDocPath(context)]
       .filter((file) => fs.existsSync(file)).map((file) => path.relative(fs.realpathSync(trackerRoot(context)), file));
     git(context, ["add", "--", ...extra]);
