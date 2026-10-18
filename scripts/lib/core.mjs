@@ -201,6 +201,45 @@ export function sidOf(input) {
 export function sessionDir(sid, context = null) {
   return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
 }
+
+const grantMtime = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
+const grantTtl = (ttl) => typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0;
+
+// Pure grant rule: the session's own marker lives for ttlMs, the global
+// doc-write-pending marker for the shorter pendingTtlMs. A malformed TTL
+// grants nothing.
+export function grantValid({ pendingMtime, sessionMtime, now, pendingTtlMs, ttlMs }) {
+  if (!grantTtl(pendingTtlMs) || !grantTtl(ttlMs)) return false;
+  if (typeof pendingMtime === "number" && now - pendingMtime < pendingTtlMs) return true;
+  return typeof sessionMtime === "number" && now - sessionMtime < ttlMs;
+}
+
+// The one doc-write authority check (ARCH-DOCS-07, ARCH-STATE-06): grants live
+// at the root STATE_DIR (context.grantStateDir overrides, for tests). Read-only
+// by default; with `claim` a pending grant is claimed into this session's
+// marker and a held marker is refreshed, as the pre-guard needs.
+export function hasDocWriteGrant({ sid, claim = false } = {}, context = null) {
+  const guard = loadConfig(context).docWriteGuard || {};
+  const stateDir = context?.grantStateDir ?? STATE_DIR;
+  const marker = sid ? path.join(sessionDir(sidOf({ session_id: sid }), { stateDir }), "doc-write") : null;
+  const pending = path.join(stateDir, "doc-write-pending");
+  const now = Date.now();
+  const opts = { now, pendingTtlMs: guard.pendingTtlMs ?? 1800000, ttlMs: guard.ttlMs ?? 3600000 };
+  const sessionMtime = marker ? grantMtime(marker) : null;
+  const held = grantValid({ ...opts, pendingMtime: null, sessionMtime });
+  const ok = held || grantValid({ ...opts, pendingMtime: grantMtime(pending), sessionMtime: null });
+  if (ok && claim && marker) {
+    try {
+      if (!held) {
+        fs.mkdirSync(path.dirname(marker), { recursive: true });
+        fs.writeFileSync(marker, `claimed ${new Date().toISOString()}\n`);
+      } else {
+        const t = new Date(); fs.utimesSync(marker, t, t);
+      }
+    } catch {}
+  }
+  return ok;
+}
 // Isolated fresh-context agents: one command invocation grants exactly one
 // dispatch of its named agent, even under root-only agent mode — /scrutinise →
 // `scrutineer`, /idea → `idea-critic`, /architect --deep → `architect-analyst`.

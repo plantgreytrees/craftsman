@@ -551,3 +551,22 @@ test("pre-guard: without /auto the destructive git forms are unchanged (not bloc
     for (const command of [...DESTRUCTIVE, ...ALLOWED]) assert.equal(run(GUARD, dir, bash("plain", command)).status, 0, command);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("pre-guard: rm / git rm of a guarded doc is blocked without the grant, chained too, and allowed with it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rm-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "old.md"), "# old\n");
+    const bash = (command) => run(GUARD, dir, { session_id: "rm-test", tool_name: "Bash", tool_input: { command } });
+    assert.equal(bash("git rm docs/plans/old.md").status, 2);
+    assert.equal(bash("rm -f docs/plans/old.md").status, 2);
+    assert.equal(bash("echo hi && git rm -q docs/plans/old.md").status, 2);
+    assert.equal(bash("ls; rm docs/plans/old.md | cat").status, 2);
+    assert.equal(bash("rm src/other.txt && ls docs").status, 0, "non-doc removal is untouched");
+    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(bash("git rm docs/plans/old.md").status, 0);
+    assert.equal(bash("echo hi && rm docs/plans/old.md").status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
