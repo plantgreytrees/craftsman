@@ -11,7 +11,7 @@ import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, s
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
-import { ledgerPath, reconcileAcceptance } from "./tracker.mjs";
+import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 
 const pexec = promisify(execFile);
 let input = {};
@@ -318,6 +318,36 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
       );
     }
   }
+}
+
+// 4. Unlanded features (ARCH-STATE-08): a feature this session worked whose rows
+//    are ALL FEATURE_MERGED is merged on its feature branch but not landed on
+//    base; land-feature is what promotes it to COMPLETE. Same in-flight skip.
+if (!inFlight.length) {
+  try {
+    const rows = currentState(context);
+    const mine = new Set();
+    for (const line of fs.readFileSync(ledgerPath(context), "utf8").split("\n")) {
+      let event = null;
+      try { event = JSON.parse(line); } catch { continue; }
+      if (event?.session_id === sid && event.feature) mine.add(`${event.project}::${event.plan}::${event.feature}`);
+    }
+    const groups = new Map();
+    for (const row of rows) {
+      if (!row.feature) continue;
+      const id = `${row.project}::${row.plan}::${row.feature}`;
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(row);
+    }
+    for (const [id, group] of groups) {
+      if (!mine.has(id) || !group.every((r) => r.status === "FEATURE_MERGED")) continue;
+      problems.push(
+        `FEATURE NOT LANDED: feature ${group[0].feature} (${group[0].plan}) has every unit FEATURE_MERGED ` +
+        `on ${group[0].feature_branch || "its feature branch"} but is not landed on the base branch. ` +
+        `Run land-feature to land it and promote its units to COMPLETE.`
+      );
+    }
+  } catch { /* no tracker ledger or unreadable — nothing to enforce */ }
 }
 
 if (!problems.length) { logEvent({ ev: "stop", sid, result: "pass" }); process.exit(0); }
