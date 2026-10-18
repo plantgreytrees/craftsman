@@ -327,8 +327,11 @@ function loadRecords(file) {
   return out;
 }
 
+// A message's content blocks, minus any corrupt (non-object) entries.
+const blocks = (content) => Array.isArray(content) ? content.filter((x) => x && typeof x === "object") : [];
+
 const textOf = (content) => Array.isArray(content)
-  ? content.filter((x) => x?.type === "text").map((x) => x.text || "").join("\n")
+  ? blocks(content).filter((x) => x.type === "text").map((x) => x.text || "").join("\n")
   : typeof content === "string" ? content : content == null ? "" : JSON.stringify(content);
 
 function userPrompts(records) {
@@ -447,7 +450,7 @@ export function digestTranscript(file, { resultChars = 600 } = {}) {
         if (!d.isMeta && content.trim()) out.push("", `## USER ${ts}`, "", content.trim(), "");
         continue;
       }
-      for (const x of Array.isArray(content) ? content : []) {
+      for (const x of blocks(content)) {
         if (x.type === "text" && !d.isMeta && x.text?.trim()) out.push("", `## USER ${ts}`, "", x.text.trim(), "");
         if (x.type !== "tool_result") continue;
         const text = textOf(x.content);
@@ -457,7 +460,7 @@ export function digestTranscript(file, { resultChars = 600 } = {}) {
       }
       continue;
     }
-    for (const x of Array.isArray(content) ? content : []) {
+    for (const x of blocks(content)) {
       if (x.type === "thinking" || x.type === "redacted_thinking") thinking++;
       else if (x.type === "text" && x.text?.trim()) out.push("", `### CLAUDE ${ts}`, "", x.text.trim(), "");
       else if (x.type === "tool_use") {
@@ -469,8 +472,8 @@ export function digestTranscript(file, { resultChars = 600 } = {}) {
     }
   }
   // A last tool call with no result was cut off by the switch.
-  const answered = new Set(msgs.flatMap((d) => Array.isArray(d.message?.content)
-    ? d.message.content.filter((x) => x.type === "tool_result").map((x) => x.tool_use_id) : []));
+  const answered = new Set(msgs.flatMap((d) =>
+    blocks(d.message?.content).filter((x) => x.type === "tool_result").map((x) => x.tool_use_id)));
   const unanswered = [...pending.entries()].filter(([id]) => !answered.has(id)).map(([, name]) => name);
   out.push("", "---", "", "## Files touched", "");
   out.push(...(files.size ? [...files].map(([f, k]) => `- \`${f}\` — ${[...k].sort().join(", ")}`) : ["- none"]));

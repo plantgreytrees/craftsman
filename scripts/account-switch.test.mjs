@@ -46,7 +46,8 @@ test("account-switch: digest keeps the visible record and drops thinking, side c
       user([{ type: "tool_result", tool_use_id: "t1", is_error: true, content: "String not found" }]),
       assistant([{ type: "tool_use", id: "t2", name: "Bash", input: { command: "npm test", description: "Run tests" } }]),
       { ...user("subagent prompt"), isSidechain: true },
-    ]) + "null\n[1]\n{not json\n" + JSON.stringify({ ...user({ odd: "object content" }), gitBranch: "feat" }) + "\n");
+    ]) + "null\n[1]\n{not json\n" + JSON.stringify(user([null, 3])) + "\n" + JSON.stringify(assistant([null])) + "\n" +
+      JSON.stringify({ ...user({ odd: "object content" }), gitBranch: "feat" }) + "\n");
     const { text } = digestTranscript(file);
     assert.match(text, /title: switch work/);
     assert.match(text, /compaction summary\]\n\nEarlier work summarised/);
