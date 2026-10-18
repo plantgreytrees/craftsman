@@ -53,28 +53,129 @@ function usesAlternateGitRoot(command) {
   return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_DIR\s*=|\bGIT_WORK_TREE\s*=/.test(command);
 }
 
-// Guarded doc paths named by any `rm` / `git rm` segment of a (chained) command.
+// Quote-aware split of a shell command into segments of words. `;` `&` `|`
+// newline ( ) and backticks separate segments; a leading `\` on a word is
+// dropped (`\rm`). `ok` is false when a quote never closes.
+function shellSegments(cmd) {
+  const segments = [];
+  let words = [], word = null, quote = null;
+  const endWord = () => { if (word !== null) words.push(word); word = null; };
+  const endSegment = () => { endWord(); if (words.length) segments.push(words); words = []; };
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === '"' && i + 1 < cmd.length) word += cmd[++i];
+      else word += c;
+    } else if (c === '"' || c === "'") { quote = c; word ??= ""; }
+    else if (c === "\\" && i + 1 < cmd.length) { word = (word ?? "") + cmd[++i]; }
+    else if (/\s/.test(c) && c !== "\n") endWord();
+    else if ("\n;&|()`".includes(c)) endSegment();
+    else word = (word ?? "") + c;
+  }
+  endSegment();
+  return { segments, ok: !quote };
+}
+
+const OPT_ARG = { sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"]), env: new Set(["-u", "-C", "-S"]),
+  xargs: new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]) };
+const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas"]);
+
+// Literal directory prefix of a guarded glob: "docs/plans/**" -> "docs/plans".
+function guardedBase(glob) {
+  const parts = [];
+  for (const part of glob.replace(/^\.\//, "").split("/")) { if (/[*?[{]/.test(part)) break; parts.push(part); }
+  return parts.join("/");
+}
+
+// Does removing/moving this path delete or alter a guarded doc? True for a
+// guarded path itself, anything under it, or any ancestor of one (incl. ".").
+function touchesGuarded(arg, cwd, docPaths) {
+  if (!arg) return null;
+  const cut = arg.search(/[*?[{]/);
+  const literal = cut === -1 ? arg : arg.slice(0, cut).replace(/[^/]*$/, "") || ".";
+  const rel = path.relative(activeRoot, path.resolve(cwd, literal)).split(path.sep).join("/");
+  if (rel === ".." || rel.startsWith("../")) {
+    // An ancestor of the project root contains every guarded doc.
+    return path.relative(path.resolve(cwd, literal), activeRoot).startsWith("..") ? null : (rel || ".");
+  }
+  if (rel === "") return ".";
+  if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) return rel;
+  if (docPaths.some((p) => { const base = guardedBase(p); return base === rel || base.startsWith(rel + "/"); })) return rel;
+  return null;
+}
+
+// Guarded doc paths removed (or moved) by a (chained) command: rm / unlink /
+// git rm / git mv / mv / find -delete / xargs rm / sh -c bodies, through
+// `git -C`, `cd`, and command|env|sudo|\ wrappers. Anything unparseable that
+// names a guarded path fails closed.
 function removedDocs(cmd, docPaths) {
   const hits = [];
-  for (const segment of cmd.split(/\r?\n|&&|\|\||[;&|]/)) {
-    const words = (segment.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((w) => w.replace(/^["']|["']$/g, ""));
-    while (words.length && /^[({]$|^\w+=/.test(words[0])) words.shift();
-    if (words[0] === "sudo") words.shift();
-    let args;
-    if (words[0] === "rm") args = words.slice(1);
-    else if (words[0] === "git") {
-      let i = 1;
-      while (i < words.length && words[i].startsWith("-")) i += words[i] === "-C" || words[i] === "-c" ? 2 : 1;
-      if (words[i] !== "rm") continue;
-      args = words.slice(i + 1);
-    } else continue;
-    for (const arg of args) {
-      if (arg.startsWith("-") || !arg) continue;
-      const rel = path.relative(activeRoot, path.resolve(process.cwd(), arg)).split(path.sep).join("/");
-      if (rel.startsWith("..")) continue;
-      if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) hits.push(rel);
+  const st = { cwd: process.cwd(), xargsRm: false, seen: [] };
+  const check = (arg, cwd) => { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(h); };
+  const args = (words) => words.filter((w) => w && !w.startsWith("-"));
+
+  function stripPrefixes(words) {
+    for (;;) {
+      if (!words.length) return words;
+      const w = words[0], base = path.basename(w);
+      if (/^\w+=/.test(w) || w === "{") { words = words.slice(1); continue; }
+      if (!WRAPPERS.has(base)) return words;
+      words = words.slice(1);
+      while (words.length && (words[0].startsWith("-") || (base === "env" && /^\w+=/.test(words[0])))) {
+        words = words.slice(OPT_ARG[base]?.has(words[0]) ? 2 : 1);
+      }
     }
   }
+
+  function segment(words, state, depth) {
+    words = stripPrefixes(words);
+    if (!words.length) return;
+    const verb = path.basename(words[0]);
+    const rest = words.slice(1);
+    state.seen.push(...args(rest).map((w) => ({ w, cwd: state.cwd })));
+    if (verb === "cd" || verb === "pushd") { if (rest[0] && !rest[0].startsWith("-")) state.cwd = path.resolve(state.cwd, rest[0]); return; }
+    if (verb === "rm" || verb === "unlink") { for (const a of args(rest)) check(a, state.cwd); return; }
+    if (verb === "mv") { for (const a of args(rest)) check(a, state.cwd); return; }
+    if (verb === "git") {
+      let cwd = state.cwd, i = 0;
+      while (i < rest.length && rest[i].startsWith("-")) {
+        if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
+        else i += rest[i] === "-c" ? 2 : 1;
+      }
+      if (rest[i] === "rm" || rest[i] === "mv") for (const a of args(rest.slice(i + 1))) check(a, cwd);
+      return;
+    }
+    if (verb === "find") {
+      const exprAt = rest.findIndex((w) => w.startsWith("-") || w === "(" || w === "!");
+      const exprs = exprAt === -1 ? [] : rest.slice(exprAt);
+      const deletes = exprs.includes("-delete") || exprs.some((w, k) => /^-exec(?:dir)?$/.test(w) && /^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || "")));
+      if (deletes) for (const a of exprAt === -1 ? rest : rest.slice(0, exprAt)) check(a, state.cwd);
+      return;
+    }
+    if (verb === "xargs") {
+      let tail = rest;
+      while (tail.length && tail[0].startsWith("-")) tail = tail.slice(OPT_ARG.xargs.has(tail[0]) ? 2 : 1);
+      const inner = stripPrefixes(tail);
+      if (inner.length && /^(?:rm|unlink)$/.test(path.basename(inner[0]))) st.xargsRm = true;
+      segment(tail, state, depth);
+      return;
+    }
+    if (/^(?:ba|z|da|k)?sh$/.test(verb) || verb === "eval") {
+      const at = verb === "eval" ? 0 : rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
+      const body = verb === "eval" ? rest.join(" ") : rest[at + 1];
+      if (at !== -1 && body !== undefined && depth < 5) walk(body, { ...state, seen: state.seen }, depth + 1);
+    }
+  }
+
+  function walk(text, state, depth) {
+    const parsed = shellSegments(text);
+    if (!parsed.ok && docPaths.some((p) => { const b = guardedBase(p); return b && text.includes(b); })) hits.push("(unparseable command naming a guarded path)");
+    for (const words of parsed.segments) segment(words, state, depth);
+  }
+
+  walk(cmd, st, 0);
+  if (st.xargsRm) for (const { w, cwd } of st.seen) check(w, cwd);
   return hits;
 }
 
