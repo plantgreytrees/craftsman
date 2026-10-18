@@ -198,6 +198,27 @@ export function syncTrackerDoc(context = projectContext(".")) {
   return { file, changed: true };
 }
 
+// The published, derived copy of the ledger rows (ARCH-TRACKER-11/12). Written
+// only by publish; read only to rehydrate an absent local ledger.
+export function trackerJsonlPath(context = projectContext(".")) {
+  return path.join(trackerRoot(context), "docs", "plans", "TRACKER.jsonl");
+}
+
+// Ledger text for `init` when no local ledger exists: the committed
+// TRACKER.jsonl rows (ARCH-TRACKER-12), else empty. Malformed lines are dropped.
+function rehydrateText(context) {
+  let text = "";
+  try { text = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { return ""; }
+  const rows = [];
+  for (const line of text.split("\n").filter(Boolean)) {
+    try {
+      const row = JSON.parse(line);
+      if (row && typeof row.key === "string" && STATUSES.includes(row.status)) rows.push(row);
+    } catch { /* skip */ }
+  }
+  return rows.length ? rows.map((row) => JSON.stringify(row)).join("\n") + "\n" : "";
+}
+
 // Re-render the epic/story rollups (ARCH-TRACKER-10) from the ledger. Never
 // touches the root TRACKER.md block.
 export function syncRollups(context = projectContext(".")) {
@@ -434,13 +455,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (input.action === "transition") output = transition(input, context);
     else if (input.action === "init") {
       const file = ledgerPath(context);
-      if (!fs.existsSync(file)) atomicWrite(file, "");
+      if (!fs.existsSync(file)) atomicWrite(file, rehydrateText(context));
       output = { ledger: file };
     } else if (input.action === "compact") output = compactLedger(context);
     else if (input.action === "rollup") output = syncRollups(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
     else if (input.action === "archive") output = archivePlan(input, context);
-    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, or archive");
+    else if (input.action === "publish") output = await (await import("./tracker-publish.mjs")).publishTracker(input, context);
+    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, or publish");
     process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
