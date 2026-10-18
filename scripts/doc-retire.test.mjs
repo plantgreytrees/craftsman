@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { grantValid, retire } from "./doc-retire.mjs";
+import { loadIndex } from "./lib/plan-index.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
 
 const fixtures = new Set();
@@ -420,4 +421,71 @@ test("doc-retire: a rows-less epic archives with the full heading and lookup rou
   assert.equal(found.doc, docSha);
   assert.equal(found.goal, "Ship the epic");
   assert.equal(found.landed, docSha);
+});
+
+test("doc-retire: retiring a child heals the parent's children list so the index loads and a later retire works", () => {
+  const files = {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta, gamma]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+    "docs/plans/other.md": "# other\n",
+  };
+  const context = repo({ files });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  const index = loadIndex(context.root);
+  assert.deepEqual(index.get("alpha").children, ["gamma"]);
+  assert.ok(!/beta/.test(fs.readFileSync(path.join(context.root, PLAN), "utf8")));
+  assert.ok(run(context.root, "show", "--name-status", "--format=", "HEAD").includes(`M\t${PLAN}`));
+  assert.ok(!run(context.root, "status", "--porcelain").includes("alpha.md"));
+  transition({ plan: "docs/plans/other.md", unit: "u1", goal: "o", status: "PENDING" }, context);
+  transition({ plan: "docs/plans/other.md", unit: "u1", status: "IN_PROGRESS", evidence: "c" }, context);
+  transition({ plan: "docs/plans/other.md", unit: "u1", status: "MERGED", evidence: "a" }, context);
+  transition({ plan: "docs/plans/other.md", unit: "u1", status: "COMPLETE", evidence: "a" }, context);
+  settle(context);
+  const next = retire({ plan: "docs/plans/other.md" }, context);
+  assert.equal(next.retired, "docs/plans/other.md", JSON.stringify(next));
+});
+
+test("doc-retire: block-form children lists are healed too", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren:\n  - beta\n  - gamma\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD, "docs/plans/gamma.md": "---\nparent: alpha\n---\n# gamma\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: "docs/plans/beta.md" }, context);
+  assert.equal(out.retired, "docs/plans/beta.md", JSON.stringify(out));
+  assert.deepEqual(loadIndex(context.root).get("alpha").children, ["gamma"]);
+});
+
+test("doc-retire: a rows-less scrutinise- sibling gets a full heading in the same commit", () => {
+  const context = repo();
+  const kept = fs.readFileSync(ledgerPath(context), "utf8").split("\n").filter((l) => l && !l.includes("scrutinise-alpha"));
+  fs.writeFileSync(ledgerPath(context), kept.join("\n") + "\n");
+  const docSha = run(context.root, "rev-parse", "HEAD").trim();
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  const archive = fs.readFileSync(archivePath(context), "utf8");
+  const date = new Date().toISOString().slice(0, 10);
+  assert.ok(archive.includes(`## ${SIB} (${date}) —`), archive);
+  assert.ok(archive.includes(`## ${PLAN} (${date}) —`), archive);
+  assert.match(archive, new RegExp(`${SIB.replace(/[./]/g, "\\$&")} .*doc ${docSha} · landed ${docSha}`));
+  assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+});
+
+test("doc-retire: a rows-less derived descendant is judged like a rows-less sibling, not refused as live", () => {
+  const context = repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD,
+    "docs/plans/scrutinise-beta.md": "---\nparent: beta\n---\n# scrutinise beta\n",
+  } });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  assert.ok(!fs.existsSync(path.join(context.root, "docs/plans/scrutinise-beta.md")));
+  const archive = fs.readFileSync(archivePath(context), "utf8");
+  assert.match(archive, /## docs\/plans\/scrutinise-beta\.md \(.*\) — .* · doc \S+ · landed \S+/);
 });
