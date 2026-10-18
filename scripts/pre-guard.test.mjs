@@ -746,6 +746,16 @@ test("pre-guard: find -exec strips wrappers and covers mv (20.2)", () => {
   ], ["find . -name '*.log' -exec rm {} +"]);
 });
 
+test("pre-guard: find -exec mv {} under a guarded base and icase-pathspecs fail closed (21)", () => {
+  grantedPair("craftsman-find21-", "find21", null, [
+    "find docs -name '*.md' -exec mv {} /x \\;", "find docs -execdir mv {} /x \\;", "find docs/plans -exec sudo mv {} /x +",
+    "find docs -exec mv -t /x {} +", "find build -exec mv + docs /y \\;",
+  ], ["find build -name x -exec mv {} /y \\;"]);
+  grantedPair("craftsman-icase21-", "icase21", null, [
+    "git --icase-pathspecs rm -r DOCS", "git --icase-pathspecs rm -r 'DOC*'", "GIT_ICASE_PATHSPECS=1 git rm -r DOCS",
+  ], ["git rm src/x.md"]);
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
