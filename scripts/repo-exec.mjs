@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { atomicWrite, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
+import { loadIndex } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
@@ -120,19 +121,16 @@ function heartbeat(lock) {
 }
 
 // Plan files the feature must find on origin/<base> before its worktree exists:
-// the plan doc, each `parent:` ancestor and every rollup (ARCH-LAND-16).
+// the plan doc, each parent ancestor (from the plan index) and every rollup (ARCH-LAND-16).
 function planGateFiles(root, planSlug) {
   const files = [];
   const seen = new Set();
+  let index;
+  try { index = loadIndex(root); } catch { index = null; }
   for (let slug = planSlug; slug && !seen.has(slug); ) {
     seen.add(slug);
-    const doc = `docs/plans/${slug}.md`;
-    files.push(doc, `docs/plans/${slug}/TRACKER.md`);
-    let text = "";
-    try { text = fs.readFileSync(path.join(root, doc), "utf8"); } catch {}
-    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1] || "";
-    const parent = /^parent:\s*(\S+)/m.exec(front)?.[1];
-    slug = parent ? path.basename(parent.replace(/^["']|["']$/g, ""), ".md") : "";
+    files.push(`docs/plans/${slug}.md`, `docs/plans/${slug}/TRACKER.md`);
+    slug = index?.get(slug)?.parent || "";
   }
   return files;
 }

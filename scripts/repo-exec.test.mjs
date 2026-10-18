@@ -707,6 +707,20 @@ test("repo-exec: plan gate refuses a plan doc, parent or rollup that differs fro
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
+test("repo-exec: plan gate resolves a parent the index parses (quoted, commented)", () => {
+  const data = featureFixture();
+  try {
+    const context = { id: ".", root: data.root, stateDir: path.join(data.root, ".craftsman") };
+    fs.writeFileSync(path.join(data.root, "docs", "plans", "plan-a.md"), "---\nslug: plan-a\nparent: \"docs/plans/epic1.md\"   # the epic\n---\nplan\n");
+    git(data.root, ["commit", "-qam", "quote parent"]);
+    git(data.root, ["push", "-q", "origin", "HEAD:" + data.base]);
+    const info = inspectRepo(context);
+    const abs = path.join(data.root, "docs", "plans", "epic1.md");
+    fs.writeFileSync(abs, fs.readFileSync(abs, "utf8") + "edited\n");
+    assert.throws(() => prepare(context, { plan: "plan-a", feature: "f1", unit: "u1" }, info), /plan gate: .*epic1\.md/);
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 test("repo-exec: a base is never inferred from a feature/ branch", () => {
   const data = fixture();
   try {
