@@ -345,6 +345,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-failclosed-2
+    scope_id: guard-failclosed-2
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -485,6 +498,13 @@ Closes the tenth /scrutinise (8ad7d0b..0dfec17) defects in the Step 24 gate; sam
 - [ ] 25.5 Targets resolve through `realpath` of the longest existing prefix; a relative `-execdir` target under a root that is an ancestor of a guarded base is unsafe (`pre-guard.mjs:230,499-505`) → accept: pre-guard.test: with a symlink `d -> docs`, `rm -rf d/plans` and `rm -rf d/*`; and `touch docs/a.nomatch; find . -name '*.nomatch' -execdir rm -rf plans \;` blocked without the grant and allowed with it
 - [ ] 25.6 Block messages distinguish "cannot prove safe" and redirect writes from a matched target; `grep -rn rm docs/`, `grep -n "rm" docs/plans/x.md` and `cd ~/scratch/foo && rm -rf build` stay allowed (`~` resolves via `os.homedir()`); the two 24.3 work-tree probes become `git --work-tree=docs rm -r plans` and `GIT_WORK_TREE=docs git rm -r plans` (allowed on the old code) → accept: pre-guard.test covers each message, the three allowed forms and the replaced probes; they fail on the 0dfec17 code
 
+### Step 26 — guard-failclosed-2 (., javascript, high) — round 14
+Depends on: none
+Closes the two Critical findings and the Step 24 log-redirect regression from the eleventh /scrutinise (8ad7d0b..3c9a10b), as the user chose in decision (b). The other eleventh-review items stay flagged, not driven.
+- [ ] 26.1 `stripHeredocs` reads the heredoc delimiter as a full shell word with quote removal (any run of non-metacharacters); a delimiter that does not match the simple form exactly makes the command unsafe once the gate fires (`pre-guard.mjs:117`) → accept: pre-guard.test: `cat <<E"OF"` + `EOF` + `rm -rf docs` + `EOF` and `cat <<E@F` + `E@F` + `rm -rf docs` + `E` blocked without the grant and allowed with it; the existing `git commit -F - <<'EOF'` forms stay allowed
+- [ ] 26.2 `env -C`/`--chdir` and `sudo -D`/`--chdir` make the working directory unknown, and `env -S`/`--split-string` is unsafe (`pre-guard.mjs:162,568`) → accept: pre-guard.test: `env -C docs rm -rf plans`, `env --chdir=docs rm -rf plans` and `env -S 'rm -rf docs'` blocked without the grant and allowed with it; `env -u HOME rm -rf build` stays allowed
+- [ ] 26.3 A `~` or `~/` in a redirect or removal target resolves through `os.homedir()`, and a dynamic redirect target (`$VAR`, `"$VAR"`) fires the gate only when a removal word is present; an unresolvable redirect gets its own block message (`pre-guard.mjs:427,454,855-857`) → accept: pre-guard.test: `npm test > ~/scratch/log.txt 2>&1` and `node --test scripts/x.test.mjs > "$TMPDIR/out" 2>&1` allowed without the grant; `echo x > $D/x; rm -rf docs` still blocked; fails on 3c9a10b for the two allowed forms
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
@@ -540,3 +560,5 @@ Round 11 Suggestions, flagged not driven: the icase flag does not reach a shell 
 Round 12 (Step 24, user decision b after the ninth /scrutinise on 78b9947..8ad7d0b): `pre-guard.mjs` removal detection becomes fail-closed in one unit. Follow-up for /architect --update, not edited here: ARCH-DOCS-07 holds as written; a sibling rule recording the fail-closed policy (unrecognised grammar with a removal word is blocked) may be added there. Accepted limits: a non-Bash tool, an interpreter call such as `node -e` or `python -c` with no removal word in its text, and case-insensitive filesystems stay outside what a text-level guard can see.
 
 Round 13 (Step 25, tenth /scrutinise on 8ad7d0b..0dfec17): 2 Critical + 6 Warning in the Step 24 gate. Open for the user, not decided here: Step 24's criterion 24.2 says every earlier allowed case stays green, but six previously-allowed assertions (`rm -rf "$TMPDIR/x"`, `for f in a b; do rm "$f"; done`, `f=build/x; rm "$f"` twice, `GIT_ICASE_PATHSPECS=0 git rm -r DOCS`, the export 1 then 0 form) are blocked by the fail-closed design chosen in decision (b); 24.2 stays unticked until the user accepts them as over-blocks. Residual risk, accepted limits of any text-level guard: removals by binaries whose text is not in the command (`make`, `npm run x`, scripts written earlier, existing git aliases), tee/cp/ln/git checkout|restore writes over docs, case-insensitive filesystems.
+
+Round 14 (Step 26, eleventh /scrutinise on 8ad7d0b..3c9a10b, user decision b): the user accepted the six over-blocks that fail Step 24's 24.2 as the cost of the fail-closed design (`rm -rf "$TMPDIR/x"`, `for f in a b; do rm "$f"; done`, `f=build/x; rm "$f"` twice, `GIT_ICASE_PATHSPECS=0 git rm -r DOCS`, the export 1-then-0 form), so 24.2 is ticked on that acceptance. Flagged, not driven (Suggestions and accepted residual risk): interpreter input by pipe, heredoc or here-string; `./s.sh`, `. s.sh` and `python3 s.py` of a script written in the same command; `git -c core.pager=…`; hidden xargs input into `env`, `find` or `git`; quoted redirect targets inside a subshell or function; `make clean`, `rg -n rm` and `gh --body` over-blocks; names built without the literal word (`$'\\x72m'`, `/bin/r[m]`); tee/cp/ln/sed -i/dd and git checkout|restore writes; case-insensitive filesystems; `CDPATH`.
