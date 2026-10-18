@@ -726,6 +726,39 @@ test("repo-exec: plan gate resolves a parent the index parses (quoted, commented
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
+test("repo-exec: plan gate refuses a broken sibling doc, a missing leaf or parent, and compares a parent by its real path", () => {
+  const data = featureFixture();
+  try {
+    const context = { id: ".", root: data.root, stateDir: path.join(data.root, ".craftsman") };
+    const info = inspectRepo(context);
+    const input = { plan: "plan-a", feature: "f1", unit: "u1" };
+    const docs = path.join(data.root, "docs", "plans");
+    const noWorktree = () => assert.equal(fs.existsSync(path.join(data.root, ".worktrees", "plan-a-f1")), false);
+    // broken sibling doc
+    fs.writeFileSync(path.join(docs, "sib.md"), "---\nslug: sib\nparent: nowhere\n---\n");
+    assert.throws(() => prepare(context, input, info), /plan gate: .*dangling parent 'nowhere'/);
+    noWorktree();
+    fs.rmSync(path.join(docs, "sib.md"));
+    // missing leaf
+    assert.throws(() => prepare(context, { ...input, plan: "ghost" }, info), /plan gate: .*ghost\.md/);
+    // missing parent
+    fs.rmSync(path.join(docs, "epic1.md"));
+    assert.throws(() => prepare(context, input, info), /plan gate: /);
+    noWorktree();
+    // parent whose filename differs from its slug
+    fs.writeFileSync(path.join(docs, "big-epic.md"), "---\nslug: epic1\nlevel: epic\n---\nepic\n");
+    git(data.root, ["add", "-A", "docs"]);
+    git(data.root, ["commit", "-qm", "rename epic"]);
+    git(data.root, ["push", "-q", "origin", "HEAD:" + data.base]);
+    assert.equal(prepare(context, input, info).reattached, false, "equal real path passes");
+    fs.rmSync(path.join(data.root, ".worktrees", "plan-a-f1"), { recursive: true, force: true });
+    git(data.root, ["worktree", "prune"]);
+    git(data.root, ["branch", "-D", "feature/plan-a-f1"]);
+    fs.appendFileSync(path.join(docs, "big-epic.md"), "edited\n");
+    assert.throws(() => prepare(context, input, info), /plan gate: .*big-epic\.md/);
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 test("repo-exec: a base is never inferred from a feature/ branch", () => {
   const data = fixture();
   try {
