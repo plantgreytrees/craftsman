@@ -5,11 +5,11 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 
-Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task text and criteria. `S <name>` means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin (`printf '%s' '<json>' |`), pinned to the root's project (ARCH-STATE-01). Pass the **root** `session_id`, never your own; your unit is told apart by its worktree (ARCH-STATE-03).
+Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task text and criteria. `S <name>` means `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin (`printf '%s' '<json>' |`), pinned to the root project (ARCH-STATE-01). Pass the **root** `session_id`, never your own; your unit is told apart by its worktree (ARCH-STATE-03).
 
 ## implement
-1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner"}`.
-2. `S repo-exec` `{action:"prepare", session_id, project, unit, slug:unit}`. Keep `worktree_path`; none → no edits.
+1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner", session_id}` (+`feature`, `feature_branch`).
+2. `S repo-exec` `{action:"prepare", session_id, project, unit, slug:unit}`. Keep `worktree_path`.
 3. `S scope` `{session_id, plan, unit, project, worktree_path, arch, scope}`, then `{action:"require", session_id, project, worktree_path}`. Refused → `BLOCKED`.
 4. Smoke gate first (ARCH-TRACKER-05): the repo's own test command, before any edit. Red → `BLOCKED`.
 5. An open decision only the user can make → no edit, no default: return `PARKED` with `parked:[{question, options[], recommended?}]`.
@@ -20,7 +20,7 @@ Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, 
 Fix round: given `worktree_path` and review findings, fix only those, then steps 7–8.
 
 ## review
-Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, criteria and cited rules. Check correctness, real tests (none skipped/weakened), each criterion and rule. Return `APPROVED`, or `CHANGES` with `findings[]` (`file:line — defect`).
+Fresh reviewer, no edits. Read `git -C <worktree_path> diff <base>...HEAD`, criteria and cited rules. Check correctness, real tests (none skipped/weakened), each criterion and rule. Return `APPROVED`, or `CHANGES` with `findings[]` (`file:line — defect`).
 
 ## land
 1. Tick each `[unit:<unit>]` line in `.craftsman/acceptance.md` only if the diff proves it; else `BLOCKED`.
@@ -29,7 +29,7 @@ Fresh reviewer; edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, 
 4. `S tracker` → `MERGED` with that evidence (a refusal → `BLOCKED`), then `S claim` `{action:"release", session_id, plan, unit}`.
 
 ## park
-1. `S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked[0]>` (ARCH-TRACKER-03). Never `CANCELLED` (ARCH-TRACKER-04). 
+1. `S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked[0]>` (ARCH-TRACKER-03). Never `CANCELLED` (ARCH-TRACKER-04).
 2. Commit any work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the kept branch in `evidence`. Keep the claim.
 
 ## block
@@ -42,4 +42,4 @@ Any `BLOCKED` return from implement, review or land → root runs `block` (ARCH-
 Prompt has `feature:` or role `land-feature` → follow `commands/_features.md` (prepare/reattach, land-unit, scope release, publish).
 
 ## Return
-Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` ≤2k tokens (ARCH-ENGINE-06). Never force-push, `--no-verify` or touch files outside the unit.
+Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` ≤2k tokens. Never force-push, `--no-verify` or touch files outside the unit.
