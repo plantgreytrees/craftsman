@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { rootContextRows, rootContextSection, latencySection } from "./stats.mjs";
+import { rootContextRows, rootContextSection, latencySection, preguardBlocks } from "./stats.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = (sid, tokens, percent, unit = null) => ({ ts: 1, ev: "context", sid, phase: "orchestrate", unit, tokens, percent, cost: null });
@@ -58,4 +58,14 @@ test("stats: latency p50/p95 per ms-carrying event type, flagged over 80% of tim
   assert.match(line("preguard"), /n<20 FLAG/);
   assert.doesNotMatch(section, /router/);
   assert.match(latencySection([], TIMEOUTS), /No latency samples yet/);
+});
+
+test("stats: an allowed preguard event is not a block but is in the ms percentiles", () => {
+  const events = [
+    { ts: 1, ev: "preguard", result: "allowed", ms: 10 },
+    { ts: 2, ev: "preguard", result: "blocked", ms: 30 },
+  ];
+  assert.deepEqual(preguardBlocks(events), [events[1]]);
+  assert.equal(events.filter((e) => e.ev === "preguard").length, 2); // old count treated both as blocks
+  assert.match(latencySection(events, TIMEOUTS), /preguard\s+n=2 · p50 10ms · p95 30ms/);
 });
