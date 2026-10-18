@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { loadConfig, logEvent, projectContext, readStdin, sessionDir, sidOf } from "./lib/core.mjs";
+import { STATE_DIR, loadConfig, logEvent, projectContext, readStdin, sessionDir, sidOf } from "./lib/core.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
 const CLOSED = ["COMPLETE", "CANCELLED"];
@@ -29,13 +29,15 @@ export function grantValid({ pendingMtime, sessionMtime, now, pendingTtlMs, ttlM
   return typeof sessionMtime === "number" && now - sessionMtime < ttlMs;
 }
 
-// Inputs come from the root state dir (ARCH-STATE-06; retire only runs in the
-// main checkout). The grant is required even when docWriteGuard.enabled is false.
+// Inputs come from the root STATE_DIR, where doc-write.mjs drops the grant and
+// pre-guard reads it (ARCH-STATE-06); tests inject grantStateDir. The grant is
+// required even when docWriteGuard.enabled is false.
 function hasGrant(sid, context) {
   const guard = loadConfig(context).docWriteGuard || {};
-  const session = sid ? path.join(sessionDir(sidOf({ session_id: sid }), context), "doc-write") : null;
+  const stateDir = context.grantStateDir ?? STATE_DIR;
+  const session = sid ? path.join(sessionDir(sidOf({ session_id: sid }), { stateDir }), "doc-write") : null;
   return grantValid({
-    pendingMtime: mtimeOf(path.join(context.stateDir ?? "", "doc-write-pending")),
+    pendingMtime: mtimeOf(path.join(stateDir, "doc-write-pending")),
     sessionMtime: session ? mtimeOf(session) : null,
     now: Date.now(),
     pendingTtlMs: guard.pendingTtlMs ?? 1800000,

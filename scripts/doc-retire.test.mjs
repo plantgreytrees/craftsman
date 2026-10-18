@@ -38,7 +38,8 @@ function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", f
   }
   run(root, "add", "-A");
   run(root, "commit", "-q", "-m", "init");
-  const context = { id: ".", root, stateDir: path.join(root, ".craftsman") };
+  const stateDir = path.join(root, ".craftsman");
+  const context = { id: ".", root, stateDir, grantStateDir: stateDir };
   for (const [plan, status] of [[PLAN, planStatus], [SIB, sibStatus]]) {
     transition({ plan, unit: "u1", goal: "Ship alpha", status: "PENDING" }, context);
     if (status === "PENDING") continue;
@@ -213,7 +214,7 @@ test("doc-retire: a linked worktree refuses; a main checkout under a symlinked p
   const link = context.root + "-link";
   fixtures.add(link);
   try { fs.symlinkSync(context.root, link, "junction"); } catch { return; }
-  const viaLink = { id: ".", root: link, stateDir: path.join(link, ".craftsman") };
+  const viaLink = { id: ".", root: link, stateDir: path.join(link, ".craftsman"), grantStateDir: context.grantStateDir };
   const res = retire({ plan: PLAN }, viaLink);
   assert.equal(res.retired, PLAN, JSON.stringify(res));
 });
