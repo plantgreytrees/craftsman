@@ -18,7 +18,7 @@ const PLAN = "docs/plans/alpha.md";
 const SIB = "docs/plans/scrutinise-alpha.md";
 
 // A real temp git repo: a plan, a closed sibling citing it, and COMPLETE ledger rows.
-function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", files = {} } = {}) {
+function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", files = {}, goal = "Ship alpha" } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-"));
   fixtures.add(root);
   run(root, "init", "-q");
@@ -41,7 +41,7 @@ function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", f
   const stateDir = path.join(root, ".craftsman");
   const context = { id: ".", root, stateDir, grantStateDir: stateDir };
   for (const [plan, status] of [[PLAN, planStatus], [SIB, sibStatus]]) {
-    transition({ plan, unit: "u1", goal: "Ship alpha", status: "PENDING" }, context);
+    transition({ plan, unit: "u1", goal, status: "PENDING" }, context);
     if (status === "PENDING") continue;
     transition({ plan, unit: "u1", status: "IN_PROGRESS", evidence: "claimed" }, context);
     if (status === "IN_PROGRESS") continue;
@@ -331,4 +331,20 @@ test("doc-retire: success removes the rollup and writes the full DOCS-09 heading
   const date = new Date().toISOString().slice(0, 10);
   const archive = fs.readFileSync(archivePath(context), "utf8");
   assert.ok(archive.includes(`## ${PLAN} (${date}) — Ship alpha · doc ${docSha} · landed ${docSha}`), archive);
+});
+
+test("doc-retire: a goal-less row still writes the full heading, goal from front-matter, H1 or slug", () => {
+  const date = new Date().toISOString().slice(0, 10);
+  for (const [body, want] of [
+    ["---\ngoal: Front goal\n---\n# Title\n", "Front goal"],
+    ["# Only H1\n", "Only H1"],
+    ["no heading\n", "alpha"],
+  ]) {
+    const context = repo({ goal: null, files: { [PLAN]: body } });
+    const docSha = run(context.root, "rev-parse", "HEAD").trim();
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.retired, PLAN, JSON.stringify(out));
+    const archive = fs.readFileSync(archivePath(context), "utf8");
+    assert.ok(archive.includes(`## ${PLAN} (${date}) — ${want} · doc ${docSha} · landed ${docSha}`), archive);
+  }
 });
