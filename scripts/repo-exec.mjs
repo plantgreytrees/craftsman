@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { atomicWrite, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
+import { currentState, transition } from "./tracker.mjs";
 
 function run(root, args, options = {}) {
   try {
@@ -432,6 +433,98 @@ function landUnit(context, input, info) {
   return { ...result, merged: true, merged_locally: true, pushed: Boolean(hasRemoteFeature), branch_deleted: true, remote_branch_deleted: remoteDeleted, cleaned: false };
 }
 
+// ARCH-LAND-18: a finished feature lands on base. Refused unless
+// planning.featureBranches and every row of the feature is FEATURE_MERGED.
+// In a detached temp worktree: base merged into the feature, gate re-run, then
+// the result merged --no-ff onto origin/<base> and pushed. Locks: feature, then
+// base. Conflict / ff-only / rejected push PARK the feature's last unit
+// (ARCH-LAND-06); nothing is ever forced (ARCH-LAND-05).
+function landFeature(context, input, info) {
+  if (!loadConfig(context).planning?.featureBranches) throw new Error("land-feature requires planning.featureBranches");
+  if (!input.plan || !input.feature) throw new Error("land-feature requires plan and feature");
+  if (!info.has_remote) throw new Error("land-feature requires an origin remote");
+  const planSlug = path.basename(String(input.plan), ".md");
+  const rows = currentState(context).filter((row) => path.basename(row.plan, ".md") === planSlug && row.feature === input.feature);
+  if (!rows.length) throw new Error(`land-feature: no tracker rows for feature ${input.feature} of ${input.plan}`);
+  const open = rows.filter((row) => row.status !== "FEATURE_MERGED");
+  if (open.length) throw new Error(`land-feature refused: ${open.map((row) => `${row.unit} is ${row.status}`).join(", ")}; every unit must be FEATURE_MERGED`);
+  const slug = `${planSlug}-${input.feature}`;
+  const feature = input.feature_branch || rows.find((row) => row.feature_branch)?.feature_branch || `feature/${slug}`;
+  if (!run(context.root, ["rev-parse", "--verify", "--quiet", `refs/heads/${feature}`], { allowFailure: true })) {
+    throw new Error(`feature branch ${feature} does not exist`);
+  }
+  const lastUnit = rows[rows.length - 1].unit;
+  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units: rows.map((row) => row.unit) };
+  const featureLock = acquireLock({ ...info, base_branch: `feature-${feature.replace(/[^A-Za-z0-9_-]/g, "-")}` }, input);
+  let baseLock = null;
+  let added = false;
+  let step = null;
+  const temp = path.join(info.common_git_dir, ".craftsman", "land", `feature-${slug}-${process.pid}`);
+  try {
+    run(context.root, ["fetch", "origin", info.base_branch]);
+    baseLock = acquireLock(info, input);
+    fs.mkdirSync(path.dirname(temp), { recursive: true });
+    run(context.root, ["worktree", "add", "--detach", temp, `refs/heads/${feature}`]);
+    added = true;
+    heartbeat(baseLock);
+    step = "conflict";
+    run(temp, ["merge", "--no-edit", `origin/${info.base_branch}`]);
+    step = null;
+    verifyGateBeforeMerge(context, temp);
+    const ready = run(temp, ["rev-parse", "HEAD"]);
+    step = "ff-only";
+    run(temp, ["merge-base", "--is-ancestor", `origin/${info.base_branch}`, ready]);
+    run(temp, ["checkout", "--detach", `origin/${info.base_branch}`]);
+    step = "conflict";
+    run(temp, ["merge", "--no-ff", "--no-edit", ready]);
+    step = null;
+    heartbeat(baseLock);
+    step = "rejected-push";
+    run(temp, ["push", "origin", `HEAD:${info.base_branch}`]);
+    step = null;
+    result.merge_sha = run(temp, ["rev-parse", "HEAD"]);
+  } catch (error) {
+    if (added && step === "conflict") run(temp, ["merge", "--abort"], { allowFailure: true });
+    if (!step) throw error;
+    logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: false, reason: step }, context);
+    return landingPark(step, result, error);
+  } finally {
+    if (added) run(context.root, ["worktree", "remove", temp], { allowFailure: true });
+    fs.rmSync(temp, { recursive: true, force: true });
+    run(context.root, ["worktree", "prune"], { allowFailure: true });
+    releaseLock(baseLock);
+    releaseLock(featureLock);
+  }
+  const promoted = [];
+  const promote_errors = [];
+  for (const row of rows) {
+    try {
+      transition({ project: row.project, plan: row.plan, unit: row.unit, status: "COMPLETE", evidence: `land-feature ${result.merge_sha}`, session_id: input.session_id }, context);
+      promoted.push(row.unit);
+    } catch (error) { promote_errors.push(`${row.unit}: ${error.message}`); }
+  }
+  let cleaned = false;
+  let remoteDeleted = false;
+  if (input.cleanup !== false) {
+    const worktree = path.join(mainCheckoutRoot(context.root), ".worktrees", slug);
+    try {
+      if (fs.existsSync(worktree)) {
+        run(context.root, ["worktree", "remove", worktree]);
+        forgetSessionWorktree(input, worktree, context);
+      }
+      run(context.root, ["worktree", "prune"]);
+      run(context.root, ["branch", "-D", feature]); // merged into origin/<base> above
+      cleaned = true;
+      try {
+        execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", feature], { stdio: "ignore", env: { ...process.env, LC_ALL: "C" } });
+        remoteDeleted = true;
+      } catch {}
+    } catch (error) { result.cleanup_error = String(error.stderr || error.message).trim(); }
+  }
+  logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: true, sha: result.merge_sha }, context);
+  return { ...result, merged: true, merged_locally: true, pushed: true, promoted, promote_errors, cleaned, remote_branch_deleted: remoteDeleted };
+}
+
 // The four landing failures that PARK (ARCH-LAND-06): {parked:true, decision},
 // worktree and branch kept, recorded as tracker PARKED with the decision.
 const PARK_DECISIONS = {
@@ -549,8 +642,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (input.action === "sync") result = sync(context, input, info);
     else if (input.action === "merge") result = merge(context, input, info);
     else if (input.action === "land-unit") result = landUnit(context, input, info);
+    else if (input.action === "land-feature") result = landFeature(context, input, info);
     else if (input.action === "cleanup") result = cleanup(context, input, info);
-    else throw new Error("action must be inspect, prepare, sync, merge, land-unit, or cleanup");
+    else throw new Error("action must be inspect, prepare, sync, merge, land-unit, land-feature, or cleanup");
     process.stdout.write(JSON.stringify(result) + "\n");
   } catch (error) {
     process.stderr.write(`craftsman: repository execution failed: ${error.message}\n`);
@@ -558,4 +652,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 }
 
-export { inspectRepo, prepare, sync, merge, landUnit, cleanup };
+export { inspectRepo, prepare, sync, merge, landUnit, landFeature, cleanup };

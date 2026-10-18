@@ -4,8 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { cleanup, inspectRepo, landUnit, merge, prepare, sync } from "./repo-exec.mjs";
+import { cleanup, inspectRepo, landUnit, landFeature, merge, prepare, sync } from "./repo-exec.mjs";
 import { plainArgs } from "./lib/land.mjs";
+import { ledgerPath } from "./tracker.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
 
 function git(root, args) {
@@ -790,4 +791,122 @@ test("repo-exec land-unit: a red gate blocks, keeping the unit branch and a clea
       assert.ok(git(context.root, ["branch", "--list", "feat/u3"]));
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// land-feature (ARCH-LAND-18): two FEATURE_MERGED units land on base.
+function landFeatureFixture(data, statuses = ["FEATURE_MERGED", "FEATURE_MERGED"]) {
+  const context = projectContext("one");
+  fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true } }));
+  git(context.root, ["add", "craftsman.config.json"]);
+  git(context.root, ["commit", "-q", "-m", "config"]);
+  const { origin, base } = addOrigin(data.workspace, context.root);
+  const info = inspectRepo(context);
+  const feature = prepare(context, { unit: "f-x", slug: "p-f1", branch: "feature/p-f1" }, info);
+  git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/p-f1"]);
+  const rows = statuses.map((status, i) => ({
+    key: `.::p::u${i}`, project: ".", plan: "p", unit: `u${i}`, status: i === 0 ? "IN_PROGRESS" : status, evidence: "x",
+    session_id: "s", feature: "f1", feature_branch: "feature/p-f1", updated_at: "2026-01-01T00:00:00Z",
+  }));
+  return { context, info, feature, origin, base, rows, statuses };
+}
+
+function writeLedger(context, rows, statuses) {
+  const file = ledgerPath(context);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const lines = [];
+  rows.forEach((row, i) => {
+    lines.push(JSON.stringify({ ...row, status: "IN_PROGRESS" }));
+    if (statuses[i] !== "IN_PROGRESS") lines.push(JSON.stringify({ ...row, status: statuses[i] }));
+  });
+  fs.writeFileSync(file, lines.join("\n") + "\n");
+}
+
+function featureCommit(feature, file, text) {
+  fs.writeFileSync(path.join(feature.worktree_path, file), text);
+  git(feature.worktree_path, ["add", file]);
+  git(feature.worktree_path, ["commit", "-q", "-m", `feat: ${file}`]);
+}
+
+test("repo-exec land-feature: lands a two-unit feature with --no-ff, pushes base, cleans up", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, origin, base, rows } = landFeatureFixture(data);
+      featureCommit(feature, "a.txt", "a\n");
+      git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
+      writeLedger(context, rows, ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      const result = landFeature(context, { plan: "docs/plans/p.md", feature: "f1", session_id: "s" }, info);
+      assert.equal(result.merged, true);
+      assert.equal(git(origin, ["rev-parse", base]), result.merge_sha);
+      assert.equal(git(origin, ["rev-list", "--parents", "-n", "1", base]).split(" ").length, 3, "no-ff merge commit");
+      assert.equal(git(origin, ["show", `${base}:a.txt`]), "a");
+      assert.deepEqual(result.promoted.sort(), ["u0", "u1"]);
+      assert.equal(git(context.root, ["branch", "--list", "feature/p-f1"]), "");
+      assert.equal(fs.existsSync(feature.worktree_path), false);
+      assert.equal(fs.existsSync(path.join(info.common_git_dir, ".craftsman", "merge-locks", `${base}.lock`)), false);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-feature: refuses an incomplete feature and a config without featureBranches", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, rows, origin, base } = landFeatureFixture(data);
+      const before = git(origin, ["rev-parse", base]);
+      writeLedger(context, rows, ["FEATURE_MERGED", "IN_PROGRESS"]);
+      assert.throws(() => landFeature(context, { plan: "p", feature: "f1" }, info), /u1 is IN_PROGRESS/);
+      assert.equal(git(origin, ["rev-parse", base]), before);
+      fs.writeFileSync(path.join(context.root, "craftsman.config.json"), "{}");
+      assert.throws(() => landFeature(context, { plan: "p", feature: "f1" }, info), /featureBranches/);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-feature: a conflict PARKs the last unit with a decision and lands nothing", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, origin, base, rows } = landFeatureFixture(data);
+      featureCommit(feature, "shared.txt", "feature\n");
+      writeLedger(context, rows, ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      const other = path.join(data.workspace, "other");
+      git(data.workspace, ["clone", "-q", origin, other]);
+      git(other, ["config", "user.email", "t@t"]); git(other, ["config", "user.name", "t"]);
+      fs.writeFileSync(path.join(other, "shared.txt"), "base\n");
+      git(other, ["add", "shared.txt"]); git(other, ["commit", "-q", "-m", "base side"]);
+      git(other, ["push", "-q", "origin", `HEAD:${base}`]);
+      const before = git(origin, ["rev-parse", base]);
+      const result = landFeature(context, { plan: "p", feature: "f1" }, info);
+      assert.equal(result.parked, true);
+      assert.equal(result.reason, "conflict");
+      assert.equal(result.park_unit, "u1");
+      assert.ok(result.decision.question && result.decision.options.length >= 2);
+      assert.equal(git(origin, ["rev-parse", base]), before);
+      assert.ok(git(context.root, ["branch", "--list", "feature/p-f1"]));
+      assert.equal(git(context.root, ["worktree", "list"]).includes("feature-p-f1"), false, "temp worktree removed");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-feature: a rejected push PARKs", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature, origin, rows } = landFeatureFixture(data);
+      featureCommit(feature, "a.txt", "a\n");
+      writeLedger(context, rows, ["FEATURE_MERGED", "FEATURE_MERGED"]);
+      fs.writeFileSync(path.join(origin, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      const result = landFeature(context, { plan: "p", feature: "f1" }, info);
+      assert.equal(result.parked, true);
+      assert.equal(result.reason, "rejected-push");
+      assert.equal(result.park_unit, "u1");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-feature: new code never uses force flags", () => {
+  const src = fs.readFileSync(new URL("./repo-exec.mjs", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("function landFeature"), src.indexOf("const PARK_DECISIONS"));
+  assert.doesNotMatch(body, /--force|push["'`, ]+-f\b|reset["'`, ]+--hard|"-f"/);
 });
