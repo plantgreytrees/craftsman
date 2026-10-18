@@ -178,3 +178,30 @@ test("pluginVersion: release from metadata, plus the cache directory's commit wh
   assert.equal(pluginVersion({}, "/cache/craftsman/3f2a9c1d0b4e"), "3f2a9c1d0b4e");
   assert.equal(pluginVersion({}, "/repo/craftsman"), null);
 });
+
+test("init update stamps level: feature into canonical plans only, and a second run is a no-op", () => {
+  const root = fixture();
+  const dir = path.join(root, "docs", "plans");
+  fs.mkdirSync(dir, { recursive: true });
+  const canonical = "---\nslug: canon\nscope_id: canon-1\n---\n\n- [ ] 1.1 work\n";
+  const legacy = "# Legacy plan\n\n| 1 | hand-written row | PENDING |\n";
+  const handoff = "# Hand-off: Craftsman Plugin Enhancements\n\nscope_id: keep\n";
+  const leveled = "---\nslug: epic-one\nlevel: epic\n---\n";
+  fs.writeFileSync(path.join(dir, "canon.md"), canonical);
+  fs.writeFileSync(path.join(dir, "legacy.md"), legacy);
+  fs.writeFileSync(path.join(dir, "plugin-enhancements-handoff.md"), handoff);
+  fs.writeFileSync(path.join(dir, "epic-one.md"), leveled);
+
+  const plan = buildUpdatePlan(root, { checkTools: false });
+  assert.deepEqual(plan.update.planChanges.map((f) => path.basename(f)).sort(), ["canon.md", "epic-one.md"]);
+  applyInitPlan(plan);
+
+  const stamped = fs.readFileSync(path.join(dir, "canon.md"), "utf8");
+  assert.match(stamped, /^level: feature$/m);
+  assert.match(stamped, /^scope_id: canon-1$/m);
+  assert.equal(fs.readFileSync(path.join(dir, "legacy.md"), "utf8"), legacy);
+  assert.equal(fs.readFileSync(path.join(dir, "plugin-enhancements-handoff.md"), "utf8"), handoff);
+  assert.equal(fs.readFileSync(path.join(dir, "epic-one.md"), "utf8").includes("level: feature"), false);
+
+  assert.deepEqual(buildUpdatePlan(root, { checkTools: false }).update.planChanges, []);
+});

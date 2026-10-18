@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { loadIndex, descendantSlugs } from "./plan-index.mjs";
 
 const pexec = promisify(execFile);
 
@@ -235,6 +236,10 @@ export function spendAgentGrant(agent, sid, context = null) {
 export const RUNNER_AGENTS = ["unit-runner", "implementer", "code-reviewer"];
 // implement + up to 3 reviews + 2 fix rounds (ARCH-ENGINE-05) + land + park/block.
 export const RUNNER_DISPATCHES_PER_UNIT = 8;
+// +1 per feature for its land-feature call (ARCH-AUTO-08).
+export const RUNNER_DISPATCHES_PER_FEATURE = 1;
+export const runnerDispatchCount = (units, features = 0) =>
+  Math.max(0, Math.floor(units)) * RUNNER_DISPATCHES_PER_UNIT + Math.max(0, Math.floor(features)) * RUNNER_DISPATCHES_PER_FEATURE;
 export function grantRunnerDispatches(count, sid, context = null) {
   const grant = agentGrantFile("runner", sid, context);
   try {
@@ -275,7 +280,8 @@ export function spendRunnerDispatch(sid, context = null) {
 // PENDING/IN_PROGRESS row or no rows yet; the force block (autoForceBlock)
 // also holds while PARKED/BLOCKED rows await Phase C, until every row lands.
 export const AUTO_MARKER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const OPEN_STATUSES = new Set(["PENDING", "IN_PROGRESS"]);
+// FEATURE_MERGED is still open: the feature is not landed (ARCH-AUTO-08).
+const OPEN_STATUSES = new Set(["PENDING", "IN_PROGRESS", "FEATURE_MERGED"]);
 const LANDED_STATUSES = new Set(["MERGED", "COMPLETE"]);
 export const autoMarkerFile = (sid) => path.join(sessionDir(sid), "auto-active");
 // The plan slug a command's arguments name: its first non-flag word, with an
@@ -299,7 +305,18 @@ export function readAutoMarker(sid) {
     return marker && typeof marker === "object" && Number.isFinite(Date.parse(marker.at)) ? marker : null;
   } catch { return null; } // absent, or a legacy timestamp-only marker
 }
+// A slug resolves through plan-index: an epic or story owns its descendants'
+// rows (ARCH-AUTO-09). An unindexed slug stands for itself.
+function planSlugs(plan, context) {
+  try {
+    const root = mainCheckoutRoot(context?.root || PROJECT_ROOT);
+    const index = loadIndex(root);
+    if (index.get(plan)) return new Set([plan, ...descendantSlugs(plan, { index })]);
+  } catch {}
+  return new Set([plan]);
+}
 function planStatuses(plan, context) {
+  const slugs = planSlugs(plan, context);
   const ledger = path.join(mainCheckoutRoot(context?.root || PROJECT_ROOT), ".craftsman", "tracker", "events.jsonl");
   const latest = new Map();
   let text = "";
@@ -307,7 +324,7 @@ function planStatuses(plan, context) {
   for (const line of text.split("\n")) {
     try {
       const event = JSON.parse(line);
-      if (planSlugOf(event.plan) === plan) latest.set(event.key, event.status);
+      if (slugs.has(planSlugOf(event.plan))) latest.set(event.key, event.status);
     } catch {}
   }
   return [...latest.values()];
@@ -418,15 +435,23 @@ export function ownsAcceptance(sid, text, context = null) {
     return ref.identity ? ref.identity === acceptanceIdentity(text) : ref.hash === sha1(String(text).trim());
   } catch { return false; }
 }
-// Every criterion as { line, unit, done }. `- [ ] [unit:<id>] …` scopes a
-// criterion to one plan unit (its tracker unit or scope_id); untagged lines
-// belong to the whole plan.
+// Every criterion as { line, unit, feature, done }. `- [ ] [unit:<id>] …`
+// scopes a criterion to one plan unit (its tracker unit or scope_id);
+// `[feature:<id>]` scopes it to one feature's land-feature (ARCH-TRACKER-08).
+// Lines with neither tag are untagged.
 export function acceptanceCriteria(text) {
   return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.test(l)).map((line) => ({
     line: line.trim(),
-    unit: /^\s*[-*]\s*\[[ xX]\]\s*\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
+    unit: /^\s*[-*]\s*\[[ xX]\]\s*(?:\[feature:[^\]\s]+\]\s*)?\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
+    feature: /^\s*[-*]\s*\[[ xX]\]\s*(?:\[unit:[^\]\s]+\]\s*)?\[feature:([^\]\s]+)\]/.exec(line)?.[1] || null,
     done: ACCEPTANCE_LINE.exec(line)[2] !== " ",
   }));
+}
+// The criteria gating one feature's land-feature: its `[feature:<id>]` lines,
+// plus the untagged ones only when it is the plan's last feature.
+export function featureCriteria(text, featureId, isLast = false) {
+  return acceptanceCriteria(text).filter((c) =>
+    c.feature != null ? c.feature === String(featureId) : isLast && !c.unit);
 }
 export function uncheckedAcceptance(text) {
   return acceptanceCriteria(text).filter((c) => !c.done);

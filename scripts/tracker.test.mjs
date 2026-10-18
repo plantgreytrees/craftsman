@@ -301,3 +301,23 @@ test("tracker: archive refuses a plan with an open row, then retires a finished 
   assert.match(archive, /\*\*example#unit-1\*\* COMPLETE — all 1 acceptance criteria ticked; abc123\n {2}- \[x\] \[unit:unit-1\] shipped criterion/);
   assert.match(archive, /\*\*example#unit-2\*\* CANCELLED — dropped/);
 });
+
+test("tracker: FEATURE_MERGED needs ticked criteria, is never auto-promoted, carries feature fields (ARCH-TRACKER-06/07)", () => {
+  const selected = context();
+  const acPath = path.join(selected.stateDir, "acceptance.md");
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(acPath, "- [ ] [unit:u1] thing\n");
+  const plan = "docs/plans/example.md";
+  transition({ plan, unit: "u1", status: "PENDING", feature: "F1", feature_branch: "feat/f1" }, selected);
+  transition({ plan, unit: "u1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  assert.throws(() => transition({ plan, unit: "u1", status: "FEATURE_MERGED", evidence: "abc" }, selected), /FEATURE_MERGED refused/);
+  fs.writeFileSync(acPath, "- [x] [unit:u1] thing\n");
+  assert.throws(() => transition({ plan, unit: "u1", status: "FEATURE_MERGED" }, selected), /requires evidence/);
+  transition({ plan, unit: "u1", status: "FEATURE_MERGED", evidence: "abc" }, selected);
+  reconcileAcceptance(selected, {});
+  const [row] = currentState(selected);
+  assert.equal(row.status, "FEATURE_MERGED");
+  assert.equal(row.feature, "F1");
+  assert.equal(row.feature_branch, "feat/f1");
+  assert.equal(transition({ plan, unit: "u1", status: "COMPLETE", evidence: "landing sha" }, selected).status, "COMPLETE");
+});

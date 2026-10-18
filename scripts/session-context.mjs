@@ -14,6 +14,7 @@ import {
 import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
+import { loadIndex } from "./lib/plan-index.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 
 let input = {};
@@ -156,6 +157,13 @@ if (handoff?.plan) {
   }
 }
 
+// Level of the hand-off's plan, resolved through plan-index; folded into the
+// existing HAND-OFF line (no new lines). Unindexed slugs print no level.
+let handoffLevel = "";
+if (handoff?.plan) {
+  try { handoffLevel = loadIndex(context.root).get(String(handoff.plan))?.level || ""; } catch { /* unindexable plans print bare */ }
+}
+
 // Kick the test-green snapshot into the BACKGROUND for THIS session (detached).
 fs.mkdirSync(sessionDir(sid, context), { recursive: true });
 let anyStopCommandMarker = false;
@@ -249,7 +257,7 @@ const parts = [
   (cfg.security?.enabled || cfg.stopGate?.requireAcceptanceCriteria)
     ? `Stop gate: ${[cfg.security?.enabled && "secrets scan", cfg.stopGate?.requireAcceptanceCriteria && "unticked acceptance criteria"].filter(Boolean).join(" + ")} block completion.`
     : "",
-  handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
+  handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}${handoffLevel ? ` (${handoffLevel})` : ""}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
   swept.length ? `WORKTREES SWEPT (merged, clean): ${summarizeUnits(swept.map((e) => path.relative(context.root, e.path)))}.` : "",
   lingering.length ? `LINGERING WORKTREES: ${summarizeUnits(lingering.map((e) => path.relative(context.root, e.path)))} — merged, clean, unowned. Remove: printf '%s' '{"action":"sweep","all_merged":true}' | node "${path.join(PLUGIN_ROOT, "scripts", "worktree-sweep.mjs")}"` : "",
   trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
