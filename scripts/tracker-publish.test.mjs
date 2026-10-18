@@ -133,6 +133,51 @@ test("publish: a checkout merely behind origin cannot blank the block; a real ar
   assert.equal(git(bare, "show", "main:docs/plans/TRACKER.jsonl"), "");
 });
 
+function blankedFixture() {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  assert.equal(publishTracker({}, a).published, true);
+  const fresh = clone(bare);
+  fs.mkdirSync(path.dirname(ledgerPath(fresh)), { recursive: true });
+  fs.writeFileSync(ledgerPath(fresh), "");
+  return fresh;
+}
+
+const evLine = (ev) => JSON.stringify({ ts: 1, ev }) + "\n";
+function writeLog(ctx, ...evs) {
+  fs.mkdirSync(ctx.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(ctx.stateDir, "events.jsonl"), evs.map(evLine).join(""));
+}
+
+test("publish: unset stateDir refuses and never reads the process cwd", () => {
+  const fresh = blankedFixture();
+  const cwdDir = tmp("cwd");
+  fs.writeFileSync(path.join(cwdDir, "events.jsonl"), evLine("tracker_archived"));
+  const old = process.cwd();
+  process.chdir(cwdDir);
+  try {
+    const { stateDir, ...noState } = fresh;
+    const refused = publishTracker({}, noState);
+    assert.equal(refused.published, false);
+    assert.match(refused.refused, /blank/);
+  } finally { process.chdir(old); }
+});
+
+test("publish: an archive event before the last publish cannot unlock; one after it can", () => {
+  const fresh = blankedFixture();
+  writeLog(fresh, "tracker_archived", "tracker_published");
+  assert.match(publishTracker({}, fresh).refused, /blank/);
+  writeLog(fresh, "tracker_archived", "tracker_published", "doc_retired");
+  assert.equal(publishTracker({}, fresh).published, true);
+});
+
+test("publish: a log with no publish line and an archive event unlocks", () => {
+  const fresh = blankedFixture();
+  writeLog(fresh, "tracker_archived");
+  assert.equal(publishTracker({}, fresh).published, true);
+});
+
 test("publish: a failed worktree remove then a retry succeeds", () => {
   const { bare } = remote();
   const a = clone(bare), other = clone(bare);
