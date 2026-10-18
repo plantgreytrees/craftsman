@@ -92,3 +92,21 @@ test("run-manifest: one file per plan, and other plans' rows stay out", () => {
   assert.equal(planSlug("docs/plans/a-b.md"), "a-b");
   assert.deepEqual(buildManifest(PLAN, [], "").features, []);
 });
+
+test("run-manifest: features[] stays units and feature_groups is added, with and without features (ARCH-TRACKER-07)", () => {
+  const plain = context();
+  move(plain, "solo", "PENDING");
+  const flat = read(plain);
+  assert.deepEqual(flat.features.map((f) => f.unit), ["solo"]);
+  assert.deepEqual(flat.feature_groups, []);
+  assert.equal(flat.features[0].feature, undefined);
+
+  const grouped = context();
+  move(grouped, "a1", "PENDING", { feature: "F1", feature_branch: "feat/f1", scope_id: "S-a1" });
+  move(grouped, "a2", "PENDING", { feature: "F1", feature_branch: "feat/f1" });
+  move(grouped, "b1", "PENDING");
+  const manifest = read(grouped);
+  assert.deepEqual(manifest.features.map((f) => f.unit), ["a1", "a2", "b1"]);
+  assert.deepEqual(manifest.feature_groups, [{ feature: "F1", feature_branch: "feat/f1", units: ["a1", "a2"] }]);
+  assert.equal(currentState(grouped).find((r) => r.unit === "a1").scope_id, "S-a1");
+});
