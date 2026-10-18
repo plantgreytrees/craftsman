@@ -756,6 +756,22 @@ test("pre-guard: find -exec mv {} under a guarded base and icase-pathspecs fail 
   ], ["git rm src/x.md"]);
 });
 
+test("pre-guard: GIT_ICASE_PATHSPECS reaches pipelines, nested shells and exports (22.1)", () => {
+  grantedPair("craftsman-icase22-", "icase22", null, [
+    "echo x | GIT_ICASE_PATHSPECS=1 xargs git rm -r DOCS", "GIT_ICASE_PATHSPECS=1 sh -c 'git rm -r DOCS'",
+    "export GIT_ICASE_PATHSPECS=1; git rm -r DOCS", "declare -x GIT_ICASE_PATHSPECS=1; git rm -r DOCS",
+  ], ["GIT_ICASE_PATHSPECS=0 git rm -r DOCS"]);
+});
+
+test("pre-guard: icase pathspecs compare globs in full and find -exec git rm|mv is a removal (22.2)", () => {
+  grantedPair("craftsman-icase22b-", "icase22b", (dir) => {
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["docs/plans/*.md"] } }));
+  }, [
+    "git --icase-pathspecs rm docs/plans/X.MD", "git rm -r ':(icase)docs/plans/X.MD'",
+    "find docs -exec git rm {} +", "find docs -exec git mv {} /x \\;",
+  ]);
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {

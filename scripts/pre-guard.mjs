@@ -204,7 +204,10 @@ function segmentRe(seg, flags = "") {
   return new RegExp("^" + re + "$", flags);
 }
 
-function lastSegmentGlob(arg, cwd, docPaths) {
+// A guarded glob as a RegExp; an icase pathspec compares it case-insensitively in full.
+const guardRe = (p, icase) => (icase ? new RegExp(globToRe(p).source, "i") : globToRe(p));
+
+function lastSegmentGlob(arg, cwd, docPaths, icase = false) {
   const slash = arg.lastIndexOf("/");
   const dir = slash === -1 ? "" : arg.slice(0, slash + 1), seg = arg.slice(slash + 1);
   if (!/[*?[{]/.test(seg) || /[*?[{]/.test(dir)) return undefined; // not a last-segment-only glob
@@ -213,16 +216,16 @@ function lastSegmentGlob(arg, cwd, docPaths) {
     return path.relative(path.resolve(cwd, dir || "."), activeRoot).startsWith("..") ? null : (rel || ".");
   }
   const dirParts = rel === "" ? [] : rel.split("/");
-  const re = segmentRe(seg);
+  const re = segmentRe(seg, icase ? "i" : "");
   const sample = [...dirParts, seg.replace(/[*?[\]{},!]/g, "x")].join("/");
   let entries = null;
   try { entries = fs.readdirSync(path.join(activeRoot, ...dirParts)); } catch { entries = []; }
   for (const p of docPaths) {
     if (!p.includes("**")) {
       // No `**`: test the real directory entries the glob expands to, not a sample.
-      const hit = entries.find((e) => re.test(e) && [[...dirParts, e].join("/"), "./" + [...dirParts, e].join("/")].some((c) => globToRe(p).test(c)));
+      const hit = entries.find((e) => re.test(e) && [[...dirParts, e].join("/"), "./" + [...dirParts, e].join("/")].some((c) => guardRe(p, icase).test(c)));
       if (hit !== undefined) return [...dirParts, hit].join("/");
-    } else if (globToRe(p).test(sample) || globToRe(p).test("./" + sample)) return sample;
+    } else if (guardRe(p, icase).test(sample) || guardRe(p, icase).test("./" + sample)) return sample;
     const base = guardedBase(p).split("/").filter(Boolean);
     if (base.length > dirParts.length && dirParts.every((d, k) => base[k] === d) && re.test(base[dirParts.length])) return [...dirParts, base[dirParts.length]].join("/");
   }
@@ -288,9 +291,9 @@ function decodeMagic(arg, cwd, docPaths, forceIcase = false) {
   return { arg: rest || ".", cwd: top ? activeRoot : cwd, icase, exclude };
 }
 
-function touchesGuarded(arg, cwd, docPaths) {
+function touchesGuarded(arg, cwd, docPaths, icase = false) {
   if (!arg) return null;
-  const lastSeg = lastSegmentGlob(arg, cwd, docPaths);
+  const lastSeg = lastSegmentGlob(arg, cwd, docPaths, icase);
   if (lastSeg !== undefined) return lastSeg;
   const cut = arg.search(/[*?[{]/);
   const literal = cut === -1 ? arg : arg.slice(0, cut).replace(/[^/]*$/, "") || ".";
@@ -300,7 +303,7 @@ function touchesGuarded(arg, cwd, docPaths) {
     return path.relative(path.resolve(cwd, literal), activeRoot).startsWith("..") ? null : (rel || ".");
   }
   if (rel === "") return ".";
-  if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) return rel;
+  if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => guardRe(p, icase).test(c)))) return rel;
   if (docPaths.some((p) => { const base = guardedBase(p); return base === rel || base.startsWith(rel + "/"); })) return rel;
   return null;
 }
@@ -374,14 +377,18 @@ function removedDocs(cmd, docPaths) {
     }
   }
 
-  function segment(words, state, depth) {
+  function segment(words, state, depth, inheritIcase = false) {
     // GIT_ICASE_PATHSPECS=<truthy> anywhere in the prefix (`VAR=1 git`, `env VAR=1 git`).
-    const icaseEnv = words.some((w) => { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); return m && !/^(?:0|false|no|off|)$/i.test(m[1]); });
+    const icaseEnv = inheritIcase || state.icase || words.some((w) => { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); return m && !/^(?:0|false|no|off|)$/i.test(m[1]); });
     words = stripPrefixes(words, state.cwd);
     if (!words.length) return;
     const verb = path.basename(words[0]);
     const rest = words.slice(1);
-    if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+\+?=/.test(a)) assigned(a, state.cwd);
+    if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+\+?=/.test(a)) {
+      assigned(a, state.cwd);
+      const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(a); // stays set for the later segments
+      if (m) state.icase = !/^(?:0|false|no|off|)$/i.test(m[1]);
+    }
     state.seen.push(...args(rest).map((w) => ({ w, cwd: state.cwd })));
     if (verb === "cd" || verb === "pushd") { if (rest[0] && !rest[0].startsWith("-")) state.cwd = path.resolve(state.cwd, rest[0]); return; }
     if (verb === "rm" || verb === "unlink" || verb === "mv") {
@@ -409,7 +416,7 @@ function removedDocs(cmd, docPaths) {
         for (const spec of specs) {
           if (spec.unreadable) { hits.push(spec.unreadable); continue; }
           if (spec.exclude && spec.arg !== "." ) continue;
-          check(spec.arg, spec.cwd); const h = pathspecHit(spec.arg, spec.cwd, docPaths, spec.icase); if (h) hits.push(h);
+          const h0 = touchesGuarded(spec.arg, spec.cwd, docPaths, spec.icase); if (h0) hits.push(h0); const h = pathspecHit(spec.arg, spec.cwd, docPaths, spec.icase); if (h) hits.push(h);
         }
       }
       return;
@@ -427,6 +434,11 @@ function removedDocs(cmd, docPaths) {
         while (m < exprs.length && exprs[m] !== ";" && !(exprs[m] === "+" && exprs[m - 1] === "{}")) m++;
         const cmdWords = stripPrefixes(exprs.slice(k + 1, m), state.cwd);
         if (/^(?:rm|unlink|mv)$/.test(path.basename(cmdWords[0] || ""))) execs.push({ verb: path.basename(cmdWords[0]), words: cmdWords.slice(1) });
+        else if (path.basename(cmdWords[0] || "") === "git") { // git rm / git mv count as removal verbs
+          let g = 1;
+          while (g < cmdWords.length && cmdWords[g].startsWith("-")) g += cmdWords[g] === "-C" || cmdWords[g] === "-c" ? 2 : 1;
+          if (cmdWords[g] === "rm" || cmdWords[g] === "mv") execs.push({ verb: cmdWords[g], words: cmdWords.slice(g + 1) });
+        }
       }
       const deletes = exprs.includes("-delete") || execs.some((x) => x.verb !== "mv" || x.words.some((w) => w.includes("{}")));
       for (const x of execs) for (const w of x.words) { // every literal word handed to rm/unlink/mv, bar `{}`
@@ -449,13 +461,13 @@ function removedDocs(cmd, docPaths) {
         const visible = state.sep === "|" && /^(?:echo|printf|find)$/.test(prevVerb);
         if (!visible || rest.some((w) => w.startsWith("<")) || opts.some((w) => /^-a|^--arg-file/.test(w))) hits.push("(xargs " + path.basename(inner[0]) + " with input the parser cannot see)");
       }
-      segment(tail, state, depth);
+      segment(tail, state, depth, icaseEnv);
       return;
     }
     if (/^(?:ba|z|da|k)?sh$/.test(verb) || verb === "eval") {
       const at = verb === "eval" ? 0 : rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
       const body = verb === "eval" ? rest.join(" ") : rest[at + 1];
-      if (at !== -1 && body !== undefined && depth < 5) walk(body, { ...state, seen: state.seen }, depth + 1);
+      if (at !== -1 && body !== undefined && depth < 5) walk(body, { ...state, seen: state.seen, icase: icaseEnv }, depth + 1);
     }
   }
 
