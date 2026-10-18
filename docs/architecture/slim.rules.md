@@ -3,7 +3,7 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: ac57d0e891bc7343dcb07f174e179ab8f1fd68c9
+verified_at: 9c4f8f4658784069efa875aad4d010d2e92376a2
 updated: 2026-10-18
 ---
 # ARCH slim — enforced rules
@@ -14,6 +14,6 @@ updated: 2026-10-18
 - **ARCH-SLIM-04** [decided] Detail that applies only under a config or plan condition lives in a reference doc read at the point of need, never in the always-read body — check: Read placement review — cite: commands/_shared-execution.md:5
 - **ARCH-SLIM-05** [decided] Duplicate prose is removed in this order: delete what a hook or script enforces; else move it into a doc the command already reads; never into a newly loaded doc. Call-site directives kept on purpose are asserted in a test — check: wiring.test.mjs prose assertions — cite: scripts/wiring.test.mjs:152-160
 - **ARCH-SLIM-06** [decided] A MUST sentence may leave a command or agent only when a hook or script enforces it or a test asserts its replacement; a trim keeps the suite, doc-size-policy and descriptions.test green and reports stats.mjs block rates before and after — check: PR evidence — cite: scripts/stats.mjs:59-66
-- **ARCH-SLIM-07** [decided] Scripts have no hard byte cap: CI warns when the scripts/ source total grows, and hook latency (quality gate, pre-guard, stop-gate p50/p95 in stats.mjs) is the hard budget under hooks.json timeouts — check: stats latency section — cite: scripts/stats.mjs:62
+- **ARCH-SLIM-07** [decided] Scripts have no hard byte cap: CI warns when the scripts/ source total grows, and hook latency (quality gate, pre-guard, stop-gate p50/p95 in stats.mjs) is the hard budget under hooks.json timeouts — check: stats latency section — cite: scripts/stats.mjs:34-51
 - **ARCH-SLIM-08** [decided] CHANGELOG.md [Unreleased] stays under 8 KB; a release is cut before it grows past that — check: changelog size test — cite: CHANGELOG.md:6
 - **ARCH-SLIM-09** [decided] New behaviour is a role in an existing agent, not a new agent, unless its description fits the descriptions.test total without raising it — check: descriptions.test.mjs — cite: scripts/descriptions.test.mjs:13-16
