@@ -12,7 +12,10 @@ export const meta = {
 // Orchestration only (ARCH-ENGINE-03): no filesystem, shell, module loading or clock here.
 // Every repo action runs inside an agent through craftsman's own scripts.
 // args: { sessionId, pluginRoot, projectRoot, protocolText?, project, plan,
-//         units: [{ unit, depends_on?, task, criteria, scope, arch }] }
+//         featureBranches?, maxSubagents?, featuresText?,
+//         units: [{ unit, feature?, depends_on?, task, criteria, scope, arch }] }
+// featureBranches mirrors planning.featureBranches and maxSubagents mirrors
+// execution.maxSubagents; root reads the config and passes both (the script reads no files).
 
 const MAX_FIX_ROUNDS = 2
 // ARCH-ENGINE-06: root keeps per-unit summaries of at most ~2k tokens.
@@ -65,6 +68,10 @@ function planOrder(units) {
 // agent type carries agents/unit-runner.md as its system prompt. Otherwise
 // the caller passes that file's text in args.protocolText.
 function brief(role, u, extra) {
+  // Feature protocol (commands/_features.md): inside protocolText when root
+  // supplies the protocol, else featuresText beside the installed agent type.
+  const features = u.featureId && !args.protocolText && args.featuresText
+    ? `\n<features>\n${args.featuresText}\n</features>` : ''
   return [
     args.protocolText
       ? `Follow the "role: ${role}" section of this protocol exactly. Return only its schema JSON.\n<protocol>\n${args.protocolText}\n</protocol>`
@@ -75,12 +82,13 @@ function brief(role, u, extra) {
     `project: ${args.project}`,
     `plan: ${args.plan}`,
     `unit: ${u.unit}`,
+    ...(u.featureId ? [`feature: ${u.featureId}`] : []),
     `arch: ${JSON.stringify(u.arch || [])}`,
     `scope: ${JSON.stringify(u.scope)}`,
     `task: ${u.task}`,
     `criteria: ${JSON.stringify(u.criteria || [])}`,
     extra || '',
-  ].join('\n')
+  ].join('\n') + features
 }
 
 function run(role, u, phase, extra) {
@@ -163,22 +171,78 @@ function summary(result) {
   return keep
 }
 
-// Sequential in plan-graph order (ARCH-ENGINE-09): one unit's pipeline
-// finishes before the next starts, until parallel scope isolation is proven.
-// A unit whose dependency did not land stays PENDING, never dispatched.
+// Units group by feature (ARCH-ENGINE-13). Without planning.featureBranches
+// there is one group and no feature lines: the single-feature path as before.
+const featureMode = args.featureBranches === true
+const planSlug = String(args.plan).split('/').pop().replace(/\.md$/, '')
+const ordered = planOrder(args.units)
+const groups = []
+for (const u of ordered) {
+  const id = featureMode ? (u.feature || planSlug) : null
+  let group = groups.find((g) => g.id === id)
+  if (!group) groups.push((group = { id, units: [] }))
+  group.units.push(u)
+}
+
+// ARCH-ENGINE-16: a wave needs two sub-agents and feature branches; at a cap
+// below 2 (the default 0) every batch is one unit and parallel() never runs.
+const waveCap = featureMode && Number.isInteger(args.maxSubagents) && args.maxSubagents >= 2 ? args.maxSubagents : 0
+const writes = (u) => (u.scope && u.scope.write) || []
+const nests = (x, y) => x === y || x.startsWith(y.endsWith('/') ? y : `${y}/`) || y.startsWith(x.endsWith('/') ? x : `${x}/`)
+const apart = (a, b) => !(a.depends_on || []).includes(b.unit) && !(b.depends_on || []).includes(a.unit)
+  && !writes(a).some((x) => writes(b).some((y) => nests(x, y)))
+
 const results = []
 const landed = new Set()
 const ids = new Set(args.units.map((u) => u.unit))
-for (const u of planOrder(args.units)) {
-  const waiting = (u.depends_on || []).filter((d) => ids.has(d) && !landed.has(d))
-  if (waiting.length) {
-    results.push({ unit: u.unit, status: 'PENDING', evidence: `waiting on ${waiting.join(', ')}`, parked: [] })
-    continue
-  }
+
+async function oneUnit(u, extra) {
   log(`unit ${u.unit}`)
-  const [result] = await pipeline([u], (item) => run('implement', item, 'Implement'), reviewLoop, close)
-  const done = summary(result || await block(dead(u, 'pipeline'), u))
-  if (done.status === 'MERGED') landed.add(u.unit)
-  results.push(done)
+  const [result] = await pipeline([u], (item) => run('implement', item, 'Implement', extra), reviewLoop, close)
+  const raw = result || await block(dead(u, 'pipeline'), u)
+  return { raw, done: summary(raw) }
+}
+
+// ARCH-ENGINE-17: sequential in plan-graph order inside the feature worktree,
+// whose worktree_path comes from the feature's first unit result. A unit whose
+// dependency did not land stays PENDING, never dispatched.
+for (const group of groups) {
+  let fw = ''
+  const members = []
+  const queue = group.units.slice()
+  while (queue.length) {
+    const batch = [queue.shift()]
+    while (waveCap && fw && queue.length && batch.length < waveCap && batch.every((m) => apart(m, queue[0]))) batch.push(queue.shift())
+    const runnable = []
+    for (const raw of batch) {
+      const u = group.id ? { ...raw, featureId: group.id } : raw
+      const waiting = (u.depends_on || []).filter((d) => ids.has(d) && !landed.has(d))
+      if (waiting.length) {
+        members.push(u)
+        results.push({ unit: u.unit, status: 'PENDING', evidence: `waiting on ${waiting.join(', ')}`, parked: [] })
+      } else runnable.push(u)
+    }
+    if (!runnable.length) continue
+    const wave = runnable.length > 1
+    // A wave unit never shares a worktree: it gets its own from the feature branch.
+    const outs = wave
+      ? await parallel(runnable.map((u) => () => oneUnit(u, `wave: true\nfeature_worktree: ${fw}`)))
+      : [await oneUnit(runnable[0], fw ? `worktree_path: ${fw}` : '')]
+    runnable.forEach((u, i) => {
+      members.push(u)
+      const { raw, done } = outs[i]
+      if (!wave && !fw && raw.worktree_path && group.id) fw = raw.worktree_path
+      if (done.status === 'MERGED') landed.add(u.unit)
+      results.push(done)
+    })
+  }
+  // One land-feature call after the feature's last unit, only when every unit landed.
+  if (group.id && members.length && members.every((u) => landed.has(u.unit))) {
+    const last = members[members.length - 1]
+    const out = await run('land-feature', last, 'Land',
+      `worktree_path: ${fw}\nunits: ${JSON.stringify(members.map((u) => u.unit))}`) || dead(last, 'land-feature')
+    const settled = out.status === 'MERGED' ? out : out.status === 'PARKED' ? await park(out, last) : await block(out, last)
+    results.push({ ...summary(settled), unit: `feature:${group.id}` })
+  }
 }
 return { results }

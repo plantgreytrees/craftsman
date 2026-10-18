@@ -27,6 +27,7 @@ const BUDGETS = [
   { name: "architecture contract", glob: /^commands\/_architecture\.md$/, max: 4000 },
   { name: "architect --init/--update protocol", glob: /^commands\/_architect-maintain\.md$/, max: 6500 },
   { name: "architect --backfill protocol", glob: /^commands\/_architect-backfill\.md$/, max: 5500 },
+  { name: "feature protocol (passed as protocolText)", glob: /^commands\/_features\.md$/, max: 3500 },
   { name: "command", glob: /^commands\/[^_].*\.md$/, max: 10000 },
   { name: "agent", glob: /^agents\/.*\.md$/, max: 3800 },
   { name: "skill", glob: /^skills\/.*\/SKILL\.md$/, max: 4200 },
