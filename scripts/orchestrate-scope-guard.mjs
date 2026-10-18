@@ -105,7 +105,7 @@ else if (invoked === "orchestrate" && autoActive(sid, context)) {
 // /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
 // itself, and on the /orchestrate its unattended /goal starts with. Sized
 // from the resolved feature plan's units, not the parent doc's; a fresh invocation re-arms, never accumulates.
-if (autoRun) grantRunnerDispatches((resolved.units ?? planUnitCount(slug, context)) * RUNNER_DISPATCHES_PER_UNIT, sid, context);
+if (autoRun) grantRunnerDispatches((resolved.units || planUnitCount(slug, context)) * RUNNER_DISPATCHES_PER_UNIT, sid, context);
 
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
 // spends it). Re-arming on a repeat invocation is intended — each run of
