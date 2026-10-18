@@ -125,10 +125,11 @@ function stripHeredocs(text) {
 // newline ( ) and backticks separate segments; a leading `\` on a word is
 // dropped (`\rm`). `ok` is false when a quote never closes.
 function shellSegments(cmd) {
-  const segments = [];
-  let words = [], word = null, quote = null;
+  const segments = [], seps = [], substs = [];
+  let words = [], word = null, quote = null, subst = false, sep = null;
   const endWord = () => { if (word !== null) words.push(word); word = null; };
-  const endSegment = () => { endWord(); if (words.length) segments.push(words); words = []; };
+  // seps[i]: the separator before segment i; substs[i]: it opened a `...` or $(...).
+  const endSegment = () => { endWord(); if (words.length) { segments.push(words); seps.push(sep); substs.push(subst); sep = null; } words = []; subst = false; };
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
     if (quote) {
@@ -138,16 +139,23 @@ function shellSegments(cmd) {
     } else if (c === '"' || c === "'") { quote = c; word ??= ""; }
     else if (c === "\\" && i + 1 < cmd.length) { word = (word ?? "") + cmd[++i]; }
     else if (/\s/.test(c) && c !== "\n") endWord();
-    else if ("\n;&|()`".includes(c)) endSegment();
+    else if ("\n;&|()`".includes(c)) {
+      if (c === "`" || (c === "(" && word !== null && word.endsWith("$"))) subst = true;
+      endSegment();
+      if (!(sep === "|" && "()`".includes(c))) sep = c;
+    }
     else word = (word ?? "") + c;
   }
   endSegment();
-  return { segments, ok: !quote };
+  return { segments, seps, substs, ok: !quote };
 }
 
 const OPT_ARG = { sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"]), env: new Set(["-u", "-C", "-S"]),
   xargs: new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]) };
-const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas"]);
+const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas", "nice", "timeout", "busybox", "stdbuf", "ionice"]);
+const KEYWORDS = new Set(["then", "do", "else", "elif", "!"]);
+OPT_ARG.nice = new Set(["-n"]); OPT_ARG.timeout = new Set(["-s", "-k"]);
+OPT_ARG.stdbuf = new Set(["-i", "-o", "-e"]); OPT_ARG.ionice = new Set(["-c", "-n", "-p", "-P", "-u"]);
 
 // Literal directory prefix of a guarded glob: "docs/plans/**" -> "docs/plans".
 function guardedBase(glob) {
@@ -251,7 +259,7 @@ function findNamesMiss(exprs, start, cwd, docPaths) {
 // names a guarded path fails closed.
 function removedDocs(cmd, docPaths) {
   const hits = [];
-  const st = { cwd: process.cwd(), xargsRm: false, seen: [] };
+  const st = { cwd: process.cwd(), xargsRm: false, seen: [], rmVar: false, sep: null, prev: null, subst: false };
   const check = (arg, cwd) => { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(h); };
   const args = (words) => words.filter((w) => w && !w.startsWith("-"));
 
@@ -259,12 +267,13 @@ function removedDocs(cmd, docPaths) {
     for (;;) {
       if (!words.length) return words;
       const w = words[0], base = path.basename(w);
-      if (/^\w+=/.test(w) || w === "{") { words = words.slice(1); continue; }
+      if (/^\w+=/.test(w) || w === "{" || KEYWORDS.has(w)) { words = words.slice(1); continue; }
       if (!WRAPPERS.has(base)) return words;
       words = words.slice(1);
       while (words.length && (words[0].startsWith("-") || (base === "env" && /^\w+=/.test(words[0])))) {
         words = words.slice(OPT_ARG[base]?.has(words[0]) ? 2 : 1);
       }
+      if (base === "timeout" && words.length) words = words.slice(1); // the duration
     }
   }
 
@@ -275,8 +284,16 @@ function removedDocs(cmd, docPaths) {
     const rest = words.slice(1);
     state.seen.push(...args(rest).map((w) => ({ w, cwd: state.cwd })));
     if (verb === "cd" || verb === "pushd") { if (rest[0] && !rest[0].startsWith("-")) state.cwd = path.resolve(state.cwd, rest[0]); return; }
-    if (verb === "rm" || verb === "unlink") { for (const a of args(rest)) check(a, state.cwd); return; }
-    if (verb === "mv") { for (const a of args(rest)) check(a, state.cwd); return; }
+    if (verb === "rm" || verb === "unlink" || verb === "mv") {
+      for (const a of args(rest)) {
+        check(a, state.cwd);
+        if (/^(?:~|\$\{?(?:PWD|HOME)(?![\w]))/.test(a)) hits.push("(" + verb + " argument the parser cannot resolve: " + a + ")");
+        if (/\$[A-Za-z_{]/.test(a) && verb !== "mv") st.rmVar = true;
+      }
+      if (state.subst) hits.push("(" + verb + " with a command substitution argument)");
+      else if (rest.some((a) => /\$\(|`/.test(a))) hits.push("(" + verb + " with a command substitution argument)");
+      return;
+    }
     if (verb === "git") {
       let cwd = state.cwd, i = 0;
       while (i < rest.length && rest[i].startsWith("-")) {
@@ -288,9 +305,10 @@ function removedDocs(cmd, docPaths) {
     }
     if (verb === "find") {
       const exprAt = rest.findIndex((w) => w.startsWith("-") || w === "(" || w === "!");
+      const starts = exprAt === -1 ? rest : rest.slice(0, exprAt);
       const exprs = exprAt === -1 ? [] : rest.slice(exprAt);
       const deletes = exprs.includes("-delete") || exprs.some((w, k) => /^-exec(?:dir)?$/.test(w) && /^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || "")));
-      if (deletes) for (const a of exprAt === -1 ? rest : rest.slice(0, exprAt)) {
+      if (deletes) for (const a of starts.length ? starts : ["."]) {
         const h = touchesGuarded(a, state.cwd, docPaths);
         if (h && !findNamesMiss(exprs, a, state.cwd, docPaths)) hits.push(h);
       }
@@ -300,7 +318,13 @@ function removedDocs(cmd, docPaths) {
       let tail = rest;
       while (tail.length && tail[0].startsWith("-")) tail = tail.slice(OPT_ARG.xargs.has(tail[0]) ? 2 : 1);
       const inner = stripPrefixes(tail);
-      if (inner.length && /^(?:rm|unlink)$/.test(path.basename(inner[0]))) st.xargsRm = true;
+      if (inner.length && /^(?:rm|unlink)$/.test(path.basename(inner[0]))) {
+        st.xargsRm = true;
+        const opts = rest.slice(0, rest.length - tail.length);
+        const prevVerb = state.prev ? path.basename(stripPrefixes(state.prev)[0] || "") : "";
+        const visible = state.sep === "|" && /^(?:echo|printf|find)$/.test(prevVerb);
+        if (!visible || rest.some((w) => w.startsWith("<")) || opts.some((w) => /^-a|^--arg-file/.test(w))) hits.push("(xargs " + path.basename(inner[0]) + " with input the parser cannot see)");
+      }
       segment(tail, state, depth);
       return;
     }
@@ -315,11 +339,14 @@ function removedDocs(cmd, docPaths) {
     text = stripHeredocs(text);
     const parsed = shellSegments(text);
     if (!parsed.ok && docPaths.some((p) => { const b = guardedBase(p); return b && text.includes(b); })) hits.push("(unparseable command naming a guarded path)");
-    for (const words of parsed.segments) segment(words, state, depth);
+    parsed.segments.forEach((words, i) => {
+      state.sep = parsed.seps[i]; state.prev = parsed.segments[i - 1] || null; state.subst = parsed.substs[i];
+      segment(words, state, depth);
+    });
   }
 
   walk(cmd, st, 0);
-  if (st.xargsRm) for (const { w, cwd } of st.seen) check(w, cwd);
+  if (st.xargsRm || st.rmVar) for (const { w, cwd } of st.seen) check(w, cwd);
   return hits;
 }
 

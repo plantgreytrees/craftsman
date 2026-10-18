@@ -602,6 +602,32 @@ test("pre-guard: every rm form that removes or moves a guarded doc (or its ances
   }
 });
 
+test("pre-guard: shell keywords, more wrappers and unseen-argument removals fail closed (12.1, 12.2)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+    const bash = (command) => run(GUARD, dir, { session_id: "bypass-forms", tool_name: "Bash", tool_input: { command } });
+    const forms = [
+      "if true; then rm docs/plans/x.md; fi", "! rm docs/plans/x.md", "for x in a; do rm docs/plans/x.md; done",
+      "nice rm docs/plans/x.md", "nice -n 5 rm docs/plans/x.md", "timeout 5 rm docs/plans/x.md", "timeout -s KILL 5 rm docs/plans/x.md",
+      "busybox rm docs/plans/x.md", "stdbuf -oL rm docs/plans/x.md", "ionice -c 3 rm docs/plans/x.md", "find -name x.md -delete",
+      "git ls-files | xargs rm", "xargs rm < list", "xargs -a list rm", "git ls-files | xargs unlink", "rm -rf ~", "rm -rf \"$PWD/docs\"", "rm -rf $HOME/x",
+      "rm -rf $(git rev-parse --show-toplevel)/docs", "rm -rf `pwd`/docs", "rm -rf \"$(pwd)/docs\"",
+      "for f in docs/plans/*.md; do rm \"$f\"; done",
+    ];
+    for (const command of forms) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    for (const command of ["rm -rf \"$TMPDIR/x\"", "echo a | xargs echo", "echo a | xargs rm", "nice ls docs", "timeout 5 ls", "find -name x -print",
+      "if true; then ls; fi", "for f in a b; do rm \"$f\"; done"]) {
+      assert.equal(bash(command).status, 0, `stays allowed: ${command}`);
+    }
+    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    for (const command of forms) assert.equal(bash(command).status, 0, `granted: ${command}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pre-guard: a glob in the last path segment is matched against the guarded bases (11.1)", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-glob-"));
   try {
