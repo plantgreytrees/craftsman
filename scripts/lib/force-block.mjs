@@ -1,5 +1,7 @@
 // The force block (ARCH-LAND-05): the destructive git forms /auto must never
 // run, found in a Bash command however it is quoted, split or wrapped.
+// A plain `git push origin HEAD:<base>` (tracker publish, ARCH-LAND-17) is not
+// destructive and passes; every force flag and `+refspec` still blocks.
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 import { shellSegments, UNEXPANDED } from "./shell-words.mjs";
 
