@@ -13,26 +13,128 @@ import path from "node:path";
 
 const DEFAULT_ROOT = path.resolve(import.meta.dirname, "..");
 
-// Budgets are char counts with real headroom over current sizes (see the
-// measurement this file's companion trimming pass used) — generous enough
-// not to fight legitimate growth, tight enough to catch actual bloat before
-// it ships. Read-unconditionally docs (agent mode, tooling manifest — paid
-// on every execution-touching command) get the tightest budget of the set.
-const BUDGETS = [
-  { name: "shared machinery (read unconditionally)", glob: /^commands\/_shared-machinery\.md$/, max: 7500 },
-  { name: "shared execution (per-unit loop)", glob: /^commands\/_shared-execution\.md$/, max: 13500 },
-  { name: "shared analysis", glob: /^commands\/_shared-analysis\.md$/, max: 6500 },
-  { name: "scrutinise --deep protocol", glob: /^commands\/_scrutinise-deep\.md$/, max: 6500 },
-  // Read by every loop command whenever architecture rules exist — kept tight.
-  { name: "architecture contract", glob: /^commands\/_architecture\.md$/, max: 4000 },
-  { name: "architect --init/--update protocol", glob: /^commands\/_architect-maintain\.md$/, max: 6500 },
-  { name: "architect --backfill protocol", glob: /^commands\/_architect-backfill\.md$/, max: 5500 },
-  { name: "sync-docs --archive/--prune protocol", glob: /^commands\/_sync-docs-prune\.md$/, max: 1575 },
-  { name: "feature protocol (passed as protocolText)", glob: /^commands\/_features\.md$/, max: 3500 },
-  { name: "command", glob: /^commands\/[^_].*\.md$/, max: 10000 },
-  { name: "agent", glob: /^agents\/.*\.md$/, max: 3800 },
-  { name: "skill", glob: /^skills\/.*\/SKILL\.md$/, max: 4200 },
-];
+// Per-file byte caps (ARCH-SLIM-01/02): every loadable .md has its own cap, set
+// to its size when added and only ever lowered. A file with no entry is a
+// finding, not a skip. The ratchet test compares these with the merge-base copy.
+export const FILE_CAPS = {
+  "agents/api-reviewer.md": 2060,
+  "agents/architect-analyst.md": 2910,
+  "agents/build-doctor.md": 2062,
+  "agents/code-reviewer.md": 2564,
+  "agents/consumer-tracer.md": 2463,
+  "agents/dependency-auditor.md": 2168,
+  "agents/docs-curator.md": 1616,
+  "agents/idea-critic.md": 2985,
+  "agents/idiom-reviewer.md": 2042,
+  "agents/implementer.md": 2308,
+  "agents/migration-reviewer.md": 2052,
+  "agents/observability-reviewer.md": 1920,
+  "agents/performance-reviewer.md": 1946,
+  "agents/phase-tracker.md": 1511,
+  "agents/plan-reviewer.md": 2282,
+  "agents/plan-strategist.md": 1854,
+  "agents/review-router.md": 1187,
+  "agents/scrutineer.md": 3710,
+  "agents/security-auditor.md": 2184,
+  "agents/standards-keeper.md": 2608,
+  "agents/ui-ux-reviewer.md": 2762,
+  "agents/unit-runner.md": 3605,
+  "commands/_architect-backfill.md": 4582,
+  "commands/_architect-maintain.md": 5810,
+  "commands/_architecture.md": 3643,
+  "commands/_features.md": 3496,
+  "commands/_scrutinise-deep.md": 5473,
+  "commands/_shared-analysis.md": 6365,
+  "commands/_shared-execution.md": 12769,
+  "commands/_shared-machinery.md": 6930,
+  "commands/_sync-docs-prune.md": 1575,
+  "commands/account-switch.md": 8325,
+  "commands/architect.md": 7142,
+  "commands/auto-go.md": 611,
+  "commands/auto.md": 4561,
+  "commands/baseline.md": 950,
+  "commands/builtin-check.md": 6164,
+  "commands/digest.md": 640,
+  "commands/fix-tests.md": 5105,
+  "commands/idea.md": 7232,
+  "commands/init.md": 4956,
+  "commands/instruction.md": 8700,
+  "commands/investigate.md": 6227,
+  "commands/merge.md": 6288,
+  "commands/orchestrate.md": 9168,
+  "commands/plan.md": 9102,
+  "commands/scrutinise.md": 8332,
+  "commands/stats.md": 412,
+  "commands/sync-docs.md": 9312,
+  "commands/toggle.md": 397,
+  "commands/understand.md": 6803,
+  "commands/upgrade.md": 2239,
+  "commands/workspace-init.md": 2742,
+  "skills/deep-research/SKILL.md": 519,
+  "skills/design-review/SKILL.md": 2253,
+  "skills/language-aware-planning/SKILL.md": 3075,
+  "skills/language-aware-planning/references/architecture-template.md": 3053,
+  "skills/language-aware-planning/references/cpp.md": 1922,
+  "skills/language-aware-planning/references/csharp.md": 2004,
+  "skills/language-aware-planning/references/data-science.md": 2079,
+  "skills/language-aware-planning/references/dockerfile.md": 1647,
+  "skills/language-aware-planning/references/generic.md": 2131,
+  "skills/language-aware-planning/references/go.md": 1971,
+  "skills/language-aware-planning/references/idea-template.md": 3266,
+  "skills/language-aware-planning/references/java.md": 2116,
+  "skills/language-aware-planning/references/javascript.md": 1934,
+  "skills/language-aware-planning/references/kotlin.md": 1629,
+  "skills/language-aware-planning/references/kubernetes.md": 1481,
+  "skills/language-aware-planning/references/php.md": 1616,
+  "skills/language-aware-planning/references/plan-template.md": 7293,
+  "skills/language-aware-planning/references/python.md": 2059,
+  "skills/language-aware-planning/references/react-native.md": 2349,
+  "skills/language-aware-planning/references/ruby.md": 2053,
+  "skills/language-aware-planning/references/rust.md": 2121,
+  "skills/language-aware-planning/references/shell.md": 1627,
+  "skills/language-aware-planning/references/swift.md": 1503,
+  "skills/language-aware-planning/references/terraform.md": 1652,
+  "skills/language-aware-planning/references/typescript.md": 1894,
+};
+
+// Shared docs a command reads unconditionally (ARCH-SLIM-03). Conditional reads
+// (_architecture, _features, mode protocols) are not counted.
+export const INVOCATION_DOCS = {
+  "orchestrate": ["commands/_shared-machinery.md","commands/_shared-execution.md"],
+  "architect": ["commands/_architecture.md","commands/_shared-analysis.md"],
+  "idea": ["commands/_shared-analysis.md"],
+  "investigate": ["commands/_shared-analysis.md"],
+  "understand": ["commands/_shared-analysis.md"],
+  "plan": ["commands/_shared-analysis.md"],
+  "scrutinise": ["commands/_shared-machinery.md"],
+  "sync-docs": ["commands/_shared-machinery.md"],
+};
+
+// Per-invocation cap: the command's bytes plus its unconditional shared docs.
+export const INVOCATION_CAPS = {
+  "account-switch": 8325,
+  "architect": 17150,
+  "auto-go": 611,
+  "auto": 4561,
+  "baseline": 950,
+  "builtin-check": 6164,
+  "digest": 640,
+  "fix-tests": 5105,
+  "idea": 13597,
+  "init": 4956,
+  "instruction": 8700,
+  "investigate": 12592,
+  "merge": 6288,
+  "orchestrate": 28867,
+  "plan": 15467,
+  "scrutinise": 15262,
+  "stats": 412,
+  "sync-docs": 16242,
+  "toggle": 397,
+  "understand": 13168,
+  "upgrade": 2239,
+  "workspace-init": 2742,
+};
 
 function markdownFiles(dir) {
   const files = [];
@@ -46,20 +148,51 @@ function markdownFiles(dir) {
   return files;
 }
 
-export function checkDocSizes(root = DEFAULT_ROOT) {
-  const findings = [];
+export function listDocs(root = DEFAULT_ROOT) {
+  const out = [];
   for (const dir of ["commands", "agents", "skills"]) {
     for (const file of markdownFiles(path.join(root, dir))) {
-      const rel = path.relative(root, file).split(path.sep).join("/");
-      const budget = BUDGETS.find((b) => b.glob.test(rel));
-      if (!budget) continue; // no matching category (e.g. skill reference files) — not size-policed
-      const size = fs.statSync(file).size;
-      if (size > budget.max) {
-        findings.push(`${rel}: ${size} chars exceeds the ${budget.max}-char budget for "${budget.name}" (over by ${size - budget.max}) — trim it before shipping.`);
-      }
+      out.push(path.relative(root, file).split(path.sep).join("/"));
     }
   }
+  return out.sort();
+}
+
+export function invocationTotals(root = DEFAULT_ROOT, docs = INVOCATION_DOCS) {
+  const size = (rel) => fs.statSync(path.join(root, rel)).size;
+  const totals = {};
+  for (const rel of listDocs(root)) {
+    const m = /^commands\/([^_].*)\.md$/.exec(rel);
+    if (!m) continue;
+    totals[m[1]] = size(rel) + (docs[m[1]] || []).reduce((n, d) => n + size(d), 0);
+  }
+  return totals;
+}
+
+export function checkDocSizes(root = DEFAULT_ROOT, caps = FILE_CAPS, invCaps = INVOCATION_CAPS) {
+  const findings = [];
+  for (const rel of listDocs(root)) {
+    const cap = caps[rel];
+    if (cap === undefined) {
+      findings.push(`${rel}: no per-file cap in doc-size-policy.mjs FILE_CAPS — add one at its current size.`);
+      continue;
+    }
+    const size = fs.statSync(path.join(root, rel)).size;
+    if (size > cap) {
+      findings.push(`${rel}: ${size} bytes exceeds its ${cap}-byte cap (over by ${size - cap}) — trim it before shipping.`);
+    }
+  }
+  for (const [cmd, total] of Object.entries(invocationTotals(root))) {
+    const cap = invCaps[cmd];
+    if (cap === undefined) findings.push(`command ${cmd}: no per-invocation cap in INVOCATION_CAPS.`);
+    else if (total > cap) findings.push(`command ${cmd}: per-invocation total ${total} bytes exceeds its ${cap}-byte cap (over by ${total - cap}).`);
+  }
   return findings;
+}
+
+// Ratchet helper: every cap present in both maps may only stay or fall.
+export function raisedCaps(base, current) {
+  return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
