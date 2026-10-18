@@ -728,9 +728,21 @@ test("pre-guard: git pathspec magic is decoded (17.2)", () => {
   ], ["git rm src/x.md"]);
 });
 
+test("pre-guard: exclude and icase pathspec magic fail closed (20.1)", () => {
+  grantedPair("craftsman-magic20-", "magic20", null, [
+    "git rm -r ':!src'", "git rm -r ':^src'", "git rm -r ':(exclude)src'", "git rm -r ':(icase)D*'", "git rm -r ':(icase)DOCS/P*'",
+  ], ["git rm src/x.md"]);
+});
+
 test("pre-guard: find -exec rm checks its literal words (17.3)", () => {
   grantedPair("craftsman-exec17-", "exec17", null, [
     "find . -name '*.log' -exec rm -rf docs \\;", "find . -name '*.log' -exec rm {} docs/plans/x.md +",
+  ], ["find . -name '*.log' -exec rm {} +"]);
+});
+
+test("pre-guard: find -exec strips wrappers and covers mv (20.2)", () => {
+  grantedPair("craftsman-exec20-", "exec20", null, [
+    "find . -name '*.log' -exec env rm -rf docs \\;", "find . -name '*.log' -exec mv docs /x \\;",
   ], ["find . -name '*.log' -exec rm {} +"]);
 });
 
