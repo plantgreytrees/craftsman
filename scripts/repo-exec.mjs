@@ -154,7 +154,17 @@ function planGate(context, input, info, planSlug) {
 // A feature session owns one long-lived worktree under the MAIN checkout, never
 // under the linked .claude/worktrees directory the session runs in
 // (ARCH-LAND-13); the branch is pushed at creation (ARCH-LAND-09).
+function assertFeatureId(id) {
+  const text = String(id ?? "");
+  if (!/^[A-Za-z0-9._-]+$/.test(text) || text.includes("..")) throw new Error(`invalid feature id: ${JSON.stringify(text)}`);
+}
+
+function featureLockInfo(info, feature) {
+  return { ...info, base_branch: `feature-${feature.replace(/[^A-Za-z0-9_-]/g, "-")}` };
+}
+
 function prepareFeature(context, input, info) {
+  assertFeatureId(input.feature);
   const main = mainCheckoutRoot(context.root);
   const anchored = { ...context, root: main, stateDir: path.join(main, ".craftsman") };
   const planSlug = path.basename(String(input.plan || ""), ".md");
@@ -400,41 +410,46 @@ function landUnit(context, input, info) {
   if (run(worktree, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) throw new Error("feature worktree has a merge in progress");
   const gateDir = input.unit_worktree ? safeWorktree(anchored, input.unit_worktree, input.unit) : worktree;
   verifyGateBeforeMerge(context, gateDir);
-  if (run(worktree, ["branch", "--show-current"]) !== feature) run(worktree, ["checkout", feature]);
-  const result = { ...info, base_branch: feature, branch: unitBranch, feature_branch: feature, land: "unit", merged: false, merged_locally: false, worktree_path: worktree };
-  let step = "conflict";
+  const featureLock = acquireLock(featureLockInfo(info, feature), input);
   try {
-    run(worktree, ["merge", "--no-ff", "--no-edit", unitBranch]);
-    step = null;
-  } catch (error) {
-    run(worktree, ["merge", "--abort"], { allowFailure: true });
-    if (/untracked working tree files would be overwritten/.test(`${error?.stderr || ""}${error?.message || ""}`)) throw error;
-    logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "conflict" }, context);
-    return landingPark("conflict", result, error);
-  }
-  run(worktree, ["merge-base", "--is-ancestor", unitBranch, "HEAD"]);
-  const hasRemoteFeature = info.has_remote && input.push !== false;
-  if (hasRemoteFeature) {
-    try { run(worktree, ["push", "-u", "origin", feature]); }
-    catch (error) {
-      logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "rejected-push" }, context);
-      return landingPark("rejected-push", { ...result, merged_locally: true }, error);
-    }
-  }
-  if (input.unit_worktree && fs.existsSync(gateDir) && gateDir !== worktree) {
-    run(context.root, ["worktree", "remove", gateDir]);
-    forgetSessionWorktree(input, gateDir, context);
-  }
-  run(context.root, ["branch", "-D", unitBranch]); // merged into feature, verified above;
-  let remoteDeleted = false;
-  if (info.has_remote && run(context.root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${unitBranch}`], { allowFailure: true })) {
+    if (run(worktree, ["branch", "--show-current"]) !== feature) run(worktree, ["checkout", feature]);
+    const result = { ...info, base_branch: feature, branch: unitBranch, feature_branch: feature, land: "unit", merged: false, merged_locally: false, worktree_path: worktree };
+    let step = "conflict";
     try {
-      execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", unitBranch], { stdio: "ignore", env: { ...process.env, LC_ALL: "C" } });
-      remoteDeleted = true;
-    } catch {}
+      run(worktree, ["merge", "--no-ff", "--no-edit", unitBranch]);
+      step = null;
+    } catch (error) {
+      run(worktree, ["merge", "--abort"], { allowFailure: true });
+      if (/untracked working tree files would be overwritten/.test(`${error?.stderr || ""}${error?.message || ""}`)) throw error;
+      logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "conflict" }, context);
+      return landingPark("conflict", result, error);
+    }
+    run(worktree, ["merge-base", "--is-ancestor", unitBranch, "HEAD"]);
+    const hasRemoteFeature = info.has_remote && input.push !== false;
+    if (hasRemoteFeature) {
+      try { run(worktree, ["push", "-u", "origin", feature]); }
+      catch (error) {
+        logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "rejected-push" }, context);
+        return landingPark("rejected-push", { ...result, merged_locally: true }, error);
+      }
+    }
+    if (input.unit_worktree && fs.existsSync(gateDir) && gateDir !== worktree) {
+      run(context.root, ["worktree", "remove", gateDir]);
+      forgetSessionWorktree(input, gateDir, context);
+    }
+    run(context.root, ["branch", "-D", unitBranch]); // merged into feature, verified above;
+    let remoteDeleted = false;
+    if (info.has_remote && run(context.root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${unitBranch}`], { allowFailure: true })) {
+      try {
+        execFileSync("git", ["-C", context.root, "push", "--quiet", "origin", "--delete", unitBranch], { stdio: "ignore", env: { ...process.env, LC_ALL: "C" } });
+        remoteDeleted = true;
+      } catch {}
+    }
+    logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: true, pushed: Boolean(hasRemoteFeature) }, context);
+    return { ...result, merged: true, merged_locally: true, pushed: Boolean(hasRemoteFeature), branch_deleted: true, remote_branch_deleted: remoteDeleted, cleaned: false };
+  } finally {
+    releaseLock(featureLock);
   }
-  logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: true, pushed: Boolean(hasRemoteFeature) }, context);
-  return { ...result, merged: true, merged_locally: true, pushed: Boolean(hasRemoteFeature), branch_deleted: true, remote_branch_deleted: remoteDeleted, cleaned: false };
 }
 
 // ARCH-LAND-18: a finished feature lands on base. Refused unless
@@ -444,6 +459,7 @@ function landUnit(context, input, info) {
 // base. Conflict / ff-only / rejected push PARK the feature's last unit
 // (ARCH-LAND-06); nothing is ever forced (ARCH-LAND-05).
 function landFeature(context, input, info, deps = {}) {
+  if (input.feature !== undefined && input.feature !== null) assertFeatureId(input.feature);
   const config = loadConfig(context);
   if (!config.planning?.featureBranches) throw new Error("land-feature requires planning.featureBranches");
   if (!input.plan || !input.feature) throw new Error("land-feature requires plan and feature");
@@ -470,7 +486,7 @@ function landFeature(context, input, info, deps = {}) {
   const lastUnit = rows[rows.length - 1].unit;
   if (landMode(config) === "pr") return landFeaturePullRequest(context, input, info, { feature, config, runner: deps.runner, units: rows.map((row) => row.unit), lastUnit });
   const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units: rows.map((row) => row.unit) };
-  const featureLock = acquireLock({ ...info, base_branch: `feature-${feature.replace(/[^A-Za-z0-9_-]/g, "-")}` }, input);
+  const featureLock = acquireLock(featureLockInfo(info, feature), input);
   let baseLock = null;
   let added = false;
   let step = null;

@@ -1005,3 +1005,41 @@ test("repo-exec land-feature: acceptance criteria gate the landing (ARCH-TRACKER
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
+
+test("repo-exec feature id: unsafe ids are refused in prepare and land-feature, core-1.2 is accepted", () => {
+  const data = featureFixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      for (const feature of ["x/../../..", "a b"]) {
+        assert.throws(() => prepare(context, { plan: "docs/plans/plan-a.md", feature, unit: "u", slug: "u" }, info), /invalid feature id/);
+        assert.throws(() => landFeature(context, { plan: "docs/plans/plan-a.md", feature }, info), /invalid feature id/);
+      }
+      const ok = prepare(context, { plan: "docs/plans/plan-a.md", feature: "core-1.2", unit: "u", slug: "u" }, info);
+      assert.ok(ok.worktree_path.endsWith("plan-a-core-1.2"));
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec land-unit: a held feature lock refuses; the lock is gone after success and after a conflict park", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const { context, info, feature } = landUnitFixture(data);
+      const lock = path.join(info.common_git_dir, ".craftsman", "merge-locks", "feature-feature-x.lock");
+      const u1 = landUnitBranch(context, info, feature, "l1", "l1.txt", "l1\n");
+      fs.mkdirSync(lock, { recursive: true });
+      assert.throws(() => landUnit(context, { unit: "l1", worktree_path: feature.worktree_path }, info), /merge lock is held/);
+      fs.rmSync(lock, { recursive: true });
+      assert.equal(landUnit(context, { unit: "l1", worktree_path: feature.worktree_path, unit_worktree: u1.worktree_path }, info).merged, true);
+      assert.equal(fs.existsSync(lock), false);
+      landUnitBranch(context, info, feature, "l2", "shared.txt", "unit\n");
+      fs.writeFileSync(path.join(feature.worktree_path, "shared.txt"), "feature\n");
+      git(feature.worktree_path, ["add", "shared.txt"]);
+      git(feature.worktree_path, ["commit", "-q", "-m", "feat: feature side"]);
+      assert.equal(landUnit(context, { unit: "l2", worktree_path: feature.worktree_path }, info).parked, true);
+      assert.equal(fs.existsSync(lock), false);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
