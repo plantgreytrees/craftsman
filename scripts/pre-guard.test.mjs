@@ -772,6 +772,18 @@ test("pre-guard: icase pathspecs compare globs in full and find -exec git rm|mv 
   ]);
 });
 
+test("pre-guard: find -exec git and bare icase assignments reach the git branch (23)", () => {
+  grantedPair("craftsman-git23a-", "git23a", null, [
+    "find build -exec git rm -r ':!src' \\;", "find build -exec git --icase-pathspecs rm -r DOCS \\;",
+    "find build -exec git rm -r ':(icase)DOCS' \\;", "GIT_ICASE_PATHSPECS=1 find build -exec git rm -r DOCS \\;",
+  ], ["find build -exec git rm {} +"]);
+  grantedPair("craftsman-git23b-", "git23b", null, [
+    "GIT_ICASE_PATHSPECS=1; export GIT_ICASE_PATHSPECS; git rm -r DOCS", "export GIT_ICASE_PATHSPECS; GIT_ICASE_PATHSPECS=1; git rm -r DOCS",
+    "set -a; GIT_ICASE_PATHSPECS=1; git rm -r DOCS", "echo docs | xargs git rm -r",
+    "typeset -x GIT_ICASE_PATHSPECS=1; git rm -r DOCS",
+  ], ["export GIT_ICASE_PATHSPECS=1; export GIT_ICASE_PATHSPECS=0; git rm -r DOCS"]);
+});
+
 test("pre-guard: terminal allow and block events carry numeric ms", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-ms-"));
   try {
