@@ -231,14 +231,14 @@ function lastSegmentGlob(arg, cwd, docPaths) {
 
 // git pathspec globs match across `/` (`*.md` reaches docs/plans/x.md). The
 // glob is tested against every guarded base, its ancestors and its real contents.
-function pathspecHit(arg, cwd, docPaths) {
+function pathspecHit(arg, cwd, docPaths, icase = false) {
   if (!/[*?[]/.test(arg)) return null;
   const pre = path.relative(activeRoot, cwd).split(path.sep).join("/");
   if (pre === ".." || pre.startsWith("../")) return null;
   let re = "";
   for (const c of (pre ? pre + "/" : "") + arg.replace(/^\.\//, "")) re += c === "*" ? ".*" : c === "?" ? "." : c === "[" || c === "]" ? c : c.replace(/[.+^${}()|\\]/g, "\\$&");
   let rx;
-  try { rx = new RegExp("^" + re + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
+  try { rx = new RegExp("^" + re + "$", icase ? "i" : ""); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
   let budget = 20000, found = null;
   const visit = (rel) => {
     if (found || --budget < 0) return;
@@ -262,17 +262,17 @@ function pathspecHit(arg, cwd, docPaths) {
 // case); magic it cannot decode fails closed rather than slipping past.
 function decodeMagic(arg, cwd, docPaths) {
   if (!arg.startsWith(":")) return { arg, cwd };
-  let rest = arg.slice(1), top = false, icase = false;
+  let rest = arg.slice(1), top = false, icase = false, exclude = false;
   if (rest.startsWith("(")) {
     const e = rest.indexOf(")");
     if (e === -1) return { unreadable: "(git pathspec the parser cannot read: " + arg + ")" };
     for (const m of rest.slice(1, e).split(",")) {
-      if (m === "top") top = true; else if (m === "icase") icase = true;
-      else if (!["glob", "literal", "exclude"].includes(m)) return { unreadable: "(git pathspec magic the parser cannot read: " + arg + ")" };
+      if (m === "top") top = true; else if (m === "icase") icase = true; else if (m === "exclude") exclude = true;
+      else if (!["glob", "literal"].includes(m)) return { unreadable: "(git pathspec magic the parser cannot read: " + arg + ")" };
     }
     rest = rest.slice(e + 1);
   } else {
-    while (/^[/!^]/.test(rest)) { if (rest[0] === "/") top = true; rest = rest.slice(1); }
+    while (/^[/!^]/.test(rest)) { if (rest[0] === "/") top = true; else exclude = true; rest = rest.slice(1); }
     if (rest.startsWith(":")) rest = rest.slice(1);
   }
   if (icase) {
@@ -284,7 +284,7 @@ function decodeMagic(arg, cwd, docPaths) {
       }
     }
   }
-  return { arg: rest || ".", cwd: top ? activeRoot : cwd };
+  return { arg: rest || ".", cwd: top ? activeRoot : cwd, icase, exclude };
 }
 
 function touchesGuarded(arg, cwd, docPaths) {
@@ -397,10 +397,16 @@ function removedDocs(cmd, docPaths) {
         if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
         else i += rest[i] === "-c" ? 2 : 1;
       }
-      if (rest[i] === "rm" || rest[i] === "mv") for (const raw of args(rest.slice(i + 1))) {
-        const spec = decodeMagic(raw, cwd, docPaths);
-        if (spec.unreadable) { hits.push(spec.unreadable); continue; }
-        check(spec.arg, spec.cwd); const h = pathspecHit(spec.arg, spec.cwd, docPaths); if (h) hits.push(h);
+      if (rest[i] === "rm" || rest[i] === "mv") {
+        const specs = args(rest.slice(i + 1)).map((raw) => decodeMagic(raw, cwd, docPaths));
+        // An exclusion never names a path to keep: with no positive pathspec git
+        // acts on everything, so the argument list fails closed as `.`.
+        if (specs.length && specs.every((x) => x.exclude)) specs.push({ arg: ".", cwd });
+        for (const spec of specs) {
+          if (spec.unreadable) { hits.push(spec.unreadable); continue; }
+          if (spec.exclude && spec.arg !== "." ) continue;
+          check(spec.arg, spec.cwd); const h = pathspecHit(spec.arg, spec.cwd, docPaths, spec.icase); if (h) hits.push(h);
+        }
       }
       return;
     }
@@ -408,12 +414,18 @@ function removedDocs(cmd, docPaths) {
       const exprAt = rest.findIndex((w) => w.startsWith("-") || w === "(" || w === "!");
       const starts = exprAt === -1 ? rest : rest.slice(0, exprAt);
       const exprs = exprAt === -1 ? [] : rest.slice(exprAt);
-      const deletes = exprs.includes("-delete") || exprs.some((w, k) => /^-exec(?:dir)?$/.test(w) && /^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || "")));
-      for (let k = 0; k < exprs.length; k++) { // every literal word handed to rm/unlink, bar `{}`
-        if (!/^-exec(?:dir)?$/.test(exprs[k]) || !/^(?:rm|unlink)$/.test(path.basename(exprs[k + 1] || ""))) continue;
-        for (let m = k + 2; m < exprs.length && exprs[m] !== ";" && exprs[m] !== "+"; m++) {
-          if (exprs[m] !== "{}" && !exprs[m].startsWith("-")) { const h = touchesGuarded(exprs[m], state.cwd, docPaths); if (h) hits.push(h); }
-        }
+      // Each -exec command, wrappers stripped (`env rm`, `sudo mv`), up to `;` / `+`.
+      const execs = [];
+      for (let k = 0; k < exprs.length; k++) {
+        if (!/^-exec(?:dir)?$/.test(exprs[k])) continue;
+        let m = k + 1;
+        while (m < exprs.length && exprs[m] !== ";" && exprs[m] !== "+") m++;
+        const cmdWords = stripPrefixes(exprs.slice(k + 1, m), state.cwd);
+        if (/^(?:rm|unlink|mv)$/.test(path.basename(cmdWords[0] || ""))) execs.push({ verb: path.basename(cmdWords[0]), words: cmdWords.slice(1) });
+      }
+      const deletes = exprs.includes("-delete") || execs.some((x) => x.verb !== "mv");
+      for (const x of execs) for (const w of x.words) { // every literal word handed to rm/unlink/mv, bar `{}`
+        if (w !== "{}" && !w.startsWith("-")) { const h = touchesGuarded(w, state.cwd, docPaths); if (h) hits.push(h); }
       }
       if (deletes) for (const a of starts.length ? starts : ["."]) {
         const h = touchesGuarded(a, state.cwd, docPaths);
