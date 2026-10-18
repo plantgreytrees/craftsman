@@ -15,6 +15,15 @@ const DOC = "docs/plans/TRACKER.md";
 const JSONL = "docs/plans/TRACKER.jsonl";
 const ARCHIVE = "docs/plans/TRACKER-archive.md";
 
+// A real archive event is a tracker_archived or doc_retired line in the event log;
+// a checkout merely behind origin differs in TRACKER-archive.md but logs neither.
+function hasArchiveEvent(context) {
+  const lines = read(path.join(context.stateDir || "", "events.jsonl")).split("\n");
+  return lines.some((line) => {
+    try { const ev = JSON.parse(line).ev; return ev === "tracker_archived" || ev === "doc_retired"; } catch { return false; }
+  });
+}
+
 function read(file) {
   try { return fs.readFileSync(file, "utf8"); } catch { return ""; }
 }
@@ -32,13 +41,13 @@ export function jsonlText(rows) {
 }
 
 // Render into `temp`; returns the pathspecs to stage, or a refusal.
-function render(temp, rows, root, input) {
+function render(temp, rows, context, input) {
   const docFile = path.join(temp, DOC);
   const jsonlFile = path.join(temp, JSONL);
   const doc = read(docFile);
   const committedJsonl = read(jsonlFile);
   if (!rows.length && (blockHasRows(doc) || committedJsonl.trim())) {
-    const archived = input.archived === true || read(path.join(root, ARCHIVE)) !== read(path.join(temp, ARCHIVE));
+    const archived = input.archived === true || hasArchiveEvent(context);
     if (!archived) return { refused: "blank: refusing to shrink a committed non-empty tracker block to empty without an archive event" };
   }
   const paths = [];
@@ -76,9 +85,10 @@ export function publishTracker(input = {}, context = projectContext(input.projec
       heartbeat(lock);
       run(root, ["fetch", "origin", base]);
       fs.mkdirSync(path.dirname(temp), { recursive: true });
+      run(root, ["worktree", "prune"], { allowFailure: true });
       run(root, ["worktree", "add", "--detach", temp, `origin/${base}`]);
       added = true;
-      const rendered = render(temp, rows, root, input);
+      const rendered = render(temp, rows, context, input);
       if (rendered.refused) return { published: false, mode, refused: rendered.refused };
       if (rendered.paths.length) run(temp, ["add", "--", ...rendered.paths]);
       if (!rendered.paths.length || !run(temp, ["diff", "--cached", "--name-only"])) return { published: false, mode, unchanged: true };
