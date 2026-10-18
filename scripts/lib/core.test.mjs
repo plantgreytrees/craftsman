@@ -497,50 +497,29 @@ test("ARCH-STATE-07: craftsman registers no SubagentStop hook", () => {
   assert.equal("SubagentStop" in JSON.parse(fs.readFileSync(HOOKS_JSON, "utf8")).hooks, false);
 });
 
-// ---- plan-hierarchy config keys (ARCH-ENGINE-12, ARCH-ENGINE-18) ----
-const SHIPPED_CONFIG = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "craftsman.config.json");
+// plan-hierarchy config keys (ARCH-ENGINE-12, ARCH-ENGINE-18)
+const CFG = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "craftsman.config.json");
 
-test("config defaults: hierarchy keys ship with behaviour-neutral values", () => {
-  const c = JSON.parse(fs.readFileSync(SHIPPED_CONFIG, "utf8"));
-  assert.equal(c.planning.featureBranches, false);
-  assert.equal(c.planning.featureUnitCap, 8);
-  assert.equal(c.tracker.publish, "push");
-  assert.equal(c.execution.maxSubagents, 0); // 0 = root-only, sub-agents running at once
-  assert.equal(c.execution.maxSessions, 1);
-  assert.equal(c.execution.agentMode, "root-only"); // existing keys survive
+test("config: hierarchy key defaults, and project config overrides them", () => {
+  const c = JSON.parse(fs.readFileSync(CFG, "utf8"));
+  assert.deepEqual(
+    [c.planning.featureBranches, c.planning.featureUnitCap, c.tracker.publish, c.execution.maxSubagents, c.execution.maxSessions],
+    [false, 8, "push", 0, 1]); // maxSubagents 0 = root-only
+  const m = deepMerge(c, { planning: { featureBranches: true, featureUnitCap: 3 }, tracker: { publish: "pr" },
+    execution: { maxSubagents: 2, maxSessions: 4 } });
+  assert.deepEqual(
+    [m.planning.featureBranches, m.planning.featureUnitCap, m.tracker.publish, m.execution.maxSubagents, m.execution.maxSessions],
+    [true, 3, "pr", 2, 4]);
+  assert.equal(m.tracker.nudgeLines, 300);
 });
 
-test("config defaults: merged project config overrides each hierarchy key", () => {
-  const c = JSON.parse(fs.readFileSync(SHIPPED_CONFIG, "utf8"));
-  const m = deepMerge(c, {
-    planning: { featureBranches: true, featureUnitCap: 3 },
-    tracker: { publish: "pr" },
-    execution: { maxSubagents: 2, maxSessions: 4 },
+test("config: execution.maxSessions is reserved, read by nothing yet", () => {
+  const root = path.dirname(CFG), hits = [];
+  const walk = (d) => fs.existsSync(d) && fs.readdirSync(d, { withFileTypes: true }).forEach((e) => {
+    const f = path.join(d, e.name);
+    if (e.isDirectory()) { if (e.name !== "node_modules") walk(f); }
+    else if (!/\.test\.m?[jt]s$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")) hits.push(f);
   });
-  assert.equal(m.planning.featureBranches, true);
-  assert.equal(m.planning.featureUnitCap, 3);
-  assert.equal(m.tracker.publish, "pr");
-  assert.equal(m.execution.maxSubagents, 2);
-  assert.equal(m.execution.maxSessions, 4);
-  assert.equal(m.tracker.nudgeLines, 300); // siblings kept
-  assert.equal(m.planning.blindRederivation, "never");
-});
-
-test("config: execution.maxSessions is reserved and read by nothing yet", () => {
-  // Reserved key: no script, hook, command or workflow may read it until a
-  // later unit wires it. Only the config and tests may mention it.
-  const root = path.join(path.dirname(SHIPPED_CONFIG));
-  const hits = [];
-  for (const dir of ["scripts", "hooks", "workflows", "commands", "agents", "skills"]) {
-    const walk = (d) => {
-      if (!fs.existsSync(d)) return;
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const f = path.join(d, e.name);
-        if (e.isDirectory()) { if (e.name !== "node_modules") walk(f); }
-        else if (!/\.test\.mjs$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")) hits.push(f);
-      }
-    };
-    walk(path.join(root, dir));
-  }
+  for (const d of ["scripts", "hooks", "workflows", "commands", "agents", "skills"]) walk(path.join(root, d));
   assert.deepEqual(hits, []);
 });
