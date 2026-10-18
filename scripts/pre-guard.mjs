@@ -164,7 +164,7 @@ function shellSegments(cmd) {
 const OPT_ARG = { sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"]), env: new Set(["-u", "-C", "-S"]),
   xargs: new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]) };
 const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas", "nice", "timeout", "busybox", "stdbuf", "ionice"]);
-const KEYWORDS = new Set(["then", "do", "else", "elif", "!"]);
+const KEYWORDS = new Set(["then", "do", "else", "elif", "!", "if", "while", "until", "coproc"]);
 OPT_ARG.nice = new Set(["-n"]); OPT_ARG.timeout = new Set(["-s", "-k"]);
 OPT_ARG.stdbuf = new Set(["-i", "-o", "-e"]); OPT_ARG.ionice = new Set(["-c", "-n", "-p", "-P", "-u"]);
 
@@ -310,10 +310,14 @@ function removedDocs(cmd, docPaths) {
   const check = (arg, cwd) => { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(h); };
   const args = (words) => words.filter((w) => w && !w.startsWith("-"));
 
+  // A NAME=value word is stripped, so its value joins the seen words first.
+  const assigned = (w) => { const v = w.slice(w.indexOf("=") + 1); if (v) st.seen.push({ w: v, cwd: st.cwd }); };
+
   function stripPrefixes(words) {
     for (;;) {
       if (!words.length) return words;
       const w = words[0], base = path.basename(w);
+      if (/^\w+=/.test(w)) assigned(w);
       if (/^\w+=/.test(w) || w === "{" || KEYWORDS.has(w)) { words = words.slice(1); continue; }
       if (!WRAPPERS.has(base)) return words;
       words = words.slice(1);
@@ -329,13 +333,14 @@ function removedDocs(cmd, docPaths) {
     if (!words.length) return;
     const verb = path.basename(words[0]);
     const rest = words.slice(1);
+    if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+=/.test(a)) assigned(a);
     state.seen.push(...args(rest).map((w) => ({ w, cwd: state.cwd })));
     if (verb === "cd" || verb === "pushd") { if (rest[0] && !rest[0].startsWith("-")) state.cwd = path.resolve(state.cwd, rest[0]); return; }
     if (verb === "rm" || verb === "unlink" || verb === "mv") {
       for (const a of args(rest)) {
         check(a, state.cwd);
         if (/^(?:~|\$\{?(?:PWD|HOME)(?![\w]))/.test(a)) hits.push("(" + verb + " argument the parser cannot resolve: " + a + ")");
-        if (/\$[A-Za-z_{]/.test(a) && verb !== "mv") st.rmVar = true;
+        if (/\$[A-Za-z_{]/.test(a)) st.rmVar = true;
       }
       if (state.subst) hits.push("(" + verb + " with a command substitution argument)");
       else if (rest.some((a) => /\$\(|`/.test(a))) hits.push("(" + verb + " with a command substitution argument)");
