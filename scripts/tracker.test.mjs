@@ -342,3 +342,39 @@ test("tracker: a descendant transition re-renders the rollups and leaves the roo
   assert.equal(syncRollups(selected).changed, true);
   assert.match(fs.readFileSync(rollup, "utf8"), /Status: IN_PROGRESS/);
 });
+
+// ARCH-LAND-06 / ARCH-TRACKER-06: a land-feature park of a FEATURE_MERGED row.
+function featureMerged(selected, units = ["u1"]) {
+  const plan = "docs/plans/example.md";
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(selected.stateDir, "acceptance.md"), units.map((u) => `- [x] [unit:${u}] thing\n`).join(""));
+  for (const unit of units) {
+    transition({ plan, unit, status: "PENDING", feature: "F1", feature_branch: "feat/f1" }, selected);
+    transition({ plan, unit, status: "IN_PROGRESS", evidence: "claimed" }, selected);
+    transition({ plan, unit, status: "FEATURE_MERGED", evidence: "abc" }, selected);
+  }
+  return plan;
+}
+
+test("tracker: FEATURE_MERGED parks only with a decision and re-enters from PARKED (ARCH-LAND-06)", () => {
+  const selected = context();
+  const plan = featureMerged(selected);
+  assert.throws(() => transition({ plan, unit: "u1", status: "PARKED", evidence: "conflict", autonomous: true }, selected), /PARKED refused: an autonomous park needs decision/);
+  assert.equal(currentState(selected)[0].status, "FEATURE_MERGED");
+  const parked = transition({ plan, unit: "u1", status: "PARKED", evidence: "land-feature conflict", autonomous: true, decision: DECISION }, selected);
+  assert.equal(parked.status, "PARKED");
+  const [row] = currentState(selected);
+  assert.deepEqual(row.decision, DECISION);
+  assert.equal(row.feature, "F1");
+  assert.equal(transition({ plan, unit: "u1", status: "FEATURE_MERGED", evidence: "abc" }, selected).status, "FEATURE_MERGED");
+});
+
+test("tracker: other FEATURE_MERGED transitions are unchanged", () => {
+  const selected = context();
+  const plan = featureMerged(selected, ["u1", "u2", "u3"]);
+  for (const to of ["PENDING", "IN_PROGRESS", "MERGED", "CANCELLED"]) {
+    assert.throws(() => transition({ plan, unit: "u1", status: to, evidence: "x" }, selected), /./, to);
+  }
+  assert.equal(transition({ plan, unit: "u2", status: "BLOCKED", evidence: "x" }, selected).status, "BLOCKED");
+  assert.equal(transition({ plan, unit: "u3", status: "COMPLETE", evidence: "sha" }, selected).status, "COMPLETE");
+});
