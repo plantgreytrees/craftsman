@@ -254,3 +254,52 @@ test("doc-retire: a malformed configured ttl refuses", () => {
   fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { pendingTtlMs: "soon" } }));
   assert.match(retire({ plan: PLAN }, context).reason, /no doc-write grant/);
 });
+
+test("doc-retire: a failing pre-commit hook refuses and leaves index, tree and status untouched", () => {
+  const context = repo();
+  run(context.root, "add", "-A");
+  run(context.root, "commit", "-q", "-m", "tracker doc");
+  const hooks = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-hooks-"));
+  fixtures.add(hooks);
+  const marker = path.join(hooks, "ran");
+  fs.writeFileSync(path.join(hooks, "pre-commit"), `#!/bin/sh\necho ran > "${marker}"\nexit 1\n`, { mode: 0o755 });
+  run(context.root, "config", "core.hooksPath", hooks);
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.ok(fs.existsSync(marker));
+  assert.deepEqual(snapshot(context), before);
+  run(context.root, "diff", "--cached", "--quiet");
+  assert.equal(run(context.root, "status", "--porcelain"), "");
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+  assert.ok(fs.existsSync(path.join(context.root, SIB)));
+});
+
+test("doc-retire: an archive failure restores the whole index, keeping unrelated staged content", () => {
+  const context = repo({ planStatus: "IN_PROGRESS" });
+  fs.writeFileSync(path.join(context.root, "staged.md"), "staged\n");
+  run(context.root, "add", "staged.md");
+  fs.writeFileSync(path.join(context.root, "README.md"), "nothing relevant\nedited\n");
+  run(context.root, "add", "README.md");
+  const tree = run(context.root, "write-tree");
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /archive refused/);
+  assert.equal(run(context.root, "write-tree"), tree);
+  assert.match(run(context.root, "status", "--porcelain"), /^A  staged\.md$/m);
+});
+
+test("doc-retire: unmerged index entries refuse before any change", () => {
+  const context = repo();
+  const f = "conflict.md";
+  const base = run(context.root, "rev-parse", "--abbrev-ref", "HEAD").trim();
+  run(context.root, "checkout", "-q", "-b", "other");
+  fs.writeFileSync(path.join(context.root, f), "a\n"); run(context.root, "add", f); run(context.root, "commit", "-q", "-m", "a");
+  run(context.root, "checkout", "-q", base);
+  fs.writeFileSync(path.join(context.root, f), "b\n"); run(context.root, "add", f); run(context.root, "commit", "-q", "-m", "b");
+  try { run(context.root, "merge", "other"); } catch { /* conflict expected */ }
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /snapshot the index/);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});

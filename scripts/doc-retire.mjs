@@ -127,8 +127,13 @@ export function retire(input, context = projectContext(".")) {
     try { text = fs.readFileSync(file, "utf8"); } catch { /* absent */ }
     return { file, text };
   });
-  git(context, ["rm", "-q", "--", ...removing]);
+  // Snapshot the whole index (refuses before any change if it cannot be written, e.g. unmerged entries).
+  let snapshotTree;
+  try { snapshotTree = git(context, ["write-tree"]).trim(); } catch (error) {
+    return refuse(`retire refused: cannot snapshot the index: ${String(error.stderr || error.message).trim()}`);
+  }
   try {
+    git(context, ["rm", "-q", "--", ...removing]);
     archivePlan({ plan, goal, doc_sha, landed_sha }, context);
     for (const sibling of siblings) if (rowsOf(sibling).length) archivePlan({ plan: sibling, goal, doc_sha, landed_sha }, context);
     const extra = [archivePath(context), trackerDocPath(context)]
@@ -136,14 +141,19 @@ export function retire(input, context = projectContext(".")) {
     git(context, ["add", "--", ...extra]);
     git(context, ["commit", "-q", "-m", `docs: retire ${plan}`, "--", ...removing, ...extra]);
   } catch (error) {
-    // Only the removed paths come back via git; ledger and archive docs return from the backups below.
-    tryGit(context, ["reset", "-q", "HEAD", "--", ...removing]);
-    tryGit(context, ["checkout", "HEAD", "--", ...removing]);
+    // Restore the whole index, then the removed files, then the ledger/archive/tracker backups.
+    let restoreFailure = "";
+    try { git(context, ["read-tree", snapshotTree]); } catch (restoreError) {
+      restoreFailure = `; index restore failed: ${String(restoreError.stderr || restoreError.message).trim()}`;
+    }
+    try { git(context, ["checkout", "HEAD", "--", ...removing]); } catch (restoreError) {
+      restoreFailure += `; checkout restore failed: ${String(restoreError.stderr || restoreError.message).trim()}`;
+    }
     for (const { file, text } of backups) {
       if (text === null) fs.rmSync(file, { force: true });
       else fs.writeFileSync(file, text);
     }
-    return refuse(`retire refused: ${error.message}`);
+    return refuse(`retire refused: ${error.message}${restoreFailure}`);
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
   logEvent({ ev: "doc_retired", plan, sha, siblings }, context);

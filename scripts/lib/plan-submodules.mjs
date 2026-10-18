@@ -83,6 +83,10 @@ export function checkSubmoduleBumps(steps, workspace, { isGitlink } = {}) {
         if (!dependsOn(byId, bump.id, step.id)) {
           throw new Error(`bump step ${bump.id} must depend on submodule step ${step.id} (ARCH-LAND-03)`);
         }
+        // ARCH-LAND-11: the bump shares its submodule steps' feature.
+        if (bump.feature !== step.feature) {
+          throw new Error(`bump step ${bump.id} must share the feature of submodule step ${step.id} (${step.feature ?? "implicit"}), not ${bump.feature ?? "implicit"} (ARCH-LAND-11)`);
+        }
       }
     }
   }

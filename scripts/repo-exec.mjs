@@ -273,7 +273,8 @@ function merge(context, input, info, deps = {}) {
   const branch = checkedOutBranch;
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   verifyGateBeforeMerge(context, worktree);
-  if (land === "pr") return landPullRequest(context, input, info, { worktree, branch, cfg, runner: deps.runner });
+  // ARCH-LAND-12: a unit PR targets its feature branch when one is given.
+  if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
   if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
   // Otherwise the merge lands in the checkout that has base: this root, or
@@ -439,8 +440,9 @@ function landUnit(context, input, info) {
 // the result merged --no-ff onto origin/<base> and pushed. Locks: feature, then
 // base. Conflict / ff-only / rejected push PARK the feature's last unit
 // (ARCH-LAND-06); nothing is ever forced (ARCH-LAND-05).
-function landFeature(context, input, info) {
-  if (!loadConfig(context).planning?.featureBranches) throw new Error("land-feature requires planning.featureBranches");
+function landFeature(context, input, info, deps = {}) {
+  const config = loadConfig(context);
+  if (!config.planning?.featureBranches) throw new Error("land-feature requires planning.featureBranches");
   if (!input.plan || !input.feature) throw new Error("land-feature requires plan and feature");
   if (!info.has_remote) throw new Error("land-feature requires an origin remote");
   const planSlug = path.basename(String(input.plan), ".md");
@@ -454,6 +456,7 @@ function landFeature(context, input, info) {
     throw new Error(`feature branch ${feature} does not exist`);
   }
   const lastUnit = rows[rows.length - 1].unit;
+  if (landMode(config) === "pr") return landFeaturePullRequest(context, input, info, { feature, config, runner: deps.runner, units: rows.map((row) => row.unit), lastUnit });
   const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units: rows.map((row) => row.unit) };
   const featureLock = acquireLock({ ...info, base_branch: `feature-${feature.replace(/[^A-Za-z0-9_-]/g, "-")}` }, input);
   let baseLock = null;
@@ -523,6 +526,30 @@ function landFeature(context, input, info) {
   }
   logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: true, sha: result.merge_sha }, context);
   return { ...result, merged: true, merged_locally: true, pushed: true, promoted, promote_errors, cleaned, remote_branch_deleted: remoteDeleted };
+}
+
+// ARCH-LAND-12: in "pr" mode one feature PR targets base. The feature branch is
+// pushed and its PR opened or reused; nothing merges and no row is promoted.
+function landFeaturePullRequest(context, input, info, { feature, config, runner, units, lastUnit }) {
+  const host = detectHost(info.origin, config.repoExec?.host);
+  if (!host) throw new Error(`cannot tell which host ${info.origin} is on; set repoExec.host to github, gitlab or azure`);
+  const options = {
+    host, cwd: context.root, branch: feature, base: info.base_branch,
+    autoMerge: config.repoExec?.autoMerge !== false,
+    mergeMethod: config.repoExec?.mergeMethod || "merge",
+  };
+  preflightHost(options, runner);
+  const result = { ...info, branch: feature, feature_branch: feature, land: "pr", merged: false, merged_locally: false, park_unit: lastUnit, units };
+  try { run(context.root, ["push", "-u", "origin", feature]); }
+  catch (error) { return landingPark("rejected-push", { ...result, pushed: false }, error); }
+  const pr = openPullRequest({
+    ...options,
+    title: `Feature ${input.feature} of ${path.basename(String(input.plan), ".md")}`,
+    body: `Landed by craftsman (repoExec.land: "pr").\n\n${units.map((unit) => `- ${unit}`).join("\n")}`,
+  }, runner);
+  const { auto_merge, auto_merge_error, ...request } = pr;
+  if (auto_merge_error) return landingPark("auto-merge", { ...result, pushed: true, pr: request, auto_merge, auto_merge_error }, new Error(auto_merge_error));
+  return { ...result, pushed: true, pr: request, auto_merge };
 }
 
 // The four landing failures that PARK (ARCH-LAND-06): {parked:true, decision},
