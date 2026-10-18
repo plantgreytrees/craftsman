@@ -7,6 +7,7 @@
 // Doc authority is SESSION-SCOPED: each session holds its own grant, so
 // concurrent sessions never block or leak into one another.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
@@ -141,6 +142,23 @@ function stripHeredocs(text) {
   return out;
 }
 
+// Realpath of a directory, or its plain resolution when it does not exist.
+function realDir(dir) { try { return fs.realpathSync(dir); } catch { return path.resolve(dir); } }
+function realRoot() { return realDir(activeRoot); }
+
+// `p` resolved from `cwd`, each component through realpath while it exists, so a
+// symlink (`d -> docs`) is followed; the rest of a missing tail stays lexical.
+function realResolve(cwd, p) {
+  let cur = path.isAbsolute(p) ? path.parse(p).root : realDir(cwd);
+  for (const part of p.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") { cur = path.dirname(cur); continue; }
+    const next = path.join(cur, part);
+    try { cur = fs.realpathSync(next); } catch { cur = next; }
+  }
+  return cur;
+}
+
 const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "sudo", "doas", "nice", "timeout", "busybox", "stdbuf", "ionice"]);
 const KEYWORDS = new Set(["if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in", "select", "function", "time", "coproc", "!", "{", "}", "[["]);
 
@@ -172,15 +190,16 @@ function lastSegmentGlob(arg, cwd, docPaths) {
   const slash = arg.lastIndexOf("/");
   const dir = slash === -1 ? "" : arg.slice(0, slash + 1), seg = arg.slice(slash + 1);
   if (!/[*?[{]/.test(seg) || /[*?[{]/.test(dir)) return undefined; // not a last-segment-only glob
-  const rel = path.relative(activeRoot, path.resolve(cwd, dir || ".")).split(path.sep).join("/");
+  const abs = realResolve(cwd, dir || ".");
+  const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
   if (rel === ".." || rel.startsWith("../")) {
-    return path.relative(path.resolve(cwd, dir || "."), activeRoot).startsWith("..") ? null : (rel || ".");
+    return path.relative(abs, realRoot()).startsWith("..") ? null : (rel || ".");
   }
   const dirParts = rel === "" ? [] : rel.split("/");
   const re = segmentRe(seg);
   const sample = [...dirParts, seg.replace(/[*?[\]{},!]/g, "x")].join("/");
   let entries = null;
-  try { entries = fs.readdirSync(path.join(activeRoot, ...dirParts)); } catch { entries = []; }
+  try { entries = fs.readdirSync(path.join(realRoot(), ...dirParts)); } catch { entries = []; }
   for (const p of docPaths) {
     if (!p.includes("**")) {
       // No `**`: test the real directory entries the glob expands to, not a sample.
@@ -197,7 +216,7 @@ function lastSegmentGlob(arg, cwd, docPaths) {
 // glob is tested against every guarded base, its ancestors and its real contents.
 function pathspecHit(arg, cwd, docPaths) {
   if (!/[*?[]/.test(arg)) return null;
-  const pre = path.relative(activeRoot, cwd).split(path.sep).join("/");
+  const pre = path.relative(realRoot(), realDir(cwd)).split(path.sep).join("/");
   if (pre === ".." || pre.startsWith("../")) return null;
   let re = "";
   for (const c of (pre ? pre + "/" : "") + arg.replace(/^\.\//, "")) re += c === "*" ? ".*" : c === "?" ? "." : c === "[" || c === "]" ? c : c.replace(/[.+^${}()|\\]/g, "\\$&");
@@ -227,10 +246,11 @@ function touchesGuarded(arg, cwd, docPaths) {
   if (lastSeg !== undefined) return lastSeg;
   const cut = arg.search(/[*?[{]/);
   const literal = cut === -1 ? arg : arg.slice(0, cut).replace(/[^/]*$/, "") || ".";
-  const rel = path.relative(activeRoot, path.resolve(cwd, literal)).split(path.sep).join("/");
+  const abs = realResolve(cwd, literal); // through realpath of the longest existing prefix
+  const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
   if (rel === ".." || rel.startsWith("../")) {
     // An ancestor of the project root contains every guarded doc.
-    return path.relative(path.resolve(cwd, literal), activeRoot).startsWith("..") ? null : (rel || ".");
+    return path.relative(abs, realRoot()).startsWith("..") ? null : (rel || ".");
   }
   if (rel === "") return ".";
   if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) return rel;
@@ -244,7 +264,7 @@ function touchesGuarded(arg, cwd, docPaths) {
 // fails closed (false).
 function findNamesMiss(names, start, cwd, docPaths) {
   if (!names.length) return false;
-  const startRel = path.relative(activeRoot, path.resolve(cwd, start)).split(path.sep).join("/");
+  const startRel = path.relative(realRoot(), realResolve(cwd, start)).split(path.sep).join("/");
   if (startRel.startsWith("..")) return false;
   const inside = (r) => docPaths.some((p) => [r, "./" + r, r + "/x"].some((c) => globToRe(p).test(c)));
   if (startRel && inside(startRel)) return false;
@@ -280,6 +300,8 @@ const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh 
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const SAFE_HEADS = new Set(["echo", "printf", "grep", "egrep", "fgrep"]);
+const DECLARERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
 const DYNAMIC = /[$`~]/;
 const ASSIGNMENT = /^[A-Za-z_][\w[\]]*\+?=/;
 const XARGS_ARG = new Set(["-a", "-d", "-E", "-I", "-L", "-n", "-P", "-s"]);
@@ -397,24 +419,42 @@ function tokenize(text, fail) {
 function removedDocs(cmd, docPaths) {
   const hits = [];
   const unsafe = (why) => { hits.push("(command the parser cannot prove safe: " + why + ")"); };
-  // A `>` redirect onto a guarded (or unresolvable) path is a removal word too.
+  // The gate reads the text with its quotes and backslashes removed as well as the
+  // raw text, so `r''m`, `r\m` and `"r"m` are removal words; a `>` redirect onto a
+  // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
+  const bare = cmd.replace(/['"\\]/g, "");
+  const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
+  const redirectBad = (t) => t && (DYNAMIC.test(t) || touchesGuarded(t, process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(t)));
   const redirectsOntoDocs = () => {
     for (const m of cmd.matchAll(/>>?\|?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>()]*))/g)) {
-      const t = m[1] ?? m[2] ?? m[3] ?? "";
-      if (t && (DYNAMIC.test(t) || touchesGuarded(t, process.cwd(), docPaths) || (/\b(?:cd|pushd)\b/.test(cmd) && !path.isAbsolute(t)))) return true;
+      if (redirectBad(m[1] ?? m[2] ?? m[3] ?? "")) return true;
     }
-    return false;
+    const walk = (text, depth) => {
+      if (depth > 5) return true;
+      const cmds = tokenize(stripHeredocs(text), () => {});
+      return !!cmds && cmds.some((c) => c.redirOut.some(redirectBad) || c.substs.some((x) => walk(x, depth + 1)));
+    };
+    return walk(cmd, 0);
   };
-  if (!REMOVAL_WORD.test(cmd) && !SHELL_C.test(cmd) && !redirectsOntoDocs()) return hits;
+  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
   // One removal target, resolved from every directory the command may run in.
+  const ancestorOfGuarded = (root) => { // is this absolute dir the project root, above it, or a guarded base or its ancestor?
+    const rel = path.relative(realRoot(), root).split(path.sep).join("/");
+    if (rel === "") return true;
+    if (rel === ".." || rel.startsWith("../")) return !path.relative(root, realRoot()).startsWith("..");
+    return docPaths.some((p) => { const base = guardedBase(p); return base === rel || base.startsWith(rel + "/"); });
+  };
   function target(arg, st, label, env) {
     if (env.exec && arg.includes("{}")) return;
+    if (env.execdir && env.roots && !path.isAbsolute(arg) && env.roots.some(ancestorOfGuarded)) {
+      return hits.push("(" + label + " target relative to a find -execdir directory under a root above a guarded path: " + arg + ")");
+    }
     if (DYNAMIC.test(arg)) return hits.push("(" + label + " target the parser cannot resolve: " + arg + ")");
     if (!st.cwds) return hits.push("(" + label + " in a directory the parser cannot resolve)");
     if (env.execdir && /(?:^|\/)\.\.(?:\/|$)/.test(arg)) return hits.push("(" + label + " target above a find -execdir directory: " + arg + ")");
-    for (const cwd of st.cwds) { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(h); }
+    for (const cwd of st.cwds) { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(label === "redirect" ? "redirect:" + h : h); }
   }
   const targetsOf = (rest) => {
     const out = []; let dashes = false;
@@ -434,21 +474,30 @@ function removedDocs(cmd, docPaths) {
   };
 
   function git(rest, st, env) {
-    let i = 0, cwds = st.cwds, bad = null;
+    let i = 0, cwds = st.cwds, bad = null, always = null;
     while (i < rest.length && rest[i].startsWith("-")) {
       const o = rest[i];
       if (o === "-C") {
         const d = rest[i + 1];
         cwds = d === undefined || DYNAMIC.test(d) || !cwds ? null : cwds.map((c) => path.resolve(c, d));
         i += 2;
-      } else if (o === "-c") { if (/^alias\./i.test(rest[i + 1] || "")) bad = "a git alias override"; i += 2; }
+      } else if (o === "-c") { if (/^alias\./i.test(rest[i + 1] || "")) bad = always = "a git alias override"; i += 2; }
       else {
+        if (/^--config-env\b/.test(o)) bad = always = "git " + o + " (a config override)";
         if (/^--(?:icase-pathspecs|work-tree|git-dir|separate-git-dir)\b/.test(o)) bad = "git " + o;
         i += /^--(?:git-dir|work-tree|namespace|super-prefix|config-env)$/.test(o) ? 2 : 1;
       }
     }
     const sub = rest[i];
-    if (sub !== "rm" && sub !== "mv" && sub !== "clean") { if (bad === "a git alias override") unsafe(bad); return; }
+    if (/GIT_CONFIG/.test(cmd)) bad = always = "a GIT_CONFIG_* variable (a config override)";
+    if (sub !== "rm" && sub !== "mv" && sub !== "clean") {
+      if (always) return unsafe(always);
+      const args = rest.slice(i + 1);
+      const message = sub === "commit" || sub === "tag";
+      const named = args.filter((a, n) => REMOVAL_WORD.test(a) && !(message && (/^-[A-Za-z]*[mF]$|^--(?:message|file)$/.test(args[n - 1] || "") || /^(?:-[mF]|--message=|--file=)/.test(a))));
+      if (named.length) unsafe("git " + (sub || "") + " given an argument naming a removal word (" + named[0] + ")");
+      return;
+    }
     const after = rest.slice(i + 1);
     noteRemoval(sub, after, env);
     if (env.unseen) return unsafe("git " + sub + " with input the parser cannot see");
@@ -496,8 +545,9 @@ function removedDocs(cmd, docPaths) {
     let deletes = kind === "delete";
     if (kind === "exec") {
       const exec = { removal: false, mvOnly: true, brace: false };
-      const cwds = execdir ? [...st.cwds, ...st.cwds.flatMap((d) => roots.map((r) => path.resolve(d, r)))] : st.cwds;
-      dispatch(execCmd, {}, null, { cwds }, depth, { exec, execdir });
+      const rootDirs = st.cwds.flatMap((d) => roots.map((r) => realResolve(d, r)));
+      const cwds = execdir ? [...st.cwds, ...rootDirs] : st.cwds;
+      dispatch(execCmd, {}, null, { cwds }, depth, { exec, execdir, roots: execdir ? rootDirs : undefined });
       deletes = exec.removal && (!exec.mvOnly || exec.brace);
     }
     if (deletes) for (const r of roots) for (const cwd of st.cwds) {
@@ -506,11 +556,25 @@ function removedDocs(cmd, docPaths) {
     }
   }
 
-  // The command starts at its first candidate word, so `sudo -u x rm`, `nohup`,
-  // `env`, `timeout 5` and the like are read through, not stripped.
+  // Every word that may be the command is examined: leading wrappers, their
+  // options and option values (`env -u find rm`, `sudo -u x rm`, `timeout 5 rm`)
+  // are read through, and a candidate that could be an option value does not end
+  // the scan. The first word that is none of those is the command; one outside
+  // the known-safe list is unsafe when an argument of it names a removal word.
   function dispatch(words, c, prev, st, depth, env) {
-    const k = words.findIndex((w) => CANDIDATES.has(path.basename(w)));
-    if (k === -1) return;
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i], b = path.basename(w), afterOption = i > 0 && words[i - 1].startsWith("-");
+      if (CANDIDATES.has(b)) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
+      if (WRAPPERS.has(b) || w.startsWith("-") || ASSIGNMENT.test(w) || afterOption || /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
+      const args = words.slice(i + 1);
+      const safe = SAFE_HEADS.has(b) || (b === "node" && args.length > 0 && /(?:^|\/)scripts\/[\w.-]+\.mjs$/.test(args[0]));
+      const named = args.find((a) => REMOVAL_WORD.test(a));
+      if (!safe && named !== undefined) unsafe("an argument naming a removal word is given to " + b + " (" + named + ")");
+      return;
+    }
+  }
+
+  function dispatchAt(words, k, c, prev, st, depth, env) {
     const verb = path.basename(words[k]), rest = words.slice(k + 1);
     if (RM_LIKE.has(verb)) {
       noteRemoval(verb, rest, env);
@@ -522,17 +586,29 @@ function removedDocs(cmd, docPaths) {
       let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += XARGS_ARG.has(rest[i]) ? 2 : 1;
       const tail = rest.slice(i);
       if (!tail.length) return; // bare xargs only echoes
+      const opts = rest.slice(0, i);
       const feeder = prev && c.sep === "|" ? path.basename(prev.words[0] || "") : "";
-      const visible = (feeder === "echo" || feeder === "printf") && !c.redirIn && !rest.slice(0, i).some((o) => /^-a|^--arg-file/.test(o));
-      const extra = visible ? prev.words.slice(1).filter((x) => !x.startsWith("-")) : [];
+      const fed = prev ? prev.words.slice(1) : [];
+      // xargs splits on blanks, honours quotes, and -d/-0/-E/-I change what it reads;
+      // printf formats and echo escapes build text the parser cannot see.
+      const reshaped = opts.some((o) => /^-(?!-)[A-Za-z0-9]*[d0EIi]|^--(?:delimiter|null|eof|replace)/.test(o) || /^-a|^--arg-file/.test(o))
+        || fed.some((x) => /['"]/.test(x) || (feeder === "printf" ? /[%\\]/.test(x) : /\\/.test(x)))
+        || (feeder === "echo" && fed.some((x) => /^-[A-Za-z]*e/.test(x)));
+      const visible = (feeder === "echo" || feeder === "printf") && !c.redirIn && !reshaped;
+      const extra = visible ? fed.filter((x) => !x.startsWith("-")).flatMap((x) => x.split(/\s+/)).filter(Boolean) : [];
       dispatch([...tail, ...extra], {}, null, st, depth, { ...env, unseen: !visible });
     } else if (SHELLS.has(verb) || verb === "eval") {
-      const at = verb === "eval" ? -1 : rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
       let body;
       if (verb === "eval") body = rest.join(" ");
-      else if (at !== -1) body = rest[at + 1];
-      else if (c.redirIn || c.sep === "|" || rest.includes("-s")) return unsafe("a shell reading commands from input the parser cannot see");
-      if (body !== undefined) analyze(body, fork(st), depth + 1, { exec: env.exec, execdir: env.execdir });
+      else {
+        const at = rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
+        if (at === -1) return unsafe("a shell running a script or input the parser cannot see");
+        let j = at + 1; while (j < rest.length && rest[j].startsWith("-") && rest[j] !== "--") j++;
+        if (rest[j] === "--") j++;
+        body = rest[j];
+        if (body === undefined) return unsafe("a shell -c without a command");
+      }
+      analyze(body, fork(st), depth + 1, { exec: env.exec, execdir: env.execdir, roots: env.roots });
     }
   }
 
@@ -545,8 +621,10 @@ function removedDocs(cmd, docPaths) {
     if (KEYWORDS.has(w[0])) return unsafe("the shell keyword " + w[0]);
     if (/[$`]/.test(w[0])) return unsafe("a command name the parser cannot resolve");
     const head = path.basename(w[0]);
+    if (DECLARERS.has(head) && w.slice(1).some((a) => ASSIGNMENT.test(a))) return unsafe("an assignment given to " + head);
     if (head === "cd" || head === "pushd" || head === "popd") {
-      const arg = w.slice(1).find((a) => !a.startsWith("-"));
+      let arg = w.slice(1).find((a) => !a.startsWith("-"));
+      if (arg === "~" || arg?.startsWith("~/")) arg = path.join(os.homedir(), arg.slice(1));
       if (head === "popd" || !arg || arg === "-" || DYNAMIC.test(arg)) st.cwds = null;
       else if (st.cwds) st.cwds = [...new Set([...st.cwds, ...st.cwds.map((d) => path.resolve(d, arg))])];
       return;
@@ -772,10 +850,16 @@ if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
   const hit = removedDocs(command, docPaths);
   if (hit.length && !hasDocWriteGrant({ sid: sidOf(input), claim: true }, { ...activeContext, grantStateDir: STATE_DIR })) {
     logEvent({ ms: Date.now() - T0, ev: "docguard", file: hit[0], sid: sidOf(input), result: "blocked" });
+    const first = hit[0], ask = `Hand the change to /plan, or if you ARE that command, first run: node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`;
     process.stderr.write(
-      `craftsman: "${hit[0]}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths); ` +
-      `removing it with rm / git rm needs doc-write authority. Hand the change to /plan, or if you ARE ` +
-      `that command, first run: node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`
+      first.startsWith("(")
+        ? `craftsman: this command holds a removal word and the guard cannot prove it safe ${first}; ` +
+          `without doc-write authority it is blocked. Rewrite it with literal targets, or: ${ask}`
+        : first.startsWith("redirect:")
+          ? `craftsman: this command writes with a redirect (>) to "${first.slice(9)}", which matches this repo's guarded ` +
+            `doc path(s) (docWriteGuard.docPaths); writing it needs doc-write authority. ${ask}`
+          : `craftsman: "${first}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths); ` +
+            `removing it with rm / git rm needs doc-write authority. ${ask}`
     );
     process.exit(2);
   }
