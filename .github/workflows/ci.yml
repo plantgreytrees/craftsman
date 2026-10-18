@@ -94,6 +94,17 @@ jobs:
         run: |
           node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/plugin.json','utf8'))"
           node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/marketplace.json','utf8'))"
+      - name: Script size delta (warn only)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          size() { git ls-tree -r -l "$1" -- scripts | awk '$5 ~ /\.mjs$/ {t += $4} END {print t + 0}'; }
+          base="$(size "${{ github.event.pull_request.base.sha }}")"
+          head="$(size HEAD)"
+          delta=$((head - base))
+          echo "scripts/**/*.mjs bytes: base $base, head $head, delta $delta"
+          if [ "$delta" -gt 0 ]; then echo "::warning::scripts/**/*.mjs grew by $delta bytes against base"; fi
+          exit 0
       - name: Install Claude Code CLI
         run: npm install --global @anthropic-ai/claude-code
       - name: Validate plugin
