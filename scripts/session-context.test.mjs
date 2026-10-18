@@ -68,3 +68,22 @@ test("session-context: SessionStart removes merged, clean leftover worktrees and
     assert.match(result.stdout, /WORKTREES SWEPT/);
   });
 });
+
+test("session-context: the HAND-OFF line carries the plan's level and adds no line", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "big-epic.md"), "---\nslug: big-epic\nlevel: epic\n---\n");
+    const session = path.join(dir, ".craftsman", "sessions", "lvl");
+    fs.mkdirSync(session, { recursive: true });
+    const handoff = (plan) => fs.writeFileSync(path.join(session, "handoff.json"), JSON.stringify({ plan, unit: "u", next_action: "go", completed_units: [], remaining_units: [] }));
+    const context = () => JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "lvl" }).stdout).hookSpecificOutput.additionalContext;
+    handoff("big-epic");
+    const withLevel = context();
+    assert.match(withLevel, /HAND-OFF RESTORED .*: plan big-epic \(epic\); unit u;/);
+    handoff("unindexed");
+    const bare = context();
+    assert.match(bare, /plan unindexed; unit u;/);
+    assert.equal(withLevel.split("\n").length, bare.split("\n").length, "no new lines");
+  });
+});

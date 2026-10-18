@@ -498,6 +498,33 @@ test("ARCH-STATE-07: craftsman registers no SubagentStop hook", () => {
   assert.equal("SubagentStop" in JSON.parse(fs.readFileSync(HOOKS_JSON, "utf8")).hooks, false);
 });
 
+// plan-hierarchy config keys (ARCH-ENGINE-12, ARCH-ENGINE-18)
+const CFG = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "craftsman.config.json");
+
+test("config: hierarchy key defaults, and project config overrides them", () => {
+  const c = JSON.parse(fs.readFileSync(CFG, "utf8"));
+  assert.deepEqual(
+    [c.planning.featureBranches, c.planning.featureUnitCap, c.tracker.publish, c.execution.maxSubagents, c.execution.maxSessions],
+    [false, 8, "push", 0, 1]); // maxSubagents 0 = root-only
+  const m = deepMerge(c, { planning: { featureBranches: true, featureUnitCap: 3 }, tracker: { publish: "pr" },
+    execution: { maxSubagents: 2, maxSessions: 4 } });
+  assert.deepEqual(
+    [m.planning.featureBranches, m.planning.featureUnitCap, m.tracker.publish, m.execution.maxSubagents, m.execution.maxSessions],
+    [true, 3, "pr", 2, 4]);
+  assert.equal(m.tracker.nudgeLines, 300);
+});
+
+test("config: execution.maxSessions is reserved, read by nothing yet", () => {
+  const root = path.dirname(CFG), hits = [];
+  const walk = (d) => fs.existsSync(d) && fs.readdirSync(d, { withFileTypes: true }).forEach((e) => {
+    const f = path.join(d, e.name);
+    if (e.isDirectory()) { if (e.name !== "node_modules") walk(f); }
+    else if (!/\.test\.m?[jt]s$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")) hits.push(f);
+  });
+  for (const d of ["scripts", "hooks", "workflows", "commands", "agents", "skills"]) walk(path.join(root, d));
+  assert.deepEqual(hits, []);
+});
+
 // ARCH-TRACKER-08: feature-tagged, untagged and mixed criteria.
 const FC_TEXT = [
   "- [ ] [feature:a] gate a", "- [x] [feature:b] gate b", "- [ ] untagged", "- [ ] [unit:u1] unit only",

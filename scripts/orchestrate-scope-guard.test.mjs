@@ -181,3 +181,23 @@ test("orchestrate-scope-guard: a prompt that merely mentions /auto, or /automate
     }
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ARCH-AUTO-09: an epic slug sizes grants from, and re-points the marker to,
+// the resolved feature plan — not the parent doc.
+test("orchestrate-scope-guard: /auto on an epic slug resolving to two features grants and marks the first feature plan", () => {
+  const dir = tmpProject();
+  try {
+    const plans = path.join(dir, "docs", "plans");
+    fs.mkdirSync(plans, { recursive: true });
+    fs.writeFileSync(path.join(plans, "big-epic.md"), "---\nslug: big-epic\nlevel: epic\nchildren: [feat-a, feat-b]\n---\n");
+    fs.writeFileSync(path.join(plans, "feat-a.md"), "---\nslug: feat-a\nparent: big-epic\nunits:\n  - id: a1\n  - id: a2\n---\n");
+    fs.writeFileSync(path.join(plans, "feat-b.md"), "---\nslug: feat-b\nparent: big-epic\nunits:\n  - id: b1\n---\n");
+    const input = { session_id: "auto-epic", prompt: "/auto big-epic" };
+    assert.equal(run(dir, input).status, 0);
+    const session = path.join(dir, ".craftsman", "sessions", "auto-epic");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(session, "auto-active"), "utf8")).plan, "feat-a");
+    const grants = fs.readdirSync(session).filter((f) => f.includes("runner"));
+    assert.equal(grants.length, 1, grants.join());
+    assert.equal(fs.readFileSync(path.join(session, grants[0]), "utf8").trim(), "16");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

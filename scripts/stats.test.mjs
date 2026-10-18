@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { rootContextRows, rootContextSection } from "./stats.mjs";
+import { rootContextRows, rootContextSection, latencySection } from "./stats.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = (sid, tokens, percent, unit = null) => ({ ts: 1, ev: "context", sid, phase: "orchestrate", unit, tokens, percent, cost: null });
@@ -40,4 +40,22 @@ test("stats: the CLI prints the root context section from events.jsonl", () => {
     assert.match(r.stdout, /Root context per run: 2 sessions/);
     assert.match(r.stdout, /root-b\s+1 samples · peak 10000/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+const lat = (ev, ms) => ({ ts: 1, ev, ms });
+const TIMEOUTS = { "quality-gate.mjs": 60, "pre-guard.mjs": 10, "stop-gate.mjs": 300 };
+
+test("stats: latency p50/p95 per ms-carrying event type, flagged over 80% of timeout, n<20 marked", () => {
+  const slow = Array.from({ length: 25 }, (_, i) => lat("gate", i < 10 ? 100 : 50_000)); // p95 50s > 48s
+  const fast = Array.from({ length: 25 }, (_, i) => lat("stop", i + 1)); // well under 240s
+  const small = [lat("preguard", 9000), lat("preguard", 9500)]; // 9.5s > 8s, n<20
+  const section = latencySection([...slow, ...fast, ...small, { ev: "router", result: "x" }], TIMEOUTS);
+  const line = (ev) => section.split("\n").find((l) => l.trim().startsWith(ev));
+  assert.match(line("gate"), /p50 50000ms · p95 50000ms FLAG/);
+  assert.doesNotMatch(line("gate"), /n<20/);
+  assert.match(line("stop"), /p50 13ms · p95 24ms$/);
+  assert.doesNotMatch(line("stop"), /FLAG|n<20/);
+  assert.match(line("preguard"), /n<20 FLAG/);
+  assert.doesNotMatch(section, /router/);
+  assert.match(latencySection([], TIMEOUTS), /No latency samples yet/);
 });
