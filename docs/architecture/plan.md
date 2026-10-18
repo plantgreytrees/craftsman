@@ -61,12 +61,13 @@ lock, so the working tree of the main checkout is never touched.
 - Legacy hand-written rows stay invisible to rollups.
 - UNPROVEN: whether Claude Code's worktree isolation lets a `node` script push from a `.claude/worktrees/` session, and the value of `CLAUDE_PROJECT_DIR` inside one.
 
-## Pending amendments (need the feature-branch-plans architecture on this branch)
-That work (branch `worktree-idea-feature-branch-plans`, 64c86de) is not on this branch. Once it lands, `/architect --update` must:
-1. Supersede its ENGINE-14 with a version that treats a plan without `features:` as one implicit feature on the feature-worktree path.
-2. Supersede its LAND-08 with a version where a unit lands by `land-unit` inside the feature worktree (the `land-feature` half is unchanged).
-3. Amend its DOCS-01 so retirement also removes `docs/plans/<slug>/TRACKER.md` and refuses a parent with live children.
-4. Add `feature:` to the `publish` triggers (FEATURE_MERGED).
+## Amendments to the feature-branch-plans rules (applied 2026-10-18)
+That work (branch `worktree-idea-feature-branch-plans`, 64c86de) is merged into this branch. Applied:
+1. ARCH-ENGINE-14 is superseded by ARCH-ENGINE-18: a plan without `features:` is one implicit feature on the feature-worktree path.
+2. ARCH-LAND-08 is superseded by ARCH-LAND-18: units land by `land-unit` inside the feature worktree; `land-feature` is unchanged.
+3. ARCH-DOCS-01 is superseded by ARCH-DOCS-09: retirement also removes the rollup and refuses a parent with live children.
+4. ARCH-TRACKER-11 names FEATURE_MERGED among the `publish` triggers.
+Terminology: its "feature" is the hierarchy's feature; the idea doc's "plan doc = feature" is only the implicit-feature case.
 
 ## Glossary
 **Wave**: units of one feature running together. **Rollup**: the generated tracker of an epic or story. **Publish**: the locked commit of generated progress files to base.

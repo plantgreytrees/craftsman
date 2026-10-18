@@ -3,7 +3,7 @@
 > and `/architect --update state` should be run.
 
 # State architecture
-_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Craftsman's guards keep their state under `.craftsman/sessions/<session-id>/`.
@@ -41,6 +41,7 @@ flowchart LR
 | ARCH-STATE-05 | `Workflow` is guarded like `Task`/`Agent` | Otherwise "use a workflow" bypasses agent mode | Rely on the runtime's consent prompt |
 | ARCH-STATE-06 | Sub-project grants live in the root project's session dir | Hook input has no project field | Guessing the project from the working directory (re-introduces the root split) |
 | ARCH-STATE-07 | No `SubagentStop` hook | Per-unit completion is already enforced by `tracker.mjs` | Gating each agent's stop (duplicate enforcement) |
+| ARCH-STATE-08 | Stop blocks while an owned feature waits to land | Anthropic's premature-victory failure mode | Rely on prose |
 
 ## Data & flows
 Grants are one-shot files that are renamed and then unlinked when spent.

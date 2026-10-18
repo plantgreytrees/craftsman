@@ -3,7 +3,7 @@
 > and `/architect --update engine` should be run.
 
 # Engine architecture
-_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 The engine is what actually runs a plan's units. There are three engines:
@@ -48,6 +48,9 @@ flowchart TD
 | ARCH-ENGINE-10 | Root-context-first supersedes the total-token rationale | Explicit reversal of CHANGELOG 2.1.0 | Silent change |
 | ARCH-ENGINE-11 | Rename `workflow.test.mjs` | Name collision | — |
 | ARCH-ENGINE-12 | Supersedes ENGINE-01: the `subagent` fallback applies under `/auto` only; a standalone `/orchestrate` stays root-only and says so when Workflow is unavailable | User decision (2026-10-09): the guard deliberately grants unit-runners only to a live `/auto` (ARCH-AUTO-06), matching ENGINE-10 | Grant unit-runners to standalone `/orchestrate` (loosens root-only for interactive runs) |
+| ARCH-ENGINE-13 | `land-feature` as one `agent()` call; protocol in `_features.md` | ENGINE-03/04 hold; unit-runner has 2 bytes of budget | A new lander agent |
+| ARCH-ENGINE-14 | Features switch on when the plan declares `features:`; cap 8 | No toggle state, no migration; short-lived branches | Config toggle + cap |
+| ARCH-ENGINE-15 | Feature claim + plan `## Decisions` | Demand for a messaging channel is unproven; ~0 new state | A per-plan message channel |
 
 ## Data & flows
 Workflow input (`args`) is the run manifest `.craftsman/runs/<slug>.json`;
@@ -68,3 +71,6 @@ restarted run repeats the unit there.
 
 ## Plan-hierarchy additions (2026-10-18)
 ARCH-ENGINE-16/17 supersede ARCH-ENGINE-09: sequential inside the feature worktree, with spike-gated waves of two or more units. See [plan](./plan.md) for the reasoning and rejected alternatives.
+
+## Plan-hierarchy amendments (2026-10-18)
+ARCH-ENGINE-14 is superseded by ARCH-ENGINE-18 (implicit feature). See [plan](./plan.md).
