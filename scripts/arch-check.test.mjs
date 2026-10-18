@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs, unitContextBytes, checkUnitContext, DEFAULT_UNIT_CONTEXT_BYTES } from "./arch-check.mjs";
+import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs, unitContextBytes, checkUnitContext, lintPlans, DEFAULT_UNIT_CONTEXT_BYTES } from "./arch-check.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
@@ -231,4 +231,26 @@ test("unit context: every step of docs/plans/autonomous-e2e-loop.md fits the def
   assert.ok(steps.length >= 10, `found ${steps.length} steps`);
   for (const step of steps) assert.ok(step.task, `step ${step.id} has task text`);
   assert.deepEqual(steps.flatMap((step) => checkUnitContext(step, repo, DEFAULT_UNIT_CONTEXT_BYTES)), []);
+});
+
+test("lint: plan-index refusals fail lint with the plan path; a clean plan set passes", () => {
+  const plan = (fm) => `---\n${fm}\n---\n# plan\n`;
+  const dir = project({
+    "docs/plans/a.md": plan("level: epic\nparent: b"),
+    "docs/plans/b.md": plan("level: epic\nparent: a"),
+  });
+  try {
+    const errors = lintPlans(dir);
+    assert.ok(errors.some((e) => /^docs\/plans\/a\.md: .*cyclic/.test(e)), errors.join("\n"));
+    const cli = spawnSync(process.execPath, [path.join(ROOT, "arch-check.mjs"), "lint", "--root", dir], { encoding: "utf8" });
+    assert.equal(cli.status, 1);
+    assert.match(cli.stderr, /docs\/plans\/a\.md: .*cyclic/);
+    fs.writeFileSync(path.join(dir, "docs/plans/a.md"), plan("level: epic"));
+    fs.writeFileSync(path.join(dir, "docs/plans/b.md"), plan("level: feature\nparent: a"));
+    assert.deepEqual(lintPlans(dir), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("lint: the repo's current plans pass", () => {
+  assert.deepEqual(lintPlans(path.resolve(ROOT, "..")), []);
 });
