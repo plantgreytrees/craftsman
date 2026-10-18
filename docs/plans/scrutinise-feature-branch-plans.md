@@ -332,6 +332,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-failclosed-fix
+    scope_id: guard-failclosed-fix
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -462,6 +475,16 @@ Supersedes the unbuilt patch unit guard-xargs-git (row CANCELLED, nothing built 
 - [ ] 24.2 The per-form denylist branches (keyword and wrapper stripping, icase env tracking, find action ordering, xargs producer tracking) are replaced by that one safe-subset check; git pathspec magic decoding runs only inside it, and a pathspec starting `:`, `--icase-pathspecs`, `GIT_ICASE_PATHSPECS`, `--work-tree` or `--git-dir` is not proven safe → accept: pre-guard.test: every blocked and allowed case that existed before stays green (`rm -f *.log`, `rm -rf build`, a `git commit -F - <<'EOF'` message naming guarded paths and `echo a | xargs echo` stay allowed); the old branches are gone from `pre-guard.mjs`
 - [ ] 24.3 The ninth-review probes and the flagged forms are blocked without the grant and allowed with it → accept: pre-guard.test: `echo ':!src' | xargs git rm -r`, `echo ':(icase)DOCS' | xargs git rm -r`, `echo DOCS | xargs git --icase-pathspecs rm -r`, `export GIT_ICASE_PATHSPECS; { GIT_ICASE_PATHSPECS=1; }; git rm -r DOCS`, the same inside `if true; then …; fi`, `for i in 1; do …; done` and after `!`, `find build -exec sh -c 'git rm -r docs' \;`, `find build -execdir git rm -r ../docs \;`, `f() { git rm -r DOCS; }; GIT_ICASE_PATHSPECS=1 f`, `git --work-tree=. rm -r docs`; each fails on the pre-change code
 
+### Step 25 — guard-failclosed-fix (., javascript, high) — round 13
+Depends on: none
+Closes the tenth /scrutinise (8ad7d0b..0dfec17) defects in the Step 24 gate; same file, so one unit after guard-failclosed has landed.
+- [ ] 25.1 The removal-word gate runs on the de-quoted tokens and redirect targets, not the raw text, so `r''m -rf docs`, `r\m -rf docs`, `"r"m -rf docs`, `echo x > "do"cs/plans/x.md` and `echo x > d\ocs/plans/x.md` are blocked (`pre-guard.mjs:278,408`) → accept: pre-guard.test: each blocked without the grant and allowed with it; fails on the old code
+- [ ] 25.2 Once the gate fires, a word containing a removal word that is an argument to a command outside a short known-safe list (git commit/tag `-m`/`-F`, echo, printf, grep, the craftsman node scripts) is unsafe: `perl -e 'unlink "docs/plans/x.md"'`, `python3 -c 'import os; os.rmdir("docs/plans")'`, `awk 'BEGIN{system("rm -rf docs")}'`, `node -e 'require("child_process").execSync("rm -rf docs")'`, `git config alias.zap '!rm -rf docs'` (`pre-guard.mjs:512-513`) → accept: pre-guard.test: each blocked without the grant and allowed with it; a git commit message naming `rm` stays allowed
+- [ ] 25.3 `dispatch` examines every candidate word, not the first, and skips wrapper option values; `sh|bash -c -- '<body>'` finds its body; a shell given a script operand is unsafe once the gate fires (`pre-guard.mjs:512,530-535`) → accept: pre-guard.test: `env -u find rm -rf docs`, `env -u sh rm -rf docs`, `sudo -u find rm -rf docs`, `bash -c -- 'rm -rf docs'`, and `cat > s.sh <<'EOF'` + `rm -rf docs` + `EOF` + `sh s.sh` blocked without the grant and allowed with it
+- [ ] 25.4 The xargs feeder splits on whitespace; printf with `%` or `\`, echo with `-e` or `\`, and xargs with `-d`, `-0`, `-E` or `-I` are unseen input; `export|declare|typeset|readonly|local` with an assignment, `--config-env` and `GIT_CONFIG_*` are unsafe when the gate fires (`pre-guard.mjs:526-528,544,451`) → accept: pre-guard.test: `echo 'a docs' | xargs rm -r`, `printf 'do%s' cs | xargs rm -r`, `echo -e 'd\x6fcs' | xargs rm -r`, `printf xdocs | xargs -d x rm -r`, `export ZAP='!rm -rf docs'; git --config-env=alias.zap=ZAP zap`, `export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.zap GIT_CONFIG_VALUE_0='!rm -rf docs'; git zap` blocked without the grant and allowed with it
+- [ ] 25.5 Targets resolve through `realpath` of the longest existing prefix; a relative `-execdir` target under a root that is an ancestor of a guarded base is unsafe (`pre-guard.mjs:230,499-505`) → accept: pre-guard.test: with a symlink `d -> docs`, `rm -rf d/plans` and `rm -rf d/*`; and `touch docs/a.nomatch; find . -name '*.nomatch' -execdir rm -rf plans \;` blocked without the grant and allowed with it
+- [ ] 25.6 Block messages distinguish "cannot prove safe" and redirect writes from a matched target; `grep -rn rm docs/`, `grep -n "rm" docs/plans/x.md` and `cd ~/scratch/foo && rm -rf build` stay allowed (`~` resolves via `os.homedir()`); the two 24.3 work-tree probes become `git --work-tree=docs rm -r plans` and `GIT_WORK_TREE=docs git rm -r plans` (allowed on the old code) → accept: pre-guard.test covers each message, the three allowed forms and the replaced probes; they fail on the 0dfec17 code
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
@@ -515,3 +538,5 @@ Round 10 Suggestions, flagged not driven: on a case-insensitive filesystem (macO
 Round 11 Suggestions, flagged not driven: the icase flag does not reach a shell function body (`f() { git rm -r DOCS; }; GIT_ICASE_PATHSPECS=1 f`); `local`/`readonly`/`declare` without `-x` also switch the flag on (errs closed).
 
 Round 12 (Step 24, user decision b after the ninth /scrutinise on 78b9947..8ad7d0b): `pre-guard.mjs` removal detection becomes fail-closed in one unit. Follow-up for /architect --update, not edited here: ARCH-DOCS-07 holds as written; a sibling rule recording the fail-closed policy (unrecognised grammar with a removal word is blocked) may be added there. Accepted limits: a non-Bash tool, an interpreter call such as `node -e` or `python -c` with no removal word in its text, and case-insensitive filesystems stay outside what a text-level guard can see.
+
+Round 13 (Step 25, tenth /scrutinise on 8ad7d0b..0dfec17): 2 Critical + 6 Warning in the Step 24 gate. Open for the user, not decided here: Step 24's criterion 24.2 says every earlier allowed case stays green, but six previously-allowed assertions (`rm -rf "$TMPDIR/x"`, `for f in a b; do rm "$f"; done`, `f=build/x; rm "$f"` twice, `GIT_ICASE_PATHSPECS=0 git rm -r DOCS`, the export 1 then 0 form) are blocked by the fail-closed design chosen in decision (b); 24.2 stays unticked until the user accepts them as over-blocks. Residual risk, accepted limits of any text-level guard: removals by binaries whose text is not in the command (`make`, `npm run x`, scripts written earlier, existing git aliases), tee/cp/ln/git checkout|restore writes over docs, case-insensitive filesystems.
