@@ -53,6 +53,25 @@ function usesAlternateGitRoot(command) {
   return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_DIR\s*=|\bGIT_WORK_TREE\s*=/.test(command);
 }
 
+// An unquoted-tag heredoc body is expanded by sh: keep only its $(...) and
+// backtick substitutions (as lines of their own) so they are still parsed.
+function heredocSubstitutions(body) {
+  let res = "";
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === "\\") { i++; continue; }
+    if (body[i] === "`") {
+      let j = i + 1;
+      while (j < body.length && body[j] !== "`") j += body[j] === "\\" ? 2 : 1;
+      res += body.slice(i + 1, j) + "\n"; i = j;
+    } else if (body[i] === "$" && body[i + 1] === "(") {
+      let j = i + 2, depth = 1;
+      while (j < body.length && depth) { if (body[j] === "(") depth++; else if (body[j] === ")") depth--; j++; }
+      res += "$(" + body.slice(i + 2, j) + (depth ? ")" : "") + "\n"; i = j - 1;
+    }
+  }
+  return res;
+}
+
 // Drop heredoc bodies (and their terminator lines) so their text is never
 // parsed as shell. Quote-aware: a `<<` inside single quotes is not a heredoc,
 // while one inside `"$( ... )"` is. Unterminated bodies run to the end, as in sh.
@@ -74,13 +93,14 @@ function stripHeredocs(text) {
     if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); out += "$("; i++; continue; }
     if (c === ")" && stack.length > 1) { stack.pop(); out += c; continue; }
     if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
-      const m = /^<<(-?)\s*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/.exec(text.slice(i));
-      if (m) { pending.push({ tabs: m[1] === "-", tag: m[2] ?? m[3] ?? m[4] }); out += m[0]; i += m[0].length - 1; continue; }
+      const m = /^<<(-?)\s*(?:'([^'\n]*)'|"([^"\n]*)"|(\\?)([\w.-]+))/.exec(text.slice(i));
+      if (m) { pending.push({ tabs: m[1] === "-", tag: m[2] ?? m[3] ?? m[5], quoted: m[2] !== undefined || m[3] !== undefined || m[4] === "\\" }); out += m[0]; i += m[0].length - 1; continue; }
     }
     if (c === "\n" && pending.length) {
       out += c;
       let pos = i + 1;
-      for (const { tabs, tag } of pending) {
+      for (const { tabs, tag, quoted } of pending) {
+        let body = "";
         for (;;) {
           if (pos >= text.length) break;
           let end = text.indexOf("\n", pos);
@@ -88,7 +108,9 @@ function stripHeredocs(text) {
           const line = text.slice(pos, end);
           pos = Math.min(end + 1, text.length);
           if ((tabs ? line.replace(/^\t+/, "") : line) === tag) break;
+          body += line + "\n";
         }
+        if (!quoted) out += heredocSubstitutions(body);
       }
       pending = [];
       i = pos - 1;

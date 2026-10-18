@@ -634,6 +634,10 @@ test("pre-guard: heredoc bodies are not parsed as shell, the command after the t
       `cat > s.sh <<'EOF'\nrm docs/plans/x.md\nEOF`,
     ]) assert.equal(bash(command).status, 0, command);
     assert.equal(bash(`cat <<'EOF'\nhello\nEOF\nrm docs/plans/x.md`).status, 2, "rm after the terminator");
+    assert.equal(bash("cat <<EOF\n$(rm docs/plans/x.md)\nEOF").status, 2, "unquoted $() body");
+    assert.equal(bash("cat <<EOF\n`rm docs/plans/x.md`\nEOF").status, 2, "unquoted backtick body");
+    assert.equal(bash("cat <<'EOF'\n$(rm docs/plans/x.md)\nEOF").status, 0, "quoted body is literal");
+    assert.equal(bash("cat <<EOF\nit's fine, no subst\nEOF").status, 0, "unquoted plain body");
     assert.equal(bash(`echo '<<EOF'\nrm docs/plans/x.md\nEOF`).status, 2, "quoted << is no heredoc");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
