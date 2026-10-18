@@ -128,3 +128,18 @@ test("hierarchy flags: --level/--feature on orchestrate and auto, detail in _fea
   const caps = { "commands/orchestrate.md": 9911, "commands/auto.md": 4620, "commands/instruction.md": 8781, "commands/plan.md": 9969, "commands/_features.md": 3500 };
   for (const [rel, max] of Object.entries(caps)) assert.ok(fs.statSync(path.join(ROOT, rel)).size <= max, `${rel} within ${max}`);
 });
+
+test("idea.md Phase 1 overlap scan lists TRACKER-archive.md (ARCH-DOCS-05)", () => {
+  assert.match(section(read("commands/idea.md"), "## Phase 1 — Overlap & prior work (bounded)"), /`TRACKER-archive\.md`/);
+});
+
+// Byte ceilings are the sizes before the lookup callers were added (ARCH-SLIM-02).
+test("auto, instruction, orchestrate resolve an unknown slug through tracker.mjs lookup without growing (ARCH-DOCS-06, SLIM-02)", () => {
+  const ceilings = { idea: 7232, auto: 4604, instruction: 8764, orchestrate: 9893 };
+  for (const f of ["auto", "instruction", "orchestrate"]) {
+    assert.match(read(`commands/${f}.md`), /[Uu]nknown slug → `tracker\.mjs lookup` before treating it as new/, f);
+  }
+  for (const [f, max] of Object.entries(ceilings)) {
+    assert.ok(Buffer.byteLength(read(`commands/${f}.md`)) <= max, `${f}.md grew past ${max} bytes`);
+  }
+});
