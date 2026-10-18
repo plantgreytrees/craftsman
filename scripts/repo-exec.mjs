@@ -652,4 +652,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 }
 
-export { inspectRepo, prepare, sync, merge, landUnit, landFeature, cleanup };
+export { inspectRepo, prepare, sync, merge, landUnit, landFeature, cleanup, acquireLock, releaseLock, heartbeat, run };
