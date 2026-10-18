@@ -9,18 +9,18 @@ allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashComman
 
 > Doc authority: /orchestrate is a doc writer (tracker rows only — plans are `/plan`'s). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
-You **execute a documented plan** — a plan doc already decided what to build (planning is `/plan`/`/investigate`; you are execution only). Plan nothing, delegate implementation, gate, review, and merge — one unit at a time.
+You **execute a documented plan** — a plan doc already decided what to build (planning is `/plan`/`/investigate`). Plan nothing, delegate implementation, gate, review, and merge — one unit at a time.
 
 Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--feature <id>`, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_features.md` § levels and flags first. Before Phase B, `Read` `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md` (Standing constraints + MCP conventions + tooling-manifest contract, deliberately light). The heavier per-unit protocol — `${CLAUDE_PLUGIN_ROOT}/commands/_shared-execution.md` — is read only at the start of Phase C, once execution actually starts. Exception: `--step`'s pre-approval summary defers both reads until after user approval (Phase A.1).
 
 ## Phase A — Resolve the plan (no decomposition here)
 
 1. **`--step <tracker-id>`** — single-row, user-gated. Grep the main checkout's `docs/plans/TRACKER.md` for the row, resolve its plan doc, run Phases B–E for that one row **with a plan-approval stop**. Build the summary from the TRACKER.md row + plan doc only — don't `Read` either shared-machinery file yet. Present it and WAIT for approval before any edit; already-done row → say so and stop. After approval, `Read` `_shared-machinery.md`, then run Phases B–E (which reads `_shared-execution.md` itself, per Phase C).
-2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → its `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously.
-3. **Tracker slug** with a linked plan doc → as (2).
+2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → its `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously
+3. **Tracker slug** with a linked plan doc → as (2). Unknown slug → `tracker.mjs lookup` before treating it as new.
 4. **Free-form request, no doc** → nothing to execute yet. Pick the right planner via SlashCommand first, then continue at (2): bug/symptom → `/investigate`; anything else → `/plan`. A doc always exists before code.
 
-**Resume rule:** at every loop iteration (and after any compaction), re-read the tracker — the **main checkout's** `docs/plans/TRACKER.md` ledger block (never a worktree's copy, which is stale), or `printf '%s' '{"action":"status"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"` — + your lock files — cheap, authoritative, always happens. **Tracker state on disk is truth, not conversation memory.** Skip MERGED units; resume IN_PROGRESS units whose lock you own; rest per Phase L. Re-read the full plan doc's task text only when first resolving the request, right after a compaction, or right before Phase C executes that unit — not every iteration once a row reads MERGED. Predates recent merges → verify Background `file:line` cites still resolve.
+**Resume rule:** at every loop iteration (and after any compaction), re-read the tracker — the **main checkout's** `docs/plans/TRACKER.md` ledger block (never a worktree's copy, which is stale), or `printf '%s' '{"action":"status"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"` — + your lock files — cheap, authoritative. **Tracker state on disk is truth, not conversation memory.** Skip MERGED units; resume IN_PROGRESS units whose lock you own; rest per Phase L. Re-read the plan doc's task text only when first resolving, after a compaction, or right before Phase C executes that unit. Predates recent merges → verify Background `file:line` cites still resolve.
 
 ## Phase B — Ready the units
 

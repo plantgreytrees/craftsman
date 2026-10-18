@@ -25,9 +25,9 @@ Idea: `$ARGUMENTS`. **`--deep`** → more research, a stronger critic, a second 
 1. Restate as a falsifiable proposal: **problem** (observable, with who hits it and how often) · **claimed benefit** · **who benefits** · **what "done" looks like**. A vague idea → extract the concrete version; if two readings diverge materially, ask (AskUserQuestion) before going further — evaluating the wrong idea is the costliest miss.
 2. Pick a kebab-case `<slug>`. If `docs/ideas/<slug>.md` already exists, this is a **re-evaluation**: read it, carry its open questions, and record what changed.
 
-## Phase 1 — Overlap & prior work (bounded, cheap first)
+## Phase 1 — Overlap & prior work (bounded)
 
-Search, in order, and cite every hit: `docs/ideas/*.md` (**including rejected** — a resurrected idea must address why it was rejected) · `docs/plans/TRACKER.md` + plan `goal:` lines · `docs/architecture/*.rules.md` (via `arch-check.mjs governs` on the areas the idea touches) · `CHANGELOG.md` `[Unreleased]` · README feature list · plan memory (`scripts/plan-memory.mjs` recall, real `query` only). Classify: **duplicate** (stop — point at it, ask whether to proceed) · **extends** · **conflicts** (name the rule/plan) · **novel**. "None found" lists exactly what was searched.
+Search in order, cite hits: `docs/ideas/*.md` (**including rejected** — a resurrected idea must address why it was rejected) · `docs/plans/TRACKER.md` + `TRACKER-archive.md` + plan `goal:` lines · `docs/architecture/*.rules.md` (via `arch-check.mjs governs` on the areas the idea touches) · `CHANGELOG.md` `[Unreleased]` · README feature list · plan memory (`scripts/plan-memory.mjs` recall, real `query` only). Classify: **duplicate** (stop — point at it, ask whether to proceed) · **extends** · **conflicts** (name the rule/plan) · **novel**. "None found" lists exactly what was searched.
 
 ## Phase 2 — Whole-system fit
 
