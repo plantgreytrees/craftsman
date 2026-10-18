@@ -382,7 +382,11 @@ function landDetached(context, input, info, { worktree, branch }) {
 // (ARCH-LAND-06); a PARKED or BLOCKED unit keeps its branch and the feature
 // worktree is left clean on the feature branch.
 function landUnit(context, input, info) {
-  const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
+  // ARCH-LAND-13: the feature worktree lives under the MAIN checkout, so paths
+  // are checked against it, not the linked .claude/worktrees session root.
+  const main = mainCheckoutRoot(context.root);
+  const anchored = { ...context, root: main, stateDir: path.join(main, ".craftsman") };
+  const worktree = safeWorktree(anchored, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
   if (!input.unit && !input.branch) throw new Error("land-unit requires unit or branch");
   const unitBranch = input.branch || `feat/${input.unit}`;
@@ -394,7 +398,7 @@ function landUnit(context, input, info) {
   }
   if (run(worktree, ["status", "--porcelain"])) throw new Error("feature worktree is not clean before land-unit");
   if (run(worktree, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) throw new Error("feature worktree has a merge in progress");
-  const gateDir = input.unit_worktree ? safeWorktree(context, input.unit_worktree, input.unit) : worktree;
+  const gateDir = input.unit_worktree ? safeWorktree(anchored, input.unit_worktree, input.unit) : worktree;
   verifyGateBeforeMerge(context, gateDir);
   if (run(worktree, ["branch", "--show-current"]) !== feature) run(worktree, ["checkout", feature]);
   const result = { ...info, base_branch: feature, branch: unitBranch, feature_branch: feature, land: "unit", merged: false, merged_locally: false, worktree_path: worktree };
