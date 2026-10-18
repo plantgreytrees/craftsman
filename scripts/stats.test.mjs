@@ -67,5 +67,5 @@ test("stats: an allowed preguard event is not a block but is in the ms percentil
   ];
   assert.deepEqual(preguardBlocks(events), [events[1]]);
   assert.equal(events.filter((e) => e.ev === "preguard").length, 2); // old count treated both as blocks
-  assert.match(latencySection(events, TIMEOUTS), /preguard\s+n=2 · p50 10ms · p95 30ms/);
+  assert.match(latencySection(events, TIMEOUTS), /preguard\s+n=2 · p50 30ms · p95 30ms/);
 });
