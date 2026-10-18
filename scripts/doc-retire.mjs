@@ -88,20 +88,37 @@ export function retire(input, context = projectContext(".")) {
   }
   if (openSiblings.length) return refuse(`retire refused: open sibling plans keep ${plan}: ${openSiblings.join("; ")}`);
 
-  // A parent whose descendant plans still have docs is live (ARCH-DOCS-09); our own closed siblings go with it.
-  let live;
+  // A parent whose descendant plans still have an open row (or no row to prove them closed) is live
+  // (ARCH-DOCS-09); our own closed siblings and closed descendants retire with it.
+  const hierarchy = new Set();
+  const descendants = [];
   try {
     const index = loadIndex(context.root);
     const own = new Set(siblings.map((p) => path.posix.basename(p, ".md")));
-    live = index.get(slug) ? descendantSlugs(slug, { index }).filter((s) => !own.has(s)) : [];
+    const isParent = (n) => n && (n.level === "epic" || n.level === "story");
+    if (isParent(index.get(slug))) hierarchy.add(plan);
+    const found = index.get(slug) ? descendantSlugs(slug, { index }).filter((s) => !own.has(s)) : [];
+    const live = [];
+    for (const child of found) {
+      const node = index.get(child);
+      const childPlan = node.path;
+      const rows = rowsOf(childPlan);
+      const open = rows.filter((row) => !CLOSED.includes(row.status));
+      if (open.length || (!rows.length && !isParent(node))) { live.push(child); continue; }
+      if (!rows.length) hierarchy.add(childPlan);
+      descendants.push({ slug: child, plan: childPlan, goal: rows.find((row) => row.goal)?.goal || planDocGoal(context, childPlan) || child });
+    }
+    if (live.length) return refuse(`retire refused: ${plan} has live descendants: ${live.join(", ")}`);
   } catch (error) {
     return refuse(`retire refused: cannot read the plan hierarchy: ${error.message}`);
   }
-  if (live.length) return refuse(`retire refused: ${plan} has live descendants: ${live.join(", ")}`);
 
-  const rollup = path.posix.join("docs/plans", slug, "TRACKER.md");
-  const removing = [plan, ...siblings];
-  if (tryGit(context, ["ls-files", "--error-unmatch", "--", rollup]) !== null) removing.push(rollup);
+  const rollupOf = (s) => path.posix.join("docs/plans", s, "TRACKER.md");
+  const rollup = rollupOf(slug);
+  const removing = [plan, ...siblings, ...descendants.map((d) => d.plan)];
+  for (const r of [rollup, ...descendants.map((d) => rollupOf(d.slug))]) {
+    if (tryGit(context, ["ls-files", "--error-unmatch", "--", r]) !== null) removing.push(r);
+  }
   if (tryGit(context, ["ls-files", "--error-unmatch", "--", plan]) === null) {
     return refuse(`retire refused: ${plan} is not tracked by git`);
   }
@@ -109,10 +126,33 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: uncommitted changes in ${removing.join(", ")}`);
   }
 
-  const hits = scanReferrers(context, plan, slug);
-  if (hits === null) return refuse("retire refused: referrer scan failed");
-  const referrers = hits.filter((file) =>
-    !removing.includes(file) && !/^docs\/plans\/TRACKER[^/]*\.md$/.test(file)).sort();
+  // The parent's generated rollup and the `children:` list of its doc only describe the hierarchy; they are not referrers.
+  const parentSlug = (() => { try { return loadIndex(context.root).get(slug)?.parent ?? null; } catch { return null; } })();
+  const parentDoc = parentSlug ? path.posix.join(dir, `${parentSlug}.md`) : null;
+  const parentRollup = parentSlug ? rollupOf(parentSlug) : null;
+  const onlyChildrenList = (file, targets) => {
+    let text = "";
+    try { text = fs.readFileSync(path.join(context.root, file), "utf8"); } catch { return false; }
+    const front = /^(---\r?\n)([\s\S]*?)(\r?\n---)/.exec(text);
+    if (!front) return false;
+    const body = front[2].replace(/^children:[^\n]*(?:\n(?:[ \t]+[^\n]*|-[^\n]*))*/m, "");
+    return !targets.some((t) => body.includes(t) || text.slice(front[0].length).includes(t));
+  };
+  const found = new Set();
+  for (const doc of [{ plan, slug }, ...descendants]) {
+    const hits = scanReferrers(context, doc.plan ?? plan, doc.slug ?? slug);
+    if (hits === null) return refuse("retire refused: referrer scan failed");
+    const targets = [doc.plan ?? plan, doc.slug ?? slug];
+    for (const file of hits) {
+      if (removing.includes(file) || /^docs\/plans\/TRACKER[^/]*\.md$/.test(file)) continue;
+      if (doc.plan === undefined || doc.plan === plan) {
+        if (file === parentRollup) continue;
+        if (file === parentDoc && onlyChildrenList(file, targets)) continue;
+      }
+      found.add(file);
+    }
+  }
+  const referrers = [...found].sort();
   if (referrers.length) {
     logEvent({ ev: "doc_prune_refused", path: plan, cited_by: referrers }, context);
     return refuse(`retire refused: ${plan} is referenced by ${referrers.join(", ")}`, referrers);
@@ -134,7 +174,8 @@ export function retire(input, context = projectContext(".")) {
   }
   try {
     git(context, ["rm", "-q", "--", ...removing]);
-    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha }, context);
+    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(plan) }, context);
+    for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(d.plan) }, context);
     for (const sibling of siblings) if (rowsOf(sibling).length) archivePlan({ plan: sibling, goal, doc: doc_sha, landed: landed_sha }, context);
     const extra = [archivePath(context), trackerDocPath(context)]
       .filter((file) => fs.existsSync(file)).map((file) => path.relative(fs.realpathSync(trackerRoot(context)), file));
@@ -156,7 +197,7 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: ${error.message}${restoreFailure}`);
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
-  logEvent({ ev: "doc_retired", plan, sha, siblings }, context);
+  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan) }, context);
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 

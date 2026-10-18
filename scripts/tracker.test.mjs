@@ -415,3 +415,20 @@ test("tracker: archivePlan writes the full heading when given goal, doc and land
   archivePlan({ plan: "docs/plans/p.md", goal: "g · h", doc: "d1", landed: "l1" }, selected);
   assert.equal(lookupArchive({ plan: "docs/plans/p.md" }, selected).goal, "g; h");
 });
+
+test("tracker: a rows-less hierarchy parent archives with the full heading and lookup round-trips; others still refuse", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-vacuous-"));
+  try {
+    const stateDir = path.join(root, ".craftsman");
+    const context = { id: ".", root, stateDir, grantStateDir: stateDir };
+    assert.throws(() => archivePlan({ plan: "docs/plans/epic.md" }, context), /no tracker rows/);
+    archivePlan({ plan: "docs/plans/epic.md", goal: "Whole epic", doc: "abc123", landed: "def456", hierarchy: true }, context);
+    const found = lookupArchive({ plan: "epic" }, context);
+    assert.equal(found.goal, "Whole epic");
+    assert.equal(found.doc, "abc123");
+    assert.equal(found.landed, "def456");
+    assert.equal(lookupArchive({ plan: "docs/plans/epic.md" }, context).kind, "plan");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
