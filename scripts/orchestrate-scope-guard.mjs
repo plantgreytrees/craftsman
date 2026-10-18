@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, RUNNER_DISPATCHES_PER_UNIT, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
+import { loadIndex, resolve } from "./lib/plan-index.mjs";
 
 // Units in the invoked plan (the `- id:` steps of its front matter only, not
 // any list further down the doc); 1 when the slug names no plan yet — /auto's
@@ -33,6 +34,19 @@ function planUnitCount(slug, context) {
     const header = /^---\n([\s\S]*?)\n---\s*$/m.exec(plan)?.[1] || "";
     return Math.max(1, (header.match(/^\s+- id: /gm) || []).length);
   } catch { return 1; }
+}
+
+// The feature plan a slug stands for (ARCH-AUTO-09): an epic or story slug
+// resolves through plan-index to its first feature's plan; a feature plan or an
+// unindexed slug stands for itself.
+function featurePlan(slug, context) {
+  if (!slug) return { slug, units: null };
+  try {
+    const index = loadIndex(context.root);
+    if (!index.get(slug)) return { slug, units: null };
+    const first = resolve(slug, { level: "feature", index }).features[0];
+    return first ? { slug: first.plan, units: first.units.length } : { slug, units: null };
+  } catch { return { slug, units: null }; }
 }
 
 let input = {};
@@ -77,7 +91,9 @@ if (invoked === "orchestrate" || invoked === "auto") {
 // only while autoActive does. Root session dir, same (sid) on every side
 // (STATE-02). The /orchestrate an /auto goal starts with re-points a live
 // marker at that plan, since /auto's own argument may be an idea or request.
-const slug = planSlugOf(args);
+const invokedSlug = planSlugOf(args);
+const resolved = featurePlan(invokedSlug, context);
+const slug = resolved.slug;
 const sid = sidOf(input);
 let autoRun = invoked === "auto";
 if (autoRun) writeAutoMarker(sid, slug);
@@ -88,8 +104,8 @@ else if (invoked === "orchestrate" && autoActive(sid, context)) {
 
 // /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
 // itself, and on the /orchestrate its unattended /goal starts with. Sized
-// from the plan's units; a fresh invocation re-arms, never accumulates.
-if (autoRun) grantRunnerDispatches(planUnitCount(slug, context) * RUNNER_DISPATCHES_PER_UNIT, sid, context);
+// from the resolved feature plan's units, not the parent doc's; a fresh invocation re-arms, never accumulates.
+if (autoRun) grantRunnerDispatches((resolved.units ?? planUnitCount(slug, context)) * RUNNER_DISPATCHES_PER_UNIT, sid, context);
 
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
 // spends it). Re-arming on a repeat invocation is intended — each run of
