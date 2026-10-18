@@ -13,13 +13,14 @@ const body = fs.readFileSync(RUN, "utf8").replace(/^export const meta\b/m, "cons
 const workflow = new AsyncFunction("agent", "pipeline", "parallel", "log", "phase", "args", body);
 
 // respond(role, unit, call) → the agent's schema result (or null for a dead agent).
-async function runPlan(units, respond) {
+async function runPlan(units, respond, extraArgs = {}) {
   const calls = [];
   let inFlight = 0;
   let maxInFlight = 0;
   const pipelines = [];
+  let waves = 0;
   const agent = async (prompt, opts) => {
-    const role = /role: (\w+)/.exec(prompt)[1];
+    const role = /role: ([\w-]+)/.exec(prompt)[1];
     const unit = /^unit: (.+)$/m.exec(prompt)[1];
     calls.push({ role, unit, opts, prompt });
     inFlight++;
@@ -36,9 +37,9 @@ async function runPlan(units, respond) {
       return value;
     }));
   };
-  const args = { sessionId: "s1", pluginRoot: "/p", projectRoot: "/r", project: ".", plan: "docs/plans/x.md", units };
-  const out = await workflow(agent, pipeline, async () => [], () => {}, () => {}, args);
-  return { ...out, calls, pipelines, maxInFlight };
+  const args = { sessionId: "s1", pluginRoot: "/p", projectRoot: "/r", project: ".", plan: "docs/plans/x.md", units, ...extraArgs };
+  const out = await workflow(agent, pipeline, async (thunks) => { waves++; return Promise.all(thunks.map((t) => t())); }, () => {}, () => {}, args);
+  return { ...out, calls, pipelines, maxInFlight, waves };
 }
 
 const unit = (id, depends_on = []) => ({ unit: id, depends_on, task: `do ${id}`, criteria: [], scope: {}, arch: [] });
@@ -142,4 +143,71 @@ test("engine: a dead land agent is blocked through the block role with the imple
   assert.deepEqual(calls.map((c) => c.role), ["implement", "review", "land", "block"]);
   assert.match(calls[3].prompt, /worktree_path: \/w\/a/);
   assert.match(results[0].evidence, /land agent returned nothing/);
+});
+
+const inFeature = (id, u, deps = [], write = [`${u}/`]) => ({ ...unit(u, deps), feature: id, scope: { write } });
+const featureHappy = (role, u) => role === "land-feature"
+  ? { unit: u, status: "MERGED", evidence: "feature merged", sha: "fff", parked: [] }
+  : { ...happy(role, u), ...(role === "implement" ? { worktree_path: "/w/feat" } : {}) };
+const FEATURES = { featureBranches: true, maxSubagents: 0 };
+
+test("engine: featureBranches groups units by feature, carries the first unit's worktree_path, lands each feature once", async () => {
+  const units = [inFeature("f1", "a"), inFeature("f2", "c"), inFeature("f1", "b", ["a"])];
+  const { results, calls } = await runPlan(units, featureHappy, FEATURES);
+  const order = calls.filter((c) => c.role === "implement").map((c) => c.unit);
+  assert.deepEqual(order, ["a", "b", "c"], "a feature's units run together, features in first-seen order");
+  const implement = (u) => calls.find((c) => c.unit === u && c.role === "implement").prompt;
+  assert.doesNotMatch(implement("a"), /^worktree_path:/m, "first unit prepares");
+  assert.match(implement("a"), /^feature: f1$/m);
+  assert.match(implement("b"), /^worktree_path: \/w\/feat$/m, "later unit reattaches");
+  assert.match(implement("c"), /^feature: f2$/m);
+  const lands = calls.filter((c) => c.role === "land-feature");
+  assert.deepEqual(lands.map((c) => c.unit), ["b", "c"], "once per feature, after its last unit");
+  assert.match(lands[0].prompt, /worktree_path: \/w\/feat/);
+  assert.deepEqual(results.map((r) => r.unit), ["a", "b", "feature:f1", "c", "feature:f2"]);
+  assert.equal(results.every((r) => r.status === "MERGED"), true);
+});
+
+test("engine: land-feature is skipped when a unit of the feature did not land", async () => {
+  const { calls } = await runPlan([inFeature("f", "a"), inFeature("f", "b")], (role, u) =>
+    u === "b" && role === "review" ? null : role === "block" ? { unit: u, status: "BLOCKED", evidence: "x", parked: [] } : featureHappy(role, u), FEATURES);
+  assert.equal(calls.some((c) => c.role === "land-feature"), false);
+});
+
+test("engine: a land-feature park goes through park with its decision", async () => {
+  const decision = { question: "Base moved. How?", options: ["Rebase", "Leave"] };
+  const { results, calls } = await runPlan([inFeature("f", "a")], (role, u) =>
+    role === "land-feature" ? { unit: u, status: "PARKED", evidence: "conflict", parked: [decision] }
+      : role === "park" ? { unit: u, status: "PARKED", evidence: "recorded", parked: [] } : featureHappy(role, u), FEATURES);
+  assert.deepEqual(calls.slice(-2).map((c) => c.role), ["land-feature", "park"]);
+  assert.deepEqual(results.at(-1).parked, [decision]);
+});
+
+test("engine: without featureBranches there are no feature lines, no land-feature and no wave, whatever the cap", async () => {
+  const { calls, waves, maxInFlight } = await runPlan([inFeature("f", "a"), inFeature("f", "b")], featureHappy, { maxSubagents: 4 });
+  assert.equal(calls.some((c) => c.role === "land-feature" || /^feature:/m.test(c.prompt)), false);
+  assert.equal(waves, 0);
+  assert.equal(maxInFlight, 1);
+});
+
+test("engine: a wave is inert when maxSubagents is 0 or 1 (units stay sequential)", async () => {
+  for (const cap of [0, 1]) {
+    const { waves, maxInFlight } = await runPlan([inFeature("f", "a"), inFeature("f", "b"), inFeature("f", "c")], featureHappy, { featureBranches: true, maxSubagents: cap });
+    assert.equal(waves, 0, `cap ${cap}`);
+    assert.equal(maxInFlight, 1, `cap ${cap}`);
+  }
+});
+
+test("engine: with a cap of 2 independent, disjoint units run as a wave after the feature's first unit; others stay sequential", async () => {
+  const units = [inFeature("f", "a"), inFeature("f", "b"), inFeature("f", "c"), inFeature("f", "d", ["b"]), inFeature("f", "e", [], ["d/"])];
+  const { results, calls, waves, maxInFlight } = await runPlan(units, featureHappy, { featureBranches: true, maxSubagents: 2 });
+  assert.equal(waves, 1, "b and c only: d depends on b, e overlaps d's scope");
+  assert.equal(maxInFlight, 2);
+  const implement = (u) => calls.find((c) => c.unit === u && c.role === "implement").prompt;
+  assert.match(implement("b"), /^wave: true$/m);
+  assert.match(implement("b"), /^feature_worktree: \/w\/feat$/m);
+  assert.doesNotMatch(implement("b"), /^worktree_path:/m, "a wave unit never reuses the feature worktree");
+  assert.doesNotMatch(implement("a"), /wave: true/);
+  assert.doesNotMatch(implement("d"), /wave: true/);
+  assert.deepEqual(results.map((r) => r.unit), ["a", "b", "c", "d", "e", "feature:f"]);
 });
