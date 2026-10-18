@@ -1,6 +1,6 @@
 ---
 description: Prompt generator — turn a vetted idea or request into ONE paste-ready /goal driving /plan → /orchestrate → /scrutinise → /sync-docs → /craftsman:merge to landed completion, with a size estimate.
-argument-hint: "<idea-slug | plan-slug | request>"
+argument-hint: "<idea-slug | plan-slug | request> [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
 allowed-tools: Bash, Read, Write, Glob, Grep
 ---
@@ -9,9 +9,9 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 
 > Doc-write policy: this command writes NOTHING under `docs/`. Its only file is the prompt it saves under `.craftsman/instructions/`.
 
-You produce a single prompt that, pasted into a fresh session, takes the work from nothing to **verified-complete and landed on the base branch** through the craftsman loop without the user re-prompting each step — and tells the user, separately, how big the job is. You do not plan or implement; you compose.
+You produce a single prompt that, pasted into a fresh session, takes the work from nothing to **verified-complete and landed on the base branch** through the craftsman loop without the user re-prompting each step — and separately tells the user how big the job is. You only compose.
 
-Target: `$ARGUMENTS`. If `docs/architecture/*.rules.md` exists, read `${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md` once.
+Target: `$ARGUMENTS`. With `--level`/`--feature`, read `commands/_features.md` § levels and flags and open the goal with its `Level:` line. If `docs/architecture/*.rules.md` exists, read `${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md` once.
 
 ## Phase 0 — Gather (slim — paths, not prose)
 
@@ -31,13 +31,13 @@ Count the drivers from the idea doc, the architecture decisions, and the touched
 | **LONG** | 4–7 units · or any migration · or ≥ 2 contract changes · or a new architecture area |
 | **EXTRA LONG** | ≥ 8 units · or more than one project · or migration + contract + security together · or the idea's verdict confidence is low |
 
-Report it as `Implementation weight: <BAND> — <the drivers that set it>`, plus the main schedule risk (e.g. "migration needs a reversible two-step"). It is an effort band from countable facts, not a time promise — say so in one clause.
+Report `Implementation weight: <BAND> — <drivers>` plus the main schedule risk. It is an effort band from countable facts, not a time promise.
 
 Turn budget for the `/goal` bound: QUICK 20 · MEDIUM 50 · LONG 100 · EXTRA LONG 180.
 
 ## Phase 2 — Compose the `/goal` prompt
 
-`/goal`'s condition **is** the directive and is capped at **4,000 characters**; a Haiku evaluator decides "met" **only from what appears in the transcript** — so completion must be printed evidence, not a claim. Compose one block, in this order, keeping context as paths (never inline doc contents):
+`/goal`'s condition **is** the directive and is capped at **4,000 characters**; a Haiku evaluator decides "met" **only from what appears in the transcript** — so completion must be printed evidence, not a claim. Compose one block, in this order, context as paths only:
 
 ```
 /goal Deliver <slug>: <one-sentence user-visible outcome>.
@@ -51,7 +51,7 @@ Loop, each step to completion before the next:
 3. /scrutinise <slug> — (A) the scrutineer gets the rules paths; (P) it judges every open criterion. While there is any Critical, Warning, Architecture finding or UNMET criterion: /orchestrate scrutinise-<slug>, then /scrutinise <slug> again.
 4. /sync-docs --all <slug> (docs, tracker, then /architect --update) — (A) every cited rule must be HOLDS; doc-stale fixes are pre-approved; stop for me only on a decision change or a VIOLATED rule.
 5. /craftsman:merge — only once (A) and (P) hold. This goal is my go-ahead to land: merge and push this session's branch/worktree (plan, tracker, doc edits) and any <slug> branch still unlanded, then clean up. Fix gate failures and conflicts yourself.
-Constraints: no scope widening, no skipped or weakened tests, no --no-verify. Use /compact at phase boundaries, never /clear (it drops this goal).
+Constraints: no scope widening, no skipped or weakened tests, no --no-verify. Never /clear (it drops this goal).
 Done when the final turn prints COMPLETION EVIDENCE: every docs/plans/TRACKER.md row for <slug> = COMPLETE (print them); (P) no unticked `- [ ]` line in .craftsman/acceptance.md for <slug>'s units or untagged (print the grep); (A) /architect --update verdicts for <ARCH ids> = HOLDS, none VIOLATED (print the table); `<test command>` exit 0; last /scrutinise = 0 Critical, 0 Warning, 0 Architecture, 0 UNMET; /sync-docs --all applied or "no drift"; /craftsman:merge landed it: print `git log --oneline -1 origin/<base>` (pr mode: the PR URL) and `git worktree list` with no <slug> worktree left. Also done when the final turn prints BLOCKED ON USER: <the one thing only I can do — a decision, access, credentials, a rejected push or protected base, a live/manual check> + what was tried; that is a met stop, not a failure. Parked rows whose decisions /auto's Phase C asked = met stop. Or stop after <N> turns and print what remains — also met.
 ```
 

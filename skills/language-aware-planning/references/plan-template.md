@@ -13,6 +13,10 @@ without re-reading).
 ---
 slug: <feature-slug>
 goal: <short user-visible outcome; one sentence, easy to scan in the tracker>
+level: epic | story | feature     # default feature; an unstamped plan means feature (ARCH-PLAN-04)
+parent: <parent-slug>             # omit on a root; priority is inherited from it
+children: [<slug>, ...]           # epic/story only, in run order; omit on a feature
+priority: P0 | P1 | P2 | P3       # default P2 (ARCH-PLAN-05)
 idea: docs/ideas/<slug>.md                        # when built from an /idea verdict (same slug); omit otherwise
 classification: in-scope | deferred | out-of-scope   # cite the deciding line/source
 tracker_rows: [TRACKER#<id>, ...]                     # rows this plan registers

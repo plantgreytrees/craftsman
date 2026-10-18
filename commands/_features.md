@@ -22,3 +22,10 @@ Release the worktree scope first: `S scope` `{action:"release", session_id, proj
 
 ## publish
 After each unit lands (`FEATURE_MERGED`), park, block and land-feature: `S tracker` `{action:"publish", project}`. It only pushes generated tracker files, honours `tracker.publish`, and never fails the unit: ignore `published:false`.
+
+## levels and flags
+Read only when `--level`, `--feature` or `level:` applies. Slugs resolve through plan-index (ARCH-PLAN-06); a parent expands to `children:` order, else priority then slug.
+- `--level epic|story|feature|unit` (default feature); `--feature <id>`. A story defaults to one feature (first open, unclaimed); `story|epic` run the whole subtree; `unit` is `--step` (ARCH-PLAN-03).
+- /auto ends when every resolved plan row is COMPLETE (ARCH-AUTO-09).
+- /instruction goal text opens `Level: <level> · feature: <id> · wave allowance: <n>` (n = `execution.maxSubagents`, 1 = no wave; ARCH-ENGINE-16).
+- /plan writes `level`, `parent`, `children`, `priority`.
