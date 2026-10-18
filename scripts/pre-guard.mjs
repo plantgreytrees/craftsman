@@ -377,11 +377,39 @@ function removedDocs(cmd, docPaths) {
     }
   }
 
+  // `git [opts] rm|mv <pathspecs>` (rest = the words after `git`): pathspec magic,
+  // --icase-pathspecs and the icase env flag all apply.
+  function gitRmMv(rest, cwd, icaseEnv) {
+    let i = 0, icaseAll = icaseEnv;
+    while (i < rest.length && rest[i].startsWith("-")) {
+      if (rest[i] === "--icase-pathspecs") icaseAll = true;
+      if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
+      else i += rest[i] === "-c" ? 2 : 1;
+    }
+    if (rest[i] === "rm" || rest[i] === "mv") {
+      const specs = args(rest.slice(i + 1)).map((raw) => decodeMagic(raw, cwd, docPaths, icaseAll));
+      // An exclusion never names a path to keep: with no positive pathspec git
+      // acts on everything, so the argument list fails closed as `.`.
+      if (specs.length && specs.every((x) => x.exclude)) specs.push({ arg: ".", cwd });
+      for (const spec of specs) {
+        if (spec.unreadable) { hits.push(spec.unreadable); continue; }
+        if (spec.exclude && spec.arg !== ".") continue;
+        const h0 = touchesGuarded(spec.arg, spec.cwd, docPaths, spec.icase); if (h0) hits.push(h0); const h = pathspecHit(spec.arg, spec.cwd, docPaths, spec.icase); if (h) hits.push(h);
+      }
+    }
+  }
+
   function segment(words, state, depth, inheritIcase = false) {
     // GIT_ICASE_PATHSPECS=<truthy> anywhere in the prefix (`VAR=1 git`, `env VAR=1 git`).
     const icaseEnv = inheritIcase || state.icase || words.some((w) => { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); return m && !/^(?:0|false|no|off|)$/i.test(m[1]); });
+    const originalWords = words;
+    const bare = words.length > 0 && words.every((w) => /^\w+\+?=/.test(w));
     words = stripPrefixes(words, state.cwd);
-    if (!words.length) return;
+    if (!words.length) {
+      // A bare GIT_ICASE_PATHSPECS=<v> is taken as exported for the rest of the command.
+      if (bare) for (const w of originalWords) { const m = /^GIT_ICASE_PATHSPECS=(.*)$/.exec(w); if (m) state.icase = !/^(?:0|false|no|off|)$/i.test(m[1]); }
+      return;
+    }
     const verb = path.basename(words[0]);
     const rest = words.slice(1);
     if (/^(?:export|local|declare|typeset|readonly)$/.test(verb)) for (const a of rest) if (/^\w+\+?=/.test(a)) {
@@ -401,26 +429,7 @@ function removedDocs(cmd, docPaths) {
       else if (rest.some((a) => /\$\(|`/.test(a))) hits.push("(" + verb + " with a command substitution argument)");
       return;
     }
-    if (verb === "git") {
-      let cwd = state.cwd, i = 0, icaseAll = icaseEnv;
-      while (i < rest.length && rest[i].startsWith("-")) {
-        if (rest[i] === "--icase-pathspecs") icaseAll = true;
-        if (rest[i] === "-C" && rest[i + 1] !== undefined) { cwd = path.resolve(cwd, rest[i + 1]); i += 2; }
-        else i += rest[i] === "-c" ? 2 : 1;
-      }
-      if (rest[i] === "rm" || rest[i] === "mv") {
-        const specs = args(rest.slice(i + 1)).map((raw) => decodeMagic(raw, cwd, docPaths, icaseAll));
-        // An exclusion never names a path to keep: with no positive pathspec git
-        // acts on everything, so the argument list fails closed as `.`.
-        if (specs.length && specs.every((x) => x.exclude)) specs.push({ arg: ".", cwd });
-        for (const spec of specs) {
-          if (spec.unreadable) { hits.push(spec.unreadable); continue; }
-          if (spec.exclude && spec.arg !== "." ) continue;
-          const h0 = touchesGuarded(spec.arg, spec.cwd, docPaths, spec.icase); if (h0) hits.push(h0); const h = pathspecHit(spec.arg, spec.cwd, docPaths, spec.icase); if (h) hits.push(h);
-        }
-      }
-      return;
-    }
+    if (verb === "git") { gitRmMv(rest, state.cwd, icaseEnv); return; }
     if (verb === "find") {
       const exprAt = rest.findIndex((w) => w.startsWith("-") || w === "(" || w === "!");
       const starts = exprAt === -1 ? rest : rest.slice(0, exprAt);
@@ -437,11 +446,12 @@ function removedDocs(cmd, docPaths) {
         else if (path.basename(cmdWords[0] || "") === "git") { // git rm / git mv count as removal verbs
           let g = 1;
           while (g < cmdWords.length && cmdWords[g].startsWith("-")) g += cmdWords[g] === "-C" || cmdWords[g] === "-c" ? 2 : 1;
-          if (cmdWords[g] === "rm" || cmdWords[g] === "mv") execs.push({ verb: cmdWords[g], words: cmdWords.slice(g + 1) });
+          if (cmdWords[g] === "rm" || cmdWords[g] === "mv") execs.push({ verb: cmdWords[g], words: cmdWords.slice(g + 1), git: cmdWords.slice(1) });
         }
       }
       const deletes = exprs.includes("-delete") || execs.some((x) => x.verb !== "mv" || x.words.some((w) => w.includes("{}")));
-      for (const x of execs) for (const w of x.words) { // every literal word handed to rm/unlink/mv, bar `{}`
+      for (const x of execs) if (x.git) gitRmMv(x.git.filter((w) => w !== "{}"), state.cwd, icaseEnv); // same branch as a direct git rm|mv
+      for (const x of execs) if (!x.git) for (const w of x.words) { // every literal word handed to rm/unlink/mv, bar `{}`
         if (w !== "{}" && !w.startsWith("-")) { const h = touchesGuarded(w, state.cwd, docPaths); if (h) hits.push(h); }
       }
       if (deletes) for (const a of starts.length ? starts : ["."]) {
@@ -454,12 +464,14 @@ function removedDocs(cmd, docPaths) {
       let tail = rest;
       while (tail.length && tail[0].startsWith("-")) tail = tail.slice(OPT_ARG.xargs.has(tail[0]) ? 2 : 1);
       const inner = stripPrefixes(tail);
-      if (inner.length && /^(?:rm|unlink)$/.test(path.basename(inner[0]))) {
+      let xv = inner.length ? path.basename(inner[0]) : "";
+      if (xv === "git") { let g = 1; while (g < inner.length && inner[g].startsWith("-")) g += inner[g] === "-C" || inner[g] === "-c" ? 2 : 1; xv = /^(?:rm|mv)$/.test(inner[g] || "") ? "git " + inner[g] : ""; }
+      if (inner.length && /^(?:rm|unlink|git (?:rm|mv))$/.test(xv)) {
         st.xargsRm = true;
         const opts = rest.slice(0, rest.length - tail.length);
         const prevVerb = state.prev ? path.basename(stripPrefixes(state.prev)[0] || "") : "";
         const visible = state.sep === "|" && /^(?:echo|printf|find)$/.test(prevVerb);
-        if (!visible || rest.some((w) => w.startsWith("<")) || opts.some((w) => /^-a|^--arg-file/.test(w))) hits.push("(xargs " + path.basename(inner[0]) + " with input the parser cannot see)");
+        if (!visible || rest.some((w) => w.startsWith("<")) || opts.some((w) => /^-a|^--arg-file/.test(w))) hits.push("(xargs " + xv + " with input the parser cannot see)");
       }
       segment(tail, state, depth, icaseEnv);
       return;
