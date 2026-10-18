@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { descendantSlugs, loadIndex } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
 const CLOSED = ["COMPLETE", "CANCELLED"];
@@ -77,7 +78,20 @@ export function retire(input, context = projectContext(".")) {
   }
   if (openSiblings.length) return refuse(`retire refused: open sibling plans keep ${plan}: ${openSiblings.join("; ")}`);
 
+  // A parent whose descendant plans still have docs is live (ARCH-DOCS-09); our own closed siblings go with it.
+  let live;
+  try {
+    const index = loadIndex(context.root);
+    const own = new Set(siblings.map((p) => path.posix.basename(p, ".md")));
+    live = index.get(slug) ? descendantSlugs(slug, { index }).filter((s) => !own.has(s)) : [];
+  } catch (error) {
+    return refuse(`retire refused: cannot read the plan hierarchy: ${error.message}`);
+  }
+  if (live.length) return refuse(`retire refused: ${plan} has live descendants: ${live.join(", ")}`);
+
+  const rollup = path.posix.join("docs/plans", slug, "TRACKER.md");
   const removing = [plan, ...siblings];
+  if (tryGit(context, ["ls-files", "--error-unmatch", "--", rollup]) !== null) removing.push(rollup);
   if (tryGit(context, ["ls-files", "--error-unmatch", "--", plan]) === null) {
     return refuse(`retire refused: ${plan} is not tracked by git`);
   }
@@ -110,8 +124,8 @@ export function retire(input, context = projectContext(".")) {
   }
   try {
     git(context, ["rm", "-q", "--", ...removing]);
-    archivePlan({ plan, goal, doc_sha, landed_sha }, context);
-    for (const sibling of siblings) if (rowsOf(sibling).length) archivePlan({ plan: sibling, goal, doc_sha, landed_sha }, context);
+    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha }, context);
+    for (const sibling of siblings) if (rowsOf(sibling).length) archivePlan({ plan: sibling, goal, doc: doc_sha, landed: landed_sha }, context);
     const extra = [archivePath(context), trackerDocPath(context)]
       .filter((file) => fs.existsSync(file)).map((file) => path.relative(fs.realpathSync(trackerRoot(context)), file));
     git(context, ["add", "--", ...extra]);
@@ -133,7 +147,7 @@ export function retire(input, context = projectContext(".")) {
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
   logEvent({ ev: "doc_retired", plan, sha, siblings }, context);
-  return { retired: plan, siblings, sha, doc_sha };
+  return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

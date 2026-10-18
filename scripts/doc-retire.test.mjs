@@ -303,3 +303,32 @@ test("doc-retire: unmerged index entries refuse before any change", () => {
   assert.match(out.reason, /snapshot the index/);
   assert.ok(fs.existsSync(path.join(context.root, PLAN)));
 });
+
+test("doc-retire: a parent with live descendants is refused with no change", () => {
+  const context = repo({
+    files: {
+      [PLAN]: "---\nlevel: epic\nchildren: [beta]\n---\n# alpha\n",
+      "docs/plans/beta.md": "---\nparent: alpha\n---\n# beta\n",
+    },
+  });
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /live descendants: beta/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: success removes the rollup and writes the full DOCS-09 heading", () => {
+  const rollup = "docs/plans/alpha/TRACKER.md";
+  const context = repo({ files: { [rollup]: "rollup\n" } });
+  const docSha = run(context.root, "rev-parse", "HEAD").trim();
+  const out = retire({ plan: PLAN }, context);
+  assert.equal(out.retired, PLAN, JSON.stringify(out));
+  assert.ok(!fs.existsSync(path.join(context.root, rollup)));
+  assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+  assert.ok(run(context.root, "show", "--name-status", "--format=", "HEAD").includes(`D\t${rollup}`));
+  const date = new Date().toISOString().slice(0, 10);
+  const archive = fs.readFileSync(archivePath(context), "utf8");
+  assert.ok(archive.includes(`## ${PLAN} (${date}) — Ship alpha · doc ${docSha} · landed ${docSha}`), archive);
+});
