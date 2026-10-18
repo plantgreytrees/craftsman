@@ -50,6 +50,12 @@ export function latencySection(events, timeouts = hookTimeouts()) {
   return lines.join("\n");
 }
 
+// Protected-path blocks: only preguard events whose result is "blocked";
+// "allowed" preguard events are latency samples, not blocks.
+export function preguardBlocks(events) {
+  return events.filter((e) => e.ev === "preguard" && e.result === "blocked");
+}
+
 // Root context per run (ARCH-MOD-03): one row per session from its
 // {ev:"context"} samples, in first-seen order.
 export function rootContextRows(events) {
@@ -85,7 +91,7 @@ function main() {
 
   const gate = events.filter((e) => e.ev === "gate");
   const stop = events.filter((e) => e.ev === "stop");
-  const pre = events.filter((e) => e.ev === "preguard");
+  const pre = preguardBlocks(events);
   const ss = events.filter((e) => e.ev === "session_start");
 
   const gms = gate.map((e) => e.ms).filter((n) => typeof n === "number");
