@@ -3,7 +3,7 @@
 > and `/architect --update landing` should be run.
 
 # Landing architecture
-_Last verified: 2026-10-09 at `8dd9488` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Running `/auto` gives it full authority to commit, branch, merge, push, land
@@ -34,12 +34,17 @@ flowchart LR
 | id | decision | why | rejected alternatives |
 |---|---|---|---|
 | ARCH-LAND-01 | `/auto` has standing git authority | User decision | Approve each merge in Phase C |
-| ARCH-LAND-02 | Each repo lands its own way, in plan order | Reuses `repo-exec` unchanged | — |
+| ARCH-LAND-02 | *Superseded by LAND-08.* Each repo lands its own way, in plan order | Reuses `repo-exec` unchanged | — |
 | ARCH-LAND-03 | An explicit pointer-bump unit, enforced by `plan-graph.mjs` | Reviewable, tracked, keeps repo-exec single-repo | An implicit bump in repo-exec (a hidden cross-repo write); protocol text alone |
 | ARCH-LAND-04 | Superseded by ARCH-LAND-07 | Named `git submodule status`; the code reads the same gitlinks with `ls-files -s` | — |
 | ARCH-LAND-07 | Registered projects only; submodules from index gitlinks, workspace root read only to refuse | Craftsman's explicit-workspace rule; `ls-files -s` reads the index gitlinks `submodule status` reports | Scanning for repos; `git submodule status` (needs `.gitmodules`) |
 | ARCH-LAND-05 | No force operations | The user's CLAUDE.md and safety | — |
 | ARCH-LAND-06 | Only listed failures park | User: stop only on real problems | — |
+| ARCH-LAND-08 | *Supersedes LAND-02.* Units land on their declared target; features land via `land-feature` in a detached temp worktree | User decision: feature-branch merge model; the feature branch stays a ref, out of the sweep's reach | Hold the feature in its own worktree (sweep-exposed) |
+| ARCH-LAND-09 | Push the feature branch at creation; `feature/` never inferred as base; sweep exempt | One code path for every `origin/<base>` use | Local-ref fallback |
+| ARCH-LAND-10 | Spike before enabling | Final-merge conflict rate is the idea's kill criterion and is unmeasured | Ship directly |
+| ARCH-LAND-11 | Submodule bump in the same feature as its submodule steps | A submodule commit on a feature branch isn't on base | Exclude submodules from features |
+| ARCH-LAND-12 | PR mode: unit PRs → feature, one feature PR → base | One reviewable PR per feature | One PR per unit to base |
 
 ## Trade-offs & known limits
 An unregistered nested repo is invisible to `/auto`; register it first. A

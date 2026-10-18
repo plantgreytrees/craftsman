@@ -3,8 +3,8 @@ area: tracker
 governs: ["scripts/tracker.mjs", "scripts/tracker-sync.mjs", "scripts/digest.mjs", "scripts/run-manifest.mjs"]
 human: docs/architecture/tracker.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: d7da89f424960b24ee235b043673a1e2a2a78849
-updated: 2026-10-09
+verified_at: ac57d0e891bc7343dcb07f174e179ab8f1fd68c9
+updated: 2026-10-18
 ---
 # ARCH tracker — enforced rules
 
@@ -13,3 +13,7 @@ updated: 2026-10-09
 - **ARCH-TRACKER-03** [decided] A PARKED event from an autonomous run MUST carry decision {question, options[, recommended]}; Phase C is built from these — check: tracker.test.mjs — cite: scripts/tracker.mjs:46-78
 - **ARCH-TRACKER-04** [decided] Autonomous runs MUST NOT emit CANCELLED; a unit reaches COMPLETE only through ticked [unit:] criteria — check: tracker refusal test — cite: scripts/tracker.mjs:64-101
 - **ARCH-TRACKER-05** [decided] Each unit starts with a smoke run of the repo's gate command before editing — check: unit-runner.md step — cite: agents/unit-runner.md:14
+- **ARCH-TRACKER-06** [decided] FEATURE_MERGED is a unit landed on its feature branch: it needs ticked [unit:] criteria like MERGED, is never auto-promoted, and reaches COMPLETE only through land-feature, which promotes every row of the feature with the landing sha — check: tracker.test.mjs transitions — cite: scripts/tracker.mjs:12-21
+- **ARCH-TRACKER-07** [decided] Ledger events gain optional feature and feature_branch; the run manifest keeps features[] as units and adds feature_groups; no migration rewrites scope_id — check: run-manifest.test.mjs — cite: scripts/run-manifest.mjs:26-48
+- **ARCH-TRACKER-08** [decided] A `[feature:<id>]` criterion gates its feature's land-feature; untagged criteria gate only the last feature's land-feature — check: core.test.mjs, tracker.test.mjs — cite: scripts/lib/core.mjs:421-430
+- **ARCH-TRACKER-09** [decided] TRACKER-archive.md headings are machine-readable and tracker.mjs lookup {plan|slug} returns the parsed line — check: tracker.test.mjs lookup — cite: scripts/tracker.mjs:401-402

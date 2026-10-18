@@ -1,17 +1,22 @@
 ---
 area: landing
-governs: ["scripts/repo-exec.mjs", "scripts/lib/land.mjs", "scripts/workspace-init.mjs", "scripts/plan-graph.mjs", "scripts/lib/plan-submodules.mjs", "commands/merge.md", "commands/workspace-init.md"]
+governs: ["scripts/repo-exec.mjs", "scripts/lib/land.mjs", "scripts/workspace-init.mjs", "scripts/plan-graph.mjs", "scripts/lib/plan-submodules.mjs", "commands/merge.md", "commands/workspace-init.md", "scripts/worktree-sweep.mjs"]
 human: docs/architecture/landing.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: 8dd9488dfea500934c30c0df39f3ca2b735bf21a
-updated: 2026-10-09
+verified_at: ac57d0e891bc7343dcb07f174e179ab8f1fd68c9
+updated: 2026-10-18
 ---
 # ARCH landing — enforced rules
 
-- **ARCH-LAND-01** [decided] Invoking /auto is standing approval to commit, branch, merge base in, push, land and clean up worktrees and branches across every registered project — check: auto.md + merge.md — cite: commands/merge.md:89-94
-- **ARCH-LAND-02** [decided] Every repo lands through its own repo-exec merge (direct | pr) in plan-graph order — check: plan dry-run order — cite: scripts/repo-exec.mjs:186-259
-- **ARCH-LAND-03** [decided] A parent repo's submodule pointer bump MUST be an explicit dependent unit in the parent, after the submodule unit lands; repo-exec stays single-repo — check: plan dry-run contains the bump unit; plan-submodules.test.mjs cases — cite: scripts/lib/plan-submodules.mjs:1-89
-- **ARCH-LAND-04** [superseded by ARCH-LAND-07] Only registered workspace projects are touched; submodules are found only via git submodule status on registered roots, never by scanning — check: grep for directory walks — cite: scripts/lib/core.mjs:90-130
-- **ARCH-LAND-07** [decided] Only registered workspace projects are touched; submodules are found only from the gitlinks (mode 160000, `git ls-files -s`) in the index of a registered root, plus a read-only check of the workspace root's index whose only effect is to refuse the plan; never by scanning directories — check: plan-submodules.test.mjs gitlink cases; plan-graph.test.mjs unknown-project case; grep for directory walks — cite: scripts/lib/plan-submodules.mjs:11-47
-- **ARCH-LAND-05** [decided] /auto MUST NOT use --force, -f on push, reset --hard or worktree remove --force; pre-guard blocks them while /auto is active — check: pre-guard.test.mjs — cite: scripts/pre-guard.mjs:178-194
-- **ARCH-LAND-06** [decided] Merge conflicts, ff-only failures, rejected pushes and pr auto-merge errors PARK the unit with a decision for Phase C; nothing else stops landing — check: repo-exec error paths — cite: scripts/repo-exec.mjs:222-251
+- **ARCH-LAND-01** [decided] /auto is standing approval to commit, branch, merge base in, push, land and clean up worktrees/branches in every registered project — check: auto.md, merge.md — cite: commands/merge.md:89-94
+- **ARCH-LAND-02** [superseded by ARCH-LAND-08]
+- **ARCH-LAND-03** [decided] A parent's submodule pointer bump MUST be an explicit parent unit after the submodule unit lands; repo-exec stays single-repo — check: plan-submodules.test.mjs — cite: scripts/lib/plan-submodules.mjs:1-89
+- **ARCH-LAND-04** [superseded by ARCH-LAND-07]
+- **ARCH-LAND-07** [decided] Only registered projects are touched; submodules come only from gitlinks (mode 160000, `git ls-files -s`) in a registered root's index, plus a refuse-only read of the workspace-root index; never by scanning directories — check: plan-submodules + plan-graph tests — cite: scripts/lib/plan-submodules.mjs:11-47
+- **ARCH-LAND-05** [decided] /auto MUST NOT use --force, push -f, reset --hard or worktree remove --force; pre-guard blocks them under /auto — check: pre-guard.test.mjs — cite: scripts/pre-guard.mjs:178-194
+- **ARCH-LAND-06** [decided] Conflicts, ff-only failures, rejected pushes and pr auto-merge errors PARK with a Phase C decision; nothing else stops landing — check: repo-exec errors — cite: scripts/repo-exec.mjs:222-251
+- **ARCH-LAND-08** [decided] Units land by repo-exec merge onto their target (base or feature/<plan>-<id>) in plan-graph order; a finished feature lands by repo-exec land-feature (detached temp worktree, base merged in, gate re-run, --no-ff, push; feature lock, then base) — check: repo-exec.test — cite: scripts/repo-exec.mjs:278-310
+- **ARCH-LAND-09** [decided] A feature branch is pushed at creation, never inferred as base, never swept — check: repo-exec, sweep tests — cite: scripts/repo-exec.mjs:31
+- **ARCH-LAND-10** [decided] Feature landing ships only after a spike shows feature merge, sync, land-feature, a conflict park and a sparing sweep — check: spike evidence — cite: docs/architecture/engine.rules.md:12
+- **ARCH-LAND-11** [decided] A submodule bump shares its submodule steps' feature — check: plan-submodules.test — cite: scripts/lib/plan-submodules.mjs:73-86
+- **ARCH-LAND-12** [decided] pr mode: unit PRs → feature; one feature PR → base — check: repo-exec.test — cite: scripts/repo-exec.mjs:347-379

@@ -3,7 +3,7 @@
 > and `/architect --update tracker` should be run.
 
 # Tracker architecture
-_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 The tracker already works much like Anthropic's "feature list". It is an
@@ -33,6 +33,10 @@ flowchart LR
 | ARCH-TRACKER-03 | Structured `decision` on PARKED | Phase C is assembled mechanically | Free-text evidence |
 | ARCH-TRACKER-04 | Autonomous runs can't emit CANCELLED | Stops a run declaring done early (Anthropic's harness findings) | — |
 | ARCH-TRACKER-05 | Smoke test first | Catches breakage left by the previous unit | — |
+| ARCH-TRACKER-06 | New `FEATURE_MERGED` status; COMPLETE only via land-feature | Hooks read status alone, so a flag would let them treat a unit as landed early | `MERGED` + `feature_landed` flag |
+| ARCH-TRACKER-07 | Additive `feature`/`feature_branch` fields; manifest adds `feature_groups` | `features[]` already means units (TRACKER-01 consumers) | Rename `features[]` |
+| ARCH-TRACKER-08 | `[feature:<id>]` criteria gate a feature's landing | User decision: explicit per-feature definition of done | Untagged lines gate only the last feature |
+| ARCH-TRACKER-09 | Machine-readable archive headings + `lookup` | A retired plan is reachable only through its index line | A separate index file |
 
 ## Trade-offs & known limits
 The manifest is a cache, so a crash between a transition and regeneration

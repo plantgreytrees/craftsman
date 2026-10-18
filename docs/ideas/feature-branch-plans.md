@@ -1,13 +1,13 @@
 ---
 slug: feature-branch-plans
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
 isolation: isolated
 created: 2026-10-18
 updated: 2026-10-18
-related: [commands/plan.md, commands/sync-docs.md, scripts/tracker.mjs, scripts/repo-exec.mjs, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/auto.rules.md, docs/ideas/autonomous-e2e-loop.md]
+related: [docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/architecture/state.rules.md, docs/architecture/mod.rules.md, commands/plan.md, commands/sync-docs.md, scripts/tracker.mjs, scripts/repo-exec.mjs, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/auto.rules.md, docs/ideas/autonomous-e2e-loop.md]
 touches: [commands/plan.md, commands/orchestrate.md, commands/_shared-execution.md, commands/_shared-machinery.md, commands/auto.md, commands/instruction.md, commands/merge.md, commands/scrutinise.md, commands/_scrutinise-deep.md, commands/investigate.md, commands/understand.md, commands/digest.md, commands/sync-docs.md, commands/architect.md, commands/_architect-maintain.md, commands/_architect-backfill.md, commands/_architecture.md, commands/idea.md, commands/init.md, commands/upgrade.md, commands/workspace-init.md, agents/unit-runner.md, agents/phase-tracker.md, agents/scrutineer.md, agents/plan-strategist.md, skills/language-aware-planning/references/plan-template.md, skills/language-aware-planning/references/idea-template.md, skills/language-aware-planning/references/architecture-template.md, scripts/tracker.mjs, scripts/run-manifest.mjs, scripts/plan-graph.mjs, scripts/lib/plan-submodules.mjs, scripts/repo-exec.mjs, scripts/worktree-sweep.mjs, scripts/stop-gate.mjs, scripts/lib/core.mjs, scripts/orchestrate-scope-guard.mjs, scripts/claim.mjs, scripts/handoff.mjs, scripts/session-context.mjs, scripts/plan-memory.mjs, scripts/digest.mjs, scripts/arch-check.mjs, scripts/pre-guard.mjs, scripts/init.mjs, scripts/doc-size-policy.mjs, workflows/run.js, hooks/register.js, craftsman.config.json, .claude-plugin/plugin.json, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/auto.rules.md, docs/architecture/state.rules.md, scripts/*.test.mjs, README.md, EXTENDING.md, INSTALL.md, CHANGELOG.md]
 ---
 
@@ -435,12 +435,15 @@ because lint only checks that a range still fits the file.
 - **Can `--clear` delete idea and architecture docs?** Answered: everything stale.
   Applied as "delete when uncited, supersede when cited"
   (recommendation 4).
-- **Still open:**
-  - Is the `--clean`/`--clear` → `--archive`/`--prune` rename acceptable? It is
-    a naming preference only the user can settle.
-  - Should the format migration live in `/init --update` rather than a new
-    `/sync-docs --update` (blocker 11)?
-  - May prune delete rejected or deferred ideas (blocker 12)?
+- **Settled by `/architect` (2026-10-18):**
+  - The flags are `--archive` and `--prune`.
+  - No migration: a plan without `features:` runs exactly as today, so no
+    `--update` is added anywhere.
+  - Rejected and deferred ideas may be pruned when uncited, keeping an index
+    line.
+  - Per-feature criteria use a `[feature:<id>]` tag (the user's choice).
+- **Added requirement:** every craftsman file is as slim as possible without
+  losing performance. This is the new `slim` area (ARCH-SLIM-01..09).
 
 ## Next step
 `/architect feature-branch-plans --deep`. It is cross-cutting and amends

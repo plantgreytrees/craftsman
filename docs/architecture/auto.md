@@ -3,7 +3,7 @@
 > and `/architect --update auto` should be run.
 
 # Auto architecture
-_Last verified: 2026-10-09 at `d7da89f` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 `/craftsman:auto <request>` is the one command that takes work from an idea
@@ -45,6 +45,7 @@ sequenceDiagram
 | ARCH-AUTO-05 | Fresh turn cap per pass | Each pass is bounded; Phase C surfaces any runaway | One cap for the whole run |
 | ARCH-AUTO-06 | The guard treats `/auto` like `/orchestrate` | Scope and acceptance enforcement apply | — |
 | ARCH-AUTO-07 | Paste fallback | `-p`, VS Code, and installs without mods | — |
+| ARCH-AUTO-08 | `FEATURE_MERGED` counts as open | Otherwise `/auto` stops granting runners before the feature lands | Count it as landed |
 
 ## Trade-offs & known limits
 Phase A can be long: by design it asks everything. Unknown decisions that
