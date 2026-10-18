@@ -137,6 +137,45 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
     arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: retire-index-heal
+    scope_id: retire-index-heal
+    project: .
+    depends_on: []
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/lib/plan-index.mjs, scripts/tracker.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/plan.rules.md, docs/architecture/tracker.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs]
+    arch: [ARCH-DOCS-09, ARCH-DOCS-02, ARCH-TRACKER-10, ARCH-TRACKER-09]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-overblock
+    scope_id: guard-overblock
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: guard-bypass
+    scope_id: guard-bypass
+    project: .
+    depends_on: [guard-overblock]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -187,9 +226,26 @@ Depends on: none
 - [ ] 9.1 Removing an ancestor of a guarded path is blocked without the grant: `rm -rf docs`, `rm -rf ./docs/`, `git rm -r docs`, and a removal of `.` (`pre-guard.mjs:57-79`) → accept: pre-guard.test: each form blocked without the grant and allowed with it; `rm -rf build` stays allowed
 - [ ] 9.2 Arguments resolve against `git -C <dir>` and a leading `cd <dir> &&`; a leading `\`, `command`, `env`, `sudo` (with options) is stripped and the verb matches by basename `rm|unlink`; `find … -delete`, `xargs rm`, `mv`/`git mv` of a guarded path and `bash -c`/`sh -c` bodies are treated as removals; an unparseable chain that names a guarded path fails closed; paths resolve against the hook input's cwd inside the one project, so ARCH-STATE-06 (no workspace project addressed by cwd) is unaffected → accept: pre-guard.test: one blocked and one granted case per form (`git -C docs rm plans/x.md`, `cd docs/plans && rm x.md`, `/bin/rm`, `command rm`, `\rm`, `env rm`, `sudo -u x rm`, `xargs rm`, `find … -delete`, `unlink`, `bash -c 'rm …'`, `git mv`); an unrelated `rm` is still allowed
 
+### Step 10 — retire-index-heal (., javascript, high) — round 5
+Depends on: none
+- [ ] 10.1 Retiring a child of a still-open parent removes the child's slug from the parent's `children:` list in the same commit and refuses (with rollback) unless `loadIndex` loads afterwards; today the parent keeps `children: [beta]` and every `loadIndex` consumer throws `children [beta] disagree with children's parent` (`doc-retire.mjs:148-150`, `plan-index.mjs:150-153`) → accept: doc-retire.test: after retiring a child, `loadIndex(root)` succeeds, the parent's `children:` no longer lists it, and a following retire of an unrelated plan is not refused; fails on the old code
+- [ ] 10.2 A rows-less `scrutinise-`/`investigate-` sibling gets the full DOCS-09 heading with doc sha (vacuously closed) when it is removed with its plan, and a rows-less derived descendant is judged by the same rule instead of being refused as live (`doc-retire.mjs:179` vs `:84-88`) → accept: doc-retire.test: retiring a plan with a tracked rows-less `scrutinise-` sibling writes a heading for both docs in the same commit; the descendant path and the sibling path agree
+
+### Step 11 — guard-overblock (., javascript, high) — round 5
+Depends on: none
+- [ ] 11.1 A glob in the last path segment is matched against the guarded bases instead of collapsing to the parent directory: `rm -f *.log`, `rm -f ./*.tgz`, `unlink *.pid`, `mv *.log logs/`, `find . -name '*.log' -delete` and `find . -type f -name '*.o' -exec rm {} +` are allowed without the grant; `rm -rf d*`, `rm -rf docs/*`, `rm docs/plans/*.md` and a `find` whose predicates can match a guarded path stay blocked (`pre-guard.mjs:95-96,149-155`) → accept: pre-guard.test: each allowed form exits 0 without the grant, each blocked form is blocked without it and allowed with it
+- [ ] 11.2 Heredoc bodies are skipped before quote tracking, so `git commit -F - <<'EOF'` messages naming guarded paths or containing an apostrophe, `git commit -m "$(cat <<'EOF' … EOF)"` and `cat > s.sh <<'EOF'` with an `rm` line in the body are not parsed as shell (`pre-guard.mjs:59-78,173`) → accept: pre-guard.test: those three commands are allowed without the grant; a real `rm docs/plans/x.md` after the heredoc terminator is still blocked
+
+### Step 12 — guard-bypass (., javascript, high) — round 5
+Depends on: guard-overblock
+- [ ] 12.1 `stripPrefixes` also strips shell keywords `then`, `do`, `else`, `elif` and `!`, and the wrappers `nice`, `timeout <n>`, `busybox`, `stdbuf`, `ionice`; a `find` with no start path is treated as `.` (`pre-guard.mjs:118-131,149-163`) → accept: pre-guard.test: `if true; then rm docs/plans/x.md; fi`, `! rm docs/plans/x.md`, `for x in a; do rm docs/plans/x.md; done`, `nice rm …`, `timeout 5 rm …`, `busybox rm …`, `find -name x.md -delete` each blocked without the grant and allowed with it
+- [ ] 12.2 Removal with an argument the parser cannot see fails closed: `xargs rm`/`xargs unlink` whose input is not a visible non-guarded producer (a pipe from an unknown command, `< file`, `-a file`), an `rm`/`unlink`/`mv` argument containing command substitution, a backtick, a leading `~`, `$PWD` or `$HOME`, and an `rm` with a `$name` argument in a chain that also names a guarded path → accept: pre-guard.test: `git ls-files | xargs rm`, `xargs rm < list`, `rm -rf ~`, `rm -rf "$PWD/docs"`, `rm -rf $(git rev-parse --show-toplevel)/docs`, `for f in docs/plans/*.md; do rm "$f"; done` blocked without the grant and allowed with it; `rm -rf "$TMPDIR/x"` and `echo a | xargs echo` stay allowed
+
 ## Sequencing
 Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
 Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
+
+Round 5 (Steps 10–12, second /scrutinise on 4931876..c4d686d): 11 → 12 share `pre-guard.mjs`; 10 is independent.
 
 ## Verification background
 - Test job checkout has no `fetch-depth` — `.github/workflows/ci.yml:79`; size step — `ci.yml:97-107`
@@ -210,3 +266,5 @@ Round 3 (ce993dd) — deferred by user decision 2026-10-18, not defects of Steps
 ARCH-DOCS-09 (rollup removal, refusing a parent with live children, full archive heading) — planned in `feature-branch-plans` Steps 3–4 (`tracker-lookup`, `doc-retire-tree`), BLOCKED on plan-hierarchy; doc-retire is not wired into any command until then. Disputed: pre-guard/stop-gate `ms` logging (ARCH-SLIM-07) — planned as `feature-branch-plans` Step 11 hook-timing. Follow-up suggestions, not tasks: lock around rollback restore (`doc-retire.mjs:96-101`), restrict `plan` to `docs/plans/*.md` (`:37-39`), `doc_prune_refused` on every refusal vs DOCS-08 wording (`:73`), `pct` rank off-by-one (`stats.mjs:15-18`, pre-existing). Round 2 suggestions (not tasks): restore the ledger under `withLock` (`doc-retire.mjs:142-145`, `tracker.mjs:404`); `ls-tree -z` and skip non-blob entries (`script-size-delta.mjs:6-12`); CI delta base vs merge-ref base (ci.yml size step); test `hookTimeouts()` against the real `hooks/hooks.json` (`stats.mjs:20-31`); fold `defaultGit` into `git()` (`doc-retire.mjs:49-53`). The pre-existing "Check PR diff whitespace" step has the same fetch-depth exposure (`ci.yml:122-125`).
 
 Round 4 (/scrutinise on 7e441ff..9549971) Suggestions, flagged not driven: `tracker.mjs:449,457` lookupArchive uses one key for plan and slug, so a pruned idea heading can hide a retired plan's record; `pre-guard.mjs:18` and `stop-gate.mjs:16` start the `ms` clock after module load (use `performance.now()`); three cap tables diverge (`wiring.test.mjs:1071-1083`, `doc-size-policy.mjs` FILE_CAPS, `auto-command.test.mjs:61,128`); the size ratchet compares with `merge-base(HEAD, origin/main)` and skips on main or a shallow clone; the doc-retire rollup test fixture is a stub and always sets a goal; stale cites in `docs.rules.md` (ARCH-DOCS-02/07/08) and `slim.rules.md` (ARCH-SLIM-01) are refreshed by `/architect --update`, never here. Rules are not edited.
+
+Round 5 (second /scrutinise on 4931876..c4d686d) Suggestions, flagged not driven: `doc-retire.mjs:131,135` builds the parent path from the slug and judges only the working-tree `children:` copy (use the index path and HEAD); the `hierarchy: true` flag of `tracker.mjs archive` (:472, :508) is caller-trusted (confirm epic/story level through plan-index); `pre-guard.mjs:114` resolves against `process.cwd()`, not the hook input cwd (realpath both sides); `_sync-docs-prune.md:18` lost "State the round count." in the size trim; `stats.test.mjs:69` asserts a tautology (spawn stats.mjs and assert the block count); older `preguard` events lack `result` and are no longer counted as blocks. The pre-guard parser is a best-effort denylist: forms beyond Steps 11–12 (for example `eval`, `python -c`, `perl -e unlink`) are not covered; that is a decision for the user, not a defect of these units.
