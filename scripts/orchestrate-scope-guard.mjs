@@ -20,7 +20,7 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, RUNNER_DISPATCHES_PER_UNIT, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { loadIndex, resolve } from "./lib/plan-index.mjs";
 
@@ -36,16 +36,36 @@ function planUnitCount(slug, context) {
   } catch { return 1; }
 }
 
+// --level <epic|story|feature|unit> and --feature <id> (space or = form), plus
+// the args with those flags and their values removed so the slug is found.
+function levelFlags(args) {
+  const out = { level: null, feature: null, rest: String(args || "") };
+  for (const name of ["level", "feature"]) {
+    const re = new RegExp(`(?:^|\\s)--${name}(?:=|\\s+)([^\\s-][^\\s]*)`);
+    const m = re.exec(out.rest);
+    if (m) { out[name] = m[1]; out.rest = out.rest.replace(re, " "); }
+  }
+  return out;
+}
+
 // The feature plan a slug stands for (ARCH-AUTO-09): an epic or story slug
 // resolves through plan-index to its first feature's plan; a feature plan or an
-// unindexed slug stands for itself.
-function featurePlan(slug, context) {
+// unindexed slug stands for itself. With --level/--feature (flagged) every
+// resolved feature's units are granted, plus one extra per feature (ARCH-AUTO-08).
+function featurePlan(slug, context, { level, feature } = {}) {
   if (!slug) return { slug, units: null };
   try {
     const index = loadIndex(context.root);
     if (!index.get(slug)) return { slug, units: null };
-    const first = resolve(slug, { level: "feature", index }).features[0];
-    return first ? { slug: first.plan, units: first.units.length } : { slug, units: null };
+    const flagged = level != null || feature != null;
+    const r = resolve(slug, { level: level || "feature", feature: feature ?? undefined, index });
+    const first = r.features[0];
+    if (!first) return { slug, units: null };
+    return {
+      slug: first.plan,
+      units: flagged ? r.units.length : first.units.length,
+      features: flagged ? r.features.length : 0,
+    };
   } catch { return { slug, units: null }; }
 }
 
@@ -91,8 +111,9 @@ if (invoked === "orchestrate" || invoked === "auto") {
 // only while autoActive does. Root session dir, same (sid) on every side
 // (STATE-02). The /orchestrate an /auto goal starts with re-points a live
 // marker at that plan, since /auto's own argument may be an idea or request.
-const invokedSlug = planSlugOf(args);
-const resolved = featurePlan(invokedSlug, context);
+const flags = levelFlags(args);
+const invokedSlug = planSlugOf(flags.rest);
+const resolved = featurePlan(invokedSlug, context, flags);
 const slug = resolved.slug;
 const sid = sidOf(input);
 let autoRun = invoked === "auto";
@@ -105,7 +126,7 @@ else if (invoked === "orchestrate" && autoActive(sid, context)) {
 // /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
 // itself, and on the /orchestrate its unattended /goal starts with. Sized
 // from the resolved feature plan's units, not the parent doc's; a fresh invocation re-arms, never accumulates.
-if (autoRun) grantRunnerDispatches((resolved.units || planUnitCount(slug, context)) * RUNNER_DISPATCHES_PER_UNIT, sid, context);
+if (autoRun) grantRunnerDispatches(runnerDispatchCount(resolved.units || planUnitCount(slug, context), resolved.features || 0), sid, context);
 
 // /scrutinise: grant its one isolated reviewer dispatch (agent-mode-guard.mjs
 // spends it). Re-arming on a repeat invocation is intended — each run of
