@@ -7,6 +7,30 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
+- **`/craftsman:account-switch`: carry a session across an account or org
+  switch.** After `/login` to another account, Claude can't read its earlier
+  thinking, so the reasoning behind the work is lost even though the
+  transcript survives. `prepare` writes a handoff (verbatim requests,
+  decisions with their reasons and rejected alternatives, state, dead ends,
+  next steps, plus an auto-captured git and craftsman snapshot). `restore`
+  reloads it, checks for drift and carries on. `recover` rebuilds the handoff
+  from the transcript when no prepare ran, labels inferred reasoning
+  `(reconstructed)`, and waits for confirmation before acting.
+  - **Works during a scoped run.** Every read and write goes through
+    `scripts/account-switch.mjs` via Bash, so pre-guard's Read/Write scope
+    lock doesn't block it. Handoffs live in `.git/.craftsman/account-handoffs/`,
+    shared by all worktrees and never committed. Known secret patterns are
+    redacted from handoffs and transcript digests.
+  - **New session after a switch.** `adopt --from <old session>` moves the
+    old session's plan hand-off, unit claims and worktree ledger to the new
+    one. Without it, a claimed unit stayed blocked for 24h. It refuses while
+    the old session is still running. Grants, scope and the auto marker
+    aren't moved: re-invoking `/craftsman:orchestrate` or `/craftsman:auto`
+    recreates them.
+  - **`claim.mjs` `action: "transfer"`** (`from_session`, `confirm: true`)
+    hands a claim to a replacing session, and only from the named previous
+    owner.
+
 - **`/craftsman:auto`: one entry for the whole loop, with a light root
   context.** It asks every open decision up front (idea, architect, plan),
   runs the units unattended under `/goal`, asks one consolidated round about

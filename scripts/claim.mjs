@@ -9,6 +9,20 @@ export function claimPath(plan, unit, project = ".", context = null) {
   return path.join(context?.stateDir || projectContext(project).stateDir, "claims", `${key}.lock`);
 }
 
+// Hand a claim to the session that replaced its owner (e.g. after an account
+// switch opened a new session). Only the named previous owner can be replaced,
+// so a live claim from an unrelated session is never taken.
+export function transferClaim(lock, fromSid, toSid) {
+  const ownerFile = path.join(lock, "owner.json");
+  const owner = JSON.parse(fs.readFileSync(ownerFile, "utf8"));
+  if (owner.session_id !== fromSid) throw new Error(`unit is owned by ${owner.session_id}, not ${fromSid}`);
+  if (fromSid === toSid) return owner;
+  const next = { ...owner, session_id: toSid, transferred_from: fromSid, transferred_at: new Date().toISOString() };
+  atomicWrite(ownerFile, JSON.stringify(next, null, 2) + "\n");
+  logEvent({ ev: "unit_transferred", sid: toSid, plan: owner.plan, unit: owner.unit, previous_session: fromSid });
+  return next;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
@@ -27,6 +41,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       fs.rmSync(lock, { recursive: true, force: true });
       logEvent({ ev: "unit_recovered", sid: sidOf(input), plan: input.plan, unit: input.unit, previous_session: owner.session_id });
       process.stdout.write(`stale unit claim recovered: ${input.unit}\n`);
+      process.exit(0);
+    }
+    if (input.action === "transfer") {
+      if (input.confirm !== true) throw new Error("claim transfer requires confirm:true");
+      if (!input.from_session) throw new Error("claim transfer requires from_session");
+      transferClaim(lock, sidOf({ session_id: input.from_session }), sidOf(input));
+      process.stdout.write(`unit claim transferred: ${input.unit}\n`);
       process.exit(0);
     }
     if (input.action === "release") {

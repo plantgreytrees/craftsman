@@ -96,6 +96,7 @@ gitignored local snapshot.
 | `/craftsman:baseline` | snapshot pre-existing lint issues (run once per repo) |
 | `/craftsman:stats` | see which gates actually fire — delete the ones that don't earn their keep |
 | `/craftsman:toggle` | turn the gates on/off for this repo |
+| `/craftsman:account-switch` | switch Claude account mid-session without losing the thread: `prepare` a handoff (goal, decisions and their reasoning, state, next steps) before `/login`, `restore` it after, or `recover` one from the transcript when no prepare ran; hands a running plan's claims to the new session |
 | `/craftsman:builtin-check` | after `claude update`: verify the wrapped Claude Code built-ins still match craftsman's assumptions, and propose new ones to wrap |
 
 ---
