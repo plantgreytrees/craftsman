@@ -9,11 +9,13 @@ import {
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 
-export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
+export const STATUSES = ["PENDING", "IN_PROGRESS", "MERGED", "FEATURE_MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"];
 const TRANSITIONS = {
   PENDING: new Set(["IN_PROGRESS", "CANCELLED", "BLOCKED"]),
-  IN_PROGRESS: new Set(["MERGED", "BLOCKED", "PARKED", "CANCELLED"]),
+  IN_PROGRESS: new Set(["MERGED", "FEATURE_MERGED", "BLOCKED", "PARKED", "CANCELLED"]),
   MERGED: new Set(["COMPLETE", "BLOCKED"]),
+  // Landed on its feature branch; only land-feature promotes it (ARCH-TRACKER-06).
+  FEATURE_MERGED: new Set(["COMPLETE", "BLOCKED"]),
   COMPLETE: new Set(),
   BLOCKED: new Set(["PENDING", "IN_PROGRESS", "CANCELLED"]),
   PARKED: new Set(["PENDING", "IN_PROGRESS", "CANCELLED"]),
@@ -38,7 +40,7 @@ function validateIdentity(row) {
 function validateTransition(from, to, evidence) {
   if (!STATUSES.includes(to)) throw new Error(`invalid tracker status: ${to}`);
   if (from && from !== to && !TRANSITIONS[from]?.has(to)) throw new Error(`illegal tracker transition: ${from} -> ${to}`);
-  if (["MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"].includes(to) && (!evidence || !String(evidence).trim())) {
+  if (["MERGED", "FEATURE_MERGED", "COMPLETE", "BLOCKED", "PARKED", "CANCELLED"].includes(to) && (!evidence || !String(evidence).trim())) {
     throw new Error(`${to} requires evidence`);
   }
 }
@@ -84,7 +86,7 @@ function validateParkInput(input, status) {
 // Only `[unit:<id>]`-tagged lines count here; untagged whole-plan criteria
 // stay with the Stop gate.
 function assertUnitAcceptance(input, status, context) {
-  if (status !== "MERGED" && status !== "COMPLETE") return;
+  if (!["MERGED", "FEATURE_MERGED", "COMPLETE"].includes(status)) return;
   const cfg = loadConfig(context);
   if (!enabled(cfg, context) || cfg.stopGate?.enabled === false || cfg.stopGate?.requireAcceptanceCriteria === false) return;
   let text = "";
@@ -257,7 +259,7 @@ function writeTransition(input, context) {
     const decision = validateParkInput(input, status);
     const scopeId = input.scope_id || previous?.scope_id;
     if (previous?.status !== status) assertUnitAcceptance({ ...input, scope_id: scopeId }, status, context);
-    const read = ["MERGED", "COMPLETE"].includes(status) ? unitCriteria(new Set([input.unit, scopeId].filter(Boolean)), context) : [];
+    const read = ["MERGED", "FEATURE_MERGED", "COMPLETE"].includes(status) ? unitCriteria(new Set([input.unit, scopeId].filter(Boolean)), context) : [];
     const event = {
       key,
       project: input.project || context.id,
@@ -276,6 +278,9 @@ function writeTransition(input, context) {
       autonomous: input.autonomous === true,
       // Carried forward: compaction keeps only the latest event per key.
       criteria: read.length ? read : previous?.criteria || null,
+      // Optional feature grouping (ARCH-TRACKER-07): absent unless given, carried forward.
+      ...(input.feature || previous?.feature ? { feature: input.feature || previous.feature } : {}),
+      ...(input.feature_branch || previous?.feature_branch ? { feature_branch: input.feature_branch || previous.feature_branch } : {}),
     };
     fs.appendFileSync(file, JSON.stringify(event) + "\n", "utf8");
     logEvent({ ev: "tracker_transition", key, from: previous?.status || null, to: status, unit: input.unit }, context);

@@ -34,17 +34,29 @@ export function buildManifest(plan, rows, acceptanceText = "") {
       return {
         unit: row.unit,
         ...(row.project && row.project !== "." ? { project: row.project } : {}),
+        ...(row.feature ? { feature: row.feature } : {}),
         status: row.status,
         criteria: { ticked: own.filter((c) => c.done).length, total: own.length },
         decision: row.status === "PARKED" ? row.decision || null : null,
       };
     });
+  // Units grouped by ledger `feature`; units without one belong to no group.
+  const groups = new Map();
+  for (const row of rows.filter((r) => r.plan === plan && r.feature)) {
+    const group = groups.get(row.feature) || { feature: row.feature, feature_branch: row.feature_branch || null, units: [] };
+    group.feature_branch = group.feature_branch || row.feature_branch || null;
+    group.units.push(row.unit);
+    groups.set(row.feature, group);
+  }
+  const feature_groups = [...groups.values()].sort((a, b) => a.feature.localeCompare(b.feature))
+    .map((g) => ({ ...g, units: g.units.sort() }));
   return {
     generated_from: ".craftsman/tracker/events.jsonl",
     note: "Derived on every tracker transition; do not edit by hand.",
     plan,
     slug: planSlug(plan),
     features,
+    feature_groups,
   };
 }
 
