@@ -121,7 +121,8 @@ function heartbeat(lock) {
 }
 
 // Plan files the feature must find on origin/<base> before its worktree exists:
-// the plan doc, each parent ancestor (from the plan index) and every rollup (ARCH-LAND-16).
+// the plan doc and each parent ancestor (from the plan index). Generated rollups
+// (docs/plans/<slug>/TRACKER.md) are excluded: every tracker transition rewrites them locally.
 function planGateFiles(root, planSlug) {
   const files = [];
   const seen = new Set();
@@ -129,7 +130,7 @@ function planGateFiles(root, planSlug) {
   try { index = loadIndex(root); } catch { index = null; }
   for (let slug = planSlug; slug && !seen.has(slug); ) {
     seen.add(slug);
-    files.push(`docs/plans/${slug}.md`, `docs/plans/${slug}/TRACKER.md`);
+    files.push(`docs/plans/${slug}.md`);
     slug = index?.get(slug)?.parent || "";
   }
   return files;
