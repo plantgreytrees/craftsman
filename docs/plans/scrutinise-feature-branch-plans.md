@@ -3,7 +3,7 @@ slug: scrutinise-feature-branch-plans
 goal: The CI script-size warning never fails a PR, and doc-retire refuses whenever it cannot prove a plan is safe to remove.
 parent: feature-branch-plans
 priority: P2
-classification: in-scope (/scrutinise feature-branch-plans, isolated scrutineer, 2026-10-18; round 1: 1 Critical, 5 Warning; round 2 on 7fc96bb: 1 Warning; round 3 on ce993dd: 2 Architecture Warnings, deferred by the user)
+classification: "in-scope (/scrutinise feature-branch-plans, isolated scrutineer, 2026-10-18; round 1: 1 Critical, 5 Warning; round 2 on 7fc96bb: 1 Warning; round 3 on ce993dd: 2 Architecture Warnings, deferred by the user)"
 tracker_rows: [TRACKER#scrutinise-feature-branch-plans]
 guards:
   blast_radius: done
@@ -59,6 +59,84 @@ units:
       write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs]
     arch: [ARCH-DOCS-02, ARCH-DOCS-08]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: retire-goalless
+    scope_id: retire-goalless
+    project: .
+    depends_on: []
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/tracker.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/tracker.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs]
+    arch: [ARCH-DOCS-09, ARCH-DOCS-02]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: retire-epic
+    scope_id: retire-epic
+    project: .
+    depends_on: [retire-goalless]
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/tracker.mjs, scripts/tracker.test.mjs, scripts/lib/plan-index.mjs, scripts/lib/tracker-rollup.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/plan.rules.md, docs/architecture/tracker.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/tracker.mjs, scripts/tracker.test.mjs]
+    arch: [ARCH-DOCS-09, ARCH-DOCS-02, ARCH-TRACKER-09, ARCH-TRACKER-01, ARCH-TRACKER-10]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
+  - id: prune-archive-input
+    scope_id: prune-archive-input
+    project: .
+    depends_on: []
+    module: commands/_sync-docs-prune.md
+    language: markdown
+    security: normal
+    scope:
+      read: [commands/_sync-docs-prune.md, scripts/wiring.test.mjs, scripts/doc-retire.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/_sync-docs-prune.md, scripts/wiring.test.mjs]
+    arch: [ARCH-DOCS-04, ARCH-SLIM-01, ARCH-ENGINE-04]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: lint-sentinels
+    scope_id: lint-sentinels
+    project: .
+    depends_on: []
+    module: scripts/arch-check.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/arch-check.mjs, scripts/arch-check.test.mjs]
+      docs: [docs/architecture/docs.rules.md]
+      write: [scripts/arch-check.mjs, scripts/arch-check.test.mjs]
+    arch: [ARCH-DOCS-03]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: preguard-event
+    scope_id: preguard-event
+    project: .
+    depends_on: []
+    module: scripts/stats.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/stats.mjs, scripts/stats.test.mjs, scripts/pre-guard.mjs]
+      docs: [docs/architecture/mod.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/stats.mjs, scripts/stats.test.mjs]
+    arch: [ARCH-SLIM-06, ARCH-SLIM-07, ARCH-MOD-03]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: rm-guard
+    scope_id: rm-guard
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/core.mjs, craftsman.config.json]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-DOCS-07, ARCH-STATE-02, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [], mcp: [] }
 ---
 
 # Plan: scrutinise-feature-branch-plans — fix pass 1 findings
@@ -83,8 +161,35 @@ Depends on: none
 Depends on: none (Steps 1–2 merged at 0816ee8, 7fc96bb)
 - [ ] 3.1 Retire's rollback restores the whole index, not a hand-kept path list (`doc-retire.mjs:124-145`): before `git rm`, snapshot it with `git write-tree` (a failure there, e.g. unmerged entries, refuses before any change); move `git rm` inside the `try`; in the catch, `git read-tree <snapshot>` with the throwing `git()` (not `tryGit`) — if the restore itself fails, append that to the refusal reason — then `git checkout HEAD -- ...removing` and restore the ledger/archive/tracker backups. Unrelated staged content survives a refused retire → accept: a test sets the fixture's `core.hooksPath` to a dir holding a `#!/bin/sh` pre-commit that writes a marker and exits 1 (no win32 skip); retire refuses, the marker exists, `snapshot()` is unchanged, `git diff --cached --quiet` and an empty `git status --porcelain` hold; an archivePlan failure before anything is staged leaves the index tree equal to its pre-retire `write-tree`; existing rollback tests (`doc-retire.test.mjs:134,146`) and referrer tests still pass
 
+### Step 4 — retire-goalless (., javascript, high) — round 4
+Depends on: none
+- [ ] 4.1 `retire` (tracker.mjs unchanged: the heading is produced from the fields doc-retire passes) takes the goal from the tracker row, else the plan doc's front-matter `goal:`, else its H1, else the slug (a stand-in for the goal slot of the DOCS-09 heading), so the full `## <plan> (<date>) — <goal> · doc <sha> · landed <sha>` heading is written for a goal-less plan too (`doc-retire.mjs:112`, `tracker.mjs:429`) → accept: doc-retire.test retires a row with no goal and asserts the archive heading carries `doc <sha>`; it fails on the old code
+
+### Step 5 — retire-epic (., javascript, high) — round 4
+Depends on: retire-goalless
+- [ ] 5.1 Only a descendant with an open (not COMPLETE/CANCELLED) row is live (`doc-retire.mjs:84-88`); closed descendants retire in the same commit with their rollups, as closed siblings do → accept: doc-retire.test: epic with a COMPLETE child retires both docs and both rollups in one commit; epic with an open child is refused naming it
+- [ ] 5.2 The parent's own generated rollup `docs/plans/<parent>/TRACKER.md` and its `children:` list are not referrers (`doc-retire.mjs:100-106`); an epic or story with zero rows archives (vacuously every row closed) with the full DOCS-09 heading instead of `no tracker rows` (`tracker.mjs:471`) → accept: doc-retire.test and tracker.test: the child is not refused for the parent's rollup; a rows-less hierarchy parent writes the full heading with doc sha, and `tracker.mjs lookup` round-trips it (ARCH-TRACKER-09); the retired parent's rollup is gone (ARCH-TRACKER-10)
+
+### Step 6 — prune-archive-input (., markdown, normal) — round 4
+Depends on: none
+- [ ] 6.1 `_sync-docs-prune.md` `--archive` passes `{"plan":"docs/plans/<slug>.md","sid":"<session>"}` to doc-retire and confirms COMPLETE with `tracker.mjs` action `status`, not `lookup` (which reads only the archive); the file stays at or under its 1575-byte cap by trimming equal prose → accept: wiring.test asserts the repo-relative path form and the `status` check, and fails on the old text; `node scripts/doc-size-policy.mjs` PASS
+
+### Step 7 — lint-sentinels (., javascript, normal) — round 4
+Depends on: none
+- [ ] 7.1 `lintRules` skips the file check only for the explicit sentinels `init` and `backfill`; any other `source:` value, path or bare name, must exist and fails naming it when missing (`arch-check.mjs:217`) → accept: arch-check.test: `source: init` and `source: backfill` pass; a missing path and a missing bare non-sentinel name fail; `node scripts/arch-check.mjs lint` PASS on the repo
+
+### Step 8 — preguard-event (., javascript, normal) — round 4
+Depends on: none
+- [ ] 8.1 `stats.mjs` counts a `preguard` event as a protected-path block only when `result` is `blocked`; allowed events still feed the p50/p95 `ms` report (`stats.mjs:88,110`) → accept: stats.test: an `allowed` preguard event is not a block and is in the ms percentiles; the old code counted it as a block
+
+### Step 9 — rm-guard (., javascript, high) — round 4
+Depends on: none
+- [ ] 9.1 Removing an ancestor of a guarded path is blocked without the grant: `rm -rf docs`, `rm -rf ./docs/`, `git rm -r docs`, and a removal of `.` (`pre-guard.mjs:57-79`) → accept: pre-guard.test: each form blocked without the grant and allowed with it; `rm -rf build` stays allowed
+- [ ] 9.2 Arguments resolve against `git -C <dir>` and a leading `cd <dir> &&`; a leading `\`, `command`, `env`, `sudo` (with options) is stripped and the verb matches by basename `rm|unlink`; `find … -delete`, `xargs rm`, `mv`/`git mv` of a guarded path and `bash -c`/`sh -c` bodies are treated as removals; an unparseable chain that names a guarded path fails closed; paths resolve against the hook input's cwd inside the one project, so ARCH-STATE-06 (no workspace project addressed by cwd) is unaffected → accept: pre-guard.test: one blocked and one granted case per form (`git -C docs rm plans/x.md`, `cd docs/plans && rm x.md`, `/bin/rm`, `command rm`, `\rm`, `env rm`, `sudo -u x rm`, `xargs rm`, `find … -delete`, `unlink`, `bash -c 'rm …'`, `git mv`); an unrelated `rm` is still allowed
+
 ## Sequencing
-Independent; any order. Neither writes a file `plan-hierarchy` writes.
+Steps 1–3 are merged and `plan-hierarchy` is merged, so no open plan writes these files.
+Round 4 (Steps 4–9, from /scrutinise on 7e441ff..9549971): 4 → 5 share `doc-retire.mjs`; 6, 7, 8 and 9 are independent (9 writes `pre-guard.mjs`, 8 only `stats.mjs`). `doc-retire-tree` (feature-branch-plans) merged at 3805942, so Step 5 corrects it rather than duplicating deferred work.
 
 ## Verification background
 - Test job checkout has no `fetch-depth` — `.github/workflows/ci.yml:79`; size step — `ci.yml:97-107`
@@ -103,3 +208,5 @@ CONSUMERS:
 ## Out of scope
 Round 3 (ce993dd) — deferred by user decision 2026-10-18, not defects of Steps 1–3: ARCH-SLIM-07 pre-guard/stop-gate p50/p95 (`pre-guard.mjs:309`, `stop-gate.mjs:353,355` log no `ms`) → `feature-branch-plans` Step 11 `hook-timing`; ARCH-DOCS-09 rollup removal and live-children refusal (`doc-retire.mjs:104-142`) → Step 4 `doc-retire-tree`; both BLOCKED on plan-hierarchy, and doc-retire stays unwired until Step 4. Round 3 suggestions (not tasks): pathspec magic in plan paths — set `GIT_LITERAL_PATHSPECS` or reject `[*?[\]]`/leading `:` (`doc-retire.mjs:13-17,79,94,105,136`); `write-tree`/`read-tree` drops intent-to-add, skip-worktree and assume-unchanged bits and overwrites a concurrent index change — back up the index file or use a temporary `GIT_INDEX_FILE` (`:132-146`); caller-supplied `sid` selects another session's longer grant window (`:35-41`); the unmerged-entries test should compare `snapshot()`; the restore-failure branch (`:146-151`) is untested; `script-size-delta.test.mjs` leaks its `mkdtemp` fixtures.
 ARCH-DOCS-09 (rollup removal, refusing a parent with live children, full archive heading) — planned in `feature-branch-plans` Steps 3–4 (`tracker-lookup`, `doc-retire-tree`), BLOCKED on plan-hierarchy; doc-retire is not wired into any command until then. Disputed: pre-guard/stop-gate `ms` logging (ARCH-SLIM-07) — planned as `feature-branch-plans` Step 11 hook-timing. Follow-up suggestions, not tasks: lock around rollback restore (`doc-retire.mjs:96-101`), restrict `plan` to `docs/plans/*.md` (`:37-39`), `doc_prune_refused` on every refusal vs DOCS-08 wording (`:73`), `pct` rank off-by-one (`stats.mjs:15-18`, pre-existing). Round 2 suggestions (not tasks): restore the ledger under `withLock` (`doc-retire.mjs:142-145`, `tracker.mjs:404`); `ls-tree -z` and skip non-blob entries (`script-size-delta.mjs:6-12`); CI delta base vs merge-ref base (ci.yml size step); test `hookTimeouts()` against the real `hooks/hooks.json` (`stats.mjs:20-31`); fold `defaultGit` into `git()` (`doc-retire.mjs:49-53`). The pre-existing "Check PR diff whitespace" step has the same fetch-depth exposure (`ci.yml:122-125`).
+
+Round 4 (/scrutinise on 7e441ff..9549971) Suggestions, flagged not driven: `tracker.mjs:449,457` lookupArchive uses one key for plan and slug, so a pruned idea heading can hide a retired plan's record; `pre-guard.mjs:18` and `stop-gate.mjs:16` start the `ms` clock after module load (use `performance.now()`); three cap tables diverge (`wiring.test.mjs:1071-1083`, `doc-size-policy.mjs` FILE_CAPS, `auto-command.test.mjs:61,128`); the size ratchet compares with `merge-base(HEAD, origin/main)` and skips on main or a shallow clone; the doc-retire rollup test fixture is a stub and always sets a goal; stale cites in `docs.rules.md` (ARCH-DOCS-02/07/08) and `slim.rules.md` (ARCH-SLIM-01) are refreshed by `/architect --update`, never here. Rules are not edited.
