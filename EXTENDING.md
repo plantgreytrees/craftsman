@@ -211,13 +211,17 @@ change:
   and merge into the feature branch with `--no-ff` (status `FEATURE_MERGED`),
   and the feature then lands on the base branch. Conflicts, ff-only failures
   and rejected pushes park the unit with a decision; nothing is force-pushed.
-  Prepare refuses while the plan doc, its parents or rollups differ from
-  `origin/<base>`.
-- `planning.featureUnitCap` — `8`; the most units one feature may hold.
+  Prepare refuses while the plan doc or its parents differ from
+  `origin/<base>` (generated rollups are left out) or the plan index cannot be
+  read; land-feature refuses while the feature's `[feature:<id>]` criteria, or
+  for the last feature any untagged criterion, are still open.
+- `planning.featureUnitCap` — `8`; the most units one feature may hold. It is
+  checked only when `planning.featureBranches` is `true`.
 - `tracker.publish` — `"push"` commits the root `TRACKER.md` block, the
   rollups and `docs/plans/TRACKER.jsonl` to the base branch from a temporary
-  worktree (only those paths, plain push, one retry, never parks). `"off"`
-  disables it.
+  worktree (only those paths, plain push, one retry, never parks). It will not
+  blank a non-empty published block unless an archive was logged since the last
+  publish. `"off"` disables it.
 - `execution.maxSubagents` — `0` (dark): root-only. A positive number lets
   that many wave units of one feature run at once, each in its own short-lived
   worktree.
