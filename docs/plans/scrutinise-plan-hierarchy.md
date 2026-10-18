@@ -3,7 +3,7 @@ slug: scrutinise-plan-hierarchy
 goal: Plans of any size run under /orchestrate with every flag off, and the feature-branch path records, gates and lands what its rules say.
 parent: plan-hierarchy
 priority: P1
-classification: in-scope (/scrutinise plan-hierarchy, isolated scrutineer, 2026-10-18; round 1 - 1 Critical, 9 Warning, 11 Suggestion)
+classification: in-scope (/scrutinise plan-hierarchy, isolated scrutineer, 2026-10-18; round 1 - 1 Critical, 9 Warning, 11 Suggestion; round 2 - 0 Critical, 4 Warning, 5 Suggestion)
 tracker_rows: [TRACKER#scrutinise-plan-hierarchy]
 guards:
   blast_radius: done
@@ -189,6 +189,45 @@ units:
       write: [docs/plans/autonomous-e2e-loop.md]
     arch: [ARCH-ENGINE-08]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: gate-fail-closed
+    scope_id: gate-fail-closed
+    project: .
+    depends_on: [historic-budget]
+    module: scripts/repo-exec.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/lib/plan-index.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+    arch: [ARCH-TRACKER-08, ARCH-LAND-18]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: gate-chain
+    scope_id: gate-chain
+    project: .
+    depends_on: [gate-fail-closed]
+    module: scripts/repo-exec.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/lib/plan-index.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/plan.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+    arch: [ARCH-LAND-16, ARCH-PLAN-02]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: publish-archive-window
+    scope_id: publish-archive-window
+    project: .
+    depends_on: [historic-budget]
+    module: scripts/tracker-publish.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/tracker-publish.mjs]
+      docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs]
+    arch: [ARCH-TRACKER-11, ARCH-TRACKER-12, ARCH-LAND-17]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
 ---
 # Plan: scrutinise-plan-hierarchy
 
@@ -255,8 +294,20 @@ Depends on: none
 Depends on: every other step (last, because the byte counts move with the other steps' reads)
 - [ ] 13.1 Trim `scope.read` of the historic `state-root-pin` and `auto-command` units in `docs/plans/autonomous-e2e-loop.md` (drop files already in `write`, such as test files) until each fits `execution.unitContextBytes`; never raise the budget or touch the test → accept: `node --test scripts/arch-check.test.mjs` passes, and `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` exits 0
 
+### Step 14 — gate-fail-closed (., javascript, high)
+Depends on: historic-budget
+- [ ] 14.1 The last-feature check in `landFeature` returns a tagged result (`{ last: boolean }` or `{ error }`, documented in JSDoc) instead of a boolean that folds "unresolvable" into false; on `{ error }` it refuses only when an open untagged line exists (`land-feature refused: cannot resolve plan index to tell if <feature> is last: <err>`) and still evaluates `[feature:<id>]` lines with last=false; non-index errors are not swallowed → accept: repo-exec.test: a deliberately broken sibling plan doc refuses and names the index error; open `[feature:<id>]` lines still refuse with a broken index; a plan with no `features:` (implicit feature id = slug, the last feature) refuses on an open untagged line; the passing cases of 6.1 and the ARCH-TRACKER-08 check files (core.test, tracker.test) still pass
+
+### Step 15 — gate-chain (., javascript, high)
+Depends on: gate-fail-closed
+- [ ] 15.1 `planGateFiles` throws, naming the index error, when `loadIndex` fails; it finds the leaf by the index node whose `.path === docs/plans/<planSlug>.md`, walks `.parent` through the same slug-keyed Map, and pushes each node's `.path`; `planGate` treats a file missing both locally and on origin as differing for every entry including the leaf; ARCH-LAND-16's text is not edited and the commit message records that rollups stay excluded (tracked as `rule-land-16-rollups`), without claiming compliance → accept: repo-exec.test: a broken sibling doc refuses the gate naming the error; a missing leaf and a missing parent refuse; a parent whose filename differs from its slug is compared by its real path; 3.1 and 4.1 tests still pass
+
+### Step 16 — publish-archive-window (., javascript, high)
+Depends on: historic-budget
+- [ ] 16.1 `hasArchiveEvent` returns false without reading anything when `context.stateDir` is unset, and otherwise scans the log backward: archive events (`tracker_archived`, `doc_retired`) after the last `tracker_published` unlock the blank guard; a log with no `tracker_published` counts every archive event (stated in the code comment); publish already logs `tracker_published` to the same log (`tracker-publish.mjs:100`) → accept: tracker-publish.test: unset stateDir refuses and never reads the process cwd; an archive event before the last publish cannot unlock; one after it can; a log with no publish line and an archive event unlocks; 12.1, 12.2 and the ARCH-TRACKER-12 refuse-to-blank test still pass
+
 ## Sequencing
-Steps 3 → 4 → 5 → 6 → 7 run strictly in order: they all edit `scripts/repo-exec.mjs` and its test. Step 8 follows steps 2 and 4. Steps 1, 2, 9, 10, 11, 12 are independent of each other. Step 13 is last.
+Steps 3 → 4 → 5 → 6 → 7 run strictly in order: they all edit `scripts/repo-exec.mjs` and its test. Step 8 follows steps 2 and 4. Steps 1, 2, 9, 10, 11, 12 are independent of each other. Step 13 is last of round 1. Round 2: 14 → 15 run in order (both edit `scripts/repo-exec.mjs` and its test); 16 is independent of them.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Cap enforced with no options and the default 8: `scripts/plan-graph.mjs:32`, `:115`; `commands/orchestrate.md:29` sends `(id, scope_id, project, depends_on, bumps)` only.
@@ -287,3 +338,5 @@ CONSUMERS:
 - Passing `featureBranches`, `maxSubagents` and `featuresText` into `craftsman:run` from the Engine paragraph: blocked on the live spikes.
 - `CHANGELOG.md` `[Unreleased]` was condensed instead of cut as `[2.2.0]`: touches the sibling plan's changelog-cut unit and needs the user.
 - Running the live spikes and flipping any flag on.
+- Round 2 Suggestions, flagged not driven: plan-graph CLI reads the plan index from `process.cwd()` and `orchestrate.md` never sends `plan` (needs an edit at its 9893/10000 cap); `landUnit` worktree checks run before the feature lock is taken; the slug pattern is written out in four places with disagreeing `..` rules (one `isSafeSlug` export); `commands/_features.md` has no clause for the PARKED → FEATURE_MERGED re-entry (3496/3500).
+- Decision for the user, not a unit (`rule-land-16-rollups`): commit 3d49b8b left generated rollups out of the plan gate, but decided ARCH-LAND-16 still says prepare refuses while rollups differ from origin/<base>, and its cite `scripts/repo-exec.mjs:126-127` is stale. Either amend the rule through `/architect` to "plan doc and parent chain; generated rollups are excluded", or conform the code (publish before the gate). The rule is not edited here.
