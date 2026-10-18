@@ -124,14 +124,18 @@ function heartbeat(lock) {
 // the plan doc and each parent ancestor (from the plan index). Generated rollups
 // (docs/plans/<slug>/TRACKER.md) are excluded: every tracker transition rewrites them locally.
 function planGateFiles(root, planSlug) {
-  const files = [];
-  const seen = new Set();
   let index;
-  try { index = loadIndex(root); } catch { index = null; }
-  for (let slug = planSlug; slug && !seen.has(slug); ) {
+  try { index = loadIndex(root); } catch (error) { throw new Error(`plan gate: plan index failed: ${error.message}`); }
+  const leafPath = `docs/plans/${planSlug}.md`;
+  const files = [leafPath];
+  const leaf = [...index.nodes.values()].find((n) => n.path === leafPath);
+  const seen = new Set(leaf ? [leaf.slug] : []);
+  for (let slug = leaf?.parent; slug && !seen.has(slug); ) {
     seen.add(slug);
-    files.push(`docs/plans/${slug}.md`);
-    slug = index?.get(slug)?.parent || "";
+    const node = index.nodes.get(slug);
+    if (!node) throw new Error(`plan gate: plan index has no node for parent '${slug}'`);
+    files.push(node.path);
+    slug = node.parent || "";
   }
   return files;
 }
@@ -143,7 +147,7 @@ function planGate(context, input, info, planSlug) {
     const abs = path.join(context.root, file);
     const local = fs.existsSync(abs) ? run(context.root, ["hash-object", abs], { allowFailure: true }) : "";
     const remote = run(context.root, ["rev-parse", "--verify", "--quiet", `${ref}:${file}`], { allowFailure: true });
-    if (local !== remote) differing.push(file);
+    if (!local || !remote || local !== remote) differing.push(file);
   }
   logEvent({ ev: "plan_gate", plan: planSlug, base: info.base_branch, ok: differing.length === 0, differing }, context);
   if (differing.length) {
