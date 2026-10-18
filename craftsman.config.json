@@ -4,7 +4,9 @@
     "agentMode": "root-only",
     "builtinAgents": ["Explore"],
     "engine": "workflow",
-    "unitContextBytes": 122880
+    "unitContextBytes": 122880,
+    "maxSubagents": 0,
+    "maxSessions": 1
   },
   "timeoutMs": 20000,
   "maxFeedbackLines": 40,
@@ -91,7 +93,8 @@
     "maxAgeMs": 3888000000
   },
   "tracker": {
-    "nudgeLines": 300
+    "nudgeLines": 300,
+    "publish": "push"
   },
   "repoExec": {
     "verifyTestsBeforeMerge": true,
@@ -137,7 +140,9 @@
     "docPaths": ["docs/plans/**", "docs/ideas/**", "docs/architecture/**"]
   },
   "planning": {
-    "blindRederivation": "never"
+    "blindRederivation": "never",
+    "featureBranches": false,
+    "featureUnitCap": 8
   },
   "architecture": {
     "enforce": true,
