@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { digestTranscript, parseArgs, projectSlug, redact } from "./account-switch.mjs";
 
-const SCRIPT = path.join(path.dirname(new URL(import.meta.url).pathname), "account-switch.mjs");
+const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "account-switch.mjs");
 const CLAIM = path.join(path.dirname(SCRIPT), "claim.mjs");
 
 const jsonl = (records) => records.map((r) => JSON.stringify(r)).join("\n") + "\n";
@@ -44,7 +46,7 @@ test("account-switch: digest keeps the visible record and drops thinking, side c
       user([{ type: "tool_result", tool_use_id: "t1", is_error: true, content: "String not found" }]),
       assistant([{ type: "tool_use", id: "t2", name: "Bash", input: { command: "npm test", description: "Run tests" } }]),
       { ...user("subagent prompt"), isSidechain: true },
-    ]));
+    ]) + "null\n[1]\n{not json\n" + JSON.stringify({ ...user({ odd: "object content" }), gitBranch: "feat" }) + "\n");
     const { text } = digestTranscript(file);
     assert.match(text, /title: switch work/);
     assert.match(text, /compaction summary\]\n\nEarlier work summarised/);
@@ -89,6 +91,12 @@ test("account-switch: save writes a fresh snapshot and empty restore log, then s
     assert.match(fs.readFileSync(file, "utf8"), /## Restore log\n- \S+ restored here\n$/);
     assert.match(f.cli(["list"]).stdout, /Handoff: demo {2}\(restored 1×\)/);
     assert.notEqual(f.cli(["save"], "  ").status, 0, "empty handoff is refused");
+
+    // Only a heading line ends the body; an inline mention keeps what follows.
+    const inline = f.cli(["save"], "# Handoff: inline\n\n## 6. Dead ends\n- tried quoting `## Restore log` inline\n\n## 8. Next steps\n1. keep me\n");
+    const kept = fs.readFileSync(/handoff saved: (\S+)/.exec(inline.stdout)[1], "utf8");
+    assert.match(kept, /## 8\. Next steps\n1\. keep me/);
+    assert.notEqual(/handoff saved: (\S+)/.exec(inline.stdout)[1], file, "same-second saves get distinct files");
   } finally {
     f.cleanup();
   }
@@ -122,6 +130,10 @@ test("account-switch: adopt moves the old session's hand-off, claims and worktre
     const ledger = (sid) => path.join(f.repo, ".git", ".craftsman", "sessions", sid, "worktrees.json");
     fs.mkdirSync(path.dirname(ledger("old")), { recursive: true });
     fs.writeFileSync(ledger("old"), JSON.stringify([path.join(f.repo, "wt")]));
+    // Named the way core.mjs worktreeBindingPath names it.
+    const suffix = crypto.createHash("sha1").update(path.resolve(f.repo, "wt")).digest("hex").slice(0, 16);
+    const binding = (sid) => path.join(path.dirname(ledger(sid)), `${suffix}-worktree-binding.json`);
+    fs.writeFileSync(binding("old"), JSON.stringify({ session_id: "old", unit: "u1", worktree_path: path.join(f.repo, "wt"), branch: "b" }));
 
     const dry = f.cli(["adopt", "--from", "old"]);
     assert.equal(dry.status, 0, dry.stderr);
@@ -137,9 +149,65 @@ test("account-switch: adopt moves the old session's hand-off, claims and worktre
     assert.deepEqual(owners.map((o) => o.session_id), ["new"]);
     assert.deepEqual(JSON.parse(fs.readFileSync(ledger("new"), "utf8")), [path.join(f.repo, "wt")]);
     assert.deepEqual(JSON.parse(fs.readFileSync(ledger("old"), "utf8")), []);
+    const bindings = (sid) => fs.readdirSync(path.dirname(ledger(sid))).filter((n) => n.endsWith("-worktree-binding.json"));
+    assert.deepEqual(bindings("old"), []);
+    const moved = JSON.parse(fs.readFileSync(path.join(path.dirname(ledger("new")), bindings("new")[0]), "utf8"));
+    assert.equal(moved.session_id, "new");
+    assert.ok(fs.existsSync(path.join(f.repo, ".craftsman", "sessions", "new", "scope-required")), "resume needs fresh scope");
     assert.match(f.cli(["adopt", "--from", "new"]).stdout, /same session/);
   } finally {
     f.cleanup();
+  }
+});
+
+test("account-switch: show, log and digest stay inside their folders; files are owner-only", () => {
+  const f = fixture();
+  try {
+    const outside = path.join(f.root, "secret.txt");
+    fs.writeFileSync(outside, "do not read");
+    const saved = f.cli(["save"], "# Handoff: x\n");
+    assert.equal(saved.status, 0, saved.stderr);
+    for (const args of [["show", outside], ["show", "../../../secret.txt"], ["log", outside, "x"]]) {
+      const res = f.cli(args);
+      assert.notEqual(res.status, 0, args.join(" "));
+      assert.doesNotMatch(res.stdout, /do not read/);
+    }
+    assert.equal(fs.readFileSync(outside, "utf8"), "do not read");
+
+    const jsonFile = path.join(f.root, "hosts.jsonl");
+    fs.writeFileSync(jsonFile, jsonl([user("token here")]));
+    assert.match(f.cli(["digest", jsonFile]).stderr, /not a transcript/);
+    f.transcript("abc123", [user("hello")]);
+    const digest = f.cli(["digest", "abc123"]);
+    const digestFile = /digest written: (\S+)/.exec(digest.stdout)[1];
+    assert.match(f.cli(["log", digestFile, "x"]).stderr, /not a handoff/);
+    if (process.platform !== "win32") {
+      const file = /handoff saved: (\S+)/.exec(saved.stdout)[1];
+      assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      assert.equal(fs.statSync(digestFile).mode & 0o777, 0o600);
+    }
+    assert.match(f.cli(["save"], "# Handoff: x\n", { CLAUDE_CODE_SESSION_ID: "" }).stderr, /no session id/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("account-switch: redaction runs before truncation and covers env-style assignments", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-digest-"));
+  try {
+    const token = "ghp_" + "b".repeat(40);
+    const file = path.join(dir, "t.jsonl");
+    fs.writeFileSync(file, jsonl([
+      assistant([{ type: "tool_use", id: "t1", name: "Bash", input: { command: "env" } }]),
+      user([{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(590) + token }]),
+    ]));
+    const { text, count } = digestTranscript(file);
+    assert.doesNotMatch(text, /ghp_b/);
+    assert.ok(count >= 1);
+    const env = redact("API_KEY=abcd1234efgh DB_PASSWORD: 'hunter22' max_tokens: 1000 postgres://u:pw1234@db/x");
+    assert.equal(env.text, "API_KEY=[REDACTED] DB_PASSWORD: '[REDACTED]' max_tokens: 1000 postgres://u:[REDACTED]@db/x");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

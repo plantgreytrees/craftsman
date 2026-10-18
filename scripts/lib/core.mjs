@@ -432,10 +432,30 @@ export function uncheckedAcceptance(text) {
   return acceptanceCriteria(text).filter((c) => !c.done);
 }
 
-export function atomicWrite(file, data) {
+// Claude Code's own config dir: transcripts under projects/, live sessions
+// under sessions/<pid>.json.
+export const claudeHome = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+
+// The pid of a still-running Claude Code session, or null. A process we may
+// not signal (EPERM) is alive.
+export function liveClaudeSession(sid) {
+  const dir = path.join(claudeHome(), "sessions");
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => n.endsWith(".json")); } catch { return null; }
+  for (const name of names) {
+    let record;
+    try { record = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); } catch { continue; }
+    if (record?.sessionId !== sid || !Number.isInteger(record.pid)) continue;
+    try { process.kill(record.pid, 0); return record.pid; }
+    catch (error) { if (error.code === "EPERM") return record.pid; }
+  }
+  return null;
+}
+
+export function atomicWrite(file, data, { mode } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, data);
+  fs.writeFileSync(tmp, data, mode ? { mode } : undefined);
   fs.renameSync(tmp, file); // rename is atomic on the same filesystem
 }
 export function sha1(s) { return crypto.createHash("sha1").update(String(s)).digest("hex"); }

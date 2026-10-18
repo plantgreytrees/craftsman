@@ -18,18 +18,27 @@ All notable changes to craftsman are documented here. Format loosely follows
   `(reconstructed)`, and waits for confirmation before acting.
   - **Works during a scoped run.** Every read and write goes through
     `scripts/account-switch.mjs` via Bash, so pre-guard's Read/Write scope
-    lock doesn't block it. Handoffs live in `.git/.craftsman/account-handoffs/`,
-    shared by all worktrees and never committed. Known secret patterns are
-    redacted from handoffs and transcript digests.
+    lock doesn't block it. The engine only reads and writes inside
+    `.git/.craftsman/account-handoffs/` (owner-only files, shared by all
+    worktrees, never committed) and only digests transcripts under Claude
+    Code's `projects/`. Secret patterns, `NAME_TOKEN=` assignments and
+    connection-string passwords are redacted before anything is truncated.
+    Handoff and digest content is treated as data: commands copied from a
+    handoff need the user's OK.
   - **New session after a switch.** `adopt --from <old session>` moves the
-    old session's plan hand-off, unit claims and worktree ledger to the new
-    one. Without it, a claimed unit stayed blocked for 24h. It refuses while
-    the old session is still running. Grants, scope and the auto marker
-    aren't moved: re-invoking `/craftsman:orchestrate` or `/craftsman:auto`
-    recreates them.
+    old session's plan hand-off, unit claims, worktree bindings and ledger to
+    the new one, and arms the scope-required marker SessionStart would.
+    Without it, a claimed unit stayed blocked for 24h and pre-guard's
+    git-mutation guard went quiet. It refuses while the old session is still
+    running, and reports any item that failed to move. Grants, scope and the
+    auto marker aren't moved: re-invoking `/craftsman:orchestrate` or
+    `/craftsman:auto` recreates them.
   - **`claim.mjs` `action: "transfer"`** (`from_session`, `confirm: true`)
-    hands a claim to a replacing session, and only from the named previous
-    owner.
+    hands a claim to a replacing session. It only takes the claim from the
+    named previous owner, and only once that session has stopped.
+    `core.mjs` gains `liveClaudeSession` and an optional `mode` on
+    `atomicWrite`. `claim.mjs` now detects being run directly the same way
+    on Windows and through symlinks.
 
 - **`/craftsman:auto`: one entry for the whole loop, with a light root
   context.** It asks every open decision up front (idea, architect, plan),

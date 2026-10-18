@@ -2,7 +2,8 @@
 // Atomically claim one plan unit so concurrent orchestrators cannot execute it twice.
 import fs from "node:fs";
 import path from "node:path";
-import { atomicWrite, logEvent, projectContext, readStdin, sidOf } from "./lib/core.mjs";
+import { pathToFileURL } from "node:url";
+import { atomicWrite, liveClaudeSession, logEvent, projectContext, readStdin, sidOf } from "./lib/core.mjs";
 
 export function claimPath(plan, unit, project = ".", context = null) {
   const key = `${project}--${plan}--${unit}`.replace(/[^A-Za-z0-9_.-]/g, "_");
@@ -11,19 +12,22 @@ export function claimPath(plan, unit, project = ".", context = null) {
 
 // Hand a claim to the session that replaced its owner (e.g. after an account
 // switch opened a new session). Only the named previous owner can be replaced,
-// so a live claim from an unrelated session is never taken.
-export function transferClaim(lock, fromSid, toSid) {
+// so a live claim from an unrelated session is never taken, nor one whose
+// owner is still running.
+export function transferClaim(lock, fromSid, toSid, context = null) {
   const ownerFile = path.join(lock, "owner.json");
   const owner = JSON.parse(fs.readFileSync(ownerFile, "utf8"));
   if (owner.session_id !== fromSid) throw new Error(`unit is owned by ${owner.session_id}, not ${fromSid}`);
   if (fromSid === toSid) return owner;
+  const pid = liveClaudeSession(fromSid);
+  if (pid) throw new Error(`session ${fromSid} is still running (pid ${pid})`);
   const next = { ...owner, session_id: toSid, transferred_from: fromSid, transferred_at: new Date().toISOString() };
   atomicWrite(ownerFile, JSON.stringify(next, null, 2) + "\n");
-  logEvent({ ev: "unit_transferred", sid: toSid, plan: owner.plan, unit: owner.unit, previous_session: fromSid });
+  logEvent({ ev: "unit_transferred", sid: toSid, plan: owner.plan, unit: owner.unit, previous_session: fromSid }, context);
   return next;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     if (!input.plan || !input.unit) throw new Error("claim requires plan and unit");
@@ -46,7 +50,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (input.action === "transfer") {
       if (input.confirm !== true) throw new Error("claim transfer requires confirm:true");
       if (!input.from_session) throw new Error("claim transfer requires from_session");
-      transferClaim(lock, sidOf({ session_id: input.from_session }), sidOf(input));
+      transferClaim(lock, sidOf({ session_id: input.from_session }), sidOf(input), context);
       process.stdout.write(`unit claim transferred: ${input.unit}\n`);
       process.exit(0);
     }

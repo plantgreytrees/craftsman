@@ -4,10 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { claimPath } from "./claim.mjs";
 import { projectContext } from "./lib/core.mjs";
 
-const CLAIM = path.join(path.dirname(new URL(import.meta.url).pathname), "claim.mjs");
+const CLAIM = path.join(path.dirname(fileURLToPath(import.meta.url)), "claim.mjs");
 
 test("claim: explicitly recovers a stale claim", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-claim-"));
@@ -52,6 +53,15 @@ test("claim: transfer hands a claim to the replacing session, never one owned by
     assert.equal(owner.session_id, "new");
     assert.equal(owner.transferred_from, "old");
     assert.match(run({ ...input, session_id: "new" }).stdout, /already claimed by this session/);
+
+    // A still-running owner keeps its claim.
+    const config = path.join(dir, "config");
+    fs.mkdirSync(path.join(config, "sessions"), { recursive: true });
+    fs.writeFileSync(path.join(config, "sessions", "1.json"), JSON.stringify({ pid: process.pid, sessionId: "new" }));
+    const live = spawnSync(process.execPath, [CLAIM], { cwd: dir, env: { ...env, CLAUDE_CONFIG_DIR: config },
+      input: JSON.stringify({ ...input, session_id: "third", action: "transfer", from_session: "new", confirm: true }), encoding: "utf8" });
+    assert.notEqual(live.status, 0);
+    assert.match(live.stderr, /still running/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
