@@ -699,3 +699,23 @@ after("stop-gate: no stray temp directories are left behind after the suite runs
   const stray = fs.readdirSync(SCRATCH_ROOT).filter((n) => n.startsWith("stop-gate-test-"));
   assert.deepEqual(stray, [], "every fixture temp dir must be cleaned up in its own test's finally block");
 });
+
+test("stop-gate: terminal pass and block events carry numeric ms", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const pass = await runStopGate(dir, "ms-pass");
+    const passEv = pass.events.find((e) => e.ev === "stop" && e.result === "pass");
+    assert.ok(passEv && Number.isFinite(passEv.ms) && passEv.ms >= 0, "pass event has ms");
+    const sid = "ms-block";
+    const bindingDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(bindingDir, { recursive: true });
+    fs.writeFileSync(path.join(bindingDir, "worktree-hash-worktree-binding.json"), JSON.stringify({
+      session_id: sid, unit: "unit-1", worktree_path: path.join(dir, ".worktrees", "unit-1"), branch: "feat/unit-1",
+    }));
+    const block = await runStopGate(dir, sid);
+    const blockEv = block.events.find((e) => e.ev === "stop" && e.result === "block");
+    assert.ok(blockEv && Number.isFinite(blockEv.ms) && blockEv.ms >= 0, "block event has ms");
+  } finally {
+    cleanup(dir);
+  }
+});

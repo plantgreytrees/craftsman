@@ -13,6 +13,7 @@ import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 
+const T0 = Date.now();
 const pexec = promisify(execFile);
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
@@ -350,9 +351,9 @@ if (!inFlight.length) {
   } catch { /* no tracker ledger or unreadable — nothing to enforce */ }
 }
 
-if (!problems.length) { logEvent({ ev: "stop", sid, result: "pass" }); process.exit(0); }
+if (!problems.length) { logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 }); process.exit(0); }
 
-logEvent({ ev: "stop", sid, result: "block", count: problems.length });
+logEvent({ ev: "stop", sid, result: "block", count: problems.length, ms: Date.now() - T0 });
 process.stdout.write(JSON.stringify({
   decision: "block",
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
