@@ -642,6 +642,59 @@ test("stop-gate: in-flight background_tasks skip only the acceptance block; secr
   }
 });
 
+// ARCH-STATE-08: an owned feature whose units are all FEATURE_MERGED is unlanded.
+function featureRows(sid, statuses, feature = "F1") {
+  return statuses.map((status, i) => ({
+    key: `.::p::u${i}`, project: ".", plan: "p", unit: `u${i}`, status, evidence: "x",
+    session_id: sid, feature, feature_branch: "feat/f1",
+  }));
+}
+
+test("stop-gate: an owned feature with every unit FEATURE_MERGED blocks as FEATURE NOT LANDED", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "feat-blocked";
+    writeAcceptance(dir, sid, "- [x] done\n", { tracker: featureRows(sid, ["FEATURE_MERGED", "FEATURE_MERGED"]) });
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /"decision":"block"/);
+    assert.match(result.stdout, /FEATURE NOT LANDED/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a landed (COMPLETE), part-merged or foreign feature does not block", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "feat-landed";
+    for (const rows of [
+      featureRows(sid, ["COMPLETE", "COMPLETE"]),
+      featureRows(sid, ["FEATURE_MERGED", "IN_PROGRESS"]),
+      featureRows("someone-else", ["FEATURE_MERGED"]),
+    ]) {
+      writeAcceptance(dir, sid, "- [x] done\n", { tracker: rows });
+      const result = await runStopGate(dir, sid);
+      assert.doesNotMatch(result.stdout, /FEATURE NOT LANDED/);
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: in-flight background_tasks skip the unlanded-feature block", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "feat-bg";
+    writeAcceptance(dir, sid, "- [x] done\n", { tracker: featureRows(sid, ["FEATURE_MERGED"]) });
+    const running = await runStopGate(dir, sid, { background_tasks: [{ id: "w1", type: "local_workflow", status: "running" }] });
+    assert.doesNotMatch(running.stdout, /FEATURE NOT LANDED/);
+    const settled = await runStopGate(dir, sid, { background_tasks: [{ id: "w1", type: "local_workflow", status: "completed" }] });
+    assert.match(settled.stdout, /FEATURE NOT LANDED/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 after("stop-gate: no stray temp directories are left behind after the suite runs", () => {
   const stray = fs.readdirSync(SCRATCH_ROOT).filter((n) => n.startsWith("stop-gate-test-"));
   assert.deepEqual(stray, [], "every fixture temp dir must be cleaned up in its own test's finally block");
