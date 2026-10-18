@@ -15,7 +15,7 @@ import {
   markerPresent, isIgnored, detectLang, cacheKey, sidOf, PROJECT_ROOT,
   renderKnownIssuesDoc, gitTrackedFiles, pruneSessions, recordFailure, topRules,
   writeRootPin, rootPinPath, resolveProjectRoot, agentGrantFile, grantRunnerDispatches, spendRunnerDispatch,
-  acceptanceCriteria, featureCriteria, runnerDispatchCount,
+  acceptanceCriteria, featureCriteria, runnerDispatchCount, hasDocWriteGrant,
 } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
@@ -581,4 +581,22 @@ test("autoActive: an epic slug resolves through plan-index; COMPLETE children re
   const expr = `console.log(JSON.stringify([m.autoActive("s"), m.autoForceBlock("s")]));`;
   assert.deepEqual(autoRun(row("COMPLETE"), docs, [["s", "epic"]], expr), [false, false]);
   assert.deepEqual(autoRun(row("PENDING"), docs, [["s", "epic"]], expr), [true, true]);
+});
+
+test("hasDocWriteGrant: pending grant, session grant and none", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-grant-"));
+  try {
+    const ctx = { root: dir, grantStateDir: dir };
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), false);
+    fs.writeFileSync(path.join(dir, "doc-write-pending"), "x");
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), true);
+    assert.equal(fs.existsSync(path.join(dir, "sessions", "s1", "doc-write")), false, "read-only by default");
+    assert.equal(hasDocWriteGrant({ sid: "s1", claim: true }, ctx), true);
+    assert.equal(fs.existsSync(path.join(dir, "sessions", "s1", "doc-write")), true, "claim writes the session marker");
+    fs.rmSync(path.join(dir, "doc-write-pending"));
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), true, "session marker alone grants");
+    assert.equal(hasDocWriteGrant({ sid: "s2" }, ctx), false, "other session has none");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
+import { hasDocWriteGrant, loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
@@ -50,6 +50,31 @@ function commandDirectoryTargets(command, worktree) {
 
 function usesAlternateGitRoot(command) {
   return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_DIR\s*=|\bGIT_WORK_TREE\s*=/.test(command);
+}
+
+// Guarded doc paths named by any `rm` / `git rm` segment of a (chained) command.
+function removedDocs(cmd, docPaths) {
+  const hits = [];
+  for (const segment of cmd.split(/\r?\n|&&|\|\||[;&|]/)) {
+    const words = (segment.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((w) => w.replace(/^["']|["']$/g, ""));
+    while (words.length && /^[({]$|^\w+=/.test(words[0])) words.shift();
+    if (words[0] === "sudo") words.shift();
+    let args;
+    if (words[0] === "rm") args = words.slice(1);
+    else if (words[0] === "git") {
+      let i = 1;
+      while (i < words.length && words[i].startsWith("-")) i += words[i] === "-C" || words[i] === "-c" ? 2 : 1;
+      if (words[i] !== "rm") continue;
+      args = words.slice(i + 1);
+    } else continue;
+    for (const arg of args) {
+      if (arg.startsWith("-") || !arg) continue;
+      const rel = path.relative(activeRoot, path.resolve(process.cwd(), arg)).split(path.sep).join("/");
+      if (rel.startsWith("..")) continue;
+      if (docPaths.some((p) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(p).test(c)))) hits.push(rel);
+    }
+  }
+  return hits;
 }
 
 function allowed(entry, candidate) {
@@ -253,6 +278,21 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
   process.exit(2);
 }
 
+// Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.
+if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
+  const docPaths = cfg.docWriteGuard?.docPaths || ["docs/**"];
+  const hit = removedDocs(command, docPaths);
+  if (hit.length && !hasDocWriteGrant({ sid: sidOf(input), claim: true }, { ...activeContext, grantStateDir: STATE_DIR })) {
+    logEvent({ ev: "docguard", file: hit[0], sid: sidOf(input), result: "blocked" });
+    process.stderr.write(
+      `craftsman: "${hit[0]}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths); ` +
+      `removing it with rm / git rm needs doc-write authority. Hand the change to /plan, or if you ARE ` +
+      `that command, first run: node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`
+    );
+    process.exit(2);
+  }
+}
+
 if (!file) process.exit(0);
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
@@ -326,32 +366,10 @@ if (g.enabled !== false && writeTool) {
   if (isDoc) {
     const sid = sidOf(input);
     // Grants live with the root project, whichever worktree is being edited
-    // (ARCH-STATE-06) — doc-write.mjs drops its grant at the root STATE_DIR.
-    const marker = path.join(sessionDir(sid), "doc-write");      // this session's own authority
-    const pending = path.join(STATE_DIR, "doc-write-pending");   // grant dropped by doc-write.mjs
-    const ttl = g.ttlMs ?? 3600000;
-    const pendingTtl = g.pendingTtlMs ?? 1800000;
-    let ok = false;
+    // (ARCH-STATE-06); core owns the check and claims/refreshes the marker.
+    const ok = hasDocWriteGrant({ sid, claim: true }, { ...activeContext, grantStateDir: STATE_DIR });
 
-    // (a) this session already holds authority (refresh keeps long runs alive)
-    try { if (Date.now() - fs.statSync(marker).mtimeMs < ttl) ok = true; } catch {}
-
-    // (b) else CLAIM a fresh grant set by /plan|/orchestrate|/sync-docs. The grant
-    //     is NOT consumed (so multiple concurrent writer sessions can each claim
-    //     their own per-session marker); it simply expires by pendingTtl.
     if (!ok) {
-      try {
-        if (Date.now() - fs.statSync(pending).mtimeMs < pendingTtl) {
-          fs.mkdirSync(sessionDir(sid), { recursive: true });
-          fs.writeFileSync(marker, `claimed ${new Date().toISOString()}\n`);
-          ok = true;
-        }
-      } catch {}
-    }
-
-    if (ok) {
-      try { const now = new Date(); fs.utimesSync(marker, now, now); } catch {} // keep alive for long writer commands
-    } else {
       logEvent({ ev: "docguard", file: rel, sid, result: "blocked" });
       process.stderr.write(
         `craftsman: "${rel}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths). ` +

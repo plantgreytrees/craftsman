@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { STATE_DIR, loadConfig, logEvent, projectContext, readStdin, sessionDir, sidOf } from "./lib/core.mjs";
+import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin } from "./lib/core.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
 const CLOSED = ["COMPLETE", "CANCELLED"];
@@ -17,33 +17,9 @@ function git(context, args) {
 }
 const tryGit = (context, args) => { try { return git(context, args); } catch { return null; } };
 
-const mtimeOf = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
-const validTtl = (ttl) => typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0;
-
-// Pure grant rule, mirroring pre-guard: the session's own marker lives for
-// ttlMs, the global doc-write-pending marker for the shorter pendingTtlMs.
-// A malformed TTL grants nothing.
-export function grantValid({ pendingMtime, sessionMtime, now, pendingTtlMs, ttlMs }) {
-  if (!validTtl(pendingTtlMs) || !validTtl(ttlMs)) return false;
-  if (typeof pendingMtime === "number" && now - pendingMtime < pendingTtlMs) return true;
-  return typeof sessionMtime === "number" && now - sessionMtime < ttlMs;
-}
-
-// Inputs come from the root STATE_DIR, where doc-write.mjs drops the grant and
-// pre-guard reads it (ARCH-STATE-06); tests inject grantStateDir. The grant is
-// required even when docWriteGuard.enabled is false.
-function hasGrant(sid, context) {
-  const guard = loadConfig(context).docWriteGuard || {};
-  const stateDir = context.grantStateDir ?? STATE_DIR;
-  const session = sid ? path.join(sessionDir(sidOf({ session_id: sid }), { stateDir }), "doc-write") : null;
-  return grantValid({
-    pendingMtime: mtimeOf(path.join(stateDir, "doc-write-pending")),
-    sessionMtime: session ? mtimeOf(session) : null,
-    now: Date.now(),
-    pendingTtlMs: guard.pendingTtlMs ?? 1800000,
-    ttlMs: guard.ttlMs ?? 3600000,
-  });
-}
+// The grant rule and check live in core (ARCH-DOCS-07); re-exported for callers.
+export { grantValid };
+const hasGrant = (sid, context) => hasDocWriteGrant({ sid }, context);
 
 // Default git runner for the referrer scan: throws on any non-zero status.
 function defaultGit(args, context) {
