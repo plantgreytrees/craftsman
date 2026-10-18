@@ -431,8 +431,8 @@ recommendations above are amended where these differ.
    `/clear` is shown to change it, fall back to keying on the Claude Code process (parent
    pid plus start time, as `worktree-sweep.mjs:68` already does for locks).
    `CRAFTSMAN_FOCUS=<kind>:<slug>` is accepted as a launch-time seed that wins when set.
-   Only `kind: feature` is accepted today; `story` and `epic` are rejected with "not yet (the types are now specified in docs/ideas/plan-hierarchy.md)
-   supported" until the other session defines them.
+   Only `kind: feature` is accepted today; `story` and `epic` are rejected with "not yet
+   supported" until the other session defines them. (See docs/ideas/plan-hierarchy.md, which now defines them.)
 6. **Merge has full git rights over registered repos, submodules, worktrees and branches.**
    `/craftsman:merge` gets `allowed-tools: Bash(git *), Bash(gh *), Bash(az *)` plus the
    `repo-exec.mjs`/`merge-tree.mjs` calls in its own frontmatter, so those run without
