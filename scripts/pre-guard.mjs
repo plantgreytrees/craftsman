@@ -145,30 +145,32 @@ function stripHeredocs(text) {
 // newline ( ) and backticks separate segments; a leading `\` on a word is
 // dropped (`\rm`). `ok` is false when a quote never closes.
 function shellSegments(cmd) {
-  const segments = [], seps = [], substs = [];
-  let words = [], word = null, quote = null, subst = false, sep = null;
+  const segments = [], seps = [], substs = [], arrays = [];
+  let words = [], word = null, quote = null, subst = false, arr = false, sep = null;
   const endWord = () => { if (word !== null) words.push(word); word = null; };
   // seps[i]: the separator before segment i; substs[i]: it opened a `...` or $(...).
-  const endSegment = () => { endWord(); if (words.length) { segments.push(words); seps.push(sep); substs.push(subst); sep = null; } words = []; subst = false; };
+  const endSegment = () => { endWord(); if (words.length) { segments.push(words); seps.push(sep); substs.push(subst); arrays.push(arr); sep = null; } words = []; subst = false; arr = false; };
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i];
     if (quote) {
       if (c === quote) quote = null;
       else if (c === "\\" && quote === '"' && i + 1 < cmd.length) word += cmd[++i];
       else word += c;
-    } else if (c === "#" && word === null) { while (i + 1 < cmd.length && cmd[i + 1] !== "\n") i++; } // comment: never opens a quote
+    } else if (c === "#" && word === null && (i === 0 || /[\s;&|(]/.test(cmd[i - 1]))) { while (i + 1 < cmd.length && cmd[i + 1] !== "\n") i++; } // comment: never opens a quote
     else if (c === '"' || c === "'") { quote = c; word ??= ""; }
     else if (c === "\\" && i + 1 < cmd.length) { word = (word ?? "") + cmd[++i]; }
     else if (/\s/.test(c) && c !== "\n") endWord();
     else if ("\n;&|()`".includes(c)) {
       if (c === "`" || (c === "(" && word !== null && word.endsWith("$"))) subst = true;
+      const opensArray = c === "(" && word !== null && /^\w+\+?=$/.test(word); // NAME=( with nothing between
       endSegment();
+      arr = opensArray;
       if (!(sep === "|" && "()`".includes(c))) sep = c;
     }
     else word = (word ?? "") + c;
   }
   endSegment();
-  return { segments, seps, substs, ok: !quote };
+  return { segments, seps, substs, arrays, ok: !quote };
 }
 
 const OPT_ARG = { sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U"]), env: new Set(["-u", "-C", "-S"]),
@@ -446,8 +448,7 @@ function removedDocs(cmd, docPaths) {
     if (!parsed.ok && docPaths.some((p) => { const b = guardedBase(p); return b && text.includes(b); })) hits.push("(unparseable command naming a guarded path)");
     parsed.segments.forEach((words, i) => {
       state.sep = parsed.seps[i]; state.prev = parsed.segments[i - 1] || null; state.subst = parsed.substs[i];
-      const before = parsed.segments[i - 1];
-      if (before && state.sep === "(" && !state.subst && /^\w+\+?=$/.test(before[before.length - 1])) { // NAME=(a b): the elements are the value
+      if (parsed.arrays[i] && !state.subst) { // NAME=(a b): the elements are the value
         for (const w of words) if (w) st.seen.push({ w, cwd: state.cwd });
         return;
       }

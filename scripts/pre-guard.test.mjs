@@ -768,3 +768,11 @@ test("pre-guard: coproc, function and exec -a run the command they wrap (18.2)",
     "unlink ~/x", 'unlink "$PWD/docs/plans/x.md"', "unlink $(pwd)/docs/plans/x.md", "mv ~/x /tmp/y", 'mv "$PWD/docs" /tmp/y', "mv $(pwd)/docs /tmp/y",
   ]);
 });
+
+test("pre-guard: NAME=( starts an array only when ( follows the word directly (19.1)", () => {
+  grantedPair("craftsman-arr19-", "arr19", null, ["f=; (rm -rf docs)", "f=\n(rm -rf docs)", "x= && (rm -rf docs/plans)", "f=(docs); rm -rf $f"]);
+});
+
+test("pre-guard: # after ) or a closing backtick is not a comment (19.2)", () => {
+  grantedPair("craftsman-hash19-", "hash19", null, ["echo $(true)#; rm -rf docs", "echo `true`#; rm -rf docs", "echo $((1))#; rm -rf docs"], ["# note; rm -rf docs"]);
+});
