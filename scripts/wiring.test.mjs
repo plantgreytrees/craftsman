@@ -295,3 +295,52 @@ test("wiring: a command that reads a partial still names it by its real path", (
   const text = promptFiles.filter((f) => !path.basename(f).startsWith("_")).map((f) => fs.readFileSync(f, "utf8")).join("\n");
   for (const f of ["_shared-machinery.md", "_shared-execution.md", "_architecture.md"]) assert.ok(text.includes(f), `${f} is still referenced`);
 });
+
+// 18.0: one root-only instruction story. The default (every "delegate" is a brief you run yourself) is stated once
+// per reading context, the subagent path is its stated alternative, and nothing dispatches an agent that mode blocks.
+const read = (rel) => fs.readFileSync(path.join(PLUGIN_ROOT, rel), "utf8");
+const relOf = (file) => path.relative(PLUGIN_ROOT, file).split(path.sep).join("/");
+const EXCEPTION_AGENTS = ["plan-strategist", "scrutineer", "idea-critic", "architect-analyst"];
+
+test("wiring: no command dispatches an agent through Task unless it is a named root-only exception or states the subagents path", () => {
+  const offenders = [];
+  for (const file of promptFiles.filter((f) => relOf(f).startsWith("commands/"))) {
+    read(relOf(file)).split("\n").forEach((line, i) => {
+      if (!/via Task|subagent_type: "/.test(line)) return;
+      if (EXCEPTION_AGENTS.some((agent) => line.includes(agent)) || /agentMode|subagents|root-only/.test(line)) return;
+      offenders.push(`${relOf(file)}:${i + 1}`);
+    });
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("wiring: the root-only default and its subagents alternative are each stated once in the two docs commands read", () => {
+  for (const doc of ["commands/_shared-machinery.md", "commands/_shared-analysis.md"]) {
+    const text = read(doc);
+    assert.equal(text.match(/default `root-only`/gi)?.length, 1, `${doc}: the default is stated once`);
+    assert.equal(text.match(/`agentMode: "subagents"`|`execution\.agentMode: "subagents"`|only `agentMode: "subagents"`/g)?.length, 1, `${doc}: the alternative is stated once`);
+  }
+});
+
+test("wiring: /plan points at the Agent mode section of a doc it actually reads", () => {
+  const line = read("commands/plan.md").split("\n").find((l) => /Agent mode/.test(l));
+  assert.ok(line, "plan.md names the Agent mode rule");
+  assert.match(line, /_shared-analysis\.md/);
+  assert.doesNotMatch(line, /_shared-machinery\.md/, "plan.md never loads _shared-machinery.md");
+});
+
+test("wiring: unit-runner and implementer agree on who commits", () => {
+  const implementer = read("agents/implementer.md");
+  const runner = read("agents/unit-runner.md");
+  assert.match(implementer, /Never run `git commit`/);
+  assert.match(implementer, /the unit-runner commits/);
+  assert.match(runner, /implementer never commits/);
+  assert.match(runner, /Commit in `<worktree_path>`/);
+  assert.match(read("commands/_shared-execution.md"), /it never commits/);
+});
+
+test("wiring: the review-routing criteria exist once, in agents/review-router.md, and the commands point to it", () => {
+  const holders = promptFiles.filter((f) => /~?120 (changed )?lines/.test(fs.readFileSync(f, "utf8"))).map(relOf);
+  assert.deepEqual(holders, ["agents/review-router.md"]);
+  for (const cmd of ["commands/_shared-execution.md", "commands/scrutinise.md"]) assert.match(read(cmd), /agents\/review-router\.md/, cmd);
+});

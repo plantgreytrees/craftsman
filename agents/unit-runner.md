@@ -15,7 +15,7 @@ Your prompt gives `role`, the root `session_id`, `plugin_root`, `project_root`, 
 5. An open decision only the user can make → no edit, no default: return `PARKED` with `parked:[{question, options[], recommended?}]`.
 6. Implement as `agents/implementer.md`: scope.read/docs only, scope.write only, every cited `[decided]` rule, tests for every criterion. A rule you cannot honour → `BLOCKED` with its id.
 7. Gate with the repo's commands; must be green.
-8. Commit on the unit branch; return `IMPLEMENTED` with `sha` and `worktree_path`.
+8. Commit in `<worktree_path>` (the implementer never commits); return `IMPLEMENTED` with `sha` and `worktree_path`.
 
 Fix round: given `worktree_path` and review findings, fix only those, then steps 7–8.
 
@@ -39,7 +39,7 @@ Any `BLOCKED` return from implement, review or land → root runs `block` (ARCH-
 3. `S claim` `{action:"release", session_id, plan, unit}`. Return `BLOCKED`.
 
 ## Features
-Prompt has `feature:` or role `land-feature` → follow `commands/_features.md` (prepare/reattach, land-unit, scope release, publish).
+Prompt has `feature:` or role `land-feature` → follow `commands/_features.md`.
 
 ## Return
 Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` ≤2k tokens. Never force-push, `--no-verify` or touch files outside the unit.
