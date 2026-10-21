@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { hasDocWriteGrant, loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
+import { hasDocWriteGrant, loadConfig, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
@@ -802,7 +802,7 @@ const binding = readWorktreeBinding(input, activeScope?.project_root
 const activeRoot = activeScope?.project_root || PROJECT_ROOT;
 const activeContext = { root: activeRoot, stateDir: path.join(activeRoot, ".craftsman"), offFlag: path.join(activeRoot, ".craftsman", "off") };
 const cfg = loadConfig(activeContext);
-if (!enabled(cfg, activeContext)) process.exit(0);
+if (!safetyEnabled()) process.exit(0); // ARCH-SAFETY-05: CRAFTSMAN_SAFETY=off in the user's environment only
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
 if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   if (activeScope.scope_ambiguous) {
@@ -896,6 +896,59 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
   process.exit(2);
 }
 
+// ARCH-SAFETY-05: a tool call cannot switch the guards off. Token matching only; anything the parser
+// cannot read stays with the sandbox. "never" paths are written by craftsman's own scripts, never by a
+// tool call. "scoped" paths can be edited by a unit whose scope manifest (made by /orchestrate) names them.
+const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json"];
+const SELF_SCOPED = ["hooks/hooks.json", "craftsman.config.json"];
+const SAFETY_CONFIG_KEYS = ["safety", "stopGate"];
+const selfKind = (relPath) => {
+  const r = String(relPath).replace(/^\.\//, "");
+  if (SELF_NEVER.some((p) => globToRe(p).test(r))) return "never";
+  return SELF_SCOPED.some((p) => r === p || r.endsWith("/" + p)) ? "scoped" : null;
+};
+const scopeNames = (relPath) => (activeScope?.scope?.write || []).some((entry) => allowed(entry, String(relPath).replace(/^\.\//, "")));
+function safetyKeysChanged(current, next) {
+  if (next === null) return false; // the edit cannot apply; the tool fails on its own
+  let after;
+  try { after = JSON.parse(next); } catch { return true; } // a result that is not JSON cannot be shown safe
+  let before = {};
+  try { before = JSON.parse(current); } catch { /* an unreadable current file counts as empty */ }
+  return SAFETY_CONFIG_KEYS.some((key) => JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after?.[key] ?? null));
+}
+function denySelfDisable(what) {
+  logEvent({ ms: Date.now() - T0, ev: "selfguard", sid: sidOf(input), what, result: "blocked" });
+  process.stderr.write(
+    `craftsman: ${what} is blocked: craftsman's own guards cannot be switched off or rewritten by a tool call. ` +
+    `Ask the user to make this change themselves, or run the craftsman command that owns it.\n`
+  );
+  process.exit(2);
+}
+if (tool === "Bash" && command) {
+  const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
+  const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json)/.test(command);
+  const scopedMentioned = ["hooks/hooks.json", "craftsman.config.json"].filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
+  const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)])
+    .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
+  if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
+  for (const hit of concrete) {
+    const kind = selfKind(hit);
+    if (kind === "never") denySelfDisable(`a command that writes ${hit}`);
+    if (kind === "scoped" && !scopeNames(hit)) denySelfDisable(`a command that writes ${hit}`);
+  }
+  if (verb) for (const name of scopedMentioned) if (!scopeNames(name)) denySelfDisable(`a command that writes ${name}`);
+  // The scripts that grant doc authority or flip the gates run only after the command that owns them.
+  const script = (name) => new RegExp(`\\bnode\\s+["']?[^\\s;&|"']*\\b${name}\\.mjs["']?(?:\\s+([^\\s;&|)]*))?`).exec(command);
+  const grant = script("doc-write");
+  if (grant && grant[1] !== "off" && !commandInvoked(sidOf(input), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
+    denySelfDisable("doc-write.mjs on outside /plan, /orchestrate, /sync-docs, /idea, /architect or /builtin-check");
+  }
+  const toggle = script("toggle");
+  if (toggle && toggle[1] !== "on" && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
+    denySelfDisable("toggle.mjs off unless the user typed /craftsman:toggle");
+  }
+}
+
 // Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.
 if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
   const docPaths = cfg.docWriteGuard?.docPaths || ["docs/**"];
@@ -921,6 +974,17 @@ if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
 }
 
 if (!file) process.exit(0); // no file: nothing to time or log
+
+if (["Write", "Edit"].includes(tool)) {
+  const kind = selfKind(rel);
+  if (kind === "never") denySelfDisable(`writing ${rel}`);
+  if (kind === "scoped" && !scopeNames(rel)) {
+    if (rel.endsWith("hooks/hooks.json")) denySelfDisable(`editing ${rel}`);
+    let current = "";
+    try { current = fs.readFileSync(path.resolve(activeRoot, file), "utf8"); } catch {}
+    if (safetyKeysChanged(current, afterEdit(current))) denySelfDisable(`editing the safety keys (${SAFETY_CONFIG_KEYS.join(", ")}) of ${rel}`);
+  }
+}
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
 //    written, and the root's generated ledger block is never hand-edited.

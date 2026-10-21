@@ -768,23 +768,50 @@ for (const script of ["quality-gate.mjs", "stop-gate.mjs", "builtin-skill-contex
 }
 
 // the SessionStart guard-state reasons, as a pure function
-test("guardState: lists every reason the guards are off, none when they are on", () => {
+test("guardState: separates what turns safety off from what turns only the quality machinery off", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-guardstate-"));
   try {
-    const none = coreNs.guardState({ cfg: {}, context: { root: dir, offFlag: path.join(dir, "off") }, env: {}, tmp: dir, sid: "g1" });
-    assert.deepEqual(none, []);
+    const ctx = { root: dir, offFlag: path.join(dir, "off") };
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: ctx, env: {}, tmp: dir, sid: "g1" }), { safety: [], quality: [] });
     fs.writeFileSync(path.join(dir, "off"), "");
-    const all = coreNs.guardState({
-      cfg: { enabled: false }, context: { root: dir, offFlag: path.join(dir, "off") },
-      env: { CRAFTSMAN: "0", CRAFTSMAN_SAFETY: "off" }, tmp: dir, sid: "g1",
-    });
-    assert.equal(all.length, 4);
+    const all = coreNs.guardState({ cfg: { enabled: false }, context: ctx, env: { CRAFTSMAN: "0", CRAFTSMAN_SAFETY: "off" }, tmp: dir, sid: "g1" });
+    assert.deepEqual(all.safety, ["CRAFTSMAN_SAFETY=off is set in the environment"]);
+    assert.equal(all.quality.length, 3);
     const marker = path.join(dir, `craftsman-launcher-${process.getuid?.() ?? 0}`, "node-missing-g2");
     fs.mkdirSync(marker, { recursive: true });
-    assert.deepEqual(coreNs.guardState({ cfg: {}, context: { root: dir, offFlag: path.join(dir, "none") }, env: {}, tmp: dir, sid: "g2" }),
+    const none = { root: dir, offFlag: path.join(dir, "none") };
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: none, env: {}, tmp: dir, sid: "g2" }).safety,
       ["node was missing earlier this session (hooks/run.sh left its marker)"]);
-    assert.deepEqual(coreNs.guardState({ cfg: {}, context: { root: dir, offFlag: path.join(dir, "none") }, env: {}, tmp: dir, sid: "has.dot" }), [],
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: none, env: {}, tmp: dir, sid: "has.dot" }).safety, [],
       "a session id run.sh would not accept is the shared marker, not this session's");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 8.2: the safety side has one off switch, and it is the user's environment.
+test("safetyEnabled: only CRAFTSMAN_SAFETY=off turns it off; CRAFTSMAN=off does not", () => {
+  assert.equal(coreNs.safetyEnabled({}), true);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN: "off" }), true);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN: "0" }), true);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN_SAFETY: "off" }), false);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN_SAFETY: "OFF" }), false);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN_SAFETY: "on" }), true);
+});
+
+test("recordCommand / commandInvoked: per session, by command, by route, and not past the ttl", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-commands-"));
+  try {
+    const context = { stateDir: dir };
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context }), false);
+    coreNs.recordCommand("s1", "plan", "skill", context);
+    assert.equal(coreNs.commandInvoked("s1", ["plan", "orchestrate"], { context }), true);
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context, via: "prompt" }), false, "route matters");
+    assert.equal(coreNs.commandInvoked("s1", ["toggle"], { context }), false, "command matters");
+    assert.equal(coreNs.commandInvoked("s2", ["plan"], { context }), false, "session matters");
+    coreNs.recordCommand("s1", "plan", "prompt", context);
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context, via: "prompt" }), true);
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context, now: Date.now() + 2 * 3600 * 1000, ttlMs: 3600000 }), false, "ttl");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

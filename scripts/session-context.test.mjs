@@ -112,17 +112,26 @@ for (const [name, reason, options] of [
   ["CRAFTSMAN=off", "CRAFTSMAN=off is set in the environment", { env: { CRAFTSMAN: "off" } }],
   [".craftsman/off", ".craftsman/off exists", { setup: (dir) => { fs.mkdirSync(path.join(dir, ".craftsman")); fs.writeFileSync(path.join(dir, ".craftsman", "off"), ""); } }],
   ["enabled:false", "enabled is false in craftsman.config.json", { setup: (dir) => fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ enabled: false })) }],
-  ["CRAFTSMAN_SAFETY=off", "CRAFTSMAN_SAFETY=off is set in the environment", { env: { CRAFTSMAN_SAFETY: "off" } }],
 ]) {
-  test(`session-context: guards off because ${name} is reported with its reason`, () => {
+  test(`session-context: ${name} turns off the quality machinery only, and says the safety guards stay on`, () => {
     withProject((dir) => {
       const { message, context } = startState(dir, options);
-      assert.match(message, new RegExp(`craftsman guards off: .*${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-      assert.match(context, /craftsman guards off:/);
-      assert.doesNotMatch(context, /craftsman guards: on/);
+      const escaped = reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      assert.match(message, new RegExp(`craftsman quality, doc and tracker gates off: .*${escaped}.*safety guards stay on`));
+      assert.match(context, /safety guards stay on/);
+      assert.doesNotMatch(message + context, /craftsman guards off/);
     });
   });
 }
+
+test("session-context: CRAFTSMAN_SAFETY=off is the one thing reported as guards off", () => {
+  withProject((dir) => {
+    const { message, context } = startState(dir, { env: { CRAFTSMAN_SAFETY: "off" } });
+    assert.match(message, /craftsman guards off: CRAFTSMAN_SAFETY=off is set in the environment/);
+    assert.match(context, /craftsman guards off:/);
+    assert.doesNotMatch(context, /craftsman guards: on/);
+  });
+});
 
 test("session-context: a node-missing marker left by hooks/run.sh earlier in this session is reported", () => {
   withProject((dir) => {

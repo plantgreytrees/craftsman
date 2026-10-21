@@ -410,3 +410,20 @@ test("agent-mode-guard: bad input, an exception or a broken default config denie
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ARCH-SAFETY-05: the dispatch rules are safety, so only CRAFTSMAN_SAFETY=off lifts them.
+test("agent-mode-guard: CRAFTSMAN=off still blocks a dispatch; CRAFTSMAN_SAFETY=off allows it (8.2)", () => {
+  const dir = tmpProject();
+  try {
+    const dispatch = { session_id: "safety-env", tool_name: "Agent", tool_input: { subagent_type: "craftsman:implementer" } };
+    const under = (env) => spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(dispatch), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env } });
+    assert.equal(under({}).status, 2, "baseline: root-only blocks the implementer");
+    assert.equal(under({ CRAFTSMAN: "off" }).status, 2);
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "off"), "off\n");
+    assert.equal(under({}).status, 2, ".craftsman/off does not lift it");
+    assert.equal(under({ CRAFTSMAN_SAFETY: "off" }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

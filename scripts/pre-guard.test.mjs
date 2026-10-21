@@ -1028,3 +1028,123 @@ test("pre-guard: bad input, an exception or a broken default config denies and n
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ARCH-SAFETY-05 (8.1/8.2): a tool call cannot switch the guards off. Token matching only; what the
+// parser cannot read stays with the sandbox.
+const OSG = path.join(ROOT, "orchestrate-scope-guard.mjs");
+
+function selfDisableProject() {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-selfdisable-")));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  fs.mkdirSync(path.join(dir, "hooks"));
+  fs.writeFileSync(path.join(dir, "hooks", "hooks.json"), "{}\n");
+  fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ maxFeedbackLines: 40, stopGate: { enabled: true } }, null, 2) + "\n");
+  return dir;
+}
+const bashIn = (dir, sid, command) => run(GUARD, dir, { session_id: sid, tool_name: "Bash", tool_input: { command } });
+const typed = (dir, sid, prompt) => run(OSG, dir, { session_id: sid, prompt });
+
+test("pre-guard: a Bash command that switches the guards off or edits their config is blocked (8.1)", () => {
+  const dir = selfDisableProject();
+  try {
+    const blocked = [
+      "echo off > .craftsman/off", "touch .craftsman/off", "echo x >> .craftsman/off", "cp /dev/null .craftsman/off",
+      "echo '{}' > craftsman.config.json", "sed -i 's/true/false/' craftsman.config.json", "mv x.json craftsman.config.json",
+      "echo '{}' > hooks/hooks.json", "tee hooks/hooks.json < x.json", "cp evil.json hooks/hooks.json", "rm hooks/hooks.json",
+      "touch .craftsman/doc-write-pending", "echo x > .craftsman/sessions/s1/doc-write", "echo '{}' > .craftsman/sessions/s1/commands.json",
+      "node scripts/toggle.mjs off", 'node "${CLAUDE_PLUGIN_ROOT}/scripts/toggle.mjs" off', "node scripts/toggle.mjs",
+      "node scripts/doc-write.mjs on", 'node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs"', "cd scripts && node doc-write.mjs on",
+    ];
+    for (const command of blocked) {
+      const r = bashIn(dir, "sd-1", command);
+      assert.equal(r.status, 2, `blocked: ${command} (${r.stderr})`);
+    }
+    const allowed = [
+      "ls .craftsman", "cat .craftsman/off", "cat craftsman.config.json | head", "git diff hooks/hooks.json", "cat hooks/hooks.json",
+      "node scripts/toggle.mjs on", "node scripts/doc-write.mjs off", "node --check scripts/toggle.mjs", "grep toggle.mjs commands/toggle.md",
+      "cat craftsman.config.json > /dev/null", "echo hi > notes.txt",
+    ];
+    for (const command of allowed) {
+      const r = bashIn(dir, "sd-1", command);
+      assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: Write and Edit cannot create .craftsman/off, edit hooks.json or the safety keys (8.1)", () => {
+  const dir = selfDisableProject();
+  try {
+    const call = (tool, input) => run(GUARD, dir, { session_id: "sd-2", tool_name: tool, tool_input: input });
+    const cfg = path.join(dir, "craftsman.config.json");
+    assert.equal(call("Write", { file_path: path.join(dir, ".craftsman", "off"), content: "off\n" }).status, 2);
+    assert.equal(call("Write", { file_path: path.join(dir, "hooks", "hooks.json"), content: "{}\n" }).status, 2);
+    assert.equal(call("Edit", { file_path: path.join(dir, "hooks", "hooks.json"), old_string: "{}", new_string: '{"hooks":{}}' }).status, 2);
+    assert.equal(call("Edit", { file_path: cfg, old_string: '"enabled": true', new_string: '"enabled": false' }).status, 2, "stopGate is a safety key");
+    assert.equal(call("Write", { file_path: cfg, content: JSON.stringify({ safety: { x: 1 } }) }).status, 2, "a new safety block is a safety key");
+    assert.equal(call("Write", { file_path: cfg, content: "{ not json" }).status, 2, "an unreadable result cannot be shown safe");
+    assert.equal(call("Edit", { file_path: cfg, old_string: '"maxFeedbackLines": 40', new_string: '"maxFeedbackLines": 10' }).status, 0, "other keys stay editable");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: an active unit scope that names hooks.json or craftsman.config.json lets that file be edited (8.1)", () => {
+  const dir = selfDisableProject();
+  try {
+    const sid = "sd-3";
+    assert.equal(typed(dir, sid, "/craftsman:orchestrate docs/plans/p.md").status, 0); // only /orchestrate or /auto may hand a unit these files
+    const manifest = { session_id: sid, plan: "docs/plans/p.md", unit: "u", project: ".",
+      scope: { read: ["hooks/hooks.json", "craftsman.config.json"], docs: [], write: ["hooks/hooks.json", "craftsman.config.json"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    const call = (tool, input) => run(GUARD, dir, { session_id: sid, tool_name: tool, tool_input: input });
+    assert.equal(call("Edit", { file_path: path.join(dir, "craftsman.config.json"), old_string: '"enabled": true', new_string: '"enabled": false' }).status, 0);
+    assert.equal(call("Write", { file_path: path.join(dir, "hooks", "hooks.json"), content: "{}\n" }).status, 0);
+    assert.equal(bashIn(dir, sid, "echo '{}' > hooks/hooks.json").status, 0);
+    assert.equal(call("Write", { file_path: path.join(dir, ".craftsman", "off"), content: "off\n" }).status, 2, "never, even with a scope");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: doc-write.mjs on needs a doc-writing command, toggle.mjs off needs the user to have typed /craftsman:toggle (8.1)", () => {
+  const dir = selfDisableProject();
+  try {
+    const grant = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on';
+    const off = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/toggle.mjs" off';
+    assert.equal(bashIn(dir, "sd-4", grant).status, 2);
+    assert.equal(typed(dir, "sd-4", "/craftsman:plan add a feature").status, 0);
+    assert.equal(bashIn(dir, "sd-4", grant).status, 0, "/plan's grant call still passes");
+    assert.equal(bashIn(dir, "sd-4", off).status, 2, "a plan run is not a toggle");
+    assert.equal(bashIn(dir, "sd-5", grant).status, 2, "another session has no such command");
+    // a model-invoked Skill call counts for doc writers, never for toggle
+    const skill = (sid, name) => run(OSG, dir, { session_id: sid, tool_name: "Skill", tool_input: { skill: name, args: "off" } });
+    assert.equal(skill("sd-6", "craftsman:orchestrate").status, 0);
+    assert.equal(bashIn(dir, "sd-6", grant).status, 0);
+    assert.equal(skill("sd-7", "craftsman:toggle").status, 0);
+    assert.equal(bashIn(dir, "sd-7", off).status, 2, "the model cannot invoke its way past the toggle gate");
+    assert.equal(typed(dir, "sd-8", "/craftsman:toggle off").status, 0);
+    assert.equal(bashIn(dir, "sd-8", off).status, 0, "/craftsman:toggle still passes");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: CRAFTSMAN=off and a .craftsman/off file leave it blocking; only CRAFTSMAN_SAFETY=off lets a call through (8.2)", () => {
+  const dir = selfDisableProject();
+  try {
+    const lock = { session_id: "sd-9", tool_name: "Write", tool_input: { file_path: path.join(dir, "package-lock.json"), content: "{}" } };
+    assert.equal(run(GUARD, dir, lock).status, 2, "baseline: a lock file is protected");
+    assert.equal(run(GUARD, dir, lock, { CRAFTSMAN: "off" }).status, 2);
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "off"), "off\n");
+    assert.equal(run(GUARD, dir, lock).status, 2, ".craftsman/off switches off quality and docs, not safety");
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ enabled: false }));
+    assert.equal(run(GUARD, dir, lock).status, 2, "enabled:false in the config is not an off switch for safety");
+    assert.equal(run(GUARD, dir, lock, { CRAFTSMAN_SAFETY: "off" }).status, 0);
+    assert.equal(run(GUARD, dir, lock, { CRAFTSMAN_SAFETY: "OFF" }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -33,12 +33,16 @@ const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
 // ARCH-SAFETY-04: say whether the guards are on, and if not, why. Off for a reason the user may not
 // know about is the dangerous case, so it reaches the user as well as the model.
-const guardsOff = guardState({ cfg, context, sid: input.session_id });
-const guardsOffLine = `craftsman guards off: ${guardsOff.join("; ")}.`;
+const state = guardState({ cfg, context, sid: input.session_id });
+const guardsOffLine = `craftsman guards off: ${state.safety.join("; ")}.`;
+const qualityOffLine = `craftsman quality, doc and tracker gates off: ${state.quality.join("; ")}; the safety guards stay on.`;
+const stateLines = [state.safety.length ? guardsOffLine : "", state.quality.length ? qualityOffLine : ""].filter(Boolean);
 if (!enabled(cfg, context)) {
+  // The quality side is off; say so, and say the guards are not.
+  const text = stateLines.join("\n") || qualityOffLine;
   process.stdout.write(JSON.stringify({
-    systemMessage: guardsOffLine,
-    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: guardsOffLine },
+    systemMessage: text,
+    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text },
   }));
   process.exit(0);
 }
@@ -259,7 +263,7 @@ try {
 // rather than compressed into vagueness.
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
-  guardsOff.length ? guardsOffLine : "craftsman guards: on.",
+  state.safety.length ? guardsOffLine : "craftsman guards: on.",
   rootOnly
     ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, the one isolated agent each of /scrutinise, /idea and /architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
     : "",
@@ -281,6 +285,6 @@ const parts = [
 
 logEvent({ ev: "session_start", sid, langs, tools: present.length, rules: rules.length });
 process.stdout.write(JSON.stringify({
-  ...(guardsOff.length ? { systemMessage: guardsOffLine } : {}),
+  ...(state.safety.length ? { systemMessage: guardsOffLine } : {}),
   hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: parts.join("\n") },
 }));

@@ -4,10 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  PROJECT_ROOT, atomicWrite, enabled, isGitRoot, loadConfig, logEvent, readStdin,
+  PROJECT_ROOT, atomicWrite, safetyEnabled, isGitRoot, loadConfig, logEvent, readStdin,
   projectContext, resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
-  sessionDir, sidOf, sha1, worktreeBindingPath,
-} from "./lib/core.mjs";
+  sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR, globToRe } from "./lib/core.mjs";
 import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
 
 export function normalizeScope(value) {
@@ -113,7 +112,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const input = JSON.parse(await readStdin() || "{}");
     const selectedContext = projectContext(input.project || ".");
     const cfg = loadConfig(selectedContext);
-    if (!enabled(cfg, selectedContext)) process.exit(0);
+    if (!safetyEnabled()) process.exit(0);
     if (input.action === "require") {
       fs.mkdirSync(rootSessionDir(input), { recursive: true });
       // A worktree marker names its worktree, so scopeRequired can match a target.
@@ -144,6 +143,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
           throw new Error(`scope path escapes project root: ${entry}`);
         }
       }
+    }
+    // ARCH-SAFETY-05: pre-guard lets a unit rewrite the hooks or the safety config only when its
+    // manifest names them. That manifest is only honoured after /orchestrate or /auto ran in this
+    // session, so the model cannot grant itself the exemption by activating its own scope.
+    const selfScoped = ["hooks/hooks.json", "craftsman.config.json"]
+      .filter((p) => scope.scope.write.some((entry) => entry === p || entry.endsWith("/" + p) || globToRe(entry).test(p)));
+    if (selfScoped.length && !commandInvoked(sidOf(input), ["orchestrate", "auto"], { context: { stateDir: STATE_DIR } })) {
+      throw new Error(`scope.write names ${selfScoped.join(", ")}, which only a unit run by /orchestrate or /auto may rewrite`);
     }
     if (scope.worktree_path) {
       if (!fs.existsSync(scope.worktree_path) || !isGitRoot(scope.worktree_path) || !sameRepository(scope.worktree_path, selectedContext.root)) {

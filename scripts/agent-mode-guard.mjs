@@ -27,7 +27,7 @@
 // "workflow". An inline or ad-hoc script is always blocked.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS, PLUGIN_ROOT, RUNNER_AGENTS, spendRunnerDispatch, autoActive } from "./lib/core.mjs";
+import { loadConfig, safetyEnabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS, PLUGIN_ROOT, RUNNER_AGENTS, spendRunnerDispatch, autoActive } from "./lib/core.mjs";
 
 // The plugin workflow a Workflow call runs (path relative to the plugin), or
 // null for anything else: an inline script, a path outside workflows/, or a
@@ -71,7 +71,7 @@ if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("std
 if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context)) process.exit(0);
+if (!safetyEnabled()) process.exit(0);
 
 if (input?.tool_name === "Workflow") {
   const workflow = pluginWorkflow(input.tool_input || {});

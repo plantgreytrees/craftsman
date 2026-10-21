@@ -580,6 +580,39 @@ export function enabled(cfg, context = null) {
   return cfg.enabled !== false;
 }
 
+// ARCH-SAFETY-05: the safety hooks (pre-guard, agent-mode-guard, orchestrate-scope-guard, scope
+// activation) have one off switch, and it is the user's own environment. CRAFTSMAN=off,
+// .craftsman/off and `enabled:false` in the config switch off the quality, doc and tracker
+// machinery only: a tool call could set the last two. Not being in a git repo still leaves
+// craftsman off, as before; that moves in step 11.
+export function safetyEnabled(env = process.env) {
+  if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") return false;
+  if (ROOT_SOURCE === "project-dir" && rootUnanchored()) return false;
+  return true;
+}
+
+// Which craftsman command ran in a session, and by which route ("prompt" = the user typed it,
+// "skill" = a Skill tool call). The doc writers and /toggle are told to run doc-write.mjs and
+// toggle.mjs; pre-guard lets those scripts through only after the command that owns them.
+export const DOC_WRITER_COMMANDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check"];
+export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle"];
+const commandsFile = (sid, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), "commands.json");
+export function recordCommand(sid, command, via, context = null) {
+  const file = commandsFile(sid, context);
+  let known = {};
+  try { known = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  known[command] = { via, at: new Date().toISOString() };
+  atomicWrite(file, JSON.stringify(known) + "\n");
+}
+export function commandInvoked(sid, names, { context = null, via = null, ttlMs = 3600000, now = Date.now() } = {}) {
+  let known;
+  try { known = JSON.parse(fs.readFileSync(commandsFile(sid, context), "utf8")); } catch { return false; }
+  return names.some((name) => {
+    const entry = known?.[name];
+    return entry && (!via || entry.via === via) && now - Date.parse(entry.at) < ttlMs;
+  });
+}
+
 // ARCH-SAFETY-04: an advisory hook still fails open on bad input, but never silently. The
 // first skip of each hook in a session says so; later ones stay quiet. The input is bad, so the
 // session id comes from the environment, not from stdin.
@@ -596,15 +629,17 @@ export function advisorySkipped(hook, reason, { env = process.env, stateDir = ST
 export const launcherMarker = (sid, tmp = os.tmpdir()) => path.join(
   tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, `node-missing-${/^[A-Za-z0-9_-]+$/.test(String(sid || "")) ? sid : "shared"}`);
 
-/** Why craftsman's guards are not running, as short reasons; [] when they are on (SessionStart). */
+/** Why craftsman is not fully running, as short reasons (SessionStart). `safety` lists what turns
+ * the guards off; `quality` lists what turns off only the quality, doc and tracker machinery. */
 export function guardState({ cfg, context = null, env = process.env, tmp = os.tmpdir(), sid } = {}) {
-  const reasons = [];
-  if (["off", "0", "false"].includes(String(env.CRAFTSMAN || "").toLowerCase())) reasons.push("CRAFTSMAN=off is set in the environment");
-  if (fs.existsSync(context?.offFlag || OFF_FLAG)) reasons.push(".craftsman/off exists");
-  if (cfg?.enabled === false) reasons.push("enabled is false in craftsman.config.json");
-  if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") reasons.push("CRAFTSMAN_SAFETY=off is set in the environment");
-  if (fs.existsSync(launcherMarker(sid, tmp))) reasons.push("node was missing earlier this session (hooks/run.sh left its marker)");
-  return reasons;
+  const safety = [];
+  const quality = [];
+  if (["off", "0", "false"].includes(String(env.CRAFTSMAN || "").toLowerCase())) quality.push("CRAFTSMAN=off is set in the environment");
+  if (fs.existsSync(context?.offFlag || OFF_FLAG)) quality.push(".craftsman/off exists");
+  if (cfg?.enabled === false) quality.push("enabled is false in craftsman.config.json");
+  if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") safety.push("CRAFTSMAN_SAFETY=off is set in the environment");
+  if (fs.existsSync(launcherMarker(sid, tmp))) safety.push("node was missing earlier this session (hooks/run.sh left its marker)");
+  return { safety, quality };
 }
 
 // ------------------------------------------------------------ glob / skip ---

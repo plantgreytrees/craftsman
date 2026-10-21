@@ -20,7 +20,7 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
+import { loadConfig, safetyEnabled, RECORDED_COMMANDS, recordCommand, STATE_DIR, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { loadIndex, resolve } from "./lib/plan-index.mjs";
 
@@ -101,12 +101,17 @@ const command = typeof toolInput.command === "string" ? toolInput.command
 // text and hard-locked sessions that had merely talked about the script.
 const invocation = /^\/(?:craftsman:)?(orchestrate|auto|scrutinise|idea|architect)(?=\s|$)(.*)/s.exec(command.trim());
 const invoked = invocation?.[1];
-if (!invoked) process.exit(0);
-const args = invocation[2] || "";
+// The commands pre-guard looks for before it lets doc-write.mjs or toggle.mjs run (ARCH-SAFETY-05).
+const recorded = new RegExp(`^/(?:craftsman:)?(${RECORDED_COMMANDS.join("|")})(?=\\s|$)`).exec(command.trim())?.[1];
+if (!invoked && !recorded) process.exit(0);
+const args = invocation?.[2] || "";
 
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context)) process.exit(0);
+if (!safetyEnabled()) process.exit(0);
+// Root session dir, as every grant (ARCH-STATE-06): pre-guard reads it from the same place.
+if (recorded) recordCommand(sidOf(input), recorded, typeof input?.prompt === "string" ? "prompt" : "skill", { stateDir: STATE_DIR });
+if (!invoked) process.exit(0);
 
 // /auto executes a plan exactly as /orchestrate does (ARCH-AUTO-06).
 if (invoked === "orchestrate" || invoked === "auto") {

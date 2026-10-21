@@ -144,3 +144,45 @@ test("scope: release between units in a shared worktree clears the scope", () =>
     assert.equal(hook("pre-guard.mjs", w, root, edit("s5", path.join(w, "a.txt"))).status, 2);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// 8.2: scope activation belongs to the safety side, so CRAFTSMAN=off must not make it a silent no-op
+// while pre-guard still demands a scope.
+test("scope.mjs: activation still works under CRAFTSMAN=off, and is a no-op only under CRAFTSMAN_SAFETY=off", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-env-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const script = fileURLToPath(new URL("./scope.mjs", import.meta.url));
+    const manifest = JSON.stringify({ session_id: "scope-env", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["a.txt"], docs: [], write: ["a.txt"] } });
+    const activate = (env) => spawnSync(process.execPath, [script], { cwd: dir, input: manifest, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env } });
+    assert.match(activate({ CRAFTSMAN: "off" }).stdout, /scope active for u/);
+    fs.rmSync(path.join(dir, ".craftsman"), { recursive: true, force: true });
+    assert.equal(activate({ CRAFTSMAN_SAFETY: "off" }).stdout.trim(), "");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ARCH-SAFETY-05: the exemption pre-guard gives a scope that names hooks.json or the config is only as
+// strong as scope activation, so activation refuses such a manifest unless /orchestrate or /auto ran.
+test("scope.mjs: a manifest that names hooks.json or craftsman.config.json needs /orchestrate or /auto first", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-self-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const scopeScript = fileURLToPath(new URL("./scope.mjs", import.meta.url));
+    const guardScript = fileURLToPath(new URL("./orchestrate-scope-guard.mjs", import.meta.url));
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+    delete env.CRAFTSMAN; delete env.CRAFTSMAN_SAFETY;
+    const manifest = (write) => JSON.stringify({ session_id: "scope-self", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: [], docs: [], write } });
+    const activate = (write) => spawnSync(process.execPath, [scopeScript], { cwd: dir, input: manifest(write), encoding: "utf8", env });
+    assert.match(activate(["a.txt"]).stdout, /scope active/, "an ordinary manifest needs nothing");
+    for (const write of [["hooks/hooks.json"], ["craftsman.config.json"], ["hooks/*.json"], ["**"]]) {
+      const refused = activate(write);
+      assert.equal(refused.status, 2, JSON.stringify(write));
+      assert.match(refused.stderr, /only a unit run by \/orchestrate or \/auto/);
+    }
+    spawnSync(process.execPath, [guardScript], { cwd: dir, input: JSON.stringify({ session_id: "scope-self", prompt: "/craftsman:orchestrate docs/plans/p.md" }), encoding: "utf8", env });
+    assert.match(activate(["hooks/hooks.json"]).stdout, /scope active/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

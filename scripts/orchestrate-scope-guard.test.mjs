@@ -283,3 +283,44 @@ test("orchestrate-scope-guard: bad input, an exception or a broken default confi
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// 8.1: the guard records which craftsman command ran and by which route, so pre-guard can tell
+// /plan's doc-write call, and a user-typed /craftsman:toggle, from a model switching guards off.
+function commandsFile(dir, sid) {
+  const file = path.join(dir, ".craftsman", "sessions", sidOf({ session_id: sid }), "commands.json");
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+}
+
+test("orchestrate-scope-guard: records a doc-writing or toggle command with its route (typed prompt vs Skill)", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(run(dir, { session_id: "cmd-1", prompt: "/craftsman:plan add a feature" }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-1").plan.via, "prompt");
+    assert.equal(run(dir, { session_id: "cmd-1", tool_name: "Skill", tool_input: { skill: "craftsman:sync-docs", args: "--all" } }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-1")["sync-docs"].via, "skill");
+    assert.equal(commandsFile(dir, "cmd-1").plan.via, "prompt", "an earlier record is kept");
+    assert.equal(run(dir, { session_id: "cmd-2", prompt: "/toggle off" }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-2").toggle.via, "prompt");
+    for (const prompt of ["/craftsman:merge", "explain /plan to me", "/planning", "/automate"]) {
+      run(dir, { session_id: "cmd-3", prompt });
+    }
+    assert.equal(commandsFile(dir, "cmd-3"), null, "only the named commands, and only as an invocation");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: CRAFTSMAN=off does not stop it arming scope-required (8.2)", () => {
+  const dir = tmpProject();
+  try {
+    const input = { session_id: "cmd-4", prompt: "/orchestrate docs/plans/example.md" };
+    const r = spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN: "off" } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), true);
+    const off = spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify({ ...input, session_id: "cmd-5" }), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN_SAFETY: "off" } });
+    assert.equal(off.status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, { session_id: "cmd-5" })), false, "CRAFTSMAN_SAFETY=off does");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
