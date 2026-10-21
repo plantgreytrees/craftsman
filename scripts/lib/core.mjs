@@ -151,7 +151,8 @@ export function projectContext(project = ".") {
 
 export function isGitRoot(root) {
   try {
-    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() === root;
+    // stderr ignored: outside a repo git's "fatal: not a git repository" would otherwise reach the user on every hook
+    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() === root;
   } catch { return false; }
 }
 
@@ -580,15 +581,20 @@ export function enabled(cfg, context = null) {
   return cfg.enabled !== false;
 }
 
-// ARCH-SAFETY-05: the safety hooks (pre-guard, agent-mode-guard, orchestrate-scope-guard, scope
-// activation) have one off switch, and it is the user's own environment. CRAFTSMAN=off,
-// .craftsman/off and `enabled:false` in the config switch off the quality, doc and tracker
-// machinery only: a tool call could set the last two. Not being in a git repo still leaves
-// craftsman off, as before; that moves in step 11.
+// ARCH-SAFETY-05/08: the safety hooks (pre-guard, agent-mode-guard) have one off switch, and it is the
+// user's own environment. CRAFTSMAN=off, .craftsman/off and `enabled:false` in the config switch off
+// the quality, doc and tracker machinery only: a tool call could set the last two. Not being in a git
+// repository switches off that same machinery and leaves safety on, because an unanchored session is
+// exactly where nothing else is watching.
 export function safetyEnabled(env = process.env) {
-  if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") return false;
-  if (ROOT_SOURCE === "project-dir" && rootUnanchored()) return false;
-  return true;
+  return String(env.CRAFTSMAN_SAFETY || "").toLowerCase() !== "off";
+}
+
+// The orchestration plumbing that keeps state per project (scope activation, the scope-required flag,
+// command markers): safety, but meaningless without a repo to anchor state to (ARCH-STATE-01), so it
+// writes nothing for an unanchored root.
+export function orchestrationEnabled(env = process.env) {
+  return safetyEnabled(env) && !(ROOT_SOURCE === "project-dir" && rootUnanchored());
 }
 
 // Which craftsman command ran in a session, and by which route ("prompt" = the user typed it,
@@ -999,6 +1005,7 @@ function pruneCache(cacheDir = CACHE_DIR) {
 // --------------------------------------------------------------- logging ---
 
 export function logEvent(ev, context = null) {
+  if (ROOT_SOURCE === "project-dir" && rootUnanchored(context?.root ?? PROJECT_ROOT)) return; // no state for an unanchored root
   const stateDir = context?.stateDir || STATE_DIR;
   try {
     fs.mkdirSync(stateDir, { recursive: true });

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  PROJECT_ROOT, atomicWrite, safetyEnabled, isGitRoot, loadConfig, logEvent, readStdin,
+  PROJECT_ROOT, atomicWrite, orchestrationEnabled, isGitRoot, loadConfig, logEvent, readStdin,
   projectContext, resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
   sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR, globToRe } from "./lib/core.mjs";
 import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
@@ -112,7 +112,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const input = JSON.parse(await readStdin() || "{}");
     const selectedContext = projectContext(input.project || ".");
     const cfg = loadConfig(selectedContext);
-    if (!safetyEnabled()) process.exit(0);
+    if (!orchestrationEnabled()) process.exit(0);
     if (input.action === "require") {
       fs.mkdirSync(rootSessionDir(input), { recursive: true });
       // A worktree marker names its worktree, so scopeRequired can match a target.

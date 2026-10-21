@@ -20,7 +20,7 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, safetyEnabled, RECORDED_COMMANDS, recordCommand, STATE_DIR, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
+import { loadConfig, orchestrationEnabled, RECORDED_COMMANDS, recordCommand, STATE_DIR, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { loadIndex, resolve } from "./lib/plan-index.mjs";
 
@@ -108,7 +108,7 @@ const args = invocation?.[2] || "";
 
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!safetyEnabled()) process.exit(0);
+if (!orchestrationEnabled()) process.exit(0);
 // Root session dir, as every grant (ARCH-STATE-06): pre-guard reads it from the same place.
 if (recorded) recordCommand(sidOf(input), recorded, typeof input?.prompt === "string" ? "prompt" : "skill", { stateDir: STATE_DIR });
 if (!invoked) process.exit(0);

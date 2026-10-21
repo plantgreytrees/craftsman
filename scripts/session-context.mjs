@@ -20,12 +20,12 @@ import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
 const sid = sidOf(input);
-// Opened above a repo with no workspace manifest: nothing to anchor state to
-// (ARCH-STATE-01). Say so once instead of silently splitting state.
+// Opened above a repo with no workspace manifest: nothing to anchor state to (ARCH-STATE-01), so the
+// quality, doc and tracker machinery is off; the safety guards are not (ARCH-SAFETY-08). One line.
 if (ROOT_SOURCE === "project-dir" && rootUnanchored()) {
   process.stdout.write(
-    `craftsman off: ${PROJECT_ROOT} is not a git repository. Open the session inside a repo, ` +
-    `or register its projects with /craftsman:workspace-init.\n`
+    `craftsman off: ${PROJECT_ROOT} is not a git repository, so the quality, doc and tracker gates are off; the safety guards stay on. ` +
+    `Open the session inside a repo, or register its projects with /craftsman:workspace-init.\n`
   );
   process.exit(0);
 }

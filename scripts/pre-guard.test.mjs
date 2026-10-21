@@ -1148,3 +1148,80 @@ test("pre-guard: CRAFTSMAN=off and a .craftsman/off file leave it blocking; only
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ARCH-SAFETY-08 (11.0/11.1): outside a git repository the safety checks stay on and only the
+// quality, doc and tracker machinery goes off. The precedence matters: the safety verdict comes
+// before the unanchored return, not after it.
+const AMG = path.join(ROOT, "agent-mode-guard.mjs");
+const nonGit = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-nongit-")));
+const inNonGit = (script, dir, input, env = {}) => spawnSync(process.execPath, [script], {
+  cwd: dir, input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8",
+  env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env },
+});
+for (const key of ["CRAFTSMAN", "CRAFTSMAN_SAFETY"]) delete process.env[key];
+
+test("pre-guard: outside a git repo a protected-path write and a bad-JSON call still deny (11.1)", () => {
+  const dir = nonGit();
+  try {
+    const lock = { session_id: "ng-1", tool_name: "Write", tool_input: { file_path: path.join(dir, "package-lock.json"), content: "{}" } };
+    assert.equal(inNonGit(GUARD, dir, lock).status, 2, "a lock file is protected without a repo too");
+    assert.equal(inNonGit(GUARD, dir, "not json").status, 2);
+    assert.equal(inNonGit(GUARD, dir, "").status, 2);
+    assert.equal(inNonGit(GUARD, dir, { session_id: "ng-1", tool_name: "Write", tool_input: { file_path: path.join(dir, "notes.txt"), content: "x" } }).status, 0, "ordinary work is untouched");
+    assert.equal(inNonGit(GUARD, dir, { session_id: "ng-1", tool_name: "Bash", tool_input: { command: "echo off > .craftsman/off" } }).status, 2, "self-protection holds too");
+    assert.equal(inNonGit(GUARD, dir, lock, { CRAFTSMAN: "off" }).status, 2);
+    assert.equal(inNonGit(GUARD, dir, lock, { CRAFTSMAN_SAFETY: "off" }).status, 0, "the one off switch still works");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: outside a git repo the doc-write and tracker machinery is off and nothing is written to disk (11.1)", () => {
+  const dir = nonGit();
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+    const write = { session_id: "ng-2", tool_name: "Write", tool_input: { file_path: path.join(dir, "docs", "plans", "x.md"), content: "# y\n" } };
+    assert.equal(inNonGit(GUARD, dir, write).status, 0, "no doc-write authority is demanded without a repo");
+    assert.equal(inNonGit(GUARD, dir, { session_id: "ng-2", tool_name: "Bash", tool_input: { command: "rm docs/plans/x.md" } }).status, 0);
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "no state for an unanchored root");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: inside a repo the doc guard still follows enabled(): CRAFTSMAN=off lifts it, safety stays (11.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-docside-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    const doc = { session_id: "ng-3", tool_name: "Write", tool_input: { file_path: path.join(dir, "docs", "plans", "x.md"), content: "# y\n" } };
+    const lock = { session_id: "ng-3", tool_name: "Write", tool_input: { file_path: path.join(dir, "package-lock.json"), content: "{}" } };
+    assert.equal(inNonGit(GUARD, dir, doc).status, 2, "baseline: docs need the grant");
+    assert.equal(inNonGit(GUARD, dir, doc, { CRAFTSMAN: "off" }).status, 0, "the doc side follows CRAFTSMAN=off");
+    assert.equal(inNonGit(GUARD, dir, lock, { CRAFTSMAN: "off" }).status, 2, "the safety side does not");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("agent-mode-guard and the scope guard: outside a git repo dispatch stays gated, no state is written (11.1)", () => {
+  const dir = nonGit();
+  try {
+    const dispatch = { session_id: "ng-4", tool_name: "Agent", tool_input: { subagent_type: "craftsman:implementer" } };
+    assert.equal(inNonGit(AMG, dir, dispatch).status, 2, "root-only holds without a repo");
+    assert.equal(inNonGit(OSG, dir, { session_id: "ng-4", prompt: "/craftsman:plan add a thing" }).status, 0);
+    assert.equal(inNonGit(OSG, dir, { session_id: "ng-4", prompt: "/orchestrate docs/plans/x.md" }).status, 0);
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "neither arms a scope nor records a command outside a repo");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("quality-gate and stop-gate: outside a git repo they stay quiet and write nothing (11.1)", () => {
+  const dir = nonGit();
+  try {
+    fs.writeFileSync(path.join(dir, "a.js"), "var x = 1\n");
+    for (const [script, input] of [
+      ["quality-gate.mjs", { session_id: "ng-5", tool_name: "Write", tool_input: { file_path: path.join(dir, "a.js") } }],
+      ["stop-gate.mjs", { session_id: "ng-5" }],
+    ]) {
+      const r = inNonGit(path.join(ROOT, script), dir, input);
+      assert.equal(r.status, 0, `${script}: ${r.stderr}`);
+      assert.equal(r.stdout + r.stderr, "", script);
+    }
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

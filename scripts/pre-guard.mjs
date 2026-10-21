@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { hasDocWriteGrant, loadConfig, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
+import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
@@ -803,6 +803,10 @@ const activeRoot = activeScope?.project_root || PROJECT_ROOT;
 const activeContext = { root: activeRoot, stateDir: path.join(activeRoot, ".craftsman"), offFlag: path.join(activeRoot, ".craftsman", "off") };
 const cfg = loadConfig(activeContext);
 if (!safetyEnabled()) process.exit(0); // ARCH-SAFETY-05: CRAFTSMAN_SAFETY=off in the user's environment only
+// The doc-write authority and tracker checks belong to the doc side, which follows enabled(): off for
+// CRAFTSMAN=off, .craftsman/off, enabled:false, and outside a git repo (ARCH-SAFETY-08). Everything else
+// in this file is safety and runs whatever enabled() says.
+const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
 if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   if (activeScope.scope_ambiguous) {
@@ -950,7 +954,7 @@ if (tool === "Bash" && command) {
 }
 
 // Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.
-if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
+if (tool === "Bash" && command && docSide && cfg.docWriteGuard?.enabled !== false) {
   const docPaths = cfg.docWriteGuard?.docPaths || ["docs/**"];
   const hit = removedDocs(command, docPaths);
   if (hit.length && !hasDocWriteGrant({ sid: sidOf(input), claim: true }, { ...activeContext, grantStateDir: STATE_DIR })) {
@@ -988,7 +992,7 @@ if (["Write", "Edit"].includes(tool)) {
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
 //    written, and the root's generated ledger block is never hand-edited.
-const tracker = ["Write", "Edit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
+const tracker = docSide && ["Write", "Edit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
 if (tracker) {
   if (path.resolve(tracker.main) !== path.resolve(tracker.root)) {
     const rootDoc = path.join(tracker.main, "docs", "plans", "TRACKER.md");
@@ -1018,7 +1022,7 @@ if (tracker) {
   }
 }
 
-const rollup = ["Write", "Edit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
+const rollup = docSide && ["Write", "Edit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
 if (rollup) {
   let current = "";
   try { current = fs.readFileSync(rollup.real, "utf8"); } catch {}
@@ -1049,7 +1053,7 @@ if (hit) {
 // 2) Doc-write authority — session-scoped.
 const g = cfg.docWriteGuard || {};
 const writeTool = ["Write", "Edit", "NotebookEdit"].includes(tool);
-if (g.enabled !== false && writeTool) {
+if (g.enabled !== false && writeTool && docSide) {
   const docPaths = g.docPaths || ["docs/**"];
   // The root tracker counts as a doc even when edited from a linked worktree,
   // where its worktree-relative path ("../../docs/…") matches no doc glob.

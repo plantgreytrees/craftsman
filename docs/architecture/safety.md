@@ -34,6 +34,7 @@ flowchart LR
 | ARCH-SAFETY-05 | Only `CRAFTSMAN_SAFETY=off` in the user's environment turns safety off; a tool call cannot touch the off flag, the safety config keys, `hooks.json` or the grant markers | `CRAFTSMAN=off`, `.craftsman/off` and `enabled:false` were all one tool call away for the model | One shared off switch for everything |
 | ARCH-SAFETY-06 | Stop and SessionEnd report unpushed work in every worktree, from local refs only; Stop blocks only when `stopGate.blockOnUnpushed` is true | Work that exists on one machine only is lost with the machine; blocking by default would stall every scratch session | Fetching to compare (slow, needs network and credentials) |
 | ARCH-SAFETY-07 | The worktree sweep is evidence-based and reversible: merged means merged into a remote-tracking ref, local data and Claude Code's own worktrees are kept, every branch deletion is logged with its sha | A sweep that trusts a local main, or deletes a `.env`, loses work with no way back | Deleting any merged-looking worktree and relying on reflog |
+| ARCH-SAFETY-08 | Safety does not depend on git anchoring: outside a repo the protected-path, scope, dispatch and fail-closed checks stay on and only the quality, doc and tracker machinery goes off, writing no state | A session opened in a home directory is exactly where nothing else is watching | Leaving everything off outside a repo, as before |
 
 ## Trade-offs & known limits
 - A machine without `node` now blocks every guarded tool call until node is installed. That is the point; the message names the cause.

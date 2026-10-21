@@ -816,3 +816,19 @@ test("recordCommand / commandInvoked: per session, by command, by route, and not
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// 11.1: not being in a git repo turns the quality machinery off and leaves safety on.
+test("safetyEnabled vs enabled: a non-git project root leaves safety on and the quality side off, and logEvent writes nothing", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-core-nongit-")));
+  try {
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      m.logEvent({ ev: "probe" });
+      console.log(JSON.stringify({ safety: m.safetyEnabled({}), quality: m.enabled({}, null), off: m.safetyEnabled({ CRAFTSMAN_SAFETY: "off" }) }));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: dir, encoding: "utf8", env: fakeEnv({ CLAUDE_PROJECT_DIR: dir }) });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { safety: true, quality: false, off: false });
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "no events.jsonl for an unanchored root");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -30,6 +30,7 @@ test("session-context: a session opened above a repo, with no workspace manifest
     const result = run(SESSION_CONTEXT, dir, { session_id: "above" });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /^craftsman off: .* is not a git repository/);
+    assert.match(result.stdout, /the quality, doc and tracker gates are off; the safety guards stay on/);
     assert.equal(result.stdout.trim().split("\n").length, 1);
     assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "no state is written for an unanchored root");
   });
