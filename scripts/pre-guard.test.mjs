@@ -24,6 +24,13 @@ function run(script, dir, input, extraEnv = {}) {
   });
 }
 
+// doc-write.mjs grants only after a doc-writing command ran in the session (ARCH-SAFETY-05), so record one first.
+function grant(dir, extraEnv = {}) {
+  const env = { CLAUDE_CODE_SESSION_ID: "grant-session", ...extraEnv };
+  run(path.join(ROOT, "orchestrate-scope-guard.mjs"), dir, { session_id: env.CLAUDE_CODE_SESSION_ID, prompt: "/craftsman:plan x" }, env);
+  return run(DOC_WRITE, dir, {}, env);
+}
+
 // The guard only analyses a destructive-looking command, never runs it, but `~` and
 // `$HOME` resolve against os.homedir(). Pin HOME and USERPROFILE to a throwaway dir
 // that holds the fixture so the verdict never depends on where TMPDIR sits relative
@@ -83,7 +90,7 @@ test("pre-guard: tracker + plan-doc reads pass as orchestration metadata even wh
     assert.equal(run(SCOPE, dir, manifest).status, 0);
     // /orchestrate's real first action grants doc-write authority before any
     // docs/ access — the guard's doc-authority gate applies to Read too.
-    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(grant(dir).status, 0);
     assert.equal(run(GUARD, dir, { session_id: sid, tool_name: "Read", tool_input: { file_path: tracker } }).status, 0);
     assert.equal(run(GUARD, dir, { session_id: sid, tool_name: "Read", tool_input: { file_path: plan } }).status, 0);
   } finally {
@@ -305,7 +312,7 @@ test("pre-guard: the root TRACKER.md's generated block can't be hand-edited; the
   const { main, text } = gitRepoWithWorktree();
   try {
     const file = path.join(main, "docs", "plans", "TRACKER.md");
-    assert.equal(run(DOC_WRITE, main, {}).status, 0);
+    assert.equal(grant(main).status, 0);
     const blocked = run(GUARD, main, {
       session_id: "tracker-root", tool_name: "Edit",
       tool_input: { file_path: file, old_string: "| a | PENDING |", new_string: "| a | COMPLETE |" },
@@ -336,7 +343,7 @@ test("pre-guard: a rollup docs/plans/<slug>/TRACKER.md fence can't be hand-edite
     assert.equal(writeRollups(main, index, []).length, 1, "the generator writes it (no tool hook involved)");
     const file = path.join(main, "docs", "plans", "e", "TRACKER.md");
     fs.appendFileSync(file, "\nHand notes.\n");
-    assert.equal(run(DOC_WRITE, main, {}).status, 0);
+    assert.equal(grant(main).status, 0);
     const blocked = run(GUARD, main, {
       session_id: "rollup", tool_name: "Edit",
       tool_input: { file_path: file, old_string: "Status: PENDING", new_string: "Status: COMPLETE" },
@@ -578,7 +585,7 @@ test("pre-guard: rm / git rm of a guarded doc is blocked without the grant, chai
     assert.equal(bash("echo hi && git rm -q docs/plans/old.md").status, 2);
     assert.equal(bash("ls; rm docs/plans/old.md | cat").status, 2);
     assert.equal(bash("rm src/other.txt && ls docs").status, 0, "non-doc removal is untouched");
-    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(grant(dir).status, 0);
     assert.equal(bash("git rm docs/plans/old.md").status, 0);
     assert.equal(bash("echo hi && rm docs/plans/old.md").status, 0);
   } finally {
@@ -610,7 +617,7 @@ test("pre-guard: every rm form that removes or moves a guarded doc (or its ances
       "cd src && rm x.md", "bash -c 'rm build/x'", "mv a.txt b.txt", "git mv a.txt b.txt", "ls docs && rm -rf build"]) {
       assert.equal(bash(command).status, 0, `unrelated stays allowed: ${command}`);
     }
-    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(grant(dir).status, 0);
     for (const command of RM_FORMS) assert.equal(bash(command).status, 0, `granted: ${command}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -636,7 +643,7 @@ test("pre-guard: shell keywords, more wrappers and unseen-argument removals fail
       "if true; then ls; fi"]) {
       assert.equal(bash(command).status, 0, `stays allowed: ${command}`);
     }
-    assert.equal(run(DOC_WRITE, dir, {}, env).status, 0);
+    assert.equal(grant(dir, env).status, 0);
     for (const command of forms) assert.equal(bash(command).status, 0, `granted: ${command}`);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -674,7 +681,7 @@ test("pre-guard: a glob in the last path segment is matched against the guarded 
       "find . -name 'x.md' -delete", "find . -name '*.md' -exec rm {} +", "find . ! -name '*.log' -delete"];
     for (const command of allowedForms) assert.equal(bash(command).status, 0, `allowed: ${command}`);
     for (const command of blockedForms) assert.equal(bash(command).status, 2, `blocked: ${command}`);
-    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(grant(dir).status, 0);
     for (const command of [...allowedForms, ...blockedForms]) assert.equal(bash(command).status, 0, `granted: ${command}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -714,7 +721,7 @@ function grantedPair(prefix, sid, setup, blocked, allowedForms = []) {
     const bash = (command) => run(GUARD, dir, { session_id: sid, tool_name: "Bash", tool_input: { command } });
     for (const c of blocked) assert.equal(bash(c).status, 2, `blocked: ${c}`);
     for (const c of allowedForms) assert.equal(bash(c).status, 0, `allowed: ${c}`);
-    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(grant(dir).status, 0);
     for (const c of [...blocked, ...allowedForms]) assert.equal(bash(c).status, 0, `granted: ${c}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
