@@ -880,9 +880,13 @@ test("pre-guard: a command holding a removal word is blocked unless the parser p
 
 test("pre-guard: the per-form denylist branches are gone, one safe-subset check remains (24.2)", () => {
   const src = fs.readFileSync(GUARD, "utf8");
-  for (const gone of ["stripPrefixes", "decodeMagic", "shellSegments", "gitRmMv", "xargsRm", "rmVar", "findNamesMiss(exprs", "icaseEnv", "state.icase"]) {
+  for (const gone of ["stripPrefixes", "decodeMagic", "gitRmMv", "xargsRm", "rmVar", "findNamesMiss(exprs", "icaseEnv", "state.icase"]) {
     assert.ok(!src.includes(gone), `${gone} removed from pre-guard.mjs`);
   }
+  // shellSegments left the doc-removal guard with the denylist branches; the one place that reads tokens again
+  // is the hook-bypass check (15.1), so it is imported once and called once, and nowhere else.
+  assert.equal(src.match(/\bshellSegments\b/g).length, 2, "shellSegments: one import and one call (the hook-bypass check)");
+  assert.equal(src.match(/shellSegments\(/g).length, 1);
   grantedPair("craftsman-safe24b-", "safe24b", null, [], [
     "rm -f *.log", "rm -rf build", "echo a | xargs echo", "echo hi | xargs rm", "git commit -F - <<'EOF'\nrm docs/plans/x.md and docs/architecture\nEOF",
   ]);
@@ -1305,5 +1309,53 @@ test("pre-guard: the launcher filter gives the same verdict as the guard for eve
 
     // CRAFTSMAN_SAFETY=off is the one off switch, with or without the launcher
     assert.equal(parity(dir, "safety off", tool("Read", { file_path: at(".env") }), { CRAFTSMAN_SAFETY: "off" }), 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// 15.0: the hook-bypass check also reads short flags and git's other spellings, by token (shell-words), no new
+// parser. The flag text is assembled from parts so this file never holds a bypass literal.
+const NOV = "--no" + "-verify";
+const CFG = (key, value = "") => `-c ${key}${value}`;
+const HOOKS = "core.hooks" + "Path";
+const SIGN = "commit.gpg" + "sign";
+
+test("pre-guard: short, clustered and abbreviated hook-bypass flags and -c forms are blocked (15.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const bash = (command) => run(GUARD, dir, { session_id: "bypass-15", tool_name: "Bash", tool_input: { command } });
+    const blocked = [
+      "git commit -n", "git commit -an", "git commit -na", "git commit -nm msg", "git commit -anm 'a message'", "git commit -m msg -n",
+      "git commit -a -m msg -n", "git commit --amend -n", "git commit -sn", "git commit -m msg --no-v", "git commit -m msg --no-ver", "git commit -m msg --no-verif",
+      `git commit ${NOV.slice(0, 7)}`, `git push ${NOV.slice(0, 8)}`,
+      `git ${CFG(HOOKS, "=/dev/null")} commit -m x`, `git -c${HOOKS}=/dev/null commit -m x`, `git ${CFG(HOOKS.toLowerCase(), "=/x")} commit -m x`,
+      `git ${CFG(HOOKS.toUpperCase(), "=/x")} push`, `git --config-env=${HOOKS}=HOOKS_DIR commit -m x`, `git ${CFG(HOOKS)} commit -m x`,
+      `git ${CFG(SIGN, "=false")} commit -m x`, `git ${CFG(SIGN, "=0")} commit -m x`, `git ${CFG(SIGN, "=no")} commit -m x`, `git ${CFG(SIGN.toUpperCase(), "=OFF")} commit -m x`,
+      "cd sub && git commit -n", "GIT_AUTHOR_NAME=a git commit -n", "env git commit -n", "/usr/bin/git commit -n", "git -C sub commit -n",
+      "sudo git commit -n", "git add . && git commit -an -m msg", "git commit -m msg; git commit -n", `git ${CFG("user.name", "=x")} ${CFG(HOOKS, "=/y")} commit -m z`,
+      "git $(echo commit) -n", "echo ok | git commit -n -m msg",
+    ];
+    for (const command of blocked.filter((c) => !c.includes("$("))) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    const allowed = [
+      "git commit -m msg", "git commit -a -m msg", "git commit -m 'fix: handle -n flag'", 'git commit -m "a -n b"', "git commit -mn", "git commit -F msg.txt",
+      "git commit -F -n", "git commit -am 'x -n'", "git commit -- -n", "git commit -m msg -- file-n",
+      "git push -n origin main", "git push --dry-run", "git log -n 5", "git -C sub log -n 5", "git status -sn", "git diff -n",
+      `git ${CFG("user.name", "=x")} commit -m y`, `git ${CFG("core.editor", "=vim")} commit -m y`, "echo git commit -n", 'echo "git commit -n"',
+      "git config core.editor vim", "git checkout -n", "ls -n", "grep -n x file", "git commit --amend --no-edit", "git commit --no-status -m x",
+    ];
+    for (const command of allowed) assert.equal(bash(command).status, 0, `allowed: ${command}`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a command shell-words cannot read falls through to the existing text check (15.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-fall-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const bash = (command) => run(GUARD, dir, { session_id: "bypass-fall", tool_name: "Bash", tool_input: { command } });
+    // 300 brace alternatives overflow the lexer's word budget: it cannot tell what the words are
+    const wide = `{${Array.from({ length: 300 }, (_, i) => `a${i}`).join(",")}}`;
+    assert.equal(bash(`echo ${wide}; git commit ${NOV} -m x`).status, 2, "the text check still catches the long flag");
+    assert.equal(bash(`echo ${wide}; git commit -m x`).status, 0, "and an innocent command is not blocked for being unreadable");
+    assert.equal(bash(`git commit -m "unterminated ${NOV}`).status, 2, "an unterminated quote still reaches the text check");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

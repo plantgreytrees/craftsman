@@ -12,6 +12,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
+import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -853,15 +854,84 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
   }
 }
 
+// The same rule read by token (shell-words, no new parser): `commit -n` and clustered short flags (`-an`,
+// `-nm msg`), abbreviated long flags git accepts (`--no-ver`), `-ccore.hooksPath=...`, `--config-env=`, any
+// case of the config key, and every falsy spelling of commit.gpgsign. Only `git [wrappers] [globals] commit|push`
+// at command position counts, so a message or an argument that merely holds `-n` does not. A command the lexer
+// cannot read with certainty returns false here and meets the text check above and below.
+const GIT_WRAPPERS = new Set(["env", "sudo", "command", "exec", "nohup", "time", "nice", "ionice", "stdbuf", "timeout", "doas"]);
+const COMMIT_VALUE_SHORT = new Set(["m", "F", "C", "c", "t"]); // value: the rest of the cluster, else the next word
+const COMMIT_ATTACHED_SHORT = new Set(["S", "u"]); // value is attached or absent
+const COMMIT_VALUE_LONG = new Set(["--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message", "--template", "--cleanup", "--fixup", "--squash", "--pathspec-from-file", "--trailer"]);
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
+function gitWordIndex(words) {
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    if (ASSIGNMENT_WORD.test(word)) continue;
+    const base = word.split("/").pop();
+    if (base === "git") return i;
+    if (!GIT_WRAPPERS.has(base)) return -1;
+    while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) i++;
+  }
+  return -1;
+}
+function bypassesHooks(text) {
+  let segments;
+  try { segments = shellSegments(text); } catch { return false; }
+  for (const words of segments) {
+    if (words.includes(UNEXPANDED)) continue;
+    const at = gitWordIndex(words);
+    if (at < 0) continue;
+    const configs = [];
+    let i = at + 1;
+    for (; i < words.length; i++) {
+      const word = words[i];
+      if (word === "-c" || word === "--config-env") configs.push(words[++i] ?? "");
+      else if (word.startsWith("--config-env=")) configs.push(word.slice("--config-env=".length));
+      else if (word.startsWith("-c") && !word.startsWith("--")) configs.push(word.slice(2));
+      else if (["-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix"].includes(word)) i++;
+      else if (!word.startsWith("-")) break;
+    }
+    const sub = words[i];
+    if (sub !== "commit" && sub !== "push") continue;
+    for (const config of configs) {
+      const eq = config.indexOf("=");
+      const key = (eq < 0 ? config : config.slice(0, eq)).toLowerCase();
+      const value = eq < 0 ? "" : config.slice(eq + 1).toLowerCase();
+      if (key === "core.hookspath" || (key === "commit.gpgsign" && ["false", "no", "off", "0"].includes(value))) return true;
+    }
+    const rest = words.slice(i + 1);
+    for (let j = 0; j < rest.length; j++) {
+      const word = rest[j];
+      if (word === "--") break;
+      if (word.startsWith("--")) {
+        const name = word.split("=")[0];
+        if (name.length >= 6 && "--no-verify".startsWith(name)) return true;
+        if (name.length >= 6 && "--no-gpg-sign".startsWith(name)) return true;
+        if (COMMIT_VALUE_LONG.has(word)) j++;
+      } else if (sub === "commit" && /^-[A-Za-z]/.test(word)) {
+        const cluster = word.slice(1);
+        for (let k = 0; k < cluster.length; k++) {
+          if (cluster[k] === "n") return true;
+          if (COMMIT_VALUE_SHORT.has(cluster[k])) { if (k === cluster.length - 1) j++; break; }
+          if (COMMIT_ATTACHED_SHORT.has(cluster[k])) break;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // A hook rejection is fixed, never bypassed (--no-verify is forbidden):
 // unconditional, for every commit/push with or without a worktree binding.
 // The flag test is linear; the commit/push one retries per `git`, so only a
 // command under 16 KB reaches it — a larger one with a bypass flag is blocked.
-if (tool === "Bash" && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
-    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command))) {
+if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
+    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command)))
+    || (command.length <= 16384 && bypassesHooks(command)))) {
   logEvent({ ms: Date.now() - T0, ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
-    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +
+    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify, commit -n, --no-gpg-sign, gpgsign=false / ` +
     `core.hooksPath override). Fix the underlying hook failure instead of skipping it — this is a ` +
     `hard rule, not a suggestion.\n`
   );
