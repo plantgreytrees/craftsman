@@ -5,15 +5,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { isCraftsmanStateLine } from "./craftsman-state.mjs";
 
 function git(cwd, args) {
   try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 8000 }).replace(/\n$/, ""); }
   catch { return null; }
 }
 const count = (cwd, args) => Number.parseInt(git(cwd, ["rev-list", "--count", ...args]) ?? "0", 10) || 0;
-
-// craftsman's own gitignored state is not the user's work.
-const isCraftsmanState = (line) => { const p = line.slice(3); return p === ".craftsman" || p.startsWith(".craftsman/"); };
 
 function worktrees(root) {
   const out = git(root, ["worktree", "list", "--porcelain"]);
@@ -36,7 +34,7 @@ export function unpushedReport(root, { max = 12 } = {}) {
 
   for (const wt of worktrees(root)) {
     const label = path.resolve(wt.path) === main ? "the main checkout" : wt.path;
-    const changed = (git(wt.path, ["status", "--porcelain", "--untracked-files=all"]) || "").split("\n").filter((l) => l && !isCraftsmanState(l));
+    const changed = (git(wt.path, ["status", "--porcelain", "--untracked-files=all"]) || "").split("\n").filter((l) => l && !isCraftsmanStateLine(l));
     if (changed.length) lines.push(`uncommitted changes in ${label}: ${changed.length} file(s)`);
     if (wt.detached) {
       const n = count(wt.path, ["HEAD", "--not", "--branches", "--remotes", "--tags"]);
@@ -47,14 +45,15 @@ export function unpushedReport(root, { max = 12 } = {}) {
   const stashes = (git(root, ["stash", "list"]) || "").split("\n").filter(Boolean).length;
   if (stashes) lines.push(`${stashes} stash ${stashes === 1 ? "entry" : "entries"} (git stash list)`);
 
-  const refs = git(root, ["for-each-ref", "--format=%(refname:short)%09%(upstream:short)%09%(upstream:track)", "refs/heads"]) || "";
+  // The full ref counts the commits, so a branch named like a tag or a file is not read as that tag or file.
+  const refs = git(root, ["for-each-ref", "--format=%(refname)%09%(refname:lstrip=2)%09%(upstream:short)%09%(upstream:track)", "refs/heads"]) || "";
   for (const row of refs.split("\n").filter(Boolean)) {
-    const [branch, upstream, track] = row.split("\t");
+    const [ref, branch, upstream, track] = row.split("\t");
     if (!upstream) {
-      const n = count(root, [branch, "--not", "--remotes"]);
+      const n = count(root, [ref, "--not", "--remotes"]);
       if (n) lines.push(`branch ${branch} has no upstream: ${n} commit(s) on no remote`);
     } else if (track === "[gone]") {
-      const n = count(root, [branch, "--not", "--remotes"]);
+      const n = count(root, [ref, "--not", "--remotes"]);
       if (n) lines.push(`branch ${branch}'s upstream ${upstream} is gone: ${n} commit(s) on no remote`);
     } else {
       const ahead = /ahead (\d+)/.exec(track || "");

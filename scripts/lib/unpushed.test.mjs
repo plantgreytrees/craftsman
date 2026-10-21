@@ -134,3 +134,23 @@ test("unpushedReport: a long report is capped and says how many were left out; f
     assert.equal(unpushed.formatReport([]), "");
   } finally { f.cleanup(); }
 });
+
+test("unpushedReport: a branch named like a tag or like a file is still reported", () => {
+  const f = fixture();
+  try {
+    git(f.repo, "tag", "topic");
+    git(f.repo, "checkout", "-q", "-b", "topic");
+    commit(f.repo, "t.txt", "on the topic branch");
+    git(f.repo, "checkout", "-q", "main");
+    git(f.repo, "branch", "notes");
+    git(f.repo, "checkout", "-q", "notes");
+    commit(f.repo, "n.txt", "on notes");
+    fs.writeFileSync(path.join(f.repo, "notes"), "a file named like the branch\n");
+    git(f.repo, "add", "notes");
+    git(f.repo, "commit", "-q", "-m", "the file");
+    git(f.repo, "checkout", "-q", "main");
+    const out = lines(f.repo);
+    assert.ok(out.some((l) => /^branch topic has no upstream: 1 commit/.test(l)), `tag-named branch: ${out}`);
+    assert.ok(out.some((l) => /^branch notes has no upstream: 2 commit/.test(l)), `file-named branch: ${out}`);
+  } finally { f.cleanup(); }
+});

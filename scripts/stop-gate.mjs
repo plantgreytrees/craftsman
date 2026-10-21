@@ -12,6 +12,7 @@ import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
 import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
+import { isCraftsmanStateLine } from "./lib/craftsman-state.mjs";
 import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 
@@ -105,10 +106,6 @@ if (ownedWorktrees.size > 0) {
 // marker misses Bash-created files). `--ignored` also catches a freshly
 // created `.env`; `.craftsman/` itself is excluded since it's gitignored
 // state touched on every hook call. Errors fail safe to treeDirty=true.
-function isCraftsmanStateLine(line) {
-  const p = line.slice(3); // porcelain v1: "XY PATH" — strip the "XY " prefix
-  return p === ".craftsman" || p.startsWith(".craftsman/");
-}
 let treeDirty = true;
 try {
   const { stdout } = await pexec("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: context.root });
