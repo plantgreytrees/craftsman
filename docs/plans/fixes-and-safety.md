@@ -251,6 +251,19 @@ units:
       write: [commands/plan.md, commands/orchestrate.md, agents/review-router.md, scripts/gate-select.test.mjs, commands/_shared-machinery.md, commands/_shared-execution.md, agents/unit-runner.md, agents/implementer.md, scripts/wiring.test.mjs, scripts/doc-size-policy.mjs]
     arch: [ARCH-SLIM-05, ARCH-SLIM-06, ARCH-ENGINE-04, ARCH-PLAN-06]
     tooling: { implementer: implementer, gates: [standards-keeper], skills: [], guards: [doc-size-policy], mcp: [] }
+  - id: ask-via-prompt
+    scope_id: ask-via-prompt
+    project: .
+    depends_on: [instruction-consistency]
+    module: commands/
+    language: markdown
+    security: normal
+    scope:
+      read: [commands/_shared-machinery.md, scripts/wiring.test.mjs, docs/architecture/auto.rules.md]
+      docs: [docs/architecture/slim.rules.md, docs/architecture/engine.rules.md, docs/architecture/plan.rules.md, docs/architecture/auto.rules.md, docs/architecture/docs.rules.md, docs/architecture/landing.rules.md]
+      write: [commands/_shared-machinery.md, commands/plan.md, commands/orchestrate.md, commands/merge.md, commands/sync-docs.md, commands/instruction.md, commands/account-switch.md, scripts/wiring.test.mjs, scripts/doc-size-policy.mjs]
+    arch: [ARCH-SLIM-02, ARCH-SLIM-05, ARCH-ENGINE-07, ARCH-PLAN-06, ARCH-AUTO-02, ARCH-DOCS-07, ARCH-LAND-06]
+    tooling: { implementer: implementer, gates: [standards-keeper], skills: [], guards: [doc-size-policy], mcp: [] }
   - id: release-identity
     scope_id: release-identity
     project: .
@@ -280,7 +293,7 @@ units:
   - id: docs-final
     scope_id: docs-final
     project: .
-    depends_on: [launcher, failclosed-guards, loud-advisory, self-disable, unpushed-report, sweep-safety, outside-git, goal-token, platform, guard-filter, bypass-flags, release-identity, reconcile-24-26]
+    depends_on: [launcher, failclosed-guards, loud-advisory, self-disable, unpushed-report, sweep-safety, outside-git, goal-token, platform, guard-filter, bypass-flags, release-identity, reconcile-24-26, ask-via-prompt]
     module: README.md
     language: markdown
     security: normal
@@ -307,11 +320,12 @@ units:
 ## Outcome
 Craftsman keeps every guard on or says loudly that it is off, a model cannot switch the guards off, unpushed work is reported at Stop and SessionEnd, the review's quick fixes land, and outside-root protection stays with the Claude Code sandbox.
 
-## Decisions for you before `/orchestrate` (details in Risk)
-1. **Order change.** Step 4 (tool names) runs before the launcher (A). Wrapping hooks.json in run.sh first would force a second rewrite of every matcher. Everything else keeps your order.
-2. **Read/Glob/Grep filter (step 14).** pre-guard also acts on Read, Glob and Grep when a unit scope is active (`pre-guard.mjs:793-876`), so a pure `if` or matcher change would lose that. Plan: the run.sh launcher skips node for those three tools when no scope file exists (a shell file test, ~2 ms). Behaviour stays identical, proved by the existing tables. Say if you would rather drop scope enforcement on reads.
-3. **Splits.** A becomes three commits (5, 6, 7) because it cannot fit one 120 KB context. The ARCH-SAFETY rules are written inside the step that creates the behaviour, not in one late step, so arch-check keeps each cite live.
-4. **Minimum versions** (recorded in README Safety, step 21): `onFailure` 2.1.295 (changelog, verified). SessionEnd stderr-only, no decision control, 1.5 s budget raisable to 60 s by `timeout` (hooks doc, verified); its systemMessage display is unconfirmed, so step 9 tests it empirically. Hook `if`: documented for tool events only, one permission rule, `Read(path)` rules cover Read/Grep/Glob, but no minimum version is documented. Exec-form `args` and `user-invocable` on plugin `commands/*.md`: also no documented minimum. Each is proved by `claude plugin test .` on 2.1.306 and gated behind a feature check, never a version string (ARCH-MOD-04 style).
+## Decisions (answered 2026-10-21)
+1. Order swap: yes, tool names (step 4) run before the launcher.
+2. Read/Glob/Grep filter: the run.sh launcher skips node when no unit scope file exists (step 14); parity proved by the existing tables.
+3. Tracker: you resolve the uncommitted TRACKER.md change first; rows and the acceptance list are registered at /orchestrate.
+4. Questions: asked through AskUserQuestion, enforced by tests and one shared rule (new step 23), no Stop-hook heuristic.
+5. Minimum versions (recorded in README Safety, step 21): `onFailure` 2.1.295 (changelog, verified). SessionEnd is stderr-only with no decision control and a 1.5 s default budget that `timeout` raises to 60 s; its systemMessage display is unconfirmed so step 9 tests it. Hook `if` (tool events, one permission rule, Read(path) covers Read/Grep/Glob), exec-form `args` and `user-invocable` on plugin commands have no documented minimum; each is proved with `claude plugin test .` on 2.1.306 and feature-detected, never version-matched.
 
 ## Scope Steps (executable core)
 
@@ -458,6 +472,16 @@ Depends on: descriptions, failclosed-guards
 - [ ] 18.3 The routing criteria currently in three places live in one (`_shared-machinery.md`); the other two point to it → accept: grep finds one copy; no cap raised
 - [ ] 18.4 Full CI set, commit `docs(loop): one root-only instruction story`
 
+### Step 23 — ask-via-prompt (., markdown, normal)
+Depends on: instruction-consistency
+Decided by you: questions go through the AskUserQuestion prompt, not prose; enforced by tests plus one shared rule (no Stop-hook heuristic).
+- [ ] 23.0 Failing tests first → accept: red on origin/main
+- [ ] 23.1 One rule in `_shared-machinery.md`: any open decision, confirmation or choice for the user is asked with AskUserQuestion (batched, 2-4 options, recommended first); prose questions are for /auto-style unattended runs only, which PARK per ARCH-ENGINE-07 → accept: grep finds the rule once
+- [ ] 23.2 Every command that asks the user lists `AskUserQuestion` in `allowed-tools` and points at the shared rule: `plan`, `orchestrate`, `merge`, `sync-docs`, `instruction`, `account-switch` (the others already have it) → accept: wiring.test fails for any command whose body asks the user but whose allowed-tools lacks the tool; the six named commands are listed in it
+- [ ] 23.3 Unattended paths keep their contract: /auto and the workflow engine still PARK instead of asking mid-run (ARCH-AUTO-02, ARCH-ENGINE-07) → accept: wiring.test asserts the PARK wording remains in `auto.md` and `_shared-execution.md`
+- [ ] 23.4 No doc cap raised; trim the same files to pay for the added lines → accept: `doc-size-policy.mjs`
+- [ ] 23.5 Full CI set, commit `feat(commands): ask decisions through the prompt, enforced by test`
+
 ### Step 19 — release-identity (., json, normal)
 Depends on: instruction-consistency
 - [ ] 19.0 Failing test first: `metadata.release` must equal the newest `## [x.y.z]` heading in CHANGELOG.md → accept: red (2.1.0 vs 2.2.0)
@@ -484,7 +508,7 @@ Depends on: docs-final
 - [ ] 22.2 PR "Not done" list: outside-root write and delete guard, credential read denial, destructive-git ask outside /auto, interpreter-deletion detection (the sandbox owns them, ARCH-SAFETY-01); the review's restructure (one dispatcher per event, orchestration over /batch, tracker/ARCH/doc guard as an optional add-on) named as the next step → accept: both lists in the PR body
 
 ## Sequencing
-Your order, with one swap: 1, 2, 3, then 4 (tool names), then A as 5, 6, 7, then B 8, D 9, E 10, then C 11, F 12, G 13, then the rest of Part 1 as 14-19, reconcile 20, docs 21, PR 22. Steps 20 and 12 depend on nothing and can move earlier if you want them out of the way. Steps share hooks.json, pre-guard.mjs, core.mjs and stop-gate.mjs, so none run in parallel. Each step lowers or holds every cap.
+Your order, with the one approved swap: 1, 2, 3, then 4 (tool names), then A as 5, 6, 7, then B 8, D 9, E 10, then C 11, F 12, G 13, then the rest of Part 1 as 14-19, ask-via-prompt 23 (after 18), reconcile 20, docs 21, PR 22. Steps 20 and 12 depend on nothing and can move earlier if you want them out of the way. Steps share hooks.json, pre-guard.mjs, core.mjs and stop-gate.mjs, so none run in parallel. Each step lowers or holds every cap.
 
 ## Verification background
 - Steps 24-26 code merged, boxes unticked — `docs/plans/scrutinise-feature-branch-plans.md:484-503`, `git log` 54eb11e ffba86b 3c9a10b
