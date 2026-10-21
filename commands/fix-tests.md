@@ -1,7 +1,7 @@
 ---
-description: Run the test suite (scoped or full), diagnose failures via pattern triage, apply minimum root-cause fixes, and restore a green build — no vacuous passes, no silently skipped tests.
+description: Run the test suite, diagnose failures via pattern triage, apply minimum root-cause fixes, and restore a green build — no vacuous passes, no silently skipped tests.
 argument-hint: "[scope e.g. a package/module/service — blank for the whole suite]"
-allowed-tools: Task, Bash, Read, Edit, Glob, Grep, TodoWrite
+allowed-tools: Task, Bash, Read, Edit, Glob, Grep, TaskCreate, TaskUpdate
 ---
 
 # Fix Tests

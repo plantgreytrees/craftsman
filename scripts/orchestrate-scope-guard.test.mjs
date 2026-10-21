@@ -35,7 +35,7 @@ function requiredFile(dir, input) {
 
 test("orchestrate-scope-guard: invoking /orchestrate marks scope required, even if the command forgets to", () => {
   const dir = tmpProject();
-  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/orchestrate docs/plans/example.md" } };
+  const input = { session_id: "s1", tool_name: "Skill", tool_input: { skill: "orchestrate", args: "docs/plans/example.md" } };
   try {
     const result = run(dir, input);
     assert.equal(result.status, 0);
@@ -47,7 +47,7 @@ test("orchestrate-scope-guard: invoking /orchestrate marks scope required, even 
 
 test("orchestrate-scope-guard: the craftsman: namespaced form also marks scope required", () => {
   const dir = tmpProject();
-  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/craftsman:orchestrate docs/plans/example.md" } };
+  const input = { session_id: "s1", tool_name: "Skill", tool_input: { skill: "craftsman:orchestrate", args: "docs/plans/example.md" } };
   try {
     run(dir, input);
     assert.equal(fs.existsSync(requiredFile(dir, input)), true);
@@ -82,7 +82,7 @@ test("orchestrate-scope-guard: a prompt that merely mentions /orchestrate does n
 
 test("orchestrate-scope-guard: an unrelated slash command never touches the scope-required marker", () => {
   const dir = tmpProject();
-  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/plan add a feature" } };
+  const input = { session_id: "s1", tool_name: "Skill", tool_input: { skill: "plan", args: "add a feature" } };
   try {
     const result = run(dir, input);
     assert.equal(result.status, 0);
@@ -153,7 +153,7 @@ const autoPayloads = {
   typed: { session_id: "auto-typed", prompt: "/auto autonomous-e2e-loop" },
   namespaced: { session_id: "auto-ns", prompt: "/craftsman:auto autonomous-e2e-loop" },
   skill: { session_id: "auto-skill", tool_name: "Skill", tool_input: { skill: "craftsman:auto", args: "autonomous-e2e-loop" } },
-  slash: { session_id: "auto-slash", tool_name: "SlashCommand", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
+  "skill-command-field": { session_id: "auto-command", tool_name: "Skill", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
 };
 for (const [shape, input] of Object.entries(autoPayloads)) {
   test(`orchestrate-scope-guard: /auto (${shape}) arms scope-required, acceptance ownership and auto-active`, () => {

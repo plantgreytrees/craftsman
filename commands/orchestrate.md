@@ -2,7 +2,7 @@
 description: Executor — implement an existing plan doc (from /plan, /investigate, or a tracker slug); gate, review, and merge each unit to the base branch. Does NOT plan.
 argument-hint: "<plan-doc path | tracker slug | feature request> [--step <tracker-id>] [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
-allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand
+allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill
 ---
 
 # Orchestrate — the executor
@@ -18,7 +18,7 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 1. **`--step <tracker-id>`** — single-row, user-gated. Grep the main checkout's `docs/plans/TRACKER.md` for the row, resolve its plan doc, run Phases B–E for that one row **with a plan-approval stop**. Build the summary from the TRACKER.md row + plan doc only — don't `Read` either shared-machinery file yet. Present it and WAIT for approval before any edit; already-done row → say so and stop. After approval, `Read` `_shared-machinery.md`, then run Phases B–E (which reads `_shared-execution.md` itself, per Phase C).
 2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → its `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously
 3. **Tracker slug** with a linked plan doc → as (2). Unknown slug → `tracker.mjs lookup` before treating it as new.
-4. **Free-form request, no doc** → nothing to execute yet. Pick the right planner via SlashCommand first, then continue at (2): bug/symptom → `/investigate`; anything else → `/plan`. A doc always exists before code.
+4. **Free-form request, no doc** → nothing to execute yet. Pick the right planner via Skill first, then continue at (2): bug/symptom → `/investigate`; anything else → `/plan`. A doc always exists before code.
 
 **Resume rule:** at every loop iteration (and after any compaction), re-read the tracker — the **main checkout's** `docs/plans/TRACKER.md` ledger block (never a worktree's copy, which is stale), or `printf '%s' '{"action":"status"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/tracker.mjs"` — + your lock files — tracker state on disk is truth. Skip MERGED units; resume IN_PROGRESS units whose lock you own; rest per Phase L. Re-read the plan doc's task text only when first resolving, after a compaction, or right before Phase C executes that unit.
 
@@ -26,7 +26,7 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 
 1. Confirm execution rows exist and are current (slug, area, language, security level, status, branch); register any the planner missed.
 2. **Blast-radius confirmation.** `/plan` already ran `consumer-tracer` per changed contract and persisted its `CONSUMERS:` block into the plan's Verification background — read that first. Re-run `consumer-tracer` only when no persisted manifest covers a contract this run touches, or the plan predates a merge that could've added a consumer. Anything found (persisted or fresh) the plan lacks → add the unit or record why out of scope.
-3. Validate and topologically order the `scope_id`/`depends_on` graph: `{"steps":[...]}` (id, scope_id, project, depends_on, bumps, feature) on stdin to `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-graph.mjs"` — exits non-zero on a missing dependency, cycle, unknown `project`, or missing/early submodule bump; fix the plan and re-run, never hand-order by eye. Write the order to TodoWrite.
+3. Validate and topologically order the `scope_id`/`depends_on` graph: `{"steps":[...]}` (id, scope_id, project, depends_on, bumps, feature) on stdin to `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-graph.mjs"` — exits non-zero on a missing dependency, cycle, unknown `project`, or missing/early submodule bump; fix the plan and re-run, never hand-order by eye. Write the order to TaskCreate.
 4. Treat each scope step as one execution packet — read its `project`, task text, `scope`, `### Tooling` manifest once, keep active until all its tasks complete; don't reload per task. Each project runs through its own worktree, base branch, merge lock, remote, cleanup lifecycle.
 5. **Read each step's `scope` manifest** as a hard allow-list — load only `scope.read`+`scope.docs` (plus tracker row + task text) before delegating; `scope.write` is the only writable set. No broad `Glob`/`Grep`, no unselected workspace projects. **Architecture:** pass the unit's `arch` ids into `scope.mjs` with the manifest (`${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md`). A unit that cannot honour a `decided` rule → PARK with the rule id and recommend `/architect`; never work around it.
 6. **Activate the scope before Phase C** — exact step manifest as JSON on stdin to `scripts/scope.mjs`, creating the session-owned allow-list. A blocked tool call = mandatory re-scope: re-analyse the dependency boundary, update the plan's scope, reactivate, retry. Never widen to a repo-wide search.

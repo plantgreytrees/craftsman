@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PreToolUse (Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit): deterministic
+// PreToolUse (Read|Glob|Grep|Write|Edit|NotebookEdit): deterministic
 // checks in a SINGLE process (one Node spawn per tool call) —
 //   1. hard-block edits to protected / generated / lock / secret paths
 //   2. enforce that only the doc-writing commands (/plan, /orchestrate,
@@ -732,11 +732,11 @@ function rollupTarget(absolute) {
   } catch { return null; }
 }
 
-// The file as it would read after this Write/Edit/MultiEdit, or null when the
+// The file as it would read after this Write/Edit, or null when the
 // edit can't apply (the tool then fails on its own; nothing to guard).
 function afterEdit(current) {
   if (tool === "Write") return typeof toolInput.content === "string" ? toolInput.content : null;
-  const edits = tool === "MultiEdit" ? toolInput.edits || [] : [toolInput];
+  const edits = [toolInput];
   let text = current;
   for (const edit of edits) {
     if (typeof edit?.old_string !== "string" || typeof edit?.new_string !== "string" || !text.includes(edit.old_string)) return null;
@@ -790,12 +790,12 @@ const activeContext = { root: activeRoot, stateDir: path.join(activeRoot, ".craf
 const cfg = loadConfig(activeContext);
 if (!enabled(cfg, activeContext)) process.exit(0);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
   }
-  const bucket = ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool) ? "write" : "read";
+  const bucket = ["Write", "Edit", "NotebookEdit"].includes(tool) ? "write" : "read";
   const candidates = [];
   if (tool === "Read" || bucket === "write") {
     if (file) candidates.push(path.relative(activeRoot, file).split(path.sep).join("/"));
@@ -873,7 +873,7 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
   }
 }
 
-if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
+if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   process.stderr.write(
     `craftsman: ${tool} blocked because this session requires an active unit scope. ` +
     `Re-analyse the unit boundary, activate scripts/scope.mjs with the exact read/docs/write ` +
@@ -910,7 +910,7 @@ if (!file) process.exit(0); // no file: nothing to time or log
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
 //    written, and the root's generated ledger block is never hand-edited.
-const tracker = ["Write", "Edit", "MultiEdit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
+const tracker = ["Write", "Edit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
 if (tracker) {
   if (path.resolve(tracker.main) !== path.resolve(tracker.root)) {
     const rootDoc = path.join(tracker.main, "docs", "plans", "TRACKER.md");
@@ -940,7 +940,7 @@ if (tracker) {
   }
 }
 
-const rollup = ["Write", "Edit", "MultiEdit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
+const rollup = ["Write", "Edit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
 if (rollup) {
   let current = "";
   try { current = fs.readFileSync(rollup.real, "utf8"); } catch {}
@@ -970,7 +970,7 @@ if (hit) {
 
 // 2) Doc-write authority — session-scoped.
 const g = cfg.docWriteGuard || {};
-const writeTool = ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool);
+const writeTool = ["Write", "Edit", "NotebookEdit"].includes(tool);
 if (g.enabled !== false && writeTool) {
   const docPaths = g.docPaths || ["docs/**"];
   // The root tracker counts as a doc even when edited from a linked worktree,

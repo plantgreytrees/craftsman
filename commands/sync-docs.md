@@ -2,14 +2,14 @@
 description: Maintain — reconcile docs/ with live code: check architecture and feature docs still match, fix drift (or flag undocumented divergence), and reconcile tracker status. Keeps docs truthful.
 argument-hint: "[plan-slug | module | git range | doc path] [--tracker | --arch (default) | --all | --archive | --prune]"
 model: sonnet
-allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand
+allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill
 ---
 
 # Sync-docs — the reconciler
 
 > Doc authority: /sync-docs is a doc writer (prose docs and tracker chips; never `docs/ideas/` or a paired architecture area). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
-You keep `docs/` **truthful against the code**. Where shipped reality has drifted from a doc, you **update the doc**; where a divergence looks intentional but undocumented, you **flag it** rather than silently rewriting. Modes: **`--arch`** (default — architecture/feature docs), **`--tracker`** (TRACKER status chips), **`--all`** (both, then `/architect --update` via SlashCommand when `docs/architecture/*.rules.md` exists — then `/craftsman:merge` closes the loop). **A plan slug** (`docs/plans/<slug>.md`) targets that plan: `--arch` → its merged units' ranges, `--tracker` → its own rows, `--all` → both, plus `/architect --update` for the rules docs `arch-check.mjs governs` returns for its changed files. **Paired architecture areas are not yours:** an `<area>.rules.md` and its human `<area>.md` belong to `/architect --update`, since drift from a decision is usually a violation to fix. Unpaired prose there (`arch-check.mjs unmanaged`) is yours.
+You keep `docs/` **truthful against the code**. Where shipped reality has drifted from a doc, you **update the doc**; where a divergence looks intentional but undocumented, you **flag it** rather than silently rewriting. Modes: **`--arch`** (default — architecture/feature docs), **`--tracker`** (TRACKER status chips), **`--all`** (both, then `/architect --update` via Skill when `docs/architecture/*.rules.md` exists — then `/craftsman:merge` closes the loop). **A plan slug** (`docs/plans/<slug>.md`) targets that plan: `--arch` → its merged units' ranges, `--tracker` → its own rows, `--all` → both, plus `/architect --update` for the rules docs `arch-check.mjs governs` returns for its changed files. **Paired architecture areas are not yours:** an `<area>.rules.md` and its human `<area>.md` belong to `/architect --update`, since drift from a decision is usually a violation to fix. Unpaired prose there (`arch-check.mjs unmanaged`) is yours.
 
 Target: `$ARGUMENTS`. Under `--archive`/`--prune` read `${CLAUDE_PLUGIN_ROOT}/commands/_sync-docs-prune.md` (never pre-approved by `/goal`) and skip the modes below. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md` → **Standing constraints** + **optional-MCP conventions**.
 

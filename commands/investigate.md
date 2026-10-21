@@ -1,7 +1,7 @@
 ---
 description: Diagnostician — root-cause a reported bug across the codebase, verify every hypothesis, and inventory root-cause, contributing and latent defects into a fix-ready analysis. No fixes, no docs.
 argument-hint: "<the error, symptom, or problem you noticed>"
-allowed-tools: Task, Bash, Read, Glob, Grep, TodoWrite, SlashCommand
+allowed-tools: Task, Bash, Read, Glob, Grep, TaskCreate, TaskUpdate, Skill
 ---
 
 # Investigate — the detective
@@ -40,5 +40,5 @@ Discard anything you couldn't verify — an unverified plausible cause is exactl
 ## Phase 3 — Assemble the fix-ready inventory & hand off
 
 1. Assemble the inventory **in the conversation** (this command writes nothing under `docs/`): the observable, reproduction, verified inventory (each finding: class, `file:line`, evidence, proposed fix), and fix sequencing (root cause first → contributing → latent; shared libraries before their consumers). **Every root-cause fix carries a regression-test requirement** (a test that fails on the old code) as an explicit task — the executor enforces it. Note each fix's **tooling needs** (language, tests, guards) so `/plan` can build the per-unit `tooling:` manifest. **Encode the fix-scope rule:** root cause + contributing are always fixed; latent / subpar items are fixed when mechanical / low-risk, else become PENDING follow-up rows — flagged, not silently expanded into a rewrite. If Phase 1's ~15-segment cap engaged, name it here too: which segments got full dispatch-and-trace vs which were only listed, so the inventory's coverage stays auditable rather than silently partial.
-2. **Auto-delegate persistence to `/plan`:** invoke `/plan` (SlashCommand tool) with a concise request plus this full inventory — `/plan` persists `docs/plans/investigate-<slug>.md` and registers each fix × module row in `docs/plans/TRACKER.md` (slug `investigate-<slug>`). This command registers no rows itself.
+2. **Auto-delegate persistence to `/plan`:** invoke `/plan` (Skill tool) with a concise request plus this full inventory — `/plan` persists `docs/plans/investigate-<slug>.md` and registers each fix × module row in `docs/plans/TRACKER.md` (slug `investigate-<slug>`). This command registers no rows itself.
 3. Do **not** fix. Print: the verified root cause in one sentence, the full inventory (fix vs follow-up), and the next step — **`/plan`** (now invoked to persist), then **`/orchestrate investigate-<slug>`**.

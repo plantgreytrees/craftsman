@@ -2,7 +2,7 @@
 description: One entry for the whole loop — ask every open decision up front, run units unattended under /goal, ask once more about what came back, land everything; repeat until every row is COMPLETE.
 argument-hint: "<idea-slug | plan-slug | request> [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, SlashCommand, Skill
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill
 ---
 
 # Auto — ask, run, ask again, land

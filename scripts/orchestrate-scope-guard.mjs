@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PostToolUse (SlashCommand|Skill) and UserPromptSubmit: the moment
+// PostToolUse (Skill) and UserPromptSubmit: the moment
 // /orchestrate, /auto or /scrutinise (bare or craftsman:-namespaced) is invoked — by
 // the model as a tool call, or typed straight into the prompt by the user,
 // which never reaches a tool hook at all.
@@ -71,11 +71,11 @@ function featurePlan(slug, context, { level, feature } = {}) {
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
-// Three payload shapes, one meaning: SlashCommand carries tool_input.command,
-// Skill carries tool_input.skill (the model's usual route to a plugin
-// command), UserPromptSubmit carries the raw prompt. Every write below is
-// idempotent, so a user-typed command that also produces a tool call simply
-// arms it twice.
+// Three payload shapes, one meaning: Skill carries tool_input.skill (the
+// model's route to a plugin command; a tool_input.command is still read, for
+// a Skill call that carries one), UserPromptSubmit carries the raw prompt.
+// Every write below is idempotent, so a user-typed command that also produces
+// a tool call simply arms it twice.
 const toolInput = input?.tool_input || {};
 const command = typeof toolInput.command === "string" ? toolInput.command
   : typeof toolInput.skill === "string"

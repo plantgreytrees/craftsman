@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SessionStart, PostToolUse (Bash|Write|Edit|MultiEdit) and Stop: keep the
+// SessionStart, PostToolUse (Bash|Write|Edit) and Stop: keep the
 // root TRACKER.md's generated ledger block equal to the ledger, whoever or
 // whatever touched either. tracker.mjs already re-renders on every write it
 // makes; this hook is the mechanical backstop — a hand edit of the block

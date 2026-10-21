@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -191,4 +192,52 @@ test("wiring: trimmed loadable docs stay at or below 95% of their size cap (ARCH
     const size = fs.statSync(path.join(PLUGIN_ROOT, file)).size;
     assert.ok(size <= cap * 0.95, `${file}: ${size} > ${cap * 0.95}`);
   }
+});
+
+// 4.0: a hook matcher or allowed-tools entry that names a tool Claude Code no longer has
+// never fires (matchers) or is ignored (allowed-tools), so the guard it was meant to be
+// silently covers nothing. `Task` is kept: it is the older name of `Agent`, which the
+// agent-mode guard still matches for older Claude Code versions.
+const CURRENT_TOOLS = new Set([
+  "Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit", "Bash", "Task", "Agent", "Workflow", "Skill",
+  "AskUserQuestion", "WebFetch", "WebSearch", "EnterWorktree", "ExitWorktree", "TaskCreate", "TaskUpdate",
+]);
+const isCurrentTool = (name) => CURRENT_TOOLS.has(name) || name.startsWith("mcp__");
+
+test("wiring: every hooks.json matcher token is a current tool name", () => {
+  const stale = [];
+  for (const [event, entries] of Object.entries(hooksConfig.hooks)) {
+    for (const entry of entries) {
+      for (const token of String(entry.matcher || "").split("|").filter(Boolean)) {
+        if (!isCurrentTool(token)) stale.push(`${event}: ${token}`);
+      }
+    }
+  }
+  assert.deepEqual(stale, []);
+});
+
+test("wiring: every allowed-tools entry in commands and tools entry in agents is a current tool name", () => {
+  const stale = [];
+  for (const file of promptFiles) {
+    const front = fs.readFileSync(file, "utf8").split(/^---$/m)[1] || "";
+    const line = front.split("\n").find((l) => /^(allowed-tools|tools):/.test(l));
+    if (!line) continue;
+    for (const token of line.replace(/^[a-z-]+:\s*/, "").split(",").map((t) => t.trim()).filter(Boolean)) {
+      if (!isCurrentTool(token)) stale.push(`${path.relative(PLUGIN_ROOT, file)}: ${token}`);
+    }
+  }
+  assert.deepEqual(stale, []);
+});
+
+test("wiring: no tracked file outside docs/ideas, docs/plans and the changelog names a removed tool", () => {
+  const dead = ["Multi" + "Edit", "Slash" + "Command", "Todo" + "Write"];
+  const files = spawnSync("git", ["ls-files"], { cwd: PLUGIN_ROOT, encoding: "utf8" }).stdout.split("\n").filter(Boolean)
+    .filter((f) => !/^(docs\/ideas\/|docs\/plans\/|CHANGELOG\.md$|scripts\/wiring\.test\.mjs$)/.test(f))
+    .filter((f) => fs.existsSync(path.join(PLUGIN_ROOT, f)));
+  const offenders = [];
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(PLUGIN_ROOT, f), "utf8");
+    for (const name of dead) if (text.includes(name)) offenders.push(`${f}: ${name}`);
+  }
+  assert.deepEqual(offenders, []);
 });
