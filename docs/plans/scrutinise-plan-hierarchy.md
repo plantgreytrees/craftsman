@@ -3,7 +3,7 @@ slug: scrutinise-plan-hierarchy
 goal: Plans of any size run under /orchestrate with every flag off, and the feature-branch path records, gates and lands what its rules say.
 parent: plan-hierarchy
 priority: P1
-classification: in-scope (/scrutinise plan-hierarchy, isolated scrutineer, 2026-10-18; round 1 - 1 Critical, 9 Warning, 11 Suggestion; round 2 - 0 Critical, 4 Warning, 5 Suggestion)
+classification: in-scope (/scrutinise plan-hierarchy, isolated scrutineer, 2026-10-18; round 1 - 1 Critical, 9 Warning, 11 Suggestion; round 2 - 0 Critical, 4 Warning, 5 Suggestion; round 3 - /architect --update found 8 decided rules the code does not satisfy, user chose to implement)
 tracker_rows: [TRACKER#scrutinise-plan-hierarchy]
 guards:
   blast_radius: done
@@ -228,6 +228,162 @@ units:
       write: [scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs]
     arch: [ARCH-TRACKER-11, ARCH-TRACKER-12, ARCH-LAND-17]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: auto-grant-bare
+    scope_id: auto-grant-bare
+    project: .
+    depends_on: []
+    module: scripts/orchestrate-scope-guard.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/orchestrate-scope-guard.mjs, scripts/orchestrate-scope-guard.test.mjs]
+    arch: [ARCH-AUTO-08, ARCH-AUTO-09, ARCH-PLAN-03, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: auto-marker-subtree
+    scope_id: auto-marker-subtree
+    project: .
+    depends_on: [auto-grant-bare]
+    module: scripts/lib/core.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/auto.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/orchestrate-scope-guard.mjs, scripts/orchestrate-scope-guard.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs]
+    arch: [ARCH-AUTO-09, ARCH-AUTO-08, ARCH-AUTO-06, ARCH-PLAN-03, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: claim-protocol
+    scope_id: claim-protocol
+    project: .
+    depends_on: []
+    module: commands/_features.md
+    language: markdown
+    security: normal
+    scope:
+      read: [commands/_features.md, agents/unit-runner.md, scripts/claim.mjs, scripts/engine.test.mjs]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/_features.md, scripts/engine.test.mjs]
+    arch: [ARCH-ENGINE-15, ARCH-ENGINE-13, ARCH-SLIM-05]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: memory-decisions
+    scope_id: memory-decisions
+    project: .
+    depends_on: []
+    module: scripts/plan-memory.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/plan-memory.mjs, scripts/plan-memory.test.mjs]
+      docs: []
+      write: [scripts/plan-memory.mjs, scripts/plan-memory.test.mjs]
+    arch: [ARCH-ENGINE-15]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: plan-decisions
+    scope_id: plan-decisions
+    project: .
+    depends_on: [memory-decisions]
+    module: scripts/plan-decisions.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/plan-memory.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/state.rules.md]
+      write: [scripts/plan-decisions.mjs, scripts/plan-decisions.test.mjs]
+    arch: [ARCH-ENGINE-15, ARCH-DOCS-03]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: inherit-index
+    scope_id: inherit-index
+    project: .
+    depends_on: []
+    module: scripts/lib/plan-index.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/plan-index.mjs, scripts/lib/plan-index.test.mjs]
+      docs: [docs/architecture/plan.rules.md]
+      write: [scripts/lib/plan-index.mjs, scripts/lib/plan-index.test.mjs]
+    arch: [ARCH-PLAN-02, ARCH-PLAN-01, ARCH-PLAN-03]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: inherit-repo-exec
+    scope_id: inherit-repo-exec
+    project: .
+    depends_on: [inherit-index]
+    module: scripts/repo-exec.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/lib/plan-index.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/plan.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+    arch: [ARCH-PLAN-02, ARCH-LAND-13, ARCH-LAND-14, ARCH-LAND-18]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: inherit-consumers
+    scope_id: inherit-consumers
+    project: .
+    depends_on: [inherit-index, auto-marker-subtree]
+    module: scripts/plan-graph.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/plan-graph.mjs, scripts/lib/tracker-rollup.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/plan-index.mjs]
+      docs: [docs/architecture/auto.rules.md, docs/architecture/landing.rules.md, docs/architecture/plan.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/plan-graph.mjs, scripts/plan-graph.test.mjs, scripts/lib/tracker-rollup.mjs, scripts/lib/tracker-rollup.test.mjs, scripts/orchestrate-scope-guard.mjs, scripts/orchestrate-scope-guard.test.mjs]
+    arch: [ARCH-PLAN-02, ARCH-ENGINE-18, ARCH-TRACKER-10, ARCH-AUTO-08, ARCH-LAND-18, ARCH-STATE-02]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: source-lint
+    scope_id: source-lint
+    project: .
+    depends_on: []
+    module: scripts/arch-check.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/arch-check.mjs, scripts/arch-check.test.mjs]
+      docs: [docs/architecture/docs.rules.md]
+      write: [scripts/arch-check.mjs, scripts/arch-check.test.mjs]
+    arch: [ARCH-DOCS-03]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: size-unmatched
+    scope_id: size-unmatched
+    project: .
+    depends_on: []
+    module: scripts/doc-size-policy.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/doc-size-policy.mjs]
+      docs: [docs/architecture/slim.rules.md]
+      write: [scripts/doc-size-policy.mjs, scripts/doc-size-policy.test.mjs]
+    arch: [ARCH-SLIM-01]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: sync-docs-publish
+    scope_id: sync-docs-publish
+    project: .
+    depends_on: []
+    module: commands/sync-docs.md
+    language: markdown
+    security: normal
+    scope:
+      read: [commands/sync-docs.md, scripts/wiring.test.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/sync-docs.md, scripts/wiring.test.mjs]
+    arch: [ARCH-TRACKER-11, ARCH-SLIM-05, ARCH-DOCS-03, ARCH-ENGINE-13]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
+  - id: land-phase-a
+    scope_id: land-phase-a
+    project: .
+    depends_on: [sync-docs-publish]
+    module: commands/orchestrate.md
+    language: markdown
+    security: normal
+    scope:
+      read: [commands/orchestrate.md, scripts/wiring.test.mjs]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/plan.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/orchestrate.md, scripts/wiring.test.mjs]
+    arch: [ARCH-LAND-16, ARCH-SLIM-05, ARCH-ENGINE-13, ARCH-PLAN-03]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [], mcp: [] }
 ---
 # Plan: scrutinise-plan-hierarchy
 
@@ -306,8 +462,56 @@ Depends on: gate-fail-closed
 Depends on: historic-budget
 - [ ] 16.1 `hasArchiveEvent` returns false without reading anything when `context.stateDir` is unset, and otherwise scans the log backward: archive events (`tracker_archived`, `doc_retired`) after the last `tracker_published` unlock the blank guard; a log with no `tracker_published` counts every archive event (stated in the code comment); publish already logs `tracker_published` to the same log (`tracker-publish.mjs:100`) → accept: tracker-publish.test: unset stateDir refuses and never reads the process cwd; an archive event before the last publish cannot unlock; one after it can; a log with no publish line and an archive event unlocks; 12.1, 12.2 and the ARCH-TRACKER-12 refuse-to-blank test still pass
 
+### Step 17 — auto-grant-bare (., javascript, normal)
+Depends on: none
+- [ ] 17.1 `featurePlan` counts the one feature a bare slug resolves to (features >= 1 for a feature plan), so `runnerDispatchCount` adds the per-feature extra for a bare `/auto <feature-plan>`; `--level` and `--feature` results are unchanged → accept: orchestrate-scope-guard.test: a bare two-unit feature plan grants 8*2+1; the `--level epic` and `--feature` cases keep their grants; the old bare-slug expectation of 16 is updated
+
+### Step 18 — auto-marker-subtree (., javascript, high)
+Depends on: auto-grant-bare
+- [ ] 18.1 For a flagged run (`--level epic|story`, or several features) the auto marker names the invoked slug, and `autoActive`, `autoForceBlock` and the runner grants read every feature plan in that plan-index subtree: the marker stays live while any of them has an open row and ends when all are COMPLETE or CANCELLED; a bare epic or story slug still resolves to its first open feature plan → accept: core.test: two feature plans under an epic, the marker is live after the first completes and ended after both; orchestrate-scope-guard.test: `--level epic` writes the epic slug and a later `/orchestrate feat-b` keeps it live; the 17.1 and 9.1 tests still pass
+
+### Step 19 — claim-protocol (., markdown, normal)
+Depends on: none
+- [ ] 19.1 `commands/_features.md` makes feature prepare run `S claim` with unit `feature:<id>` first (a refusal `unit already claimed` returns `BLOCKED`) and land-feature release it; stay inside the 3500-byte cap by trimming prose of equal length in the same file → accept: engine.test asserts the `feature:` claim, the already-claimed BLOCKED and the release wording in `_features.md`; `node scripts/doc-size-policy.mjs` PASS; claim.test unchanged
+
+### Step 20 — memory-decisions (., javascript, normal)
+Depends on: none
+- [ ] 20.1 `plan-memory.mjs` gains a `list-decisions` action taking `{project, plan, feature?}` and returning the plan's `decision`-category entries without a query (the empty-query refusal of `recall` is untouched) → accept: plan-memory.test: decisions listed for a plan, filtered by feature, empty list when there are none, and `recall` with an empty query still refuses
+
+### Step 21 — plan-decisions (., javascript, high)
+Depends on: memory-decisions
+- [ ] 21.1 New `scripts/plan-decisions.mjs` writes PARKED decisions from the plan's tracker ledger rows (optional `feature`) plus `list-decisions` entries into the plan doc's `## Decisions` section: appended, deduplicated on a re-run, the section created when missing, only with the doc-write grant (`hasDocWriteGrant`), no other part of the doc touched → accept: plan-decisions.test: section created, new decisions appended, a re-run changes nothing, refused without the grant, every other section byte-identical
+
+### Step 22 — inherit-index (., javascript, high)
+Depends on: none
+- [ ] 22.1 A derived doc (`scrutinise-`, `investigate-`) takes the feature of its source plan: under a source with no `features:` groups its units join the source's implicit feature (same id); under a source with groups each derived unit's `feature:` must name one of the source's ids, else `buildIndex` refuses naming the doc; `resolve` reports the inherited id and the source plan on the feature → accept: plan-index.test: a derived doc under an implicit source shares its feature id; a derived doc under a grouped source with a tag; the refusal without a tag; a derived-of-derived chain resolves to the root source; non-derived docs are unchanged
+
+### Step 23 — inherit-repo-exec (., javascript, high)
+Depends on: inherit-index
+- [ ] 23.1 `prepareFeature` and `landFeature` name the feature worktree, branch (`feature/<source>-<id>`) and lock after the nearest non-derived ancestor of `input.plan`, refusing when the plan index cannot be read; `landFeature` gathers the rows of the source plan and its derived docs for that feature id and counts COMPLETE rows of earlier units as done → accept: repo-exec.test: prepare for a scrutinise doc under feature f reuses `feature/<source>-f`; land-feature with a derived doc's FEATURE_MERGED row and the source's COMPLETE rows lands; a non-derived plan is unchanged; an unreadable index refuses
+
+### Step 24 — inherit-consumers (., javascript, normal)
+Depends on: inherit-index, auto-marker-subtree
+- [ ] 24.1 `plan-graph.mjs` tags a derived doc's steps with the inherited feature id and counts them toward that feature's cap; `tracker-rollup.mjs` shows the inherited feature id in the rollup rows; the guard counts one feature, the source's, for a derived doc → accept: plan-graph.test (inherited tag and cap), tracker-rollup.test (feature column) and orchestrate-scope-guard.test (a derived doc counts one feature); the default path with `featureBranches` off is unchanged
+
+### Step 25 — source-lint (., javascript, normal)
+Depends on: none
+- [ ] 25.1 `parseRulesDoc` keeps `source:`; `lint` fails a rules doc whose `source:` is a path (contains `/` or ends in `.md`) that does not exist, naming the path; non-path values such as `init` are not file-checked; every current rules doc still lints PASS → accept: arch-check.test: missing, present and non-path source cases; `node scripts/arch-check.mjs lint` PASS on the repo
+
+### Step 26 — size-unmatched (., javascript, normal)
+Depends on: none
+- [ ] 26.1 `checkDocSizes` fails an unmatched loadable `.md` under commands, agents or skills, naming it; every currently unmatched file gets a cap of at most 105% of its current size; no existing cap is raised → accept: new `scripts/doc-size-policy.test.mjs`: an unmatched file fails with its name, a file one byte over its cap fails, a file exactly at its cap passes; `node scripts/doc-size-policy.mjs` PASS on the repo
+
+### Step 27 — sync-docs-publish (., markdown, normal)
+Depends on: none
+- [ ] 27.1 `/sync-docs --tracker` runs `S tracker` `{action:"publish", project}` after its archive step and ignores `published:false`; `sync-docs.md` stays inside its cap by trimming prose of equal length in the same file → accept: wiring.test asserts the publish step in `commands/sync-docs.md`; `node scripts/doc-size-policy.mjs` PASS; descriptions.test passes
+
+### Step 28 — land-phase-a (., markdown, normal)
+Depends on: sync-docs-publish
+- [ ] 28.1 Phase A of `commands/orchestrate.md` gains one step: when `repo-exec prepare`'s plan gate would refuse (the plan doc or its parent chain differs from `origin/<base>`), land them through `/craftsman:merge` first and then continue; `orchestrate.md` stays at or under 10000 bytes by trimming prose of equal length → accept: wiring.test asserts the step in `commands/orchestrate.md`; `node scripts/doc-size-policy.mjs` PASS
+
 ## Sequencing
-Steps 3 → 4 → 5 → 6 → 7 run strictly in order: they all edit `scripts/repo-exec.mjs` and its test. Step 8 follows steps 2 and 4. Steps 1, 2, 9, 10, 11, 12 are independent of each other. Step 13 is last of round 1. Round 2: 14 → 15 run in order (both edit `scripts/repo-exec.mjs` and its test); 16 is independent of them.
+Steps 3 → 4 → 5 → 6 → 7 run strictly in order: they all edit `scripts/repo-exec.mjs` and its test. Step 8 follows steps 2 and 4. Steps 1, 2, 9, 10, 11, 12 are independent of each other. Step 13 is last of round 1. Round 3: 17 → 18 (guard, core), 18 → 24, 20 → 21 (plan-memory), 22 → 23 and 22 → 24 (plan-index), 27 → 28 (wiring.test) run in order; 19, 25 and 26 are independent. Round 2: 14 → 15 run in order (both edit `scripts/repo-exec.mjs` and its test); 16 is independent of them.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Cap enforced with no options and the default 8: `scripts/plan-graph.mjs:32`, `:115`; `commands/orchestrate.md:29` sends `(id, scope_id, project, depends_on, bumps)` only.
@@ -327,6 +531,8 @@ CONSUMERS:
 - `repo-exec` actions `prepare` (feature), `land-unit`, `land-feature`: argument shapes unchanged; new refusals only → `agents/unit-runner.md`, `commands/_features.md`, `workflows/run.js`.
 - plan-index slug rule → `scripts/lib/tracker-rollup.mjs`, `scripts/arch-check.mjs`, `scripts/orchestrate-scope-guard.mjs`, `scripts/session-context.mjs`.
 
+- Round 3 contracts: `plan-index` feature inheritance → `scripts/repo-exec.mjs` (prepare/land naming, rows), `scripts/plan-graph.mjs` tagFeatures, `scripts/lib/tracker-rollup.mjs:83`, `scripts/orchestrate-scope-guard.mjs:61-67,129`, `workflows/run.js:218` (unchanged: it passes the plan path and `featureId`); `plan-memory list-decisions` → `scripts/plan-decisions.mjs`; auto marker subtree → `autoActive`/`autoForceBlock` readers in `scripts/pre-guard.mjs`, `scripts/stop-gate.mjs`, `scripts/agent-mode-guard.mjs`.
+
 ## Risk & rollback
 - Steps 1, 9 and 13 change default-path behaviour (a defect fix); everything else is behind `planning.featureBranches`, which stays false.
 - The live feature path stays unexercised: ARCH-LAND-10 and ARCH-ENGINE-16 spikes are not run here, so steps 2–8 are verified by tests only.
@@ -338,6 +544,7 @@ CONSUMERS:
 - Passing `featureBranches`, `maxSubagents` and `featuresText` into `craftsman:run` from the Engine paragraph: blocked on the live spikes.
 - `CHANGELOG.md` `[Unreleased]` was condensed instead of cut as `[2.2.0]`: touches the sibling plan's changelog-cut unit and needs the user.
 - Running the live spikes and flipping any flag on.
+- Round 3 overlap with `docs/plans/feature-branch-plans.md`: its units source-lint (5.1), size-policy (9.1, not 9.2) and the publish step of sync-docs-modes are now delivered by steps 25, 26 and 27 here; that plan's owner reduces them. Not edited from this plan. Rules are not edited here: `/architect --update` re-verifies ARCH-AUTO-08/09, ENGINE-15, PLAN-02, DOCS-03, SLIM-01, TRACKER-11 and LAND-16 after these land.
 - Round 2 Suggestions, flagged not driven: plan-graph CLI reads the plan index from `process.cwd()` and `orchestrate.md` never sends `plan` (needs an edit at its 9893/10000 cap); `landUnit` worktree checks run before the feature lock is taken; the slug pattern is written out in four places with disagreeing `..` rules (one `isSafeSlug` export); `commands/_features.md` has no clause for the PARKED → FEATURE_MERGED re-entry (3496/3500).
 - Resolved (`rule-land-16-rollups`): the user chose to amend ARCH-LAND-16 to exclude generated rollups from the prepare plan gate; landed through `/architect --update` as e7ee432 (id and check unchanged, cite `scripts/repo-exec.mjs:126-156`).
 - Round 3 Suggestions, flagged not driven: `hasArchiveEvent` ends its backward scan at any `tracker_published`, so a non-empty publish racing an archive can leave later empty publishes refused (fails closed; only a `rows === 0` publish should end the scan); the plan gate finds the leaf by filename while `isLastFeature` resolves by frontmatter slug (differs only when filename != slug); the `no node for parent` throw in `planGateFiles` is unreachable defence in depth; the fail-closed paths log no event; no test that a broken index with no open untagged line still passes the criteria gate. Stale cites in ARCH-LAND-14, ARCH-LAND-18 and ARCH-TRACKER-11 are left to `/architect --update` in `/sync-docs`.
