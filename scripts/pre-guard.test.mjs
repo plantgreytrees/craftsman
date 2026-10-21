@@ -24,6 +24,21 @@ function run(script, dir, input, extraEnv = {}) {
   });
 }
 
+// The guard only analyses a destructive-looking command, never runs it, but `~` and
+// `$HOME` resolve against os.homedir(). Pin HOME and USERPROFILE to a throwaway dir
+// that holds the fixture so the verdict never depends on where TMPDIR sits relative
+// to the real home, and so a misfiring guard has nothing real to point at.
+const REAL_HOME = os.homedir();
+function homePinned(base = os.tmpdir()) {
+  const home = fs.mkdtempSync(path.join(base, "craftsman-home-"));
+  const dir = path.join(home, "project");
+  fs.mkdirSync(dir);
+  const env = { HOME: home, USERPROFILE: home };
+  assert.notEqual(env.HOME, REAL_HOME, "the spawned HOME must not be the real home");
+  assert.notEqual(env.USERPROFILE, REAL_HOME);
+  return { home, dir, env };
+}
+
 test("pre-guard: active scope allows declared reads and blocks undeclared reads", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-"));
   try {
@@ -603,11 +618,11 @@ test("pre-guard: every rm form that removes or moves a guarded doc (or its ances
 });
 
 test("pre-guard: shell keywords, more wrappers and unseen-argument removals fail closed (12.1, 12.2)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  const { home, dir, env } = homePinned();
   try {
     fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
     fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
-    const bash = (command) => run(GUARD, dir, { session_id: "bypass-forms", tool_name: "Bash", tool_input: { command } });
+    const bash = (command) => run(GUARD, dir, { session_id: "bypass-forms", tool_name: "Bash", tool_input: { command } }, env);
     const forms = [
       "if true; then rm docs/plans/x.md; fi", "! rm docs/plans/x.md", "for x in a; do rm docs/plans/x.md; done",
       "nice rm docs/plans/x.md", "nice -n 5 rm docs/plans/x.md", "timeout 5 rm docs/plans/x.md", "timeout -s KILL 5 rm docs/plans/x.md",
@@ -621,10 +636,29 @@ test("pre-guard: shell keywords, more wrappers and unseen-argument removals fail
       "if true; then ls; fi"]) {
       assert.equal(bash(command).status, 0, `stays allowed: ${command}`);
     }
-    assert.equal(run(DOC_WRITE, dir, {}).status, 0);
+    assert.equal(run(DOC_WRITE, dir, {}, env).status, 0);
     for (const command of forms) assert.equal(bash(command).status, 0, `granted: ${command}`);
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: rm ~ and $HOME verdicts hold with the fixture outside and inside the real home (2.1)", (t) => {
+  const bases = [os.tmpdir()];
+  try { fs.accessSync(REAL_HOME, fs.constants.W_OK); bases.push(REAL_HOME); } catch { t.diagnostic("real home not writable: inside-home case skipped"); }
+  for (const base of bases) {
+    const { home, dir, env } = homePinned(base);
+    try {
+      assert.equal(env.HOME, home);
+      fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "docs", "plans", "x.md"), "# x\n");
+      for (const command of ["rm -rf ~", "rm -rf $HOME/x", "rm -rf \"$PWD/docs\""]) {
+        const r = run(GUARD, dir, { session_id: "home-pin", tool_name: "Bash", tool_input: { command } }, env);
+        assert.equal(r.status, 2, `blocked with base ${base}: ${command}`);
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   }
 });
 
