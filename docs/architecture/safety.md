@@ -3,7 +3,7 @@
 > and `/architect --update safety` should be run.
 
 # Safety architecture
-_Last verified: 2026-10-21 at `44cd3ed` · Source plan: [fixes-and-safety](../plans/fixes-and-safety.md)_
+_Last verified: 2026-10-21 at `96a029c` · Source plan: [fixes-and-safety](../plans/fixes-and-safety.md)_
 
 ## In plain English
 Craftsman's guards are Claude Code hooks, so they only protect you while they
@@ -40,9 +40,13 @@ flowchart LR
 | ARCH-SAFETY-11 | A filter in front of pre-guard may skip it only where it cannot act: the launcher skips node for Read, Glob and Grep with no scope state, nothing protected-looking in the call and no project `protectedPaths` override | Starting node costs ~25 ms on every read in a session that has no unit scope; but pre-guard also blocks reads of `.env`, `node_modules` and lock files with no scope, so a bare "no scope, skip" would have opened them | Hook `if` (cannot test for scope files), skipping all reads when no scope exists |
 
 ## Trade-offs & known limits
-- A machine without `node` now blocks every guarded tool call until node is installed. That is the point; the message names the cause.
+- A machine without `node` blocks every guarded tool call until node is installed. That is the point; the message names the cause.
 - `run.sh` adds one `sh` process in front of every hook; the Read/Glob/Grep filter more than pays for it (measured: the skipped path adds under 1 ms p95 over 200 runs; starting node costs about 25 ms).
 - `onFailure: "block"` (Claude Code 2.1.295+) is recorded on the pre-guard and agent-mode-guard entries as a second layer; it has no effect on Stop hooks.
+- The self-protection and hook-bypass checks match tokens, with no new shell parser. Anything they cannot read (an interpreter writing a file, `make`, a script written earlier in the same command) stays with the sandbox (ARCH-SAFETY-01).
+- `pre-guard` checks protected paths against `tool_input.file_path` only, so a Grep or Glob named by `path` (for example `path: .env`) is not path-checked. This predates the safety work; the launcher filter keeps the same verdict and the parity table pins it.
+- With no remote ref the sweep removes nothing, so a repo-exec session whose merged worktree survives gets "WORKTREE NOT SWEPT" at Stop until it is removed by hand.
+- `CRAFTSMAN=off` no longer lifts the agent-mode guard; set `execution.agentMode: "subagents"` to dispatch for real.
 
 ## SessionEnd display (checked 2026-10-21, Claude Code 2.1.306)
 `scripts/session-end.mjs` writes the unpushed-work report and the hand-off to **stderr**, the channel the hooks reference

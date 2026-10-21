@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // /craftsman:toggle — on/off switch via a flag file in .craftsman/.
-// (Env var CRAFTSMAN=off also disables everything, session-wide.)
+// (CRAFTSMAN=off in the env does the same for the quality side; only CRAFTSMAN_SAFETY=off turns the safety guards off.)
 import fs from "node:fs";
 import path from "node:path";
 import { STATE_DIR } from "./lib/core.mjs";

@@ -6,6 +6,24 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Guards fail closed.** Every hook now runs through `hooks/run.sh`: with node missing a safety hook blocks the call and the others warn once per session. `pre-guard`, `agent-mode-guard` and `orchestrate-scope-guard` deny on bad JSON, empty input, an uncaught error or a failed config load instead of silently passing; the advisory hooks still fail open but say so once.
+- **The model cannot switch safety off.** Only `CRAFTSMAN_SAFETY=off` in your environment does; `CRAFTSMAN=off`, `.craftsman/off` and `enabled: false` now switch off the quality, doc and tracker machinery only. A tool call can no longer create the off flag, edit `hooks/hooks.json` or the `safety`/`stopGate` config keys, write a grant or marker, or run `toggle.mjs off` / `doc-write.mjs on` outside its command. Safety stays on outside a git repository.
+- **The worktree sweep is evidence-based and reversible.** A branch counts as merged only into a remote-tracking ref; worktrees holding non-disposable ignored files (`worktrees.disposable`) or living under `.claude/worktrees` (`worktrees.sweepClaudeWorktrees`) are kept; every deleted branch is logged with its sha in `.craftsman/sweep-log.jsonl`.
+- The mod launches a goal only if `/instruction` or `/auto` recorded it this session (`scripts/goal-token.mjs`).
+- The hook-bypass check also catches `git commit -n`, clustered and abbreviated flags, `-ccore.hooksPath=...`, `--config-env` and other spellings of the gpgsign override.
+- ESLint 9: checks use `--format json`, and a crashed tool is "unavailable", never a finding. Docs-only turns no longer re-run the suite at Stop. Hooks and `allowed-tools` use current tool names. `release` identity: `metadata.release` follows the changelog (2.2.0).
+- `/` menu and context: the nine internal partials are hidden from the menu, every command and agent description is a routing sentence of at most 90 characters (descriptions total 4.5 KB, was 9 KB), the root-only instruction story is stated once, and questions to the user go through `AskUserQuestion`.
+- The Linux `rm ~` test cases pin `HOME`. Steps 24-26 of the guard-failclosed plan (`scrutinise-feature-branch-plans`) are ticked against their tests.
+
+### Added
+
+- Stop and SessionEnd report **unpushed** work in the main checkout and every worktree, from local refs only; `stopGate.blockOnUnpushed` (default `false`) makes Stop block on it. Stop also reports guarded docs that changed without passing the doc guard.
+- SessionStart says whether the guards are on, or off and why, and notes when no settings scope enables the **sandbox**. `/craftsman:init --settings-diff` and `--settings-write` merge `sandbox.enabled` and ask rules into `.claude/settings.json` without overwriting anything.
+- The launcher skips node for Read, Glob and Grep when `pre-guard` cannot act (about 0.5 ms instead of about 25 ms), with a parity table pinning every verdict.
+- README `Safety` section, `docs/architecture/safety.md` and ARCH-SAFETY-01 to 11. New keys: `stopGate.blockOnUnpushed`, `worktrees.disposable`, `worktrees.sweepClaudeWorktrees`.
+
 ## [2.2.0] - 2026-10-18
 
 ### Added
