@@ -1226,3 +1226,84 @@ test("quality-gate and stop-gate: outside a git repo they stay quiet and write n
     assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ARCH-SAFETY-11 (14.0): the launcher's Read/Glob/Grep filter must never change a verdict. Every case runs
+// through `node pre-guard.mjs` directly and through `sh hooks/run.sh scripts/pre-guard.mjs`; the exit codes
+// must match, including the cases pre-guard blocks on a Read with no scope at all (protected paths).
+const RUN_SH = path.join(ROOT, "..", "hooks", "run.sh");
+const PLUGIN = path.resolve(ROOT, "..");
+const overLauncher = (dir, input, env = {}) => spawnSync("sh", [RUN_SH, "scripts/pre-guard.mjs"], {
+  cwd: dir, input: JSON.stringify(input), encoding: "utf8",
+  env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_PLUGIN_ROOT: PLUGIN, ...env },
+});
+
+function parity(dir, label, input, env) {
+  const direct = run(GUARD, dir, input, env);
+  const launched = overLauncher(dir, input, env);
+  assert.equal(launched.status, direct.status, `${label}: launcher ${launched.status} vs direct ${direct.status}\n${launched.stderr}`);
+  return direct.status;
+}
+
+test("pre-guard: the launcher filter gives the same verdict as the guard for every tool and case (14.0)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-parity-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    for (const rel of ["src/a.js", "src/other.js", ".env", "node_modules/x/index.js", "package-lock.json", "docs/plans/x.md", "dist/app.js"]) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), "x\n");
+    }
+    const at = (rel) => path.join(dir, rel);
+    const sid = "parity-1";
+    const tool = (name, tool_input) => ({ session_id: sid, tool_name: name, tool_input });
+    const table = [
+      ["Read source", tool("Read", { file_path: at("src/a.js") }), 0],
+      ["Read .env", tool("Read", { file_path: at(".env") }), 2],
+      ["Read node_modules", tool("Read", { file_path: at("node_modules/x/index.js") }), 2],
+      ["Read lock file", tool("Read", { file_path: at("package-lock.json") }), 2],
+      ["Read dist", tool("Read", { file_path: at("dist/app.js") }), 2],
+      ["Read a doc", tool("Read", { file_path: at("docs/plans/x.md") }), 0],
+      ["Glob source", tool("Glob", { pattern: "src/**/*.js", path: dir }), 0],
+      ["Grep source", tool("Grep", { pattern: "x", path: at("src") }), 0],
+      // pre-guard path-checks file_path only, so a Grep or Glob named by `path` passes it today; parity is the point here
+      ["Grep .env by path", tool("Grep", { pattern: "x", path: at(".env") }), 0],
+      ["Grep .env by file_path", tool("Grep", { pattern: "x", file_path: at(".env") }), 2],
+      ["Write lock file", tool("Write", { file_path: at("package-lock.json"), content: "{}" }), 2],
+      ["Write notes", tool("Write", { file_path: at("notes.txt"), content: "x" }), 0],
+      ["Write guarded doc", tool("Write", { file_path: at("docs/plans/x.md"), content: "y" }), 2],
+      ["Edit hooks.json", tool("Edit", { file_path: at("hooks/hooks.json"), old_string: "a", new_string: "b" }), 2],
+      ["NotebookEdit source", tool("NotebookEdit", { notebook_path: at("n.ipynb"), file_path: at("n.ipynb") }), 0],
+      ["Bash ls", tool("Bash", { command: "ls" }), 0],
+      ["Bash git status", tool("Bash", { command: "git status" }), 0],
+      ["Bash rm guarded doc", tool("Bash", { command: "rm docs/plans/x.md" }), 2],
+      ["Bash redirect to off flag", tool("Bash", { command: "echo off > .craftsman/off" }), 2],
+      ["Bash doc-write on", tool("Bash", { command: "node scripts/doc-write.mjs on" }), 2],
+      ["Bash toggle off", tool("Bash", { command: "node scripts/toggle.mjs off" }), 2],
+      ["Bash hook bypass", tool("Bash", { command: "git commit --no" + "-verify -m x" }), 2],
+      ["bad payload", { session_id: sid }, 0],
+    ];
+    for (const [label, input, want] of table) assert.equal(parity(dir, label, input), want, `${label}: expected ${want}`);
+
+    // with an active scope the Read is judged against its allow-list, through the launcher too
+    const scoped = "parity-2";
+    const manifest = { session_id: scoped, plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["src/a.js"], docs: [], write: ["src/a.js"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    const read = (rel) => ({ session_id: scoped, tool_name: "Read", tool_input: { file_path: at(rel) } });
+    assert.equal(parity(dir, "scope: declared read", read("src/a.js")), 0);
+    assert.equal(parity(dir, "scope: undeclared read", read("src/other.js")), 2);
+    assert.equal(parity(dir, "scope: Grep outside the scope", { session_id: scoped, tool_name: "Grep", tool_input: { pattern: "x", path: at("src/other.js") } }), 2);
+
+    // the scope-required flag alone (no scope yet) blocks reads, through the launcher too
+    const armed = "parity-3";
+    assert.equal(run(OSG, dir, { session_id: armed, prompt: "/orchestrate docs/plans/x.md" }).status, 0);
+    assert.equal(parity(dir, "scope required, none active", { session_id: armed, tool_name: "Read", tool_input: { file_path: at("src/a.js") } }), 2);
+
+    // a project that overrides protectedPaths keeps its own list honoured on reads
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ protectedPaths: ["secrets/**"] }));
+    fs.mkdirSync(path.join(dir, "secrets"));
+    fs.writeFileSync(path.join(dir, "secrets", "key.txt"), "k");
+    assert.equal(parity(dir, "project protectedPaths", { session_id: "parity-4", tool_name: "Read", tool_input: { file_path: at("secrets/key.txt") } }), 2);
+
+    // CRAFTSMAN_SAFETY=off is the one off switch, with or without the launcher
+    assert.equal(parity(dir, "safety off", tool("Read", { file_path: at(".env") }), { CRAFTSMAN_SAFETY: "off" }), 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

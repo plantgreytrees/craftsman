@@ -105,3 +105,132 @@ test("run.sh: POSIX sh only — parses under sh -n and uses no bash-only syntax"
   assert.match(text, /^#!\/bin\/sh\n/);
   assert.doesNotMatch(text, /\[\[|\bfunction\s+\w+|<\(|\$\{[^}]*\/\/|\bsource\s/);
 });
+
+// ---- 14: the Read/Glob/Grep filter (ARCH-SAFETY-11) -------------------------------------------
+// pre-guard has nothing to do for a Read, Glob or Grep unless a unit scope (or the scope-required flag) is on
+// disk for the session, the call names a protected-looking path, or the project overrides protectedPaths.
+// A fixture plugin whose pre-guard.mjs only records that node ran shows exactly when run.sh starts it.
+function filterFixture() {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-filter-plugin-"));
+  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-filter-project-")));
+  fs.mkdirSync(path.join(plugin, "scripts"));
+  fs.writeFileSync(path.join(plugin, "scripts", "pre-guard.mjs"),
+    'import fs from "node:fs"; let s = ""; for await (const c of process.stdin) s += c; fs.appendFileSync(process.env.RAN_LOG, s + "\\n"); process.exit(Number(process.env.GUARD_EXIT ?? 7));\n');
+  const ran = path.join(project, "ran.log");
+  const call = (payload, { env = {}, input = JSON.stringify(payload) } = {}) => spawnSync("sh", [RUN_SH, "scripts/pre-guard.mjs"], {
+    cwd: project, input, encoding: "utf8",
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: plugin, CLAUDE_PROJECT_DIR: project, RAN_LOG: ran, ...env },
+  });
+  const nodeRan = () => fs.existsSync(ran) && fs.readFileSync(ran, "utf8").trim() !== "";
+  const reset = () => fs.rmSync(ran, { force: true });
+  const cleanup = () => { fs.rmSync(plugin, { recursive: true, force: true }); fs.rmSync(project, { recursive: true, force: true }); };
+  return { plugin, project, call, nodeRan, reset, cleanup };
+}
+const payload = (tool, input = {}, sid = "flt-1") => ({ session_id: sid, transcript_path: "/x/t.jsonl", cwd: "/x", hook_event_name: "PreToolUse", tool_name: tool, tool_input: input, tool_use_id: "toolu_1" });
+
+test("run.sh filter: Read, Glob and Grep with no scope state skip node and pass", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    for (const [tool, input] of [["Read", { file_path: "/p/src/a.js" }], ["Glob", { pattern: "src/**/*.js" }], ["Grep", { pattern: "TODO", path: "/p/src" }]]) {
+      f.reset();
+      const r = f.call(payload(tool, input));
+      assert.equal(r.status, 0, `${tool}: ${r.stderr}`);
+      assert.equal(f.nodeRan(), false, `${tool} did not start node`);
+    }
+  } finally { f.cleanup(); }
+});
+
+test("run.sh filter: Write, Edit, NotebookEdit and Bash always run the guard, and its exit code is kept", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    for (const tool of ["Write", "Edit", "NotebookEdit", "Bash", "Task"]) {
+      f.reset();
+      const r = f.call(payload(tool, { file_path: "/p/a.js", command: "ls" }));
+      assert.equal(r.status, 7, `${tool} runs the guard and keeps its exit code`);
+      assert.equal(f.nodeRan(), true, tool);
+    }
+    f.reset();
+    const forwarded = f.call(payload("Bash", { command: "echo hi" }), { env: { GUARD_EXIT: "0" } });
+    assert.equal(forwarded.status, 0);
+    assert.match(fs.readFileSync(path.join(f.project, "ran.log"), "utf8"), /"command":"echo hi"/, "stdin reaches the guard intact");
+  } finally { f.cleanup(); }
+});
+
+test("run.sh filter: a scope or scope-required file for the session, here or in a parent project dir, runs the guard", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    const read = payload("Read", { file_path: "/p/src/a.js" }, "flt-2");
+    for (const name of ["scope.json", "scope-required", "scope@payments-0123456789abcdef.json", "scope-required@payments"]) {
+      const dir = path.join(f.project, ".craftsman", "sessions", "flt-2");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, name), "{}");
+      f.reset();
+      assert.equal(f.call(read).status, 7, name);
+      assert.equal(f.nodeRan(), true, name);
+      fs.rmSync(path.join(dir, name));
+    }
+    f.reset();
+    assert.equal(f.call(read).status, 0, "another session's scope does not count here");
+    fs.mkdirSync(path.join(f.project, ".craftsman", "sessions", "flt-2"), { recursive: true });
+    fs.writeFileSync(path.join(f.project, ".craftsman", "sessions", "flt-2", "scope.json"), "{}");
+    const sub = path.join(f.project, "packages", "app");
+    fs.mkdirSync(sub, { recursive: true });
+    f.reset();
+    const r = spawnSync("sh", [RUN_SH, "scripts/pre-guard.mjs"], { cwd: sub, input: JSON.stringify(read), encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: f.plugin, CLAUDE_PROJECT_DIR: sub, RAN_LOG: path.join(f.project, "ran.log") } });
+    assert.equal(r.status, 7, "a project dir below the repo root still finds the root's scope state");
+  } finally { f.cleanup(); }
+});
+
+test("run.sh filter: a protected-looking path, a project protectedPaths override, an odd session id or unreadable input runs the guard", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    for (const file of ["/p/.env", "/p/.env.local", "/p/node_modules/x/index.js", "/p/package-lock.json", "/p/dist/app.js", "/p/vendor/lib.go", "/p/api.pb.go", "/p/app.min.js"]) {
+      f.reset();
+      assert.equal(f.call(payload("Read", { file_path: file })).status, 7, file);
+      assert.equal(f.nodeRan(), true, file);
+    }
+    f.reset();
+    assert.equal(f.call(payload("Grep", { pattern: "x", path: "/p/.env" })).status, 7, "Grep too");
+    assert.equal(f.call(payload("Read", { file_path: "/p/a.js" }, "has.dot")).status, 7, "an id sidOf would rewrite is not looked up by the shell");
+    assert.equal(f.call(null, { input: "not json" }).status, 7);
+    assert.equal(f.call(null, { input: "" }).status, 7);
+    fs.writeFileSync(path.join(f.project, "craftsman.config.json"), JSON.stringify({ protectedPaths: ["secrets/**"] }));
+    f.reset();
+    assert.equal(f.call(payload("Read", { file_path: "/p/secrets/key.txt" })).status, 7, "a project that sets protectedPaths keeps the guard on reads");
+    fs.writeFileSync(path.join(f.project, "craftsman.config.json"), JSON.stringify({ maxFeedbackLines: 5 }));
+    f.reset();
+    assert.equal(f.call(payload("Read", { file_path: "/p/a.js" })).status, 0, "an unrelated config does not");
+  } finally { f.cleanup(); }
+});
+
+test("run.sh filter: only pre-guard is filtered; every other hook still runs node", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    fs.writeFileSync(path.join(f.plugin, "scripts", "quality-gate.mjs"), 'import fs from "node:fs"; fs.appendFileSync(process.env.RAN_LOG, "ran\\n"); process.exit(0);\n');
+    const r = spawnSync("sh", [RUN_SH, "scripts/quality-gate.mjs"], { cwd: f.project, input: JSON.stringify(payload("Read", { file_path: "/p/a.js" })), encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: f.plugin, CLAUDE_PROJECT_DIR: f.project, RAN_LOG: path.join(f.project, "ran.log") } });
+    assert.equal(r.status, 0);
+    assert.equal(f.nodeRan(), true);
+  } finally { f.cleanup(); }
+});
+
+// 14.2: the work the filter adds on the path it skips, measured through run.sh against a no-op hook.
+// The budget is ~20 ms p95; CI machines are noisier, so it triples there. The numbers are printed.
+test("run.sh filter: the skipped path adds under ~20 ms p95 over 200 runs against a no-op hook", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    const body = JSON.stringify(payload("Read", { file_path: "/p/src/a.js" }));
+    const time = (cmd, args, env) => { const t = process.hrtime.bigint(); spawnSync(cmd, args, { cwd: f.project, input: body, env }); return Number(process.hrtime.bigint() - t) / 1e6; };
+    const p95 = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.95) - 1];
+    const env = { ...process.env, CLAUDE_PLUGIN_ROOT: f.plugin, CLAUDE_PROJECT_DIR: f.project, RAN_LOG: path.join(f.project, "ran.log") };
+    for (let i = 0; i < 20; i++) { time("sh", ["-c", "cat >/dev/null"], env); time("sh", [RUN_SH, "scripts/pre-guard.mjs"], env); } // warm up
+    const noop = []; const filtered = [];
+    for (let i = 0; i < 200; i++) { noop.push(time("sh", ["-c", "cat >/dev/null"], env)); filtered.push(time("sh", [RUN_SH, "scripts/pre-guard.mjs"], env)); }
+    const delta = p95(filtered) - p95(noop);
+    const budget = 20 * (process.env.CI ? 3 : 1);
+    console.log(`# run.sh filter timing: no-op p95 ${p95(noop).toFixed(1)} ms, filtered p95 ${p95(filtered).toFixed(1)} ms, delta ${delta.toFixed(1)} ms (budget ${budget} ms)`);
+    assert.equal(f.nodeRan(), false, "none of the 200 runs started node");
+    assert.ok(delta < budget, `filtered path adds ${delta.toFixed(1)} ms p95, over ${budget} ms`);
+  } finally { f.cleanup(); }
+});

@@ -37,10 +37,11 @@ flowchart LR
 | ARCH-SAFETY-08 | Safety does not depend on git anchoring: outside a repo the protected-path, scope, dispatch and fail-closed checks stay on and only the quality, doc and tracker machinery goes off, writing no state | A session opened in a home directory is exactly where nothing else is watching | Leaving everything off outside a repo, as before |
 | ARCH-SAFETY-09 | The mod submits a goal only if craftsman wrote it this session, proven by a per-session token (name and mtime) that `goal-token.mjs` records after /instruction or /auto and no tool call can write | The mod submits as the user, so a goal file written by anything else would be a prompt-injection amplifier | Trusting every file under `.craftsman/instructions` |
 | ARCH-SAFETY-10 | Post-hoc detection reports and never replaces the guard: SessionStart snapshots guarded docs, Stop reports changes the doc guard did not allow, `/craftsman:init` only offers the sandbox settings merge | A report cannot stop a bad edit, so it sits beside the guard, not instead of it | Blocking at Stop on any doc diff (it would fire on every legitimate /plan) |
+| ARCH-SAFETY-11 | A filter in front of pre-guard may skip it only where it cannot act: the launcher skips node for Read, Glob and Grep with no scope state, nothing protected-looking in the call and no project `protectedPaths` override | Starting node costs ~25 ms on every read in a session that has no unit scope; but pre-guard also blocks reads of `.env`, `node_modules` and lock files with no scope, so a bare "no scope, skip" would have opened them | Hook `if` (cannot test for scope files), skipping all reads when no scope exists |
 
 ## Trade-offs & known limits
 - A machine without `node` now blocks every guarded tool call until node is installed. That is the point; the message names the cause.
-- `run.sh` adds one `sh` process in front of every hook. Step 14 of the plan measures it.
+- `run.sh` adds one `sh` process in front of every hook; the Read/Glob/Grep filter more than pays for it (measured: the skipped path adds under 1 ms p95 over 200 runs; starting node costs about 25 ms).
 - `onFailure: "block"` (Claude Code 2.1.295+) is recorded on the pre-guard and agent-mode-guard entries as a second layer; it has no effect on Stop hooks.
 
 ## SessionEnd display (checked 2026-10-21, Claude Code 2.1.306)

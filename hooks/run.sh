@@ -11,7 +11,46 @@ case $script in
   *) echo "craftsman: run.sh given an invalid hook script: '$1'" >&2; exit 2 ;;
 esac
 root=${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
+
+# ARCH-SAFETY-11: pre-guard has nothing to do for a Read, Glob or Grep unless a unit scope (or the
+# scope-required flag) is on disk for the session, the call names something protected-looking, or the
+# project sets its own protectedPaths. Where it cannot act, skip the node start. Anything this cannot
+# read with certainty (another tool, an odd session id, no input) returns 1 and runs the guard.
+guard_cannot_act() {
+  case $1 in
+    *'"tool_name":"Read"'*|*'"tool_name":"Glob"'*|*'"tool_name":"Grep"'*) ;;
+    *) return 1 ;;
+  esac
+  rest=${1#*'"session_id":"'}
+  [ "$rest" = "$1" ] && return 1
+  sid=${rest%%'"'*}
+  case $sid in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac
+  [ "${#sid}" -gt 64 ] && return 1
+  tin=${1#*'"tool_input":'}
+  [ "$tin" = "$1" ] && return 1
+  case $tin in
+    *.env*|*node_modules*|*vendor*|*target*|*dist*|*build*|*.next*|*.nuxt*|*.output*|*.svelte-kit*|*generated*|*.pb.go*|*_pb2.py*|*.min.js*|*lock*) return 1 ;;
+  esac
+  d=${CLAUDE_PROJECT_DIR:-$PWD}
+  while :; do
+    for f in "$d/.craftsman/sessions/$sid"/scope*; do [ -e "$f" ] && return 1; done
+    if [ -f "$d/craftsman.config.json" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do case $line in *protectedPaths*) return 1 ;; esac; done < "$d/craftsman.config.json"
+    fi
+    case $d in /|'') break ;; esac
+    d=${d%/*}
+    [ -z "$d" ] && d=/
+  done
+  return 0
+}
+
 if command -v node >/dev/null 2>&1; then
+  if [ "$script" = pre-guard.mjs ]; then
+    input=$(cat)
+    if guard_cannot_act "$input"; then exit 0; fi
+    printf '%s' "$input" | node "$root/scripts/$script"
+    exit $?
+  fi
   exec node "$root/scripts/$script"
 fi
 case $SAFETY_HOOKS in
