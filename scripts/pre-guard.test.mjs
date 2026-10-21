@@ -1488,3 +1488,54 @@ test("pre-guard: the allowed event names the tool, so the Stop drift report can 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Scrutiny round: the harness settings that decide whether craftsman's hooks run at all, and NotebookEdit.
+test("pre-guard: a tool call cannot switch craftsman off through .claude/settings*.json (self-protection)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".claude"));
+    const settings = path.join(dir, ".claude", "settings.json");
+    const local = path.join(dir, ".claude", "settings.local.json");
+    fs.writeFileSync(settings, '{"permissions":{"allow":[]},"theme":"dark"}\n');
+    fs.writeFileSync(local, '{"permissions":{"allow":["Bash(ls)"]}}\n');
+    const call = (tool, input) => run(GUARD, dir, { session_id: "st-1", tool_name: tool, tool_input: input });
+    const write = (file, doc) => call("Write", { file_path: file, content: JSON.stringify(doc) });
+    for (const file of [settings, local]) {
+      assert.equal(write(file, { disableAllHooks: true }).status, 2, `disableAllHooks in ${file}`);
+      assert.equal(write(file, { env: { CRAFTSMAN_SAFETY: "off" } }).status, 2, "the safety env switch");
+      assert.equal(write(file, { enabledPlugins: { "craftsman@craftsman-marketplace": false } }).status, 2, "craftsman disabled as a plugin");
+      assert.equal(write(file, { hooks: { PreToolUse: [] } }).status, 2, "hooks");
+      assert.equal(write(file, { permissions: { allow: ["Bash(ls)"] }, theme: "light", env: { DEBUG: "1" }, enabledPlugins: { "other@x": true } }).status, 0, "unrelated keys stay editable");
+    }
+    assert.equal(call("Edit", { file_path: settings, old_string: '"theme":"dark"', new_string: '"theme":"dark","disableAllHooks":true' }).status, 2);
+    assert.equal(call("Edit", { file_path: settings, old_string: '"theme":"dark"', new_string: '"theme":"light"' }).status, 0);
+    for (const command of ["echo '{}' > .claude/settings.json", "cp evil.json .claude/settings.local.json", "sed -i 's/a/b/' .claude/settings.json", "tee .claude/settings.json < x.json"]) {
+      assert.equal(bashIn(dir, "st-1", command).status, 2, `blocked: ${command}`);
+    }
+    for (const command of ["cat .claude/settings.json", "ls .claude", "grep theme .claude/settings.json"]) {
+      assert.equal(bashIn(dir, "st-1", command).status, 0, `allowed: ${command}`);
+    }
+    // A unit scope that names the file (made by /orchestrate) may edit it.
+    assert.equal(typed(dir, "st-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    const manifest = { session_id: "st-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: [".claude/settings.json"], docs: [], write: [".claude/settings.json"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: "st-2", tool_name: "Write", tool_input: { file_path: settings, content: '{"disableAllHooks":true}' } }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: NotebookEdit is held to the same protected-path, doc and self-protection checks as Write (notebook_path)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    const call = (notebook_path) => run(GUARD, dir, { session_id: "nb-1", tool_name: "NotebookEdit", tool_input: { notebook_path, new_source: "x", cell_id: "c" } });
+    assert.equal(call(path.join(dir, ".craftsman", "off")).status, 2, "a marker");
+    assert.equal(call(path.join(dir, "package-lock.json")).status, 2, "a protected path");
+    assert.equal(call(path.join(dir, "docs", "plans", "n.ipynb")).status, 2, "a guarded doc without the grant");
+    assert.equal(call(path.join(dir, "hooks", "hooks.json")).status, 2, "the hooks file");
+    assert.equal(call(path.join(dir, "analysis.ipynb")).status, 0, "an ordinary notebook");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

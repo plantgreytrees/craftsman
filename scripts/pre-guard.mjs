@@ -34,7 +34,7 @@ try { input = JSON.parse(rawInput); } catch { failClosed(rawInput.trim() ? "bad 
 if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("stdin is not a JSON object");
 // Test-only: lets the suite prove an exception denies. It can only ever deny.
 if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
-const file = input?.tool_input?.file_path;
+const file = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path; // NotebookEdit names its file notebook_path
 const tool = input.tool_name || "";
 const toolInput = input.tool_input || {};
 const target = file || toolInput.path;
@@ -1019,7 +1019,7 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
   // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*"];
-const SELF_SCOPED = ["hooks/hooks.json", "craftsman.config.json"];
+const SELF_SCOPED = ["hooks/hooks.json", "craftsman.config.json", ".claude/settings.json", ".claude/settings.local.json"];
 const SAFETY_CONFIG_KEYS = ["safety", "stopGate"];
 const selfKind = (relPath) => {
   const r = String(relPath).replace(/^\.\//, "");
@@ -1027,13 +1027,23 @@ const selfKind = (relPath) => {
   return SELF_SCOPED.some((p) => r === p || r.endsWith("/" + p)) ? "scoped" : null;
 };
 const scopeNames = (relPath) => (activeScope?.scope?.write || []).some((entry) => allowed(entry, String(relPath).replace(/^\.\//, "")));
-function safetyKeysChanged(current, next) {
+// What an edit of a scoped file may not change: craftsman.config.json's safety keys, or the harness settings
+// that decide whether craftsman's hooks run at all (every hook, craftsman's plugin entry, CRAFTSMAN* env).
+function safetyProjection(rel, doc) {
+  if (!doc || typeof doc !== "object") return {};
+  if (/(?:^|\/)\.claude\/settings(?:\.local)?\.json$/.test(rel)) {
+    const pick = (obj, re) => Object.fromEntries(Object.entries(obj && typeof obj === "object" ? obj : {}).filter(([key]) => re.test(key)));
+    return { disableAllHooks: doc.disableAllHooks ?? null, hooks: doc.hooks ?? null, plugins: pick(doc.enabledPlugins, /^craftsman(?:@|$)/i), env: pick(doc.env, /^CRAFTSMAN/i) };
+  }
+  return Object.fromEntries(SAFETY_CONFIG_KEYS.map((key) => [key, doc[key] ?? null]));
+}
+function safetyKeysChanged(current, next, relPath) {
   if (next === null) return false; // the edit cannot apply; the tool fails on its own
   let after;
   try { after = JSON.parse(next); } catch { return true; } // a result that is not JSON cannot be shown safe
   let before = {};
   try { before = JSON.parse(current); } catch { /* an unreadable current file counts as empty */ }
-  return SAFETY_CONFIG_KEYS.some((key) => JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after?.[key] ?? null));
+  return JSON.stringify(safetyProjection(relPath, before)) !== JSON.stringify(safetyProjection(relPath, after));
 }
 function denySelfDisable(what) {
   logEvent({ ms: Date.now() - T0, ev: "selfguard", sid: sidOf(input), what, result: "blocked" });
@@ -1046,7 +1056,7 @@ function denySelfDisable(what) {
 if (tool === "Bash" && command) {
   const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate|mkdir)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
   const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json|goal-tokens\.json|\/scope[\w.-]*|[\w.-]*worktree-binding)/.test(command);
-  const scopedMentioned = ["hooks/hooks.json", "craftsman.config.json"].filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
+  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
   const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)])
     .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
@@ -1097,7 +1107,7 @@ if (tool === "Bash" && command && docSide && cfg.docWriteGuard?.enabled !== fals
 
 if (!file) process.exit(0); // no file: nothing to time or log
 
-if (["Write", "Edit"].includes(tool)) {
+if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
   // The target by its real path too: a symlinked directory (`cs -> .craftsman/sessions`) is the same file.
   const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
   const kinds = [selfKind(rel), selfKind(realTarget)];
@@ -1106,13 +1116,13 @@ if (["Write", "Edit"].includes(tool)) {
     if (rel.endsWith("hooks/hooks.json")) denySelfDisable(`editing ${rel}`);
     let current = "";
     try { current = fs.readFileSync(path.resolve(activeRoot, file), "utf8"); } catch {}
-    if (safetyKeysChanged(current, afterEdit(current))) denySelfDisable(`editing the safety keys (${SAFETY_CONFIG_KEYS.join(", ")}) of ${rel}`);
+    if (safetyKeysChanged(current, afterEdit(current), realTarget)) denySelfDisable(`editing the safety settings of ${rel}`);
   }
 }
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
 //    written, and the root's generated ledger block is never hand-edited.
-const tracker = docSide && ["Write", "Edit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
+const tracker = docSide && ["Write", "Edit", "NotebookEdit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
 if (tracker) {
   if (path.resolve(tracker.main) !== path.resolve(tracker.root)) {
     const rootDoc = path.join(tracker.main, "docs", "plans", "TRACKER.md");
@@ -1142,7 +1152,7 @@ if (tracker) {
   }
 }
 
-const rollup = docSide && ["Write", "Edit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
+const rollup = docSide && ["Write", "Edit", "NotebookEdit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
 if (rollup) {
   let current = "";
   try { current = fs.readFileSync(rollup.real, "utf8"); } catch {}
