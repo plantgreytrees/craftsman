@@ -7,9 +7,9 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 
 # Instruction — the prompt generator
 
-> Doc-write policy: this command writes NOTHING under `docs/`. Its only file is the prompt it saves under `.craftsman/instructions/`.
+> Doc-write policy: writes NOTHING under `docs/`; its only file is the prompt it saves (Phase 3).
 
-You produce one prompt that, pasted into a fresh session, takes the work from nothing to **verified-complete and landed on the base branch** through the craftsman loop without re-prompting — and separately tells the user how big the job is. You only compose.
+You produce one prompt that, pasted into a fresh session, takes the work to **verified-complete and landed on the base branch** through the craftsman loop without re-prompting — and separately tells the user how big the job is. You only compose.
 
 Target: `$ARGUMENTS`. With `--level`/`--feature`, read `commands/_features.md` § levels and flags and open the goal with its `Level:` line. If `docs/architecture/*.rules.md` exists, read `${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md` once.
 
@@ -31,7 +31,7 @@ Count the drivers from the idea doc, the architecture decisions, and the touched
 | **LONG** | 4–7 units · or any migration · or ≥ 2 contract changes · or a new architecture area |
 | **EXTRA LONG** | ≥ 8 units · or more than one project · or migration + contract + security together · or the idea's verdict confidence is low |
 
-Report `Implementation weight: <BAND> — <drivers>` plus the main schedule risk. It is an effort band from countable facts, not a time promise.
+Report `Implementation weight: <BAND> — <drivers>` plus the main schedule risk. An effort band from countable facts, not a time promise.
 
 Turn budget for the `/goal` bound: QUICK 20 · MEDIUM 50 · LONG 100 · EXTRA LONG 180.
 
@@ -55,11 +55,11 @@ Constraints: no scope widening, no skipped or weakened tests, no --no-verify. Ne
 Done when the final turn prints COMPLETION EVIDENCE: every docs/plans/TRACKER.md row for <slug> = COMPLETE (print them); (P) no unticked `- [ ]` line in .craftsman/acceptance.md for <slug>'s units or untagged (print the grep); (A) /architect --update verdicts for <ARCH ids> = HOLDS, none VIOLATED (print the table); `<test command>` exit 0; last /scrutinise = 0 Critical, 0 Warning, 0 Architecture, 0 UNMET; /sync-docs --all applied or "no drift"; /craftsman:merge landed it: print `git log --oneline -1 origin/<base>` (pr mode: the PR URL) and `git worktree list` with no <slug> worktree left. Also done when the final turn prints BLOCKED ON USER: <the one thing only I can do — a decision, access, credentials, a rejected push or protected base, a live/manual check> + what was tried; that is a met stop, not a failure. Parked rows whose decisions /auto's Phase C asked = met stop. Or stop after <N> turns and print what remains — also met.
 ```
 
-Adapt, don't pad: drop inapplicable steps — but never step 5, never the (A)/(P) contracts, and never their evidence (unlanded work is not done; in `pr` mode its evidence is the PR URL). Idea "done" outcomes become (P) criteria through step 1, not free-floating evidence lines. No governing rules (Phase 0 step 2) → drop (A) and its clauses; fill `<ARCH ids>` with the real ids, never a placeholder. **Measure it:** save to `.craftsman/instructions/<slug>.goal.txt` and run `wc -c` on it — over 4,000 → compress (shorter request text, fewer restated constraints, paths not prose) until it fits; never truncate the evidence clause or its BLOCKED ON USER / parked-rows / turn-cap exits — without them every "stop for me" above reads as unmet, and the goal's Stop hook re-blocks until Claude Code's consecutive-block cap overrides it.
+Adapt, don't pad: drop inapplicable steps — but never step 5, never the (A)/(P) contracts, and never their evidence (unlanded work is not done; in `pr` mode its evidence is the PR URL). Idea "done" outcomes become (P) criteria through step 1, not free-floating evidence lines. No governing rules (Phase 0 step 2) → drop (A) and its clauses; fill `<ARCH ids>` with the real ids, never a placeholder. **Measure it:** save to `.craftsman/instructions/<slug>.goal.txt`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/goal-token.mjs" <path>` (lets the mod launch it), then `wc -c` it — over 4,000 → compress (shorter request text, fewer restated constraints, paths not prose) until it fits; never truncate the evidence clause or its BLOCKED ON USER / parked-rows / turn-cap exits — without them every "stop for me" reads as unmet and the Stop hook re-blocks until Claude Code's consecutive-block cap overrides it.
 
 ## Phase 3 — Output
 
 Print:
 1. **Implementation weight** line + drivers + main schedule risk (outside the prompt).
 2. The prompt in one fenced block, ready to paste, and its saved path + character count.
-3. **Before you paste** (≤ 4 bullets): run it in auto mode so turns run unattended; when the compact gate fires, run `/compact` yourself and send any message — the goal survives `/compact` but not `/clear`; `/goal` with no argument shows progress, `/goal clear` stops it; pasting it approves the final `/craftsman:merge` (merge + push to base, or a PR in `pr` mode) — drop step 5 first if you want to land by hand; any skipped prerequisite (`/idea`, `/architect`, or no rules doc governing the touched paths, so (A) is unenforced) and its risk.
+3. **Before you paste** (≤ 4 bullets): run it in auto mode so turns run unattended; when the compact gate fires, run `/compact` yourself and send any message — the goal survives `/compact` but not `/clear`; `/goal` with no argument shows progress, `/goal clear` stops it; pasting it approves the final `/craftsman:merge` (merge + push to base, or a PR in `pr` mode) — drop step 5 first if you want to land by hand; any skipped prerequisite (`/idea`, `/architect`, or no governing rules doc, so (A) is unenforced) and its risk.

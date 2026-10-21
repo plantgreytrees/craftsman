@@ -23,6 +23,7 @@ const engine = {
         return { value: [
           { name: "old.goal.txt", kind: "file", size: 9, mtimeMs: 500, isLink: false },
           { name: "x.goal.txt", kind: "file", size: 17, mtimeMs: 2000, isLink: false },
+          ...(scenario.includes("extra-goal") ? [{ name: "y.goal.txt", kind: "file", size: 17, mtimeMs: 3000, isLink: false }] : []),
         ] };
       }
       if (p.endsWith("/.craftsman/sessions/sid1")) {
@@ -40,6 +41,12 @@ const engine = {
           .map((r) => JSON.stringify(r)).join("\n") };
       }
       if (p.endsWith("x.goal.txt")) return { value: "/goal Deliver x.\n" };
+      if (p.endsWith("y.goal.txt")) return { value: "/goal Injected y.\n" };
+      // craftsman's per-session record of the goal files it wrote (ARCH-SAFETY-09)
+      if (p.endsWith("/sessions/sid1/goal-tokens.json")) {
+        if (scenario.includes("no-token")) throw new Error(`no such file ${p}`);
+        return { value: JSON.stringify({ "x.goal.txt": scenario.includes("stale-token") ? 1999 : 2000 }) };
+      }
       throw new Error(`no such file ${p}`);
     });
     on("store.get", ($, e) => { log.push({ storeGet: e }); return { value: store.get(arg(e)) }; });
@@ -89,6 +96,30 @@ describe("craftsman mod", () => {
     expect(status.includes("type /craftsman:auto-go to launch x.goal.txt")).toBe(true);
     const go = await t.command.run({ command: "craftsman:auto-go", args: "" });
     expect(go.text).toBe("/goal Deliver x.");
+  });
+
+  test("a goal file craftsman did not record a token for is shown, never submitted", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "no-token");
+    expect(log.some((l) => l.goal || l.submit)).toBe(false);
+    const status = log.filter((l) => l.status).pop().status;
+    expect(status.includes("x.goal.txt")).toBe(true);
+    expect(status.includes("not written by craftsman this session")).toBe(true);
+    expect(status.includes("launched x.goal.txt")).toBe(false);
+  });
+
+  test("a token whose mtime no longer matches the file does not launch it", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "stale-token");
+    expect(log.some((l) => l.goal || l.submit)).toBe(false);
+    expect(log.filter((l) => l.status).pop().status.includes("not written by craftsman this session")).toBe(true);
+  });
+
+  test("a newer goal file with no token cannot mask an older recorded one: x launches, y is only named", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "extra-goal");
+    expect(log.filter((l) => l.goal)).toEqual([{ goal: "Deliver x." }]);
+    expect(log.some((l) => l.submit)).toBe(false);
+    const status = log.filter((l) => l.status).pop().status;
+    expect(status.includes("launched x.goal.txt")).toBe(true);
+    expect(status.includes("y.goal.txt not written by craftsman this session")).toBe(true);
   });
 
   test("a goal file older than the session never launches", { plugins: [engine] }, async (t) => {

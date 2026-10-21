@@ -903,7 +903,7 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 // ARCH-SAFETY-05: a tool call cannot switch the guards off. Token matching only; anything the parser
 // cannot read stays with the sandbox. "never" paths are written by craftsman's own scripts, never by a
 // tool call. "scoped" paths can be edited by a unit whose scope manifest (made by /orchestrate) names them.
-const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json"];
+const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json"];
 const SELF_SCOPED = ["hooks/hooks.json", "craftsman.config.json"];
 const SAFETY_CONFIG_KEYS = ["safety", "stopGate"];
 const selfKind = (relPath) => {
@@ -930,7 +930,7 @@ function denySelfDisable(what) {
 }
 if (tool === "Bash" && command) {
   const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
-  const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json)/.test(command);
+  const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json|goal-tokens\.json)/.test(command);
   const scopedMentioned = ["hooks/hooks.json", "craftsman.config.json"].filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
   const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)])
     .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));

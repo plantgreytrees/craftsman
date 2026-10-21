@@ -1052,6 +1052,7 @@ test("pre-guard: a Bash command that switches the guards off or edits their conf
       "echo '{}' > craftsman.config.json", "sed -i 's/true/false/' craftsman.config.json", "mv x.json craftsman.config.json",
       "echo '{}' > hooks/hooks.json", "tee hooks/hooks.json < x.json", "cp evil.json hooks/hooks.json", "rm hooks/hooks.json",
       "touch .craftsman/doc-write-pending", "echo x > .craftsman/sessions/s1/doc-write", "echo '{}' > .craftsman/sessions/s1/commands.json",
+      "echo '{}' > .craftsman/sessions/s1/goal-tokens.json", "touch .craftsman/sessions/s1/goal-tokens.json",
       "node scripts/toggle.mjs off", 'node "${CLAUDE_PLUGIN_ROOT}/scripts/toggle.mjs" off', "node scripts/toggle.mjs",
       "node scripts/doc-write.mjs on", 'node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs"', "cd scripts && node doc-write.mjs on",
     ];

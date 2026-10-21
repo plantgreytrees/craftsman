@@ -324,3 +324,13 @@ test("orchestrate-scope-guard: CRAFTSMAN=off does not stop it arming scope-requi
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("orchestrate-scope-guard: /instruction is recorded too, which is what lets goal-token.mjs mint (ARCH-SAFETY-09)", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(run(dir, { session_id: "cmd-6", prompt: "/craftsman:instruction some-slug" }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-6").instruction.via, "prompt");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

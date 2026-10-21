@@ -832,3 +832,10 @@ test("safetyEnabled vs enabled: a non-git project root leaves safety on and the 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("RECORDED_COMMANDS: the doc writers, toggle and instruction (goal tokens are minted after /instruction)", () => {
+  assert.ok(coreNs.RECORDED_COMMANDS.includes("instruction"));
+  assert.ok(coreNs.RECORDED_COMMANDS.includes("toggle"));
+  for (const name of coreNs.DOC_WRITER_COMMANDS) assert.ok(coreNs.RECORDED_COMMANDS.includes(name), name);
+  assert.equal(coreNs.DOC_WRITER_COMMANDS.includes("instruction"), false, "/instruction writes nothing under docs/");
+});

@@ -6,19 +6,25 @@
 //   observe — the engine's own context size goes to scripts/telemetry.mjs (ARCH-MOD-03);
 //   draw    — a status band: plan · unit · tracker % · context %;
 //   launch  — a .craftsman/instructions/<slug>.goal.txt written since the session
-//             started starts once: command.run("goal"), else prompt.submit,
-//             else the band asks for /craftsman:auto-go (ARCH-MOD-02).
+//             started, AND recorded by craftsman this session (scripts/goal-token.mjs,
+//             ARCH-SAFETY-09), starts once: command.run("goal"), else prompt.submit,
+//             else the band asks for /craftsman:auto-go (ARCH-MOD-02). A goal file
+//             nobody recorded is named in the band and never submitted as the user.
 // /craftsman:auto-go (commands/auto-go.md) answers with the newest goal file.
 
 const GOALS = ".craftsman/instructions";
 const LAUNCHED = "craftsman.launched-goals";
 
-// The newest *.goal.txt in a fs.list result, optionally only those newer than `since`.
-function newestGoal(entries, since = 0, launched = {}) {
-  const goals = (Array.isArray(entries) ? entries : [])
+// Every *.goal.txt in a fs.list result that is newer than `since` and not yet launched, newest first.
+function goalCandidates(entries, since = 0, launched = {}) {
+  return (Array.isArray(entries) ? entries : [])
     .filter((f) => f && f.kind === "file" && /\.goal\.txt$/.test(f.name) && f.mtimeMs > since && launched[f.name] !== f.mtimeMs)
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return goals[0] || null;
+}
+
+// The newest *.goal.txt in a fs.list result, optionally only those newer than `since`.
+function newestGoal(entries, since = 0, launched = {}) {
+  return goalCandidates(entries, since, launched)[0] || null;
 }
 
 // The newest scope file name in a session dir listing.
@@ -90,11 +96,19 @@ export function register(on) {
 
     let goal = null;
     let launched = {};
+    let unrecorded = [];
     try {
       // Without the session's start time no goal file can be shown to be new, so none launches.
       if (usage && typeof usage.startedAt === "number" && usage.startedAt > 0) {
         launched = (await $.store.get(LAUNCHED)) || {};
-        goal = newestGoal(await $.fs.list(GOALS), usage.startedAt, launched);
+        const candidates = goalCandidates(await $.fs.list(GOALS), usage.startedAt, launched);
+        // Only a goal craftsman recorded in this session may be submitted as the user (ARCH-SAFETY-09):
+        // its name and mtime must match a token goal-token.mjs wrote, so a rewritten file no longer does.
+        let tokens = {};
+        try { if (sid) tokens = JSON.parse(await $.fs.read(`.craftsman/sessions/${sid}/goal-tokens.json`)) || {}; } catch { /* no tokens: nothing is recorded */ }
+        const recorded = (f) => tokens[f.name] === f.mtimeMs;
+        goal = candidates.find(recorded) || null;
+        unrecorded = candidates.filter((f) => !recorded(f)).map((f) => f.name);
       }
     } catch { /* no goal dir or no store: nothing to launch */ }
     if (goal) {
@@ -108,6 +122,8 @@ export function register(on) {
       }
       status = started ? `${status} · launched ${goal.name}` : `${status} · type /craftsman:auto-go to launch ${goal.name}`;
     }
+
+    if (unrecorded.length) status = `${status} · ${unrecorded.join(", ")} not written by craftsman this session — not launched (type /craftsman:auto-go to launch it yourself)`;
 
     try { await $.ui.status(status); } catch { /* no status surface */ }
     return result;

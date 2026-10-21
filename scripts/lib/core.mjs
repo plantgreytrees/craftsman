@@ -601,7 +601,8 @@ export function orchestrationEnabled(env = process.env) {
 // "skill" = a Skill tool call). The doc writers and /toggle are told to run doc-write.mjs and
 // toggle.mjs; pre-guard lets those scripts through only after the command that owns them.
 export const DOC_WRITER_COMMANDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check"];
-export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle"];
+// `instruction` writes nothing under docs/, so it is not a doc writer; it is recorded because goal-token.mjs mints only after it (or /auto).
+export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle", "instruction"];
 const commandsFile = (sid, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), "commands.json");
 export function recordCommand(sid, command, via, context = null) {
   const file = commandsFile(sid, context);
