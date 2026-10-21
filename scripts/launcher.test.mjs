@@ -296,3 +296,50 @@ test("run.sh filter: every default protectedPaths pattern contains one of the su
     assert.ok(needles.some((n) => pieces.some((piece) => piece.includes(n))), `${pattern}: no filter substring is part of every path it matches (${needles})`);
   }
 });
+
+// Scrutiny round 2 (16.x): a failed prompt hook cannot erase the prompt even with node present, and a safety hook
+// starts without NODE_OPTIONS (the settings `env` route would otherwise load code into node before the guard runs).
+test("run.sh: with node present, orchestrate-scope-guard failing on UserPromptSubmit keeps the prompt; other hooks and events keep their codes (16.1)", () => {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plugin-"));
+  try {
+    fs.mkdirSync(path.join(plugin, "scripts"));
+    const put = (name, body) => fs.writeFileSync(path.join(plugin, "scripts", name), body);
+    const run = (name, input = "{}") => launch(`scripts/${name}`, { env: { ...process.env, CLAUDE_PLUGIN_ROOT: plugin }, input });
+    const POST = JSON.stringify({ hook_event_name: "PostToolUse" });
+    put("orchestrate-scope-guard.mjs", 'process.stderr.write("denied"); process.exit(2);\n');
+    const prompt = run("orchestrate-scope-guard.mjs", PROMPT);
+    assert.equal(prompt.status, 0, "exit 2 on UserPromptSubmit would erase the prompt");
+    assert.match(prompt.stdout, /systemMessage[\s\S]*prompt was not checked/);
+    const post = run("orchestrate-scope-guard.mjs", POST);
+    assert.equal(post.status, 2, "the same fixture on another event still denies");
+    assert.equal(post.stderr, "denied");
+    put("orchestrate-scope-guard.mjs", "process.exit(0);\n");
+    assert.equal(run("orchestrate-scope-guard.mjs", PROMPT).status, 0);
+    for (const name of ["pre-guard.mjs", "agent-mode-guard.mjs"]) {
+      put(name, 'process.stderr.write("denied"); process.exit(2);\n');
+      assert.equal(run(name, PROMPT).status, 2, `${name} keeps exit 2`);
+      assert.equal(run(name, POST).status, 2, `${name} keeps exit 2`);
+    }
+  } finally {
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+});
+
+test("run.sh: a safety hook starts without NODE_OPTIONS, an advisory hook keeps it (16.2)", () => {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plugin-"));
+  try {
+    fs.mkdirSync(path.join(plugin, "scripts"));
+    const body = 'process.stdout.write("NO=" + (process.env.NODE_OPTIONS ?? "")); process.exit(0);\n';
+    for (const name of [...SAFETY, "stop-gate.mjs"]) fs.writeFileSync(path.join(plugin, "scripts", name), body);
+    const env = { ...process.env, CLAUDE_PLUGIN_ROOT: plugin, NODE_OPTIONS: "--max-old-space-size=64" };
+    for (const name of SAFETY) {
+      const r = launch(`scripts/${name}`, { env, input: JSON.stringify({ tool_name: "Bash" }) });
+      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      assert.equal(r.stdout, "NO=", `${name} starts with NODE_OPTIONS cleared`);
+    }
+    const advisory = launch("scripts/stop-gate.mjs", { env, input: "{}" });
+    assert.equal(advisory.stdout, "NO=--max-old-space-size=64", "an advisory hook is untouched");
+  } finally {
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+});

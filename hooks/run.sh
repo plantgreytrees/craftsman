@@ -56,8 +56,14 @@ if command -v node >/dev/null 2>&1; then
     *" $script "*)
       input=$(cat)
       if [ "$script" = pre-guard.mjs ] && guard_cannot_act "$input"; then exit 0; fi
-      printf '%s' "$input" | node "$root/scripts/$script"
+      # NODE_OPTIONS (settable from the harness env) can load code into node before the guard runs: a safety hook starts without it.
+      printf '%s' "$input" | (unset NODE_OPTIONS; exec node "$root/scripts/$script")
       rc=$?
+      # Exit 2 on UserPromptSubmit would erase the user's prompt, so a failed prompt hook says so and lets it through.
+      if [ "$script" = orchestrate-scope-guard.mjs ] && [ "$rc" -ne 0 ] && is_prompt "$input"; then
+        printf '%s\n' "{\"systemMessage\":\"craftsman: $script failed (exit $rc), so this prompt was not checked\"}"
+        exit 0
+      fi
       case $rc in 0|2) exit $rc ;; esac
       if is_prompt "$input"; then
         printf '%s\n' "{\"systemMessage\":\"craftsman: $script failed (exit $rc), so this prompt was not checked\"}"
