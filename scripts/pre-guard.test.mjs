@@ -1440,3 +1440,36 @@ test("pre-guard: every doc-write or toggle invocation is gated, with node option
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Scrutiny round: more spellings of a skipped hook. Flag text is built by concatenation so this
+// source never holds the forbidden words together.
+test("pre-guard: git config, env config, value-taking wrappers and sh -c cannot skip hooks (bypass round 2)", () => {
+  const dir = selfDisableProject();
+  try {
+    const nv = "--no-" + "verify";
+    const hp = "core.hooks" + "Path";
+    const blocked = [
+      `git config ${hp} /dev/null`, `git config --global ${hp} /x`, `git config --local ${hp.toLowerCase()} x`, `git -C . config ${hp} x`,
+      `git config alias.ci "commit ${nv}"`, "git config alias.ci '!git commit -n'", `git config --global alias.ci 'commit -a ${nv}'`,
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=${hp} GIT_CONFIG_VALUE_0=/dev/null git commit -m x`,
+      `GIT_CONFIG_PARAMETERS="'${hp}'='/x'" git commit -m x`, `env GIT_CONFIG_KEY_0=${hp} git commit -m x`,
+      "env -u FOO git commit -n -m x", "sudo -u me git commit -n -m x", "busybox git commit -n -m x", "env -C /tmp git commit -n -m x",
+      "sh -c 'git commit -n -m x'", 'bash -lc "git commit -n -m x"', "sh -c \"sh -c 'git commit -n'\"", "env -u FOO sh -c 'git commit -n'",
+    ];
+    for (const command of blocked) {
+      const r = bashIn(dir, "bf-1", command);
+      assert.equal(r.status, 2, `blocked: ${command} (${r.stderr})`);
+    }
+    const allowed = [
+      "git config core.editor vim", "git config user.name x", `git config --get ${hp}`, `git config --unset ${hp}`, "git config alias.st status",
+      "env -u FOO git commit -m msg", "sudo -u me git status", "sh -c 'git status'", "bash -c 'echo -n hi'", "env -u FOO git log -n 3",
+      "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.editor GIT_CONFIG_VALUE_0=vim git commit -m x",
+    ];
+    for (const command of allowed) {
+      const r = bashIn(dir, "bf-1", command);
+      assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -859,27 +859,69 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
 // case of the config key, and every falsy spelling of commit.gpgsign. Only `git [wrappers] [globals] commit|push`
 // at command position counts, so a message or an argument that merely holds `-n` does not. A command the lexer
 // cannot read with certainty returns false here and meets the text check above and below.
-const GIT_WRAPPERS = new Set(["env", "sudo", "command", "exec", "nohup", "time", "nice", "ionice", "stdbuf", "timeout", "doas"]);
+// Options of a wrapper that take a value: the next word is that value, not the wrapped command.
+const WRAPPER_VALUE_SHORT = { env: "uCS", sudo: "ugCDhprtUTR", doas: "uC", nice: "n", timeout: "sk", stdbuf: "ioe", ionice: "cnpt", time: "fo" };
+const WRAPPER_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--chroot", "--signal", "--kill-after"]);
 const COMMIT_VALUE_SHORT = new Set(["m", "F", "C", "c", "t"]); // value: the rest of the cluster, else the next word
 const COMMIT_ATTACHED_SHORT = new Set(["S", "u"]); // value is attached or absent
 const COMMIT_VALUE_LONG = new Set(["--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message", "--template", "--cleanup", "--fixup", "--squash", "--pathspec-from-file", "--trailer"]);
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
-function gitWordIndex(words) {
+// The index of the first word that is one of `targets`, looking through assignments and the shared WRAPPERS
+// (with their options, and the values of those that take one).
+function commandWordIndex(words, targets) {
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (ASSIGNMENT_WORD.test(word)) continue;
     const base = word.split("/").pop();
-    if (base === "git") return i;
-    if (!GIT_WRAPPERS.has(base)) return -1;
-    while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) i++;
+    if (targets.has(base)) return i;
+    if (!WRAPPERS.has(base)) return -1;
+    const valued = WRAPPER_VALUE_SHORT[base] || "";
+    while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) {
+      i++;
+      const opt = words[i];
+      if ((/^-[A-Za-z]$/.test(opt) && valued.includes(opt[1])) || WRAPPER_VALUE_LONG.has(opt)) i++;
+    }
   }
   return -1;
 }
-function bypassesHooks(text) {
+const GIT_ONLY = new Set(["git"]);
+const gitWordIndex = (words) => commandWordIndex(words, GIT_ONLY);
+// The body of `sh -c '<body>'` (any cluster holding c, any wrapper before it), else null.
+function shellBody(words) {
+  const at = commandWordIndex(words, SHELLS);
+  if (at < 0) return null;
+  for (let j = at + 1; j < words.length; j++) {
+    const word = words[j];
+    if (word === "--" || !/^[-+]/.test(word)) return null;
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(word)) return words[j + 1] ?? null;
+    if (word === "-o" || word === "+o" || word === "-O") j++;
+  }
+  return null;
+}
+const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|commit\.gpgsign)/i;
+// `git config` that points hooks elsewhere, or defines an alias that itself skips them.
+function configBypasses(args) {
+  if (args.some((a) => /^(?:--get\S*|--unset\S*|--list|-l|--remove-section|--rename-section)$/.test(a))) return false;
+  const operands = [];
+  for (let k = 0; k < args.length; k++) {
+    if (["-f", "--file", "--blob", "--type", "--default"].includes(args[k])) k++;
+    else if (!args[k].startsWith("-")) operands.push(args[k]);
+  }
+  const key = (operands[0] ?? "").toLowerCase();
+  const value = operands.slice(1).join(" ");
+  if (key === "core.hookspath") return true;
+  if (key.startsWith("alias.") && value) return bypassesHooks("git " + value, 1) || bypassesHooks(value.replace(/^!/, ""), 1);
+  return false;
+}
+function bypassesHooks(text, depth = 0) {
+  if (depth > 3) return true; // nesting this deep is not a commit
+  if (HOOK_ENV.test(text)) return true;
   let segments;
   try { segments = shellSegments(text); } catch { return false; }
   for (const words of segments) {
     if (words.includes(UNEXPANDED)) continue;
+    const body = shellBody(words);
+    if (body !== null && bypassesHooks(body, depth + 1)) return true;
     const at = gitWordIndex(words);
     if (at < 0) continue;
     const configs = [];
@@ -893,6 +935,7 @@ function bypassesHooks(text) {
       else if (!word.startsWith("-")) break;
     }
     const sub = words[i];
+    if (sub === "config" && configBypasses(words.slice(i + 1))) return true;
     if (sub !== "commit" && sub !== "push") continue;
     for (const config of configs) {
       const eq = config.indexOf("=");
