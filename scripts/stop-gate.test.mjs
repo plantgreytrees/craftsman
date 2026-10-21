@@ -808,6 +808,25 @@ test("stop-gate: a test-command marker file (package.json) edit sets dirty; an i
   }
 });
 
+test("stop-gate: an edit to a fixture, tsconfig or env file marks the session dirty; docs, markdown and state do not", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "denylist";
+    const { dirty } = seedGreenStart(dir, sid);
+    for (const rel of ["docs/y.md", "README.md", "notes/a.md", "docs/plans/p.json", ".craftsman/runs/r.json", "node_modules/dep/data.json"]) {
+      editThroughQualityGate(dir, sid, rel, "{}\n");
+      assert.equal(fs.existsSync(dirty), false, `${rel} leaves nothing a test could regress on`);
+    }
+    for (const rel of ["test/fixtures/a.json", "tsconfig.json", ".eslintrc.json", "src/__snapshots__/a.snap", "db/schema.sql", ".env.test", "data/cases.yaml"]) {
+      try { fs.unlinkSync(dirty); } catch {}
+      editThroughQualityGate(dir, sid, rel, "{}\n");
+      assert.equal(fs.existsSync(dirty), true, `${rel} can change a test result`);
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("stop-gate: an edit of the acceptance file still does not mark the session dirty", () => {
   const dir = quietFixture();
   try {

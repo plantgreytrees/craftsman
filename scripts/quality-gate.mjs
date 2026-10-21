@@ -45,13 +45,15 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
 
 // Mark this session dirty for the Stop gate: an edit to something a test could
 // regress on means the session-start test snapshot can no longer be trusted, so
-// Stop must re-verify. That is a source file of a configured language, or a
-// file that names the project's test command (package.json, go.mod, ...) —
-// and never an ignored path. A docs-only turn leaves nothing to re-run. Bash-made
-// edits are caught by the Stop gate's own `git status`, not by this marker.
+// Stop must re-verify. A denylist: only markdown, the guarded doc paths,
+// craftsman's own state and ignored paths leave nothing a test could regress
+// on, so a fixture, a tsconfig or an env file still counts. Bash-made edits are
+// caught by the Stop gate's own `git status`, not by this marker.
 const lang = detectLang(file, cfg, context);
-const namesTestCommand = Object.keys(cfg.stopGate?.commands || {}).some((marker) => globToRe(marker).test(path.basename(file)));
-if ((lang || namesTestCommand) && !isIgnored(file, cfg, lang, context)) {
+const docPaths = cfg.docWriteGuard?.docPaths || [];
+const isDocOrState = rel0.endsWith(".md") || rel0.startsWith(".craftsman/")
+  || docPaths.some((p) => globToRe(p).test(rel0) || globToRe(p).test("./" + rel0));
+if (!isDocOrState && !isIgnored(file, cfg, lang, context)) {
   try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
 }
 
