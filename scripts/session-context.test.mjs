@@ -20,7 +20,7 @@ function run(script, dir, input) {
 
 function withProject(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-session-context-"));
-  try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(`${dir}-remote.git`, { recursive: true, force: true }); }
 }
 
 test("session-context: a session opened above a repo, with no workspace manifest, is off with one notice", () => {
@@ -55,6 +55,11 @@ test("session-context: SessionStart removes merged, clean leftover worktrees and
     };
     git(dir, "init", "-q", "-b", "main");
     git(dir, "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+    // merged means merged into a pushed remote-tracking base (ARCH-SAFETY-07)
+    const bare = `${dir}-remote.git`;
+    spawnSync("git", ["init", "-q", "--bare", bare]);
+    git(dir, "remote", "add", "origin", bare);
+    git(dir, "push", "-q", "-u", "origin", "main");
     const clean = path.join(dir, ".worktrees", "clean");
     const dirty = path.join(dir, ".worktrees", "dirty");
     git(dir, "worktree", "add", "-q", "-b", "feat/clean", clean);

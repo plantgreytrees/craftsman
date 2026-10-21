@@ -33,6 +33,7 @@ flowchart LR
 | ARCH-SAFETY-04 | Advisory hooks fail open but never silently, and SessionStart states the guard state | A guard that is off for a reason nobody saw is worse than one that is plainly off | Failing every advisory hook closed (it would block work over a formatter) |
 | ARCH-SAFETY-05 | Only `CRAFTSMAN_SAFETY=off` in the user's environment turns safety off; a tool call cannot touch the off flag, the safety config keys, `hooks.json` or the grant markers | `CRAFTSMAN=off`, `.craftsman/off` and `enabled:false` were all one tool call away for the model | One shared off switch for everything |
 | ARCH-SAFETY-06 | Stop and SessionEnd report unpushed work in every worktree, from local refs only; Stop blocks only when `stopGate.blockOnUnpushed` is true | Work that exists on one machine only is lost with the machine; blocking by default would stall every scratch session | Fetching to compare (slow, needs network and credentials) |
+| ARCH-SAFETY-07 | The worktree sweep is evidence-based and reversible: merged means merged into a remote-tracking ref, local data and Claude Code's own worktrees are kept, every branch deletion is logged with its sha | A sweep that trusts a local main, or deletes a `.env`, loses work with no way back | Deleting any merged-looking worktree and relying on reflog |
 
 ## Trade-offs & known limits
 - A machine without `node` now blocks every guarded tool call until node is installed. That is the point; the message names the cause.

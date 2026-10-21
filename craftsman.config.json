@@ -127,6 +127,10 @@
     },
     "extraChecks": []
   },
+  "worktrees": {
+    "disposable": ["**/node_modules/**", "**/dist/**", "**/build/**", "**/target/**", "**/out/**", "**/coverage/**", "**/.next/**", "**/.nuxt/**", "**/.output/**", "**/.svelte-kit/**", "**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/obj/**", "**/.cache/**", "**/.pytest_cache/**", "**/.mypy_cache/**", "**/.ruff_cache/**", "**/.turbo/**", "**/.craftsman/**"],
+    "sweepClaudeWorktrees": false
+  },
   "security": {
     "enabled": true,
     "builtinFallback": true,

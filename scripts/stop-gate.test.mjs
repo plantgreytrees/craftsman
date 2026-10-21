@@ -40,6 +40,21 @@ function makeFixture(configOverride) {
 
 function cleanup(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(`${dir}-remote.git`, { recursive: true, force: true });
+}
+
+// A worktree counts as merged only into a pushed remote-tracking base (ARCH-SAFETY-07), so the sweep
+// tests give the fixture a bare origin with its current branch pushed.
+function pushBase(dir) {
+  const bare = `${dir}-remote.git`;
+  spawnSync("git", ["init", "-q", "--bare", bare]);
+  const git = (...args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  git("remote", "add", "origin", bare);
+  git("push", "-q", "-u", "origin", git("branch", "--show-current"));
 }
 
 // Spawns `node scripts/stop-gate.mjs` with cwd=dir and the given session_id
@@ -127,6 +142,7 @@ function addMergedWorktree(dir, slug) {
 // remembering a cleanup step.
 test("stop-gate: a merged, clean worktree another session left is removed automatically without blocking", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   try {
     const theirs = addMergedWorktree(dir, "other-session-unit");
     const result = await runStopGate(dir, "no-ledger-session");
@@ -140,6 +156,7 @@ test("stop-gate: a merged, clean worktree another session left is removed automa
 
 test("stop-gate: a merged, clean worktree in this session's ledger is removed and forgotten, not blocked on", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   try {
     const sid = "owning-session";
     const mine = addMergedWorktree(dir, "my-unit");
@@ -157,6 +174,7 @@ test("stop-gate: a merged, clean worktree in this session's ledger is removed an
 
 test("stop-gate: a merged ledger worktree with uncommitted changes survives the sweep and blocks as NOT SWEPT", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   try {
     const sid = "owning-session";
     const mine = addMergedWorktree(dir, "my-unit");
@@ -526,6 +544,7 @@ test("stop-gate: a genuinely failing (non-killed, non-zero exit) command still b
 // another branch — the sweep went silent on exactly the leftovers it exists for.
 test("stop-gate: a ledger worktree merged into the base while the checkout sits on another branch still blocks", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   const g = (...args) => {
     const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
@@ -541,6 +560,7 @@ test("stop-gate: a ledger worktree merged into the base while the checkout sits 
     g("checkout", "-q", "-b", "scratch");
     g("checkout", "-q", base);
     g("merge", "-q", "--no-ff", "-m", "merge unit", mine.branch);
+    g("push", "-q", "origin", base);
     g("checkout", "-q", "scratch");
     fs.writeFileSync(path.join(mine.worktree, "wip.txt"), "wip\n"); // dirty, so the sweep must leave it for the gate
     const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
@@ -548,7 +568,7 @@ test("stop-gate: a ledger worktree merged into the base while the checkout sits 
     fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
     const result = await runStopGate(dir, sid);
     assert.match(result.stdout, /WORKTREE NOT SWEPT/);
-    assert.match(result.stdout, new RegExp(`merged into ${base}`));
+    assert.match(result.stdout, new RegExp(`merged into origin/${base}`));
   } finally {
     cleanup(dir);
   }

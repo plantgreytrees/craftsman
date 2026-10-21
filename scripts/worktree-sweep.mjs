@@ -10,9 +10,12 @@
 // go without losing anything or pulling a worktree out from under a live
 // session:
 //
-//   removable = on a named branch (never feature/*, which is long-lived), fully merged into the base branch, no
-//               uncommitted/untracked changes, not the caller's own cwd, and
-//               either unlocked or locked by a process that no longer exists.
+//   removable = on a named branch (never feature/*, which is long-lived), fully merged into a REMOTE-TRACKING
+//               base ref (a local main nobody pushed proves nothing), no uncommitted/untracked changes, no
+//               ignored files beyond disposable build dirs (a `.env` or local db is someone's data), not under
+//               .claude/worktrees (Claude Code's own) unless worktrees.sweepClaudeWorktrees, not the caller's
+//               own cwd, and either unlocked or locked by a process that no longer exists.
+// Every branch deletion is logged with its sha first (ARCH-SAFETY-07), so `git branch <name> <sha>` restores it.
 //
 // Claude Code locks a live session's worktree with the reason
 // "claude session <name> (pid N start T)"; a lock whose pid is gone (or whose
@@ -25,7 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { projectContext, readStdin } from "./lib/core.mjs";
+import { projectContext, readStdin, loadConfig, mainCheckoutRoot, globToRe } from "./lib/core.mjs";
 
 function git(root, args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -37,13 +40,14 @@ function gitOr(root, args, fallback = "") {
   try { return git(root, args); } catch { return fallback; }
 }
 
-// Candidate refs a finished branch lands in, most authoritative first. Only
-// refs that actually exist are returned.
+// Remote-tracking refs a finished branch lands in, most authoritative first (ARCH-SAFETY-07): never a local
+// main or master, which may hold merges nobody pushed. Only refs that actually exist are returned, so a repo
+// with no remote has no base and nothing in it counts as merged.
 export function baseRefs(root) {
   const refs = [];
   const remoteHead = gitOr(root, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
-  if (remoteHead.startsWith("origin/")) refs.push(remoteHead.slice("origin/".length), remoteHead);
-  refs.push("main", "master");
+  if (remoteHead.startsWith("origin/")) refs.push(remoteHead);
+  refs.push("origin/main", "origin/master");
   return [...new Set(refs)].filter((ref) => gitOk(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]));
 }
 
@@ -93,9 +97,26 @@ function inside(child, parent) {
 }
 
 // Every non-primary worktree of the repository at `root`, classified.
+// An unreadable config keeps more, never less: nothing disposable, Claude Code's worktrees kept.
+function sweepConfig(root) {
+  try {
+    const worktrees = loadConfig({ root }).worktrees || {};
+    return { disposable: Array.isArray(worktrees.disposable) ? worktrees.disposable : [], sweepClaudeWorktrees: worktrees.sweepClaudeWorktrees === true };
+  } catch { return { disposable: [], sweepClaudeWorktrees: false }; }
+}
+
+// Ignored paths in a worktree that are not on the disposable list: local data a sweep must not destroy.
+function ignoredData(worktree, disposable) {
+  let out;
+  try { out = git(worktree, ["status", "--porcelain", "--ignored", "--untracked-files=all"]); } catch { return null; }
+  const isDisposable = (rel) => disposable.some((glob) => [rel, "./" + rel, rel + "/x"].some((c) => globToRe(glob).test(c)));
+  return out.split("\n").filter((l) => l.startsWith("!! ")).map((l) => l.slice(3).replace(/\/$/, "")).filter((rel) => !isDisposable(rel));
+}
+
 export function listWorktrees(root, { cwd = process.cwd() } = {}) {
   const entries = parsePorcelain(git(root, ["worktree", "list", "--porcelain"]));
   const refs = baseRefs(root);
+  const config = sweepConfig(root);
   return entries.slice(1).map((entry) => {
     const exists = fs.existsSync(entry.path);
     let dirty = null;
@@ -103,15 +124,22 @@ export function listWorktrees(root, { cwd = process.cwd() } = {}) {
       try { dirty = git(entry.path, ["status", "--porcelain", "--untracked-files=all"]).split("\n").filter(Boolean).length; }
       catch { dirty = null; }
     }
+    const isClaudeWorktree = entry.path.split(path.sep).join("/").includes("/.claude/worktrees/");
     const merged_into = entry.branch ? mergedInto(root, entry.branch, refs) : null;
+    // only a clean, merged worktree reaches the ignored-file check, so only then is it worth a second status call
+    const ignored = exists && entry.branch && merged_into && dirty === 0 ? ignoredData(entry.path, config.disposable) : [];
     const ownerAlive = entry.locked ? lockOwnerAlive(entry.lock_reason) : false;
     let keep = null;
     if (!exists || entry.prunable) keep = null; // stale admin entry — `worktree prune` handles it
     else if (!entry.branch) keep = "detached HEAD";
     else if (entry.branch.startsWith("feature/")) keep = "feature branch"; // long-lived (ARCH-LAND-09)
+    else if (isClaudeWorktree && !config.sweepClaudeWorktrees) keep = "Claude Code's own worktree (worktrees.sweepClaudeWorktrees is off)";
     else if (!merged_into) keep = "not merged into the base branch";
     else if (dirty === null) keep = "status unreadable";
     else if (dirty > 0) keep = `${dirty} uncommitted change(s)`;
+    else if (ignored === null || ignored.length) {
+      keep = ignored === null ? "status unreadable" : `ignored file(s) that are not disposable: ${ignored.slice(0, 3).join(", ")}${ignored.length > 3 ? ", …" : ""}`;
+    }
     else if (inside(cwd, entry.path)) keep = "current working directory";
     else if (entry.locked && ownerAlive !== false) keep = ownerAlive === null ? `locked: ${entry.lock_reason || "(no reason)"}` : "locked by a live session";
     return {
@@ -142,8 +170,17 @@ export function sweep(root, { paths = [], all_merged = false, cwd = process.cwd(
     try {
       if (entry.locked) git(root, ["worktree", "unlock", entry.path]);
       git(root, ["worktree", "remove", entry.path]);
+      // The log line comes first and a failed append keeps the branch: no deletion without a way back.
       let branchDeleted = false;
-      try { git(root, ["branch", "-D", entry.branch]); branchDeleted = true; } catch { /* checked out elsewhere — leave it */ }
+      try {
+        const sha = git(root, ["rev-parse", "--verify", `refs/heads/${entry.branch}`]);
+        const dir = path.join(mainCheckoutRoot(root), ".craftsman");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(path.join(dir, "sweep-log.jsonl"),
+          JSON.stringify({ branch: entry.branch, sha, reason: `merged into ${entry.merged_into}`, time: new Date().toISOString() }) + "\n");
+        git(root, ["branch", "-D", entry.branch]);
+        branchDeleted = true;
+      } catch { /* log unwritable, or checked out elsewhere — leave the branch */ }
       removed.push({ path: entry.path, branch: entry.branch, merged_into: entry.merged_into, branch_deleted: branchDeleted });
     } catch (error) {
       skipped.push({ path: entry.path, reason: String(error.stderr || error.message).trim().split("\n")[0] });
