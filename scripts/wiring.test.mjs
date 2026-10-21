@@ -241,3 +241,18 @@ test("wiring: no tracked file outside docs/ideas, docs/plans and the changelog n
   }
   assert.deepEqual(offenders, []);
 });
+
+// 5.2: every hook goes through the launcher, so a missing node is loud, never silent.
+const allHooks = Object.entries(hooksConfig.hooks).flatMap(([event, entries]) =>
+  entries.flatMap((entry) => entry.hooks.map((hook) => ({ event, matcher: entry.matcher, hook }))));
+
+test("wiring: every hooks.json command runs through hooks/run.sh with one existing script", () => {
+  const bad = allHooks.filter(({ hook }) => !/^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/run\.sh" scripts\/[A-Za-z0-9_.-]+\.mjs$/.test(hook.command));
+  assert.deepEqual(bad.map(({ event, hook }) => `${event}: ${hook.command}`), []);
+});
+
+test("wiring: onFailure block is on the pre-guard and agent-mode-guard entries only, never on Stop", () => {
+  const blocking = allHooks.filter(({ hook }) => hook.onFailure === "block").map(({ hook }) => hook.command.match(/scripts\/([\w.-]+)/)[1]).sort();
+  assert.deepEqual(blocking, ["agent-mode-guard.mjs", "pre-guard.mjs"]);
+  assert.deepEqual(allHooks.filter(({ event, hook }) => event === "Stop" && "onFailure" in hook), []);
+});
