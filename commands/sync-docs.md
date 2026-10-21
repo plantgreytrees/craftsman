@@ -1,5 +1,5 @@
 ---
-description: Maintain — reconcile docs/ with live code: check architecture and feature docs still match, fix drift (or flag undocumented divergence), and reconcile tracker status. Keeps docs truthful.
+description: Maintain: reconcile docs/ with live code, fix drift, reconcile tracker status.
 argument-hint: "[plan-slug | module | git range | doc path] [--tracker | --arch (default) | --all | --archive | --prune]"
 model: sonnet
 allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill

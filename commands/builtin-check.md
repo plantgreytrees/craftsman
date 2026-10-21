@@ -1,5 +1,5 @@
 ---
-description: After a `claude update`, check every built-in craftsman wraps still matches its wrapper's assumptions, surface new ones worth wrapping, and update on approval. Writes only docs/builtins.md.
+description: After `claude update`, check that the built-ins craftsman wraps still match.
 argument-hint: "[--report-only]"
 allowed-tools: Bash, Read, Glob, Grep, WebFetch, Task, Agent, AskUserQuestion, Skill, Edit, Write
 model: sonnet

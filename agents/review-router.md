@@ -1,6 +1,6 @@
 ---
 name: review-router
-description: Cheap triage on a diff that decides whether a full design review is warranted, returning a one-word ESCALATE/SKIP verdict.
+description: Cheap triage of a diff: returns ESCALATE or SKIP for a full design review.
 tools: Bash, Read
 model: haiku
 ---

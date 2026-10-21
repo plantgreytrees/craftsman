@@ -1,5 +1,5 @@
 ---
-description: Executor — implement an existing plan doc (from /plan, /investigate, or a tracker slug); gate, review, and merge each unit to the base branch. Does NOT plan.
+description: Executor: implement an existing plan doc unit by unit; gate, review, merge. Does NOT plan.
 argument-hint: "<plan-doc path | tracker slug | feature request> [--step <tracker-id>] [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
 allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill

@@ -1,6 +1,6 @@
 ---
 name: unit-runner
-description: Runs ONE step (implement, review, land, park or block) of ONE plan unit in its own worktree and returns schema JSON.
+description: Runs ONE step of ONE plan unit in its own worktree and returns schema JSON.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---

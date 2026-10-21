@@ -1,5 +1,5 @@
 ---
-description: One entry for the whole loop — ask up front, run units unattended under /goal, ask once more, land; repeat until every row is COMPLETE.
+description: One entry for the whole loop: ask up front, run unattended under /goal, ask again, land.
 argument-hint: "<idea-slug | plan-slug | request> [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill

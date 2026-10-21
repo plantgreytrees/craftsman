@@ -1,6 +1,6 @@
 ---
 name: docs-curator
-description: Holds documentation to the project's doc standard and verifies every cited claim still resolves, refusing to mark a doc done while its citations are stale.
+description: Holds docs to the project standard and verifies every cited claim still resolves.
 tools: Read, Grep, Glob, Edit
 model: haiku
 ---

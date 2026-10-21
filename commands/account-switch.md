@@ -1,5 +1,5 @@
 ---
-description: Switch Claude account mid-session without losing the thread — prepare a handoff before /login, restore it after, or recover one from the transcript.
+description: Switch Claude accounts mid-session: save a handoff before /login, restore it after.
 argument-hint: "prepare [note] | restore [handoff] | recover [session-id]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, EnterWorktree

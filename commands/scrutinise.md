@@ -1,5 +1,5 @@
 ---
-description: Verify — post-implementation review for logic, security and cross-unit defects a per-unit gate can't see, by ONE isolated fresh-context reviewer; findings go to /plan to persist. Fixes NOTHING.
+description: Verify: one isolated reviewer audits merged work for logic, security, cross-unit defects.
 argument-hint: "<module | git range | plan-slug> [--deep <run-slug>]"
 model: sonnet
 allowed-tools: Task, Agent, Bash, Read, Glob, Grep, TaskCreate, TaskUpdate, Skill

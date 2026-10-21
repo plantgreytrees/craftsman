@@ -1,5 +1,5 @@
 ---
-description: Audit, migrate, and scaffold craftsman for this repo — including older project configs and missing required structure.
+description: Audit, migrate and scaffold craftsman for this repo, older configs included.
 argument-hint: ""
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 ---

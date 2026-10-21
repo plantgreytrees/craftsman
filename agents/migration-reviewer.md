@@ -1,6 +1,6 @@
 ---
 name: migration-reviewer
-description: Design-level review of a DIFF touching a database schema/migration — reversibility, data loss, and deploy-safety risk — with at most 5 findings.
+description: Design review of a DIFF touching a schema or migration: reversibility, data loss, deploy.
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---

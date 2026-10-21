@@ -1,5 +1,5 @@
 ---
-description: Evaluator — vet an idea before it is built: restatement, overlap scan, system fit, research, an isolated critic, and a scored verdict in docs/ideas/<slug>.md. Never blindly agrees. No code.
+description: Evaluator: vet an idea before it is built; scored verdict in docs/ideas/. No code.
 argument-hint: "<the idea, in your own words> [--deep]"
 model: opus
 allowed-tools: Task, Agent, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, WebSearch, WebFetch, AskUserQuestion, Skill

@@ -1,5 +1,5 @@
 ---
-description: Comprehend — read-only deep trace of a feature or area (paths, layers, contracts, dependencies, gaps) into a brief that informs the next plan. Writes NO code and NO docs.
+description: Comprehend: read-only deep trace of a feature into a brief for the next plan.
 argument-hint: "<feature, file, subsystem, or question to understand>"
 allowed-tools: Task, Bash, Read, Glob, Grep, TaskCreate, TaskUpdate, Skill
 ---

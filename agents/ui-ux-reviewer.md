@@ -1,6 +1,6 @@
 ---
 name: ui-ux-reviewer
-description: Design-level review of a DIFF touching UI code (components, templates, styles) for visual hierarchy, spacing, accessibility, and generic-AI-slop patterns — with at most 5 findings.
+description: Design review of a UI DIFF: hierarchy, spacing, accessibility, AI-slop. Max 5 findings.
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---

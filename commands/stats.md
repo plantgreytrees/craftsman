@@ -1,5 +1,5 @@
 ---
-description: Cost/benefit report for the quality gates — block rate vs p50/p95 latency per layer, so you can delete the gates that don't earn their tokens.
+description: Cost/benefit report for the quality gates: block rate against latency per layer.
 allowed-tools: Bash
 ---
 

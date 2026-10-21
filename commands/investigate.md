@@ -1,5 +1,5 @@
 ---
-description: Diagnostician — root-cause a reported bug across the codebase, verify every hypothesis, and inventory root-cause, contributing and latent defects into a fix-ready analysis. No fixes, no docs.
+description: Diagnostician: root-cause a reported bug into a fix-ready analysis. No fixes, no docs.
 argument-hint: "<the error, symptom, or problem you noticed>"
 allowed-tools: Task, Bash, Read, Glob, Grep, TaskCreate, TaskUpdate, Skill
 ---

@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Implements exactly ONE plan unit in whatever language that unit uses, staying scoped to the unit's files and writing the tests its acceptance criteria require.
+description: Implements exactly ONE plan unit in its language, in scope, with the tests it requires.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---

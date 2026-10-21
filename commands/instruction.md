@@ -1,5 +1,5 @@
 ---
-description: Prompt generator — turn a vetted idea or request into ONE paste-ready /goal driving /plan → /orchestrate → /scrutinise → /sync-docs → /craftsman:merge to landed completion, with a size estimate.
+description: Prompt generator: one paste-ready /goal that drives plan to merge, with a size estimate.
 argument-hint: "<idea-slug | plan-slug | request> [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
 allowed-tools: Bash, Read, Write, Glob, Grep

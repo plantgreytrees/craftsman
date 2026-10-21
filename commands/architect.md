@@ -1,5 +1,5 @@
 ---
-description: Architect — turn a vetted idea into confirmed decisions checked against the code, written as rules docs the loop enforces; --init, --backfill and --update create/repair them. No code or plans.
+description: Architect: turn a vetted idea into confirmed decisions and enforced rules docs. No code.
 argument-hint: "<idea-slug | area | request> [--deep] | --init [area] | --backfill [area] | --update [area | git range]"
 model: opus
 allowed-tools: Task, Agent, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, WebSearch, WebFetch, AskUserQuestion, Skill

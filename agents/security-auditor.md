@@ -1,6 +1,6 @@
 ---
 name: security-auditor
-description: Read-only security review of a diff for secrets, authn/authz, input validation, injection, unsafe deserialization, SSRF, and fail-open paths, returning severity-ranked findings.
+description: Read-only security review of a diff: secrets, authz, injection, SSRF, fail-open paths.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
