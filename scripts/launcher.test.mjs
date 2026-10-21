@@ -115,7 +115,7 @@ function filterFixture() {
   const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-filter-project-")));
   fs.mkdirSync(path.join(plugin, "scripts"));
   fs.writeFileSync(path.join(plugin, "scripts", "pre-guard.mjs"),
-    'import fs from "node:fs"; let s = ""; for await (const c of process.stdin) s += c; fs.appendFileSync(process.env.RAN_LOG, s + "\\n"); process.exit(Number(process.env.GUARD_EXIT ?? 7));\n');
+    'import fs from "node:fs"; let s = ""; for await (const c of process.stdin) s += c; fs.appendFileSync(process.env.RAN_LOG, s + "\\n"); process.exit(Number(process.env.GUARD_EXIT ?? 2));\n');
   const ran = path.join(project, "ran.log");
   const call = (payload, { env = {}, input = JSON.stringify(payload) } = {}) => spawnSync("sh", [RUN_SH, "scripts/pre-guard.mjs"], {
     cwd: project, input, encoding: "utf8",
@@ -146,7 +146,7 @@ test("run.sh filter: Write, Edit, NotebookEdit and Bash always run the guard, an
     for (const tool of ["Write", "Edit", "NotebookEdit", "Bash", "Task"]) {
       f.reset();
       const r = f.call(payload(tool, { file_path: "/p/a.js", command: "ls" }));
-      assert.equal(r.status, 7, `${tool} runs the guard and keeps its exit code`);
+      assert.equal(r.status, 2, `${tool} runs the guard and keeps its exit code`);
       assert.equal(f.nodeRan(), true, tool);
     }
     f.reset();
@@ -165,7 +165,7 @@ test("run.sh filter: a scope or scope-required file for the session, here or in 
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, name), "{}");
       f.reset();
-      assert.equal(f.call(read).status, 7, name);
+      assert.equal(f.call(read).status, 2, name);
       assert.equal(f.nodeRan(), true, name);
       fs.rmSync(path.join(dir, name));
     }
@@ -178,7 +178,7 @@ test("run.sh filter: a scope or scope-required file for the session, here or in 
     f.reset();
     const r = spawnSync("sh", [RUN_SH, "scripts/pre-guard.mjs"], { cwd: sub, input: JSON.stringify(read), encoding: "utf8",
       env: { ...process.env, CLAUDE_PLUGIN_ROOT: f.plugin, CLAUDE_PROJECT_DIR: sub, RAN_LOG: path.join(f.project, "ran.log") } });
-    assert.equal(r.status, 7, "a project dir below the repo root still finds the root's scope state");
+    assert.equal(r.status, 2, "a project dir below the repo root still finds the root's scope state");
   } finally { f.cleanup(); }
 });
 
@@ -187,17 +187,17 @@ test("run.sh filter: a protected-looking path, a project protectedPaths override
   try {
     for (const file of ["/p/.env", "/p/.env.local", "/p/node_modules/x/index.js", "/p/package-lock.json", "/p/dist/app.js", "/p/vendor/lib.go", "/p/api.pb.go", "/p/app.min.js"]) {
       f.reset();
-      assert.equal(f.call(payload("Read", { file_path: file })).status, 7, file);
+      assert.equal(f.call(payload("Read", { file_path: file })).status, 2, file);
       assert.equal(f.nodeRan(), true, file);
     }
     f.reset();
-    assert.equal(f.call(payload("Grep", { pattern: "x", path: "/p/.env" })).status, 7, "Grep too");
-    assert.equal(f.call(payload("Read", { file_path: "/p/a.js" }, "has.dot")).status, 7, "an id sidOf would rewrite is not looked up by the shell");
-    assert.equal(f.call(null, { input: "not json" }).status, 7);
-    assert.equal(f.call(null, { input: "" }).status, 7);
+    assert.equal(f.call(payload("Grep", { pattern: "x", path: "/p/.env" })).status, 2, "Grep too");
+    assert.equal(f.call(payload("Read", { file_path: "/p/a.js" }, "has.dot")).status, 2, "an id sidOf would rewrite is not looked up by the shell");
+    assert.equal(f.call(null, { input: "not json" }).status, 2);
+    assert.equal(f.call(null, { input: "" }).status, 2);
     fs.writeFileSync(path.join(f.project, "craftsman.config.json"), JSON.stringify({ protectedPaths: ["secrets/**"] }));
     f.reset();
-    assert.equal(f.call(payload("Read", { file_path: "/p/secrets/key.txt" })).status, 7, "a project that sets protectedPaths keeps the guard on reads");
+    assert.equal(f.call(payload("Read", { file_path: "/p/secrets/key.txt" })).status, 2, "a project that sets protectedPaths keeps the guard on reads");
     fs.writeFileSync(path.join(f.project, "craftsman.config.json"), JSON.stringify({ maxFeedbackLines: 5 }));
     f.reset();
     assert.equal(f.call(payload("Read", { file_path: "/p/a.js" })).status, 0, "an unrelated config does not");
@@ -233,4 +233,66 @@ test("run.sh filter: the skipped path adds under ~20 ms p95 over 200 runs agains
     assert.equal(f.nodeRan(), false, "none of the 200 runs started node");
     assert.ok(delta < budget, `filtered path adds ${delta.toFixed(1)} ms p95, over ${budget} ms`);
   } finally { f.cleanup(); }
+});
+
+// Scrutiny round: what the launcher does with a prompt, with an abnormal exit, and with its own protected list.
+const PROMPT = JSON.stringify({ session_id: "p1", hook_event_name: "UserPromptSubmit", prompt: "/craftsman:plan x" });
+
+test("run.sh: node missing, orchestrate-scope-guard on UserPromptSubmit must not erase the prompt; on any other event it still blocks", { skip: skipWindows }, () => {
+  const bin = pathWithoutNode();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-launch-"));
+  try {
+    const env = { PATH: bin, TMPDIR: tmp, CLAUDE_CODE_SESSION_ID: "s-prompt" };
+    const prompt = launch("scripts/orchestrate-scope-guard.mjs", { env, input: PROMPT });
+    assert.equal(prompt.status, 0, prompt.stderr);
+    assert.match(prompt.stdout, /"systemMessage":"[^"]*node not found/);
+    const skill = launch("scripts/orchestrate-scope-guard.mjs", { env, input: JSON.stringify({ session_id: "p1", hook_event_name: "PostToolUse", tool_name: "Skill" }) });
+    assert.equal(skill.status, 2, skill.stderr);
+    assert.equal(launch("scripts/pre-guard.mjs", { env, input: PROMPT }).status, 2, "pre-guard has no prompt exemption");
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("run.sh: a safety hook that dies on an unexpected exit code denies (2); 0 and 2 and an advisory hook's own code are kept", () => {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plugin-"));
+  try {
+    fs.mkdirSync(path.join(plugin, "scripts"));
+    const put = (name, body) => fs.writeFileSync(path.join(plugin, "scripts", name), body);
+    const run = (name, input = "{}") => launch(`scripts/${name}`, { env: { ...process.env, CLAUDE_PLUGIN_ROOT: plugin }, input });
+    put("pre-guard.mjs", 'throw new Error("import-time failure");\n');
+    assert.equal(run("pre-guard.mjs").status, 2, "an import-time throw exits 1 in node, the launcher makes it a denial");
+    put("pre-guard.mjs", "process.exit(5);\n");
+    assert.equal(run("pre-guard.mjs").status, 2);
+    put("pre-guard.mjs", "process.exit(0);\n");
+    assert.equal(run("pre-guard.mjs").status, 0);
+    put("pre-guard.mjs", 'process.stderr.write("blocked"); process.exit(2);\n');
+    const denied = run("pre-guard.mjs");
+    assert.equal(denied.status, 2);
+    assert.equal(denied.stderr, "blocked");
+    put("agent-mode-guard.mjs", "process.exit(1);\n");
+    assert.equal(run("agent-mode-guard.mjs").status, 2);
+    put("stop-gate.mjs", "process.exit(1);\n");
+    assert.equal(run("stop-gate.mjs").status, 1, "an advisory hook keeps its own code");
+    put("orchestrate-scope-guard.mjs", 'throw new Error("boom");\n');
+    const prompt = run("orchestrate-scope-guard.mjs", PROMPT);
+    assert.equal(prompt.status, 0, "a crash on UserPromptSubmit must not erase the prompt");
+    assert.match(prompt.stdout, /systemMessage/);
+    assert.equal(run("orchestrate-scope-guard.mjs", JSON.stringify({ hook_event_name: "PostToolUse" })).status, 2);
+  } finally {
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+});
+
+test("run.sh filter: every default protectedPaths pattern contains one of the substrings the filter runs the guard for", () => {
+  const sh = fs.readFileSync(RUN_SH, "utf8");
+  const block = sh.slice(sh.indexOf("case $tin in"), sh.indexOf("esac", sh.indexOf("case $tin in")));
+  const needles = [...block.matchAll(/\*([^*|)\s]+)\*/g)].map((m) => m[1]);
+  assert.ok(needles.length >= 10, `parsed the filter's substrings (${needles.length})`);
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, "craftsman.config.json"), "utf8"));
+  for (const pattern of cfg.protectedPaths) {
+    const pieces = pattern.split(/\*+|\//).filter(Boolean);
+    assert.ok(needles.some((n) => pieces.some((piece) => piece.includes(n))), `${pattern}: no filter substring is part of every path it matches (${needles})`);
+  }
 });

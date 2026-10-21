@@ -1,8 +1,10 @@
 #!/bin/sh
 # The launcher every craftsman hook runs through: run.sh scripts/<name>.mjs (hook JSON on stdin).
 # POSIX sh only. With node missing a hook cannot run, so it must not look like a pass:
-#   a safety hook (the fixed list below) exits 2, which blocks the call (ARCH-SAFETY-02);
+#   a safety hook (the fixed list below) exits 2, which blocks the call (ARCH-SAFETY-02), except on
+#   UserPromptSubmit, where exit 2 would erase the user's prompt: that event says so and exits 0;
 #   any other hook exits 0 and says once per session that craftsman is off (safety.rules.md).
+# A safety hook that exits with anything but 0 or 2 (an import-time throw exits 1) is a denial too.
 SAFETY_HOOKS=" pre-guard.mjs agent-mode-guard.mjs orchestrate-scope-guard.mjs "
 script=${1#scripts/}
 case $script in
@@ -44,17 +46,35 @@ guard_cannot_act() {
   return 0
 }
 
+is_prompt() {
+  case $1 in *'"hook_event_name":"UserPromptSubmit"'*|*'"hook_event_name": "UserPromptSubmit"'*) return 0 ;; esac
+  return 1
+}
+
 if command -v node >/dev/null 2>&1; then
-  if [ "$script" = pre-guard.mjs ]; then
-    input=$(cat)
-    if guard_cannot_act "$input"; then exit 0; fi
-    printf '%s' "$input" | node "$root/scripts/$script"
-    exit $?
-  fi
+  case $SAFETY_HOOKS in
+    *" $script "*)
+      input=$(cat)
+      if [ "$script" = pre-guard.mjs ] && guard_cannot_act "$input"; then exit 0; fi
+      printf '%s' "$input" | node "$root/scripts/$script"
+      rc=$?
+      case $rc in 0|2) exit $rc ;; esac
+      if is_prompt "$input"; then
+        printf '%s\n' "{\"systemMessage\":\"craftsman: $script failed (exit $rc), so this prompt was not checked\"}"
+        exit 0
+      fi
+      echo "craftsman: $script failed (exit $rc), guards cannot run" >&2
+      exit 2 ;;
+  esac
   exec node "$root/scripts/$script"
 fi
 case $SAFETY_HOOKS in
-  *" $script "*) echo "craftsman: node not found, guards cannot run" >&2; exit 2 ;;
+  *" $script "*)
+    if [ "$script" = orchestrate-scope-guard.mjs ] && is_prompt "$(cat)"; then
+      printf '%s\n' '{"systemMessage":"craftsman: node not found, so this prompt was not checked"}'
+      exit 0
+    fi
+    echo "craftsman: node not found, guards cannot run" >&2; exit 2 ;;
 esac
 sid=${CLAUDE_CODE_SESSION_ID:-shared}
 case $sid in *[!A-Za-z0-9_-]*) sid=shared ;; esac
