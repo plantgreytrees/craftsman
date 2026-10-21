@@ -1,6 +1,7 @@
 ---
-description: Shared constraints for code-executing commands. Not invoked directly.
+description: Shared constraints for code-executing commands.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Shared execution machinery
 

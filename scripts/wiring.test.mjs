@@ -267,3 +267,31 @@ test("wiring: a SessionEnd hook runs session-end.mjs with no matcher, and there 
   assert.equal(hook.timeout, 20);
   assert.equal("SubagentStop" in hooksConfig.hooks, false);
 });
+
+// 16.0: the nine internal partials are read by commands, never typed. `user-invocable: false` keeps them out of
+// the / menu; `disable-model-invocation: true` (already there) keeps them out of the model's skill list.
+function frontmatterOf(file) {
+  const block = fs.readFileSync(file, "utf8").split(/^---$/m)[1] || "";
+  return Object.fromEntries(block.split("\n").map((l) => /^([a-z-]+):\s*(.*)$/.exec(l)).filter(Boolean).map((m) => [m[1], m[2]]));
+}
+const partials = fs.readdirSync(path.join(PLUGIN_ROOT, "commands")).filter((f) => /^_.*\.md$/.test(f));
+
+test("wiring: every commands/_*.md partial is user-invocable: false and disable-model-invocation: true", () => {
+  assert.ok(partials.length >= 9, `found ${partials.length} partials`);
+  const bad = partials.filter((f) => {
+    const fm = frontmatterOf(path.join(PLUGIN_ROOT, "commands", f));
+    return fm["user-invocable"] !== "false" || fm["disable-model-invocation"] !== "true";
+  });
+  assert.deepEqual(bad, []);
+});
+
+test("wiring: no real command is hidden from the / menu", () => {
+  const hidden = fs.readdirSync(path.join(PLUGIN_ROOT, "commands")).filter((f) => f.endsWith(".md") && !f.startsWith("_"))
+    .filter((f) => frontmatterOf(path.join(PLUGIN_ROOT, "commands", f))["user-invocable"] === "false");
+  assert.deepEqual(hidden, []);
+});
+
+test("wiring: a command that reads a partial still names it by its real path", () => {
+  const text = promptFiles.filter((f) => !path.basename(f).startsWith("_")).map((f) => fs.readFileSync(f, "utf8")).join("\n");
+  for (const f of ["_shared-machinery.md", "_shared-execution.md", "_architecture.md"]) assert.ok(text.includes(f), `${f} is still referenced`);
+});

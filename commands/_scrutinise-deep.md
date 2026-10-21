@@ -1,6 +1,7 @@
 ---
-description: Shared protocol for /scrutinise --deep. Not invoked directly.
+description: Shared protocol for /scrutinise --deep.
 disable-model-invocation: true
+user-invocable: false
 ---
 > Canonical protocol for `/scrutinise`'s `--deep <run-slug>` exhaustive whole-run
 > audit (Phase D). `/scrutinise` links here and `Read`s this file only when

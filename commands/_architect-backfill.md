@@ -1,6 +1,7 @@
 ---
-description: Shared protocol for /architect --backfill. Not invoked directly.
+description: Shared protocol for /architect --backfill.
 disable-model-invocation: true
+user-invocable: false
 ---
 > Canonical protocol for `/architect --backfill [area]`. `/architect` `Read`s
 > this only when that flag is passed. Not user-invocable. The two-file format

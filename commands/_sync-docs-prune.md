@@ -1,6 +1,7 @@
 ---
-description: Protocol for /sync-docs --archive and --prune. Not invoked.
+description: Protocol for /sync-docs --archive/--prune.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Sync-docs `--archive` / `--prune` protocol
 

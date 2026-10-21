@@ -1,6 +1,7 @@
 ---
-description: Shared protocol for read-only analysis commands. Not invoked directly.
+description: Shared protocol for read-only analysis commands.
 disable-model-invocation: true
+user-invocable: false
 ---
 > Canonical protocol shared by every command whose job is READ-ONLY analysis —
 > tracing, diagnosing, or reviewing code before a plan exists (`/understand`,

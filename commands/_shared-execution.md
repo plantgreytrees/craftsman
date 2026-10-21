@@ -1,6 +1,7 @@
 ---
-description: Shared per-unit execution loop for /orchestrate Phase C. Not invoked.
+description: Per-unit loop for /orchestrate Phase C.
 disable-model-invocation: true
+user-invocable: false
 ---
 > `Read` only when about to run Phase X — a run short of execution never pays for it.
 
