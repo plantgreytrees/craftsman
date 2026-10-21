@@ -17,8 +17,22 @@ import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
 const T0 = Date.now();
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
+// top-level await would otherwise exit 1, which Claude Code treats as a non-blocking failure.
+const GUARD = "pre-guard";
+function failClosed(why) {
+  process.stderr.write(`craftsman: ${GUARD} could not decide (${why}), so the call is denied.\n`);
+  process.exit(2);
+}
+process.on("uncaughtException", (error) => failClosed(error?.message || String(error)));
+process.on("unhandledRejection", (error) => failClosed(error?.message || String(error)));
+
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+const rawInput = await readStdin();
+try { input = JSON.parse(rawInput); } catch { failClosed(rawInput.trim() ? "bad JSON on stdin" : "empty stdin"); }
+if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("stdin is not a JSON object");
+// Test-only: lets the suite prove an exception denies. It can only ever deny.
+if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
 const file = input?.tool_input?.file_path;
 const tool = input.tool_name || "";
 const toolInput = input.tool_input || {};

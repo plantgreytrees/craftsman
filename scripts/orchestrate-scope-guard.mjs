@@ -69,8 +69,22 @@ function featurePlan(slug, context, { level, feature } = {}) {
   } catch { return { slug, units: null }; }
 }
 
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
+// top-level await would otherwise exit 1, which Claude Code treats as a non-blocking failure.
+const GUARD = "orchestrate-scope-guard";
+function failClosed(why) {
+  process.stderr.write(`craftsman: ${GUARD} could not decide (${why}), so the call is denied.\n`);
+  process.exit(2);
+}
+process.on("uncaughtException", (error) => failClosed(error?.message || String(error)));
+process.on("unhandledRejection", (error) => failClosed(error?.message || String(error)));
+
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+const rawInput = await readStdin();
+try { input = JSON.parse(rawInput); } catch { failClosed(rawInput.trim() ? "bad JSON on stdin" : "empty stdin"); }
+if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("stdin is not a JSON object");
+// Test-only: lets the suite prove an exception denies. It can only ever deny.
+if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
 // Three payload shapes, one meaning: Skill carries tool_input.skill (the
 // model's route to a plugin command; a tool_input.command is still read, for
 // a Skill call that carries one), UserPromptSubmit carries the raw prompt.

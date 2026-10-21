@@ -238,3 +238,48 @@ test("orchestrate-scope-guard: --feature narrows the grant; a bare slug is uncha
     assert.equal(grantOf(dir, "bare"), 16);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error used to exit 1,
+// which Claude Code treats as a non-blocking failure, so the guard was silently off.
+function failClosedCases(guard, script, dir) {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-badplugin-"));
+  fs.writeFileSync(path.join(plugin, "craftsman.config.json"), "{ not json");
+  const manifest = path.join(plugin, "workspace.json");
+  fs.writeFileSync(manifest, "{ bad");
+  // an invocation, so the guard goes on to read its config
+  const payload = JSON.stringify({ session_id: "fail-closed", prompt: "/orchestrate docs/plans/example.md" });
+  const cases = [
+    ["bad JSON on stdin", "not json", {}],
+    ["empty stdin", "", {}],
+    ["a thrown error inside the guard", payload, { CRAFTSMAN_TEST_THROW: guard }],
+    ["an unreadable default config", payload, { CLAUDE_PLUGIN_ROOT: plugin }],
+    // projectContext() throws on a broken workspace manifest (ARCH-SAFETY-03); it used to exit 1 silently
+    ["an invalid workspace manifest", payload, { CRAFTSMAN_WORKSPACE_MANIFEST: manifest }],
+  ];
+  try {
+    for (const [label, input, env] of cases) {
+      const r = spawnSync(process.execPath, [script], {
+        cwd: dir, input, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env },
+      });
+      assert.equal(r.status, 2, `${guard} denies on ${label}: ${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`craftsman: ${guard}`), `${guard} names itself on ${label}`);
+    }
+    // the throw hook only ever denies: another guard's name does nothing
+    const other = spawnSync(process.execPath, [script], {
+      cwd: dir, input: payload, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN_TEST_THROW: "someone-else" },
+    });
+    assert.notEqual(other.status, 2, "the test hook is scoped to one guard");
+  } finally {
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+}
+
+test("orchestrate-scope-guard: bad input, an exception or a broken default config denies and names the guard (6.1, 6.2)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-failclosed-osg-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    failClosedCases("orchestrate-scope-guard", path.join(path.dirname(fileURLToPath(import.meta.url)), "orchestrate-scope-guard.mjs"), dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
