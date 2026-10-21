@@ -1359,3 +1359,50 @@ test("pre-guard: a command shell-words cannot read falls through to the existing
     assert.equal(bash(`git commit -m "unterminated ${NOV}`).status, 2, "an unterminated quote still reaches the text check");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Scrutiny round: markers, symlinks and scope files are never written by a tool call.
+test("pre-guard: mkdir or ln onto a marker path, and a forged scope file, are blocked (self-protection)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman", "sessions", "s1"), { recursive: true });
+    const blocked = [
+      "mkdir -p .craftsman/doc-write-pending", "mkdir .craftsman/off", "mkdir -p .craftsman/sessions/s1/doc-write",
+      "install /dev/null .craftsman/off", "ln -s /dev/null .craftsman/off", "ln -s .craftsman/sessions cs",
+      "printf '{}' > .craftsman/sessions/s1/scope.json", "echo x > .craftsman/sessions/s1/scope-required",
+      "cp evil.json .craftsman/sessions/s1/scope-ab12.json", "touch .craftsman/sessions/s1/root-worktree-binding.json",
+    ];
+    for (const command of blocked) {
+      const r = bashIn(dir, "sp-1", command);
+      assert.equal(r.status, 2, `blocked: ${command} (${r.stderr})`);
+    }
+    for (const command of ["mkdir build", "mkdir -p .craftsman/runs", "ls .craftsman/sessions", "cat .craftsman/sessions/s1/scope.json"]) {
+      const r = bashIn(dir, "sp-1", command);
+      assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+    }
+    const call = (tool, input) => run(GUARD, dir, { session_id: "sp-1", tool_name: tool, tool_input: input });
+    for (const name of ["scope.json", "scope-required", "scope-ab12.json", "root-worktree-binding.json"]) {
+      assert.equal(call("Write", { file_path: path.join(dir, ".craftsman", "sessions", "s1", name), content: "{}" }).status, 2, `Write ${name}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("pre-guard: a symlinked directory into .craftsman cannot forge a goal token or command record (self-protection)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman", "sessions", "s1"), { recursive: true });
+    fs.symlinkSync(path.join(".craftsman", "sessions"), path.join(dir, "cs"));
+    fs.mkdirSync(path.join(dir, "plain", "s1"), { recursive: true });
+    const call = (tool, input) => run(GUARD, dir, { session_id: "sp-2", tool_name: tool, tool_input: input });
+    for (const name of ["goal-tokens.json", "commands.json", "doc-write"]) {
+      assert.equal(call("Write", { file_path: path.join(dir, "cs", "s1", name), content: "{}" }).status, 2, `Write cs/s1/${name}`);
+      assert.equal(call("Write", { file_path: path.join("cs", "s1", name), content: "{}" }).status, 2, `relative Write cs/s1/${name}`);
+      assert.equal(bashIn(dir, "sp-2", `echo '{}' > cs/s1/${name}`).status, 2, `redirect to cs/s1/${name}`);
+    }
+    assert.equal(call("Edit", { file_path: path.join(dir, "cs", "s1", "goal-tokens.json"), old_string: "a", new_string: "b" }).status, 2);
+    assert.equal(call("Write", { file_path: path.join(dir, "plain", "s1", "goal-tokens.json"), content: "{}" }).status, 0, "a real directory of that name is just a file");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

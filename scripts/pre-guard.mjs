@@ -973,7 +973,9 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 // ARCH-SAFETY-05: a tool call cannot switch the guards off. Token matching only; anything the parser
 // cannot read stays with the sandbox. "never" paths are written by craftsman's own scripts, never by a
 // tool call. "scoped" paths can be edited by a unit whose scope manifest (made by /orchestrate) names them.
-const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json"];
+const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
+  // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
+  ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*"];
 const SELF_SCOPED = ["hooks/hooks.json", "craftsman.config.json"];
 const SAFETY_CONFIG_KEYS = ["safety", "stopGate"];
 const selfKind = (relPath) => {
@@ -999,12 +1001,14 @@ function denySelfDisable(what) {
   process.exit(2);
 }
 if (tool === "Bash" && command) {
-  const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
-  const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json|goal-tokens\.json)/.test(command);
+  const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate|mkdir)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
+  const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json|goal-tokens\.json|\/scope[\w.-]*|[\w.-]*worktree-binding)/.test(command);
   const scopedMentioned = ["hooks/hooks.json", "craftsman.config.json"].filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
   const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)])
     .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
+  // A link into the state directory would let a later Write reach it under another name.
+  if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     const kind = selfKind(hit);
     if (kind === "never") denySelfDisable(`a command that writes ${hit}`);
@@ -1050,9 +1054,11 @@ if (tool === "Bash" && command && docSide && cfg.docWriteGuard?.enabled !== fals
 if (!file) process.exit(0); // no file: nothing to time or log
 
 if (["Write", "Edit"].includes(tool)) {
-  const kind = selfKind(rel);
-  if (kind === "never") denySelfDisable(`writing ${rel}`);
-  if (kind === "scoped" && !scopeNames(rel)) {
+  // The target by its real path too: a symlinked directory (`cs -> .craftsman/sessions`) is the same file.
+  const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
+  const kinds = [selfKind(rel), selfKind(realTarget)];
+  if (kinds.includes("never")) denySelfDisable(`writing ${rel}`);
+  if (kinds.includes("scoped") && !(scopeNames(rel) || scopeNames(realTarget))) {
     if (rel.endsWith("hooks/hooks.json")) denySelfDisable(`editing ${rel}`);
     let current = "";
     try { current = fs.readFileSync(path.resolve(activeRoot, file), "utf8"); } catch {}
