@@ -1626,3 +1626,38 @@ test("pre-guard: a quote-split name or a cd into .craftsman cannot forge a marke
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Scrutiny round 2 (15.x): git config set, -c alias, the other subcommands that take the skip flag, .git/config, one -c extractor.
+test("pre-guard: git config set, -c alias.X, merge/rebase/am/cherry-pick skip flags and .git writes are blocked (15.1-15.4)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass3-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const bash = (command) => run(GUARD, dir, { session_id: "bypass-15b", tool_name: "Bash", tool_input: { command } });
+    const blocked = [
+      `git config set ${HOOKS} /x`, `git config set --global ${HOOKS} /x`, `git config set --local ${HOOKS.toLowerCase()} /x`,
+      "git -c alias.ci='commit -n' ci -m x", `git -c "alias.ci=commit ${NOV}" ci -m x`, "git -c alias.ci='!git commit -n' ci -m x",
+      `git merge ${NOV} topic`, `git rebase ${NOV} main`, `git am ${NOV} p.patch`, `git cherry-pick ${NOV} abc`, `git merge ${NOV.slice(0, 8)} topic`,
+      "bash -lc 'git commit -n -m x'", "sh -o pipefail -c 'git commit -n -m x'", "bash -c -- 'git commit -n -m x'", `bash -c "git ${CFG(HOOKS, "=/x")} commit -m x"`,
+      "echo '[core]' >> .git/config", "cp evil .git/hooks/pre-commit", "tee .git/hooks/commit-msg < x", "printf x > .git/config",
+    ];
+    for (const command of blocked) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    const allowed = [
+      "git config get core.editor", "git config set user.name x", "git config user.name x", "git -c alias.st=status st", "git merge topic",
+      "git rebase main", "git am p.patch", "git cherry-pick abc", "git merge --no-ff topic", "git rebase -n main", "git commit -m 'about -n'",
+      "bash -c 'git status'", "bash -lc 'git log -n 3'", "cat .git/config", "ls .git/hooks",
+    ];
+    for (const command of allowed) assert.equal(bash(command).status, 0, `allowed: ${command}`);
+
+    const write = (rel, content) => run(GUARD, dir, { session_id: "bypass-15b", tool_name: "Write", tool_input: { file_path: path.join(dir, rel), content } });
+    assert.equal(write(".git/config", `[core]\n\t${HOOKS} = /x\n`).status, 2, "Write of .git/config");
+    assert.equal(write(".git/hooks/pre-commit", "#!/bin/sh\nexit 0\n").status, 2, "Write of a git hook");
+    assert.equal(write("notes.txt", "x").status, 0, "an ordinary file stays writable");
+
+    // One extractor for sh -c bodies (15.4).
+    const source = fs.readFileSync(GUARD, "utf8");
+    assert.equal((source.match(/function shellBodyAfter\(/g) || []).length, 1, "one shell-body extractor");
+    assert.doesNotMatch(source, /rest\.findIndex\(\(w\) => \/\^-\[a-z\]\*c\[a-z\]\*\$\//, "the second copy is gone");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

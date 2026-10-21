@@ -10,6 +10,15 @@ export const SELF_SCOPED = Object.freeze([
   ".claude/settings.local.json",
 ]);
 
+// Paths no tool call may write: craftsman's own scripts (and git itself) are their only writers.
+export const SELF_NEVER = Object.freeze([
+  ".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
+  // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
+  ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*",
+  // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
+  "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
+]);
+
 const clean = (entry) => String(entry).replaceAll("\\", "/").replace(/^(?:\.\/)+/, "").replace(/\/+$/, "");
 
 // Does one `scope.write` entry (a path, a directory or a glob) reach `name`?

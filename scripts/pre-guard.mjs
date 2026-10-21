@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
-import { SELF_SCOPED, safetyProjection } from "./lib/self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, safetyProjection } from "./lib/self-protect.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -676,12 +676,10 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       let body;
       if (verb === "eval") body = rest.join(" ");
       else {
-        const at = rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
-        if (at === -1) return unsafe("a shell running a script or input the parser cannot see");
-        let j = at + 1; while (j < rest.length && rest[j].startsWith("-") && rest[j] !== "--") j++;
-        if (rest[j] === "--") j++;
-        body = rest[j];
-        if (body === undefined) return unsafe("a shell -c without a command");
+        const found = shellBodyAfter(rest);
+        if (!found.c) return unsafe("a shell running a script or input the parser cannot see");
+        body = found.body;
+        if (body === null) return unsafe("a shell -c without a command");
       }
       analyze(body, fork(st), depth + 1, { exec: env.exec, execdir: env.execdir, roots: env.roots });
     }
@@ -921,18 +919,27 @@ function commandWordIndex(words, targets) {
 }
 const GIT_ONLY = new Set(["git"]);
 const gitWordIndex = (words) => commandWordIndex(words, GIT_ONLY);
-// The body of `sh -c '<body>'` (any cluster holding c, any wrapper before it), else null.
+// The one extractor of a shell's command string, from the words AFTER the shell: `sh|bash|zsh|dash|ksh
+// [options] -c [options] [--] <body>`. A cluster holding c (-c, -lc, -ec) sets `c`; -o/+o/-O/+O take a value;
+// the first operand is the body when -c was given, else a script the parser cannot see. Both the bypass
+// check and the removal analysis read shell bodies through here.
+function shellBodyAfter(rest) {
+  let c = false;
+  for (let j = 0; j < rest.length; j++) {
+    const word = rest[j];
+    if (word === "--") return { c, body: c ? rest[j + 1] ?? null : null };
+    if (!/^[-+]/.test(word)) return { c, body: c ? word : null };
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(word)) c = true;
+    if (word === "-o" || word === "+o" || word === "-O" || word === "+O") j++;
+  }
+  return { c, body: null };
+}
+// The body of `sh -c '<body>'` (any wrapper before the shell), else null.
 function shellBody(words) {
   const at = commandWordIndex(words, SHELLS);
-  if (at < 0) return null;
-  for (let j = at + 1; j < words.length; j++) {
-    const word = words[j];
-    if (word === "--" || !/^[-+]/.test(word)) return null;
-    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(word)) return words[j + 1] ?? null;
-    if (word === "-o" || word === "+o" || word === "-O") j++;
-  }
-  return null;
+  return at < 0 ? null : shellBodyAfter(words.slice(at + 1)).body;
 }
+const SKIP_SUBCOMMANDS = new Set(["commit", "push", "merge", "rebase", "am", "cherry-pick"]);
 const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|commit\.gpgsign)/i;
 // `git config` that points hooks elsewhere, or defines an alias that itself skips them.
 function configBypasses(args) {
@@ -942,6 +949,10 @@ function configBypasses(args) {
     if (["-f", "--file", "--blob", "--type", "--default"].includes(args[k])) k++;
     else if (!args[k].startsWith("-")) operands.push(args[k]);
   }
+  // git 2.46+ subcommands: `git config set <key> <value>` writes like the old form; get, unset, list and edit do not set one.
+  // (A config key always holds a dot, so these words are never a key.)
+  if (["get", "unset", "list", "edit", "rename-section", "remove-section"].includes(operands[0])) return false;
+  if (operands[0] === "set") operands.shift();
   const key = (operands[0] ?? "").toLowerCase();
   const value = operands.slice(1).join(" ");
   if (key === "core.hookspath") return true;
@@ -971,7 +982,16 @@ function bypassesHooks(text, depth = 0) {
     }
     const sub = words[i];
     if (sub === "config" && configBypasses(words.slice(i + 1))) return true;
-    if (sub !== "commit" && sub !== "push") continue;
+    // `-c alias.X=<value>` defines the alias for this one command, like `git config alias.X <value>`.
+    for (const config of configs) {
+      const eq = config.indexOf("=");
+      if (eq > 0 && /^alias\./i.test(config) && config.length > eq + 1) {
+        const value = config.slice(eq + 1);
+        if (bypassesHooks("git " + value, depth + 1) || bypassesHooks(value.replace(/^!/, ""), depth + 1)) return true;
+      }
+    }
+    // The subcommands that run commit-msg, pre-commit-style hooks and take the skip flag.
+    if (!SKIP_SUBCOMMANDS.has(sub)) continue;
     for (const config of configs) {
       const eq = config.indexOf("=");
       const key = (eq < 0 ? config : config.slice(0, eq)).toLowerCase();
@@ -1051,9 +1071,6 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 // ARCH-SAFETY-05: a tool call cannot switch the guards off. Token matching only; anything the parser
 // cannot read stays with the sandbox. "never" paths are written by craftsman's own scripts, never by a
 // tool call. "scoped" paths can be edited by a unit whose scope manifest (made by /orchestrate) names them.
-const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
-  // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
-  ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*"];
 const selfKind = (relPath) => {
   const r = String(relPath).replace(/^\.\//, "");
   if (SELF_NEVER.some((p) => globToRe(p).test(r))) return "never";

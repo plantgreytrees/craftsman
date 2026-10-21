@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, SAFETY_CONFIG_KEYS, SAFETY_ENV, namesSelfScoped, safetyProjection } from "./self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, namesSelfScoped, safetyProjection } from "./self-protect.mjs";
+import { globToRe } from "./core.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
   assert.deepEqual([...SELF_SCOPED], ["hooks/hooks.json", "craftsman.config.json", ".claude/settings.json", ".claude/settings.local.json"]);
@@ -20,6 +21,15 @@ test("self-protect: namesSelfScoped matches exact names, suffixes, directories a
   assert.deepEqual(hits(["*.json"]), ["craftsman.config.json"]);
   assert.deepEqual(hits(["hooks"]), ["hooks/hooks.json"]);
   assert.deepEqual(hits(["."]), [...SELF_SCOPED]);
+});
+
+test("self-protect: SELF_NEVER holds the craftsman markers, the scope files and git's own config and hooks", () => {
+  for (const p of [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/scope*", "**/.git/config", "**/.git/hooks/**"]) {
+    assert.ok(SELF_NEVER.includes(p), p);
+  }
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/config", "a/b/.git/config", ".git/hooks/pre-commit", ".git/config.worktree"]) assert.ok(hit(rel), rel);
+  for (const rel of [".gitignore", ".git/HEAD", "src/git/config", ".github/hooks/x"]) assert.ok(!hit(rel), rel);
 });
 
 test("self-protect: ordinary write entries name nothing", () => {
