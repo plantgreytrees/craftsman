@@ -307,127 +307,130 @@ Every step: task N.0 first, red before green: run the new case against `c27533d`
 
 ### Step 1 — core-isfile (., javascript, high)
 Depends on: none
-- [ ] 1.0 Failing tests first → accept: `core.test` cases for a directory at the doc-write grant path, the session `doc-write` marker, `.craftsman/off`, and the launcher marker fail on c27533d
-- [ ] 1.1 `grantMtime` (`core.mjs:208`), the `enabled()` off-flag check (`core.mjs:580`) and `guardState`'s off-flag and launcher-marker checks use `isFile()` (the launcher marker is a directory by design, so it keeps `isDirectory()`) → accept: a directory named `doc-write-pending`, `doc-write` or `off` is not a grant and not an off flag; a regular file still is; `guardState` agrees
-- [ ] 1.2 Full CI set, commit `fix(state): a directory is not a grant or an off flag`
+- [x] 1.0 Failing tests first → accept: `core.test` cases for a directory at the doc-write grant path, the session `doc-write` marker, `.craftsman/off`, and the launcher marker fail on c27533d
+- [x] 1.1 `grantMtime` (`core.mjs:208`), the `enabled()` off-flag check (`core.mjs:580`) and `guardState`'s off-flag and launcher-marker checks use `isFile()` (the launcher marker is a directory by design, so it keeps `isDirectory()`) → accept: a directory named `doc-write-pending`, `doc-write` or `off` is not a grant and not an off flag; a regular file still is; `guardState` agrees
+- [x] 1.2 Full CI set, commit `fix(state): a directory is not a grant or an off flag`
 
 ### Step 2 — selfprotect-markers (., javascript, high)
 Depends on: none
-- [ ] 2.0 Failing tests first, in the self-disable table's style, run through `pre-guard` as the suite already does → accept: red on c27533d for each row below
-- [ ] 2.1 The Bash write-verb regex gains `mkdir`, `ln`, `install`, `mktemp` for the never-written and scoped paths (`pre-guard.mjs:~1002`) → accept: `mkdir -p .craftsman/doc-write-pending`, `mkdir .craftsman/off`, `ln -s x .craftsman/off`, `install /dev/null .craftsman/off` blocked; `mkdir build` and `ls .craftsman` stay allowed
-- [ ] 2.2 `selfKind` and `scopeNames` judge the realpath of the target (the existing `realResolve`), for Write/Edit and for Bash hits; a Bash `ln` whose target resolves into `.craftsman` is a write → accept: after a symlinked directory `cs -> .craftsman/sessions` exists on disk, Write `cs/s1/goal-tokens.json` and `cs/s1/commands.json` are blocked; an ordinary file under a real `cs/` directory is allowed
-- [ ] 2.3 `SELF_NEVER` gains `.craftsman/sessions/**/scope*`, `**/scope-required*`, `**/worktree-binding*` (scope.mjs and repo-exec stay the only writers; they are scripts, not tool calls) → accept: Write and `printf … > …` of a forged `scope.json` with `write:["**"]` blocked; the existing "a unit scope that names hooks.json lets it be edited" case still passes because it activates through `scope.mjs`
-- [ ] 2.4 Full CI set, commit `fix(guard): markers, scope files and symlinks are self-protected`
+- [x] 2.0 Failing tests first, in the self-disable table's style, run through `pre-guard` as the suite already does → accept: red on c27533d for each row below
+- [x] 2.1 The Bash write-verb regex gains `mkdir`, `ln`, `install`, `mktemp` for the never-written and scoped paths (`pre-guard.mjs:~1002`) → accept: `mkdir -p .craftsman/doc-write-pending`, `mkdir .craftsman/off`, `ln -s x .craftsman/off`, `install /dev/null .craftsman/off` blocked; `mkdir build` and `ls .craftsman` stay allowed
+- [x] 2.2 `selfKind` and `scopeNames` judge the realpath of the target (the existing `realResolve`), for Write/Edit and for Bash hits; a Bash `ln` whose target resolves into `.craftsman` is a write → accept: after a symlinked directory `cs -> .craftsman/sessions` exists on disk, Write `cs/s1/goal-tokens.json` and `cs/s1/commands.json` are blocked; an ordinary file under a real `cs/` directory is allowed
+- [x] 2.3 `SELF_NEVER` gains `.craftsman/sessions/**/scope*`, `**/scope-required*`, `**/worktree-binding*` (scope.mjs and repo-exec stay the only writers; they are scripts, not tool calls) → accept: Write and `printf … > …` of a forged `scope.json` with `write:["**"]` blocked; the existing "a unit scope that names hooks.json lets it be edited" case still passes because it activates through `scope.mjs`
+- [x] 2.4 Full CI set, commit `fix(guard): markers, scope files and symlinks are self-protected`
 
 ### Step 3 — selfprotect-scripts (., javascript, high)
 Depends on: selfprotect-markers
-- [ ] 3.0 Failing tests first → accept: red on c27533d for each row below
-- [ ] 3.1 The doc-write and toggle script gate scans every `node … <name>.mjs` invocation (`matchAll`), accepts node options (`--no-warnings`, `--`, `--input-type=module`) before the path, and denies when ANY invocation carries a non-permitted argument (`pre-guard.mjs:~1015-1023`) → accept: `node scripts/doc-write.mjs off; node scripts/doc-write.mjs on`, `node -- scripts/doc-write.mjs on`, `node --no-warnings "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs"` and `node --no-warnings scripts/toggle.mjs off` blocked outside the owning command and allowed after it; `node --check scripts/toggle.mjs`, `node scripts/doc-write.mjs off` and `node scripts/toggle.mjs on` stay allowed
-- [ ] 3.2 Full CI set, commit `fix(guard): every doc-write or toggle invocation is gated, with node options`
+- [x] 3.0 Failing tests first → accept: red on c27533d for each row below
+- [x] 3.1 The doc-write and toggle script gate scans every `node … <name>.mjs` invocation (`matchAll`), accepts node options (`--no-warnings`, `--`, `--input-type=module`) before the path, and denies when ANY invocation carries a non-permitted argument (`pre-guard.mjs:~1015-1023`) → accept: `node scripts/doc-write.mjs off; node scripts/doc-write.mjs on`, `node -- scripts/doc-write.mjs on`, `node --no-warnings "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs"` and `node --no-warnings scripts/toggle.mjs off` blocked outside the owning command and allowed after it; `node --check scripts/toggle.mjs`, `node scripts/doc-write.mjs off` and `node scripts/toggle.mjs on` stay allowed
+- [x] 3.2 Full CI set, commit `fix(guard): every doc-write or toggle invocation is gated, with node options`
 
 ### Step 4 — bypass-flags-2 (., javascript, high)
 Depends on: selfprotect-scripts
-- [ ] 4.0 Failing tests first, flag text built by concatenation → accept: red on c27533d for each row below
-- [ ] 4.1 `git config [--local|--global|--system] core.hooksPath …` and `git config alias.<x> <value naming the no-verify or no-gpg-sign flag>` are blocked; `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_PARAMETERS` assignments are read like `-c` → accept: those forms blocked; `git config core.editor vim` and `git config user.name x` stay allowed
-- [ ] 4.2 `gitWordIndex` skips the value of a value-taking wrapper option (`-u`, `-g`, `-C`, `-D`, `-n` for nice) and `GIT_WRAPPERS` is the same set as `WRAPPERS` (`pre-guard.mjs:~862` and `:~198`, `busybox` included) → accept: `env -u FOO git commit -n`, `sudo -u me git commit -n`, `busybox git commit -n` blocked; `env -u FOO git commit -m msg` allowed
-- [ ] 4.3 A `sh|bash|zsh -c '<body>'` body is checked recursively like `removedDocs` does → accept: `sh -c 'git commit -n -m x'` and `bash -c "git -c core.hooksPath=/x commit"` (flag text concatenated in the test) blocked; `sh -c 'git status'` allowed
-- [ ] 4.4 Full CI set, commit `fix(guard): more hook-bypass spellings`
+- [x] 4.0 Failing tests first, flag text built by concatenation → accept: red on c27533d for each row below
+- [x] 4.1 `git config [--local|--global|--system] core.hooksPath …` and `git config alias.<x> <value naming the no-verify or no-gpg-sign flag>` are blocked; `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_PARAMETERS` assignments are read like `-c` → accept: those forms blocked; `git config core.editor vim` and `git config user.name x` stay allowed
+- [x] 4.2 `gitWordIndex` skips the value of a value-taking wrapper option (`-u`, `-g`, `-C`, `-D`, `-n` for nice) and `GIT_WRAPPERS` is the same set as `WRAPPERS` (`pre-guard.mjs:~862` and `:~198`, `busybox` included) → accept: `env -u FOO git commit -n`, `sudo -u me git commit -n`, `busybox git commit -n` blocked; `env -u FOO git commit -m msg` allowed
+- [x] 4.3 A `sh|bash|zsh -c '<body>'` body is checked recursively like `removedDocs` does → accept: `sh -c 'git commit -n -m x'` and `bash -c "git -c core.hooksPath=/x commit"` (flag text concatenated in the test) blocked; `sh -c 'git status'` allowed
+- [x] 4.4 Full CI set, commit `fix(guard): more hook-bypass spellings`
 
 ### Step 5 — quality-dirty-marker (., javascript, normal)
 Depends on: none
-- [ ] 5.0 Failing tests first → accept: red on c27533d
-- [ ] 5.1 `quality-gate.mjs` marks the session dirty for every edit except `docWriteGuard.docPaths`, `*.md` and ignored paths (a denylist, not "configured languages") (`quality-gate.mjs:53-56`) → accept: `stop-gate.test`: a turn editing `test/fixtures/a.json`, `tsconfig.json`, `.eslintrc.json`, `snap.snap`, `schema.sql` or `.env.test` leaves `dirty` and the suite re-runs; `docs/x.md`, `README.md` and `node_modules/x/index.js` still leave none
-- [ ] 5.2 Full CI set, commit `fix(quality): only docs and ignored paths skip the test re-run`
+- [x] 5.0 Failing tests first → accept: red on c27533d
+- [x] 5.1 `quality-gate.mjs` marks the session dirty for every edit except `docWriteGuard.docPaths`, `*.md` and ignored paths (a denylist, not "configured languages") (`quality-gate.mjs:53-56`) → accept: `stop-gate.test`: a turn editing `test/fixtures/a.json`, `tsconfig.json`, `.eslintrc.json`, `snap.snap`, `schema.sql` or `.env.test` leaves `dirty` and the suite re-runs; `docs/x.md`, `README.md` and `node_modules/x/index.js` still leave none
+- [x] 5.2 Full CI set, commit `fix(quality): only docs and ignored paths skip the test re-run`
 
 ### Step 6 — doc-drift-and-stop-report (., javascript, normal)
 Depends on: bypass-flags-2, quality-dirty-marker
-- [ ] 6.0 Failing tests first → accept: red on c27533d
-- [ ] 6.1 pre-guard's allowed event carries `tool` (`pre-guard.mjs:~1150`) and `unseenDocChanges` counts only Write, Edit and NotebookEdit → accept: `doc-snapshot.test` and `stop-gate.test`: a guarded doc that was only Read, then changed out of band, is reported; one written through Write is not
-- [ ] 6.2 `docDrift` compares the snapshot's `status` lines, or the field is dropped → accept: test pins whichever is chosen; no unused field remains (`doc-snapshot.mjs:33-34`)
-- [ ] 6.3 Stop emits the unpushed notice before its `enabled()` return, gated on `safetyEnabled()`, as `session-end.mjs:15` does (`stop-gate.mjs:27,356-359`) → accept: `stop-gate.test`: with `CRAFTSMAN=off` and with `.craftsman/off` a Stop still prints the unpushed `systemMessage`, and with `CRAFTSMAN_SAFETY=off` it does not
-- [ ] 6.4 Full CI set, commit `fix(stop): the drift report counts edits only, and Stop reports unpushed work whenever safety is on`
+- [x] 6.0 Failing tests first → accept: red on c27533d
+- [x] 6.1 pre-guard's allowed event carries `tool` (`pre-guard.mjs:~1150`) and `unseenDocChanges` counts only Write, Edit and NotebookEdit → accept: `doc-snapshot.test` and `stop-gate.test`: a guarded doc that was only Read, then changed out of band, is reported; one written through Write is not
+- [x] 6.2 `docDrift` compares the snapshot's `status` lines, or the field is dropped → accept: test pins whichever is chosen; no unused field remains (`doc-snapshot.mjs:33-34`)
+- [x] 6.3 Stop emits the unpushed notice before its `enabled()` return, gated on `safetyEnabled()`, as `session-end.mjs:15` does (`stop-gate.mjs:27,356-359`) → accept: `stop-gate.test`: with `CRAFTSMAN=off` and with `.craftsman/off` a Stop still prints the unpushed `systemMessage`, and with `CRAFTSMAN_SAFETY=off` it does not
+- [x] 6.4 Full CI set, commit `fix(stop): the drift report counts edits only, and Stop reports unpushed work whenever safety is on`
 
 ### Step 7 — launcher-promptsubmit (., shell, high)
 Depends on: none
-- [ ] 7.0 Failing tests first → accept: red on c27533d
-- [ ] 7.1 With node missing, `orchestrate-scope-guard` on UserPromptSubmit exits 0 with a `systemMessage` instead of 2 (`hooks/run.sh:46-60`); pre-guard still blocks every tool call → accept: `launcher.test`: a payload with `"hook_event_name":"UserPromptSubmit"` and no node exits 0 and names the cause; the same script on PostToolUse still exits 2
-- [ ] 7.2 Any exit other than 0 or 2 from a safety hook is mapped to 2, so an import-time throw before the in-process handler still denies → accept: `launcher.test`: a fixture `pre-guard.mjs` that throws at import exits 2 through `run.sh`; a fixture that exits 0 or 2 keeps its code; an advisory hook's exit 1 is kept
-- [ ] 7.3 A launcher test ties the protected-looking substring list to the default `protectedPaths`: every default pattern's literal part appears in `run.sh`'s case list → accept: the case fails if a default pattern is added without a matching substring
-- [ ] 7.4 Full CI set, commit `fix(launcher): a missing node cannot erase a prompt, import throws deny`
+- [x] 7.0 Failing tests first → accept: red on c27533d
+- [x] 7.1 With node missing, `orchestrate-scope-guard` on UserPromptSubmit exits 0 with a `systemMessage` instead of 2 (`hooks/run.sh:46-60`); pre-guard still blocks every tool call → accept: `launcher.test`: a payload with `"hook_event_name":"UserPromptSubmit"` and no node exits 0 and names the cause; the same script on PostToolUse still exits 2
+- [x] 7.2 Any exit other than 0 or 2 from a safety hook is mapped to 2, so an import-time throw before the in-process handler still denies → accept: `launcher.test`: a fixture `pre-guard.mjs` that throws at import exits 2 through `run.sh`; a fixture that exits 0 or 2 keeps its code; an advisory hook's exit 1 is kept
+- [x] 7.3 A launcher test ties the protected-looking substring list to the default `protectedPaths`: every default pattern's literal part appears in `run.sh`'s case list → accept: the case fails if a default pattern is added without a matching substring
+- [x] 7.4 Full CI set, commit `fix(launcher): a missing node cannot erase a prompt, import throws deny`
 
 ### Step 8 — selfprotect-settings-notebook (., javascript, high)
 Depends on: doc-drift-and-stop-report
-- [ ] 8.0 Failing tests first → accept: red on c27533d
-- [ ] 8.1 `.claude/settings.json` and `.claude/settings.local.json` join the scoped self-protected paths with a key check: an edit that adds or changes `disableAllHooks`, `enabledPlugins`, `env` or `hooks` is blocked unless an active unit scope names the file → accept: Edit adding `"disableAllHooks": true`, Write of `env.CRAFTSMAN_SAFETY`, and `echo … > .claude/settings.json` blocked; an Edit of `permissions.allow` or `theme` allowed
-- [ ] 8.2 `const file = toolInput.file_path ?? toolInput.notebook_path` so protected-path, doc-guard and self-protection checks reach NotebookEdit (`pre-guard.mjs:37`) → accept: NotebookEdit of `.craftsman/off`, of `package-lock.json` and of a guarded doc blocked as the Write equivalents are
-- [ ] 8.3 README.md's off-switch bullet and ARCH-SAFETY-05's text name what is now enforced (markers, scope files, symlinks, every invocation, settings), and `safety.md` lists the remaining limits → accept: `safety-docs.test` still green; no claim in the docs exceeds a test
-- [ ] 8.4 Full CI set, commit `fix(guard): settings and notebook edits are self-protected`
+- [x] 8.0 Failing tests first → accept: red on c27533d
+- [x] 8.1 `.claude/settings.json` and `.claude/settings.local.json` join the scoped self-protected paths with a key check: an edit that adds or changes `disableAllHooks`, `enabledPlugins`, `env` or `hooks` is blocked unless an active unit scope names the file → accept: Edit adding `"disableAllHooks": true`, Write of `env.CRAFTSMAN_SAFETY`, and `echo … > .claude/settings.json` blocked; an Edit of `permissions.allow` or `theme` allowed
+- [x] 8.2 `const file = toolInput.file_path ?? toolInput.notebook_path` so protected-path, doc-guard and self-protection checks reach NotebookEdit (`pre-guard.mjs:37`) → accept: NotebookEdit of `.craftsman/off`, of `package-lock.json` and of a guarded doc blocked as the Write equivalents are
+- [x] 8.3 README.md's off-switch bullet and ARCH-SAFETY-05's text name what is now enforced (markers, scope files, symlinks, every invocation, settings), and `safety.md` lists the remaining limits → accept: `safety-docs.test` still green; no claim in the docs exceeds a test
+- [x] 8.4 Full CI set, commit `fix(guard): settings and notebook edits are self-protected`
 
 ### Step 9 — core-small-correctness (., javascript, normal)
 Depends on: core-isfile
-- [ ] 9.0 Failing tests first → accept: red on c27533d
-- [ ] 9.1 `recordCommand` keeps a `via:"prompt"` record when a `skill` record for the same command arrives (`core.mjs:607-612`) → accept: after a typed `/craftsman:toggle`, a model Skill call to it leaves `commandInvoked(..., {via:"prompt"})` true
-- [ ] 9.2 A crash of any configured check tool (nonzero exit with no parseable findings and a stderr crash signature, or a spawn failure) is "unavailable", or plan 1 task 1.2's wording is narrowed to eslint-json in `safety.md` — pick by test: the case pins the choice (`core.mjs:835-841`) → accept: a fake `ruff` that crashes is not a finding, or the doc states the narrowed scope
-- [ ] 9.3 Full CI set, commit `fix(state): a user's typed command record survives a Skill call; tool crashes are not findings`
+- [x] 9.0 Failing tests first → accept: red on c27533d
+- [x] 9.1 `recordCommand` keeps a `via:"prompt"` record when a `skill` record for the same command arrives (`core.mjs:607-612`) → accept: after a typed `/craftsman:toggle`, a model Skill call to it leaves `commandInvoked(..., {via:"prompt"})` true
+- [x] 9.2 A crash of any configured check tool (nonzero exit with no parseable findings and a stderr crash signature, or a spawn failure) is "unavailable", or plan 1 task 1.2's wording is narrowed to eslint-json in `safety.md` — pick by test: the case pins the choice (`core.mjs:835-841`) → accept: a fake `ruff` that crashes is not a finding, or the doc states the narrowed scope
+- [x] 9.3 Full CI set, commit `fix(state): a user's typed command record survives a Skill call; tool crashes are not findings`
 
 ### Step 10 — state-filter-dedupe (., javascript, normal)
 Depends on: doc-drift-and-stop-report
-- [ ] 10.0 Failing tests first → accept: red on c27533d
-- [ ] 10.1 `unpushed.mjs` passes `refs/heads/<branch>` to `rev-list` (`unpushed.mjs:53,56`) → accept: `unpushed.test`: a branch named like a tag and one named like a file are reported
-- [ ] 10.2 One helper `isCraftsmanStateLine` in new `scripts/lib/craftsman-state.mjs` replaces the three copies (`unpushed.mjs:16`, `stop-gate.mjs:100-103`, `doc-snapshot.mjs:34`) → accept: `craftsman-state.test` pins it; grep finds one definition
-- [ ] 10.3 Full CI set, commit `refactor(state): one .craftsman porcelain filter; branch refs are explicit`
+- [x] 10.0 Failing tests first → accept: red on c27533d
+- [x] 10.1 `unpushed.mjs` passes `refs/heads/<branch>` to `rev-list` (`unpushed.mjs:53,56`) → accept: `unpushed.test`: a branch named like a tag and one named like a file are reported
+- [x] 10.2 One helper `isCraftsmanStateLine` in new `scripts/lib/craftsman-state.mjs` replaces the three copies (`unpushed.mjs:16`, `stop-gate.mjs:100-103`, `doc-snapshot.mjs:34`) → accept: `craftsman-state.test` pins it; grep finds one definition
+- [x] 10.3 Full CI set, commit `refactor(state): one .craftsman porcelain filter; branch refs are explicit`
 
 ### Step 11 — self-scoped-shared (., javascript, high)
 Depends on: none
-- [ ] 11.0 Failing tests first (against 5ef1ef9) → accept: `scope.test` cases fail where a manifest with `write` of `.claude/settings.json`, `.claude/settings.local.json`, `.claude/**`, `**` or `.claude/*` activates with no /orchestrate run
-- [ ] 11.1 New `scripts/lib/self-protect.mjs` exports the one `SELF_SCOPED` list (hooks.json, craftsman.config.json, both settings files) and `namesSelfScoped(writeEntries)` (entry equals, ends with, or its glob matches any of them) → accept: `self-protect.test` pins the list and the matcher, including `**`, `.claude/**`, `*.json`
-- [ ] 11.2 `scope.mjs` (`:148-154`) and `pre-guard.mjs` (`:1022`) import both; no second copy remains → accept: grep finds one `SELF_SCOPED` definition (test reads the sources, as `craftsman-state.test` does); every case in 11.0 now exits 2 outside /orchestrate or /auto and 0 after /orchestrate
-- [ ] 11.3 Full CI set (fix any arch-lint cite drift in `safety.rules.md`), tick `[unit:self-scoped-shared]`, commit `fix(guard): one SELF_SCOPED list gates scope activation and edits`
+- [x] 11.0 Failing tests first (against 5ef1ef9) → accept: `scope.test` cases fail where a manifest with `write` of `.claude/settings.json`, `.claude/settings.local.json`, `.claude/**`, `**` or `.claude/*` activates with no /orchestrate run
+- [x] 11.1 New `scripts/lib/self-protect.mjs` exports the one `SELF_SCOPED` list (hooks.json, craftsman.config.json, both settings files) and `namesSelfScoped(writeEntries)` (entry equals, ends with, or its glob matches any of them) → accept: `self-protect.test` pins the list and the matcher, including `**`, `.claude/**`, `*.json`
+- [x] 11.2 `scope.mjs` (`:148-154`) and `pre-guard.mjs` (`:1022`) import both; no second copy remains → accept: grep finds one `SELF_SCOPED` definition (test reads the sources, as `craftsman-state.test` does); every case in 11.0 now exits 2 outside /orchestrate or /auto and 0 after /orchestrate
+- [x] 11.3 Full CI set (fix any arch-lint cite drift in `safety.rules.md`), tick `[unit:self-scoped-shared]`, commit `fix(guard): one SELF_SCOPED list gates scope activation and edits`
 
 ### Step 12 — config-keys-protected (., javascript, high)
 Depends on: self-scoped-shared
-- [ ] 12.0 Failing tests first → accept: red on 5ef1ef9 for each Write below
-- [ ] 12.1 Protect in `craftsman.config.json`, outside a unit scope that names the file: `enabled`, `protectedPaths`, `docWriteGuard`, `execution.agentMode`, `execution.engine`, `stopGate`; delete the phantom `safety` key from `SAFETY_CONFIG_KEYS` (no key of that name exists in the config) (`pre-guard.mjs:~1023,1036`; the lists live in `lib/self-protect.mjs`) → accept: Writes of `{"protectedPaths":[]}`, `{"docWriteGuard":{"enabled":false}}`, `{"docWriteGuard":{"docPaths":[]}}`, `{"execution":{"agentMode":"subagents"}}`, `{"enabled":false}` are blocked; `maxFeedbackLines` and `timeoutMs` stay editable; a unit scope naming the file still allows
-- [ ] 12.2 The settings projection adds `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `CLAUDE_PLUGIN_ROOT` to the `CRAFTSMAN*` env keys → accept: Write of `{"env":{"NODE_OPTIONS":"--require x"}}` to `.claude/settings.json` is blocked; `{"env":{"DEBUG":"1"}}` stays allowed
-- [ ] 12.3 A NotebookEdit whose after-state cannot be computed counts as changed for a scoped JSON file (`afterEdit` null with tool NotebookEdit) → accept: NotebookEdit of `.claude/settings.json` and of `craftsman.config.json` is blocked; of `analysis.ipynb` allowed
-- [ ] 12.4 Full CI set, tick, commit `fix(guard): the config and settings keys that disable a guard are protected`
+- [x] 12.0 Failing tests first → accept: red on 5ef1ef9 for each Write below
+- [x] 12.1 Protect in `craftsman.config.json`, outside a unit scope that names the file: `enabled`, `protectedPaths`, `docWriteGuard`, `execution.agentMode`, `execution.engine`, `stopGate`; delete the phantom `safety` key from `SAFETY_CONFIG_KEYS` (no key of that name exists in the config) (`pre-guard.mjs:~1023,1036`; the lists live in `lib/self-protect.mjs`) → accept: Writes of `{"protectedPaths":[]}`, `{"docWriteGuard":{"enabled":false}}`, `{"docWriteGuard":{"docPaths":[]}}`, `{"execution":{"agentMode":"subagents"}}`, `{"enabled":false}` are blocked; `maxFeedbackLines` and `timeoutMs` stay editable; a unit scope naming the file still allows
+- [x] 12.2 The settings projection adds `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `CLAUDE_PLUGIN_ROOT` to the `CRAFTSMAN*` env keys → accept: Write of `{"env":{"NODE_OPTIONS":"--require x"}}` to `.claude/settings.json` is blocked; `{"env":{"DEBUG":"1"}}` stays allowed
+- [x] 12.3 A NotebookEdit whose after-state cannot be computed counts as changed for a scoped JSON file (`afterEdit` null with tool NotebookEdit) → accept: NotebookEdit of `.claude/settings.json` and of `craftsman.config.json` is blocked; of `analysis.ipynb` allowed
+- [x] 12.4 Full CI set, tick, commit `fix(guard): the config and settings keys that disable a guard are protected`
 
 ### Step 13 — selfprotect-shell-words (., javascript, high)
 Depends on: config-keys-protected
-- [ ] 13.0 Failing tests first, flag-free but quote-split forms → accept: red on 5ef1ef9 for each command below
-- [ ] 13.1 `touch tee cp mv ln install mkdir truncate`, `dd of=`, `sed -i`, `perl -i` targets are write targets in `removedDocs`'s `dispatchAt` (the tokenizer that removes quotes and tracks cwd) and are matched by real path against `SELF_NEVER` and `SELF_SCOPED` (`pre-guard.mjs:~1057-1064`) → accept: `touch .craftsman/o""ff`, `touch .crafts''man/off`, `touch .craftsman/sessions/s1/doc-w""rite`, `tee .craftsman/sessions/s1/command""s.json`, `tee …/goal-token""s.json`, `tee …/sco""pe.json`, `ln -s .crafts''man x`, `cp x .craftsman/o''ff` blocked; `ls .craftsman`, `cat .craftsman/off`, `touch notes.txt` allowed
-- [ ] 13.2 A `cd` into `.craftsman` (or any directory that resolves into it) followed by a write verb in the same command is refused → accept: `cd .craftsman && touch off`, `cd .craftsman; echo x > off`, `pushd .craftsman && touch off` blocked; `cd src && touch a.txt` allowed
-- [ ] 13.3 Full CI set, tick, commit `fix(guard): self-protection reads shell words, not raw text`
+- [x] 13.0 Failing tests first, flag-free but quote-split forms → accept: red on 5ef1ef9 for each command below
+- [x] 13.1 `touch tee cp mv ln install mkdir truncate`, `dd of=`, `sed -i`, `perl -i` targets are write targets in `removedDocs`'s `dispatchAt` (the tokenizer that removes quotes and tracks cwd) and are matched by real path against `SELF_NEVER` and `SELF_SCOPED` (`pre-guard.mjs:~1057-1064`) → accept: `touch .craftsman/o""ff`, `touch .crafts''man/off`, `touch .craftsman/sessions/s1/doc-w""rite`, `tee .craftsman/sessions/s1/command""s.json`, `tee …/goal-token""s.json`, `tee …/sco""pe.json`, `ln -s .crafts''man x`, `cp x .craftsman/o''ff` blocked; `ls .craftsman`, `cat .craftsman/off`, `touch notes.txt` allowed
+- [x] 13.2 A `cd` into `.craftsman` (or any directory that resolves into it) followed by a write verb in the same command is refused → accept: `cd .craftsman && touch off`, `cd .craftsman; echo x > off`, `pushd .craftsman && touch off` blocked; `cd src && touch a.txt` allowed
+- [x] 13.3 Full CI set, tick, commit `fix(guard): self-protection reads shell words, not raw text`
 
 ### Step 14 — script-authority-in-scripts (., javascript, high)
 Depends on: none
-- [ ] 14.0 Failing tests first, driving the scripts directly (`scripts/script-authority.test.mjs`) → accept: red on 5ef1ef9: `doc-write.mjs on` and `toggle.mjs off` run with no command record
-- [ ] 14.1 `doc-write.mjs on` refuses (exit 2, names the cause) unless `commandInvoked(CLAUDE_CODE_SESSION_ID, DOC_WRITER_COMMANDS)` holds; `toggle.mjs off` refuses unless the user typed `/craftsman:toggle` (`via:"prompt"`); `doc-write.mjs off` and `toggle.mjs on` stay open; a missing session id refuses (as `goal-token.mjs` does) → accept: with no record, with a record for another session, and with a record of another command each refuses; with the owning command's record each passes
-- [ ] 14.2 Every pre-guard text bypass listed in the plan's findings reaches the same refusal: `node ".../doc-w""rite.mjs" on`, `N=node; $N …/doc-write.mjs on`, a symlinked `dw.mjs`, a glob, `sh -c 'node …/doc-w"r"ite.mjs on'`, `xargs node`, and `node --input-type=module -e "…import('…/toggle.mjs')"` → accept: each, executed in a throwaway project, leaves no grant and no `.craftsman/off`; the pre-guard text check stays as a second layer (its table still green)
-- [ ] 14.3 Full CI set, tick, commit `fix(guard): doc-write and toggle check their own authority`
+- [x] 14.0 Failing tests first, driving the scripts directly (`scripts/script-authority.test.mjs`) → accept: red on 5ef1ef9: `doc-write.mjs on` and `toggle.mjs off` run with no command record
+- [x] 14.1 `doc-write.mjs on` refuses (exit 2, names the cause) unless `commandInvoked(CLAUDE_CODE_SESSION_ID, DOC_WRITER_COMMANDS)` holds; `toggle.mjs off` refuses unless the user typed `/craftsman:toggle` (`via:"prompt"`); `doc-write.mjs off` and `toggle.mjs on` stay open; a missing session id refuses (as `goal-token.mjs` does) → accept: with no record, with a record for another session, and with a record of another command each refuses; with the owning command's record each passes
+- [x] 14.2 Every pre-guard text bypass listed in the plan's findings reaches the same refusal: `node ".../doc-w""rite.mjs" on`, `N=node; $N …/doc-write.mjs on`, a symlinked `dw.mjs`, a glob, `sh -c 'node …/doc-w"r"ite.mjs on'`, `xargs node`, and `node --input-type=module -e "…import('…/toggle.mjs')"` → accept: each, executed in a throwaway project, leaves no grant and no `.craftsman/off`; the pre-guard text check stays as a second layer (its table still green)
+- [x] 14.3 Full CI set, tick, commit `fix(guard): doc-write and toggle check their own authority`
 
 ### Step 15 — bypass-flags-3 (., javascript, high)
 Depends on: selfprotect-shell-words
-- [ ] 15.0 Failing tests first, flag text by concatenation → accept: red on 5ef1ef9
-- [ ] 15.1 `configBypasses` skips a leading `set`/`get`/`unset` subcommand (git 2.46+) and `-c alias.X=<value>` is read like `git config alias.X <value>` (`pre-guard.mjs:~903-915`) → accept: `git config set core.hooksPath x` and `git -c alias.ci='commit -n' ci -m x` blocked; `git config get core.editor` and `git -c alias.st=status st` allowed
-- [ ] 15.2 The skip-flag scan covers `merge`, `rebase`, `am`, `cherry-pick` as well as `commit` and `push` (`:~972`) → accept: those four with the no-verify flag blocked; `git merge topic` allowed
-- [ ] 15.3 `.git/config` and `.git/hooks/**` join `SELF_SCOPED`/`SELF_NEVER` (`lib/self-protect.mjs`) → accept: Write of `[core] hooksPath=…` to `.git/config` and of `.git/hooks/pre-commit` blocked, `git config user.name x` still allowed
-- [ ] 15.4 One helper extracts a shell body for `sh|bash|zsh|dash|ksh -c` (flag cluster, `-o` option value, wrappers) and replaces both copies (`pre-guard.mjs:~640-650`, `~890-900`) → accept: `grep` finds one extractor; existing cases and `bash -lc`, `sh -o pipefail -c` stay green
-- [ ] 15.5 README.md, `safety.rules.md` ARCH-SAFETY-03/05 and `safety.md` limits say what Steps 11-15 enforce and what remains (interpreter-written files, run-time-built command text) → accept: `safety-docs.test` green; every new claim names its test
-- [ ] 15.6 Full CI set, tick, commit `fix(guard): git config set, -c alias, merge/rebase/am and .git/config`
+- [x] 15.0 Failing tests first, flag text by concatenation → accept: red on 5ef1ef9
+- [x] 15.1 `configBypasses` skips a leading `set`/`get`/`unset` subcommand (git 2.46+) and `-c alias.X=<value>` is read like `git config alias.X <value>` (`pre-guard.mjs:~903-915`) → accept: `git config set core.hooksPath x` and `git -c alias.ci='commit -n' ci -m x` blocked; `git config get core.editor` and `git -c alias.st=status st` allowed
+- [x] 15.2 The skip-flag scan covers `merge`, `rebase`, `am`, `cherry-pick` as well as `commit` and `push` (`:~972`) → accept: those four with the no-verify flag blocked; `git merge topic` allowed
+- [x] 15.3 `.git/config` and `.git/hooks/**` join `SELF_SCOPED`/`SELF_NEVER` (`lib/self-protect.mjs`) → accept: Write of `[core] hooksPath=…` to `.git/config` and of `.git/hooks/pre-commit` blocked, `git config user.name x` still allowed
+- [x] 15.4 One helper extracts a shell body for `sh|bash|zsh|dash|ksh -c` (flag cluster, `-o` option value, wrappers) and replaces both copies (`pre-guard.mjs:~640-650`, `~890-900`) → accept: `grep` finds one extractor; existing cases and `bash -lc`, `sh -o pipefail -c` stay green
+- [x] 15.5 README.md, `safety.rules.md` ARCH-SAFETY-03/05 and `safety.md` limits say what Steps 11-15 enforce and what remains (interpreter-written files, run-time-built command text) → accept: `safety-docs.test` green; every new claim names its test
+- [x] 15.6 Full CI set, tick, commit `fix(guard): git config set, -c alias, merge/rebase/am and .git/config`
 
 ### Step 16 — prompt-failclosed (., shell, high)
 Depends on: none
-- [ ] 16.0 Failing tests first (`launcher.test.mjs`) → accept: red on 5ef1ef9
-- [ ] 16.1 With node present, `orchestrate-scope-guard` on UserPromptSubmit maps ANY non-zero exit (2 included) to the "prompt was not checked" `systemMessage` and exit 0 (`hooks/run.sh:~54-70`); other events and the other two safety hooks keep their codes → accept: fixture guard exiting 2 on a prompt payload gives 0 + message; the same fixture on PostToolUse still gives 2; `pre-guard` fixture exit 2 stays 2
-- [ ] 16.2 `run.sh` unsets `NODE_OPTIONS` before it starts a safety hook (a second layer for the settings `env` route) → accept: a fixture hook printing `process.env.NODE_OPTIONS` shows it empty for `pre-guard.mjs`/`agent-mode-guard.mjs`/`orchestrate-scope-guard.mjs` and untouched for an advisory hook
-- [ ] 16.3 Full CI set (fix cites in `safety.rules.md` ARCH-SAFETY-02/11), tick, commit `fix(launcher): a failed prompt hook cannot erase the prompt, NODE_OPTIONS is cleared for safety hooks`
+- [x] 16.0 Failing tests first (`launcher.test.mjs`) → accept: red on 5ef1ef9
+- [x] 16.1 With node present, `orchestrate-scope-guard` on UserPromptSubmit maps ANY non-zero exit (2 included) to the "prompt was not checked" `systemMessage` and exit 0 (`hooks/run.sh:~54-70`); other events and the other two safety hooks keep their codes → accept: fixture guard exiting 2 on a prompt payload gives 0 + message; the same fixture on PostToolUse still gives 2; `pre-guard` fixture exit 2 stays 2
+- [x] 16.2 `run.sh` unsets `NODE_OPTIONS` before it starts a safety hook (a second layer for the settings `env` route) → accept: a fixture hook printing `process.env.NODE_OPTIONS` shows it empty for `pre-guard.mjs`/`agent-mode-guard.mjs`/`orchestrate-scope-guard.mjs` and untouched for an advisory hook
+- [x] 16.3 Full CI set (fix cites in `safety.rules.md` ARCH-SAFETY-02/11), tick, commit `fix(launcher): a failed prompt hook cannot erase the prompt, NODE_OPTIONS is cleared for safety hooks`
 
 ### Step 17 — stop-loopguard-reports (., javascript, normal)
 Depends on: none
-- [ ] 17.0 Failing tests first → accept: red on 5ef1ef9: with `stop_hook_active:true`, unpushed work and a drifted guarded doc, Stop prints nothing
-- [ ] 17.1 The loop guard (`stop-gate.mjs:~53`) emits the unpushed notice and the unseen-doc report as a `systemMessage` before it exits, without blocking; reports computed once, not twice, on the normal path (`:~360-381`) → accept: the three cases print the report with `stop_hook_active:true`; a clean repo prints nothing; `CRAFTSMAN_SAFETY=off` prints nothing
-- [ ] 17.2 Full CI set (fix cites in `safety.rules.md` ARCH-SAFETY-06/10 and `state.rules.md`), tick, commit `fix(stop): the loop-guard Stop still reports unpushed work and doc drift`
+- [x] 17.0 Failing tests first → accept: red on 5ef1ef9: with `stop_hook_active:true`, unpushed work and a drifted guarded doc, Stop prints nothing
+- [x] 17.1 The loop guard (`stop-gate.mjs:~53`) emits the unpushed notice and the unseen-doc report as a `systemMessage` before it exits, without blocking; reports computed once, not twice, on the normal path (`:~360-381`) → accept: the three cases print the report with `stop_hook_active:true`; a clean repo prints nothing; `CRAFTSMAN_SAFETY=off` prints nothing
+- [x] 17.2 Full CI set (fix cites in `safety.rules.md` ARCH-SAFETY-06/10 and `state.rules.md`), tick, commit `fix(stop): the loop-guard Stop still reports unpushed work and doc drift`
+
+## Status 2026-10-22
+Round 1 (steps 1-10) landed in ce003c9 to 5ef1ef9. Round 2 (steps 11-17) landed in cdcb681 (11), c9ddee1 (12), fdacc64 (13), f385705 (14), 6c22398 (15), 1a53e5e (16) and c97b5ae (17), each after its tests were seen red on the previous code and with the full CI set green: 733 node tests, model-policy, doc-size-policy, `arch-check lint --root <worktree>` (10 docs, 106 rules), `claude plugin validate .`, `claude plugin test .` and `git diff --check`. All boxes are ticked on that evidence; steps 1-10 were not re-run red-first here. Step 14 needed one test file beyond its listed scope: `pre-guard.test.mjs` gained a `grant()` helper, because `doc-write.mjs` now refuses without a command record. Still open: the PENDING follow-ups `followup-skill-record` and `followup-md-dirty-marker`, and the limits `safety.md` names (interpreter-written files, run-time-built command text).
 
 ## Sequencing
 Steps 2 → 3 → 4 → 6 → 8 share `pre-guard.mjs` and run in that order; step 6 also needs step 5 (`stop-gate.mjs`). Steps 1, 5 and 7 are independent and can run first. Step 9 follows 1 (both `core.mjs`), step 10 follows 6.
