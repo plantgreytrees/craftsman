@@ -49,8 +49,36 @@ try {
   if (swept.removed.length) logEvent({ ev: "stop-worktree-swept", sid, worktrees: swept.removed.map((e) => e.path) }, context);
 } catch { /* not a git repo or git absent — nothing to sweep */ }
 
-// Loop guard: we already blocked once this turn — let it end.
-if (input.stop_hook_active === true) process.exit(0);
+// The two reports Stop owes the user whenever the safety side is on, from local state only: unpushed work
+// (ARCH-SAFETY-06) and guarded docs that changed without passing the doc guard (ARCH-SAFETY-10, compared with
+// the snapshot SessionStart took; informational, the guard is not replaced by it). A broken report never blocks.
+function stopReports() {
+  const reports = { unpushed: "", unseenDocs: "" };
+  if (!safetyEnabled()) return reports;
+  try { reports.unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
+  try {
+    const before = JSON.parse(fs.readFileSync(path.join(sdir, "doc-snapshot.json"), "utf8"));
+    const drift = docDrift(before, snapshotDocs(context.root, cfg.docWriteGuard?.docPaths || ["docs/**"]));
+    if (drift.length) {
+      let events = [];
+      try {
+        events = fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").slice(-20000)
+          .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      } catch { /* no event log: every change counts as unseen */ }
+      reports.unseenDocs = formatDocDrift(unseenDocChanges(drift, events, sid));
+    }
+  } catch { /* no snapshot, or unreadable: nothing to compare */ }
+  return reports;
+}
+
+// Loop guard: we already blocked once this turn — let it end. The reports are still owed, so the turn that
+// ends here is not the one that hides them; it never blocks.
+if (input.stop_hook_active === true) {
+  const { unpushed, unseenDocs } = stopReports();
+  const text = [unpushed, unseenDocs].filter(Boolean).join("\n");
+  if (text) process.stdout.write(JSON.stringify({ systemMessage: text }));
+  process.exit(0);
+}
 
 // Clear THIS session's doc-write authority (never touch another session's).
 try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
@@ -357,27 +385,10 @@ if (!inFlight.length) {
   } catch { /* no tracker ledger or unreadable — nothing to enforce */ }
 }
 
-// 5. Unpushed work (ARCH-SAFETY-06), from local refs only: reported to the user at every Stop, and a
-//    block only when stopGate.blockOnUnpushed is true.
-let unpushed = "";
-try { if (safetyEnabled()) unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
+// 5. The reports (stopReports above): unpushed work is reported at every Stop and blocks only when
+//    stopGate.blockOnUnpushed is true; doc drift is informational.
+const { unpushed, unseenDocs } = stopReports();
 if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
-
-// 6. Guarded docs that changed without the doc guard allowing it (ARCH-SAFETY-10): compared with the
-//    snapshot SessionStart took. Informational only; the guard itself is not replaced by this.
-let unseenDocs = "";
-try {
-  const before = JSON.parse(fs.readFileSync(path.join(sdir, "doc-snapshot.json"), "utf8"));
-  const drift = docDrift(before, snapshotDocs(context.root, cfg.docWriteGuard?.docPaths || ["docs/**"]));
-  if (drift.length) {
-    let events = [];
-    try {
-      events = fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").slice(-20000)
-        .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-    } catch { /* no event log: every change counts as unseen */ }
-    unseenDocs = formatDocDrift(unseenDocChanges(drift, events, sid));
-  }
-} catch { /* no snapshot, or unreadable: nothing to compare */ }
 const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs].filter(Boolean).join("\n");
 
 if (!problems.length) {

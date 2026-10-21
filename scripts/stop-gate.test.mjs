@@ -947,3 +947,40 @@ test("stop-gate: unpushed work is still reported with CRAFTSMAN=off or .craftsma
     assert.equal(safety.stdout.trim(), "", "the user's own off switch silences the report");
   } finally { cleanup(dir); }
 });
+
+// Scrutiny round 2 (17.x): the Stop that ends a turn after a block (stop_hook_active) still owes the reports.
+test("stop-gate: with stop_hook_active the loop guard still reports unpushed work and unseen doc drift, without blocking (17.1)", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "loop-guard";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    fs.writeFileSync(path.join(dir, "wip.txt"), "wip\n"); // uncommitted
+    const { code, stdout } = await runStopGate(dir, sid, { stop_hook_active: true });
+    assert.equal(code, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, undefined, "the loop guard never blocks");
+    assert.match(out.systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    assert.match(out.systemMessage, /uncommitted changes in the main checkout/);
+    assert.match(out.systemMessage, /docs\/plans\/a\.md \(modified\)/);
+    assert.equal((out.systemMessage.match(/unpushed work \(local refs only\)/g) || []).length, 1, "reported once");
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: the loop-guard Stop prints nothing for a clean repo or with CRAFTSMAN_SAFETY=off (17.1)", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "loop-guard-clean";
+    fs.appendFileSync(path.join(dir, ".git", "info", "exclude"), ".craftsman/\n"); // as a real project ignores its state
+    for (const args of [["add", "-A"], ["commit", "-q", "-m", "fixture"], ["push", "-q"]]) spawnSync("git", args, { cwd: dir }); // a clean, pushed tree
+    docSnapshotFor(dir, sid);
+    const clean = await runStopGate(dir, sid, { stop_hook_active: true });
+    assert.equal(clean.code, 0);
+    const status = spawnSync("git", ["status", "--short"], { cwd: dir, encoding: "utf8" }).stdout;
+    assert.equal(clean.stdout.trim(), "", `nothing to report (working tree: ${status.trim().replace(/\n/g, "; ")})`);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited\n");
+    fs.writeFileSync(path.join(dir, "wip.txt"), "wip\n");
+    const off = await runStopGate(dir, sid, { stop_hook_active: true }, { CRAFTSMAN_SAFETY: "off" });
+    assert.equal(off.stdout.trim(), "", "the user's own off switch silences the report");
+  } finally { cleanup(dir); }
+});
