@@ -22,6 +22,28 @@ function reaches(entry, name) {
   return globToRe(e).test(name);
 }
 
+// craftsman.config.json keys that switch a guard off or loosen it; an edit that changes one needs a unit scope
+// naming the file. Dotted names reach into a nested object. Every key here exists in the shipped config.
+export const SAFETY_CONFIG_KEYS = Object.freeze([
+  "enabled", "protectedPaths", "docWriteGuard", "execution.agentMode", "execution.engine", "stopGate",
+]);
+
+// Environment keys in the harness settings that decide whether node runs craftsman's hooks, or which code it loads.
+export const SAFETY_ENV = /^(?:CRAFTSMAN|(?:NODE_OPTIONS|NODE_PATH|PATH|CLAUDE_PLUGIN_ROOT)$)/i;
+
+const dig = (obj, dotted) => dotted.split(".").reduce((value, key) => (value && typeof value === "object" ? value[key] : undefined), obj) ?? null;
+
+// What an edit of a scoped file may not change: the safety keys of craftsman.config.json, or the harness settings
+// that decide whether craftsman's hooks run at all (every hook, craftsman's plugin entry, the safety env).
+export function safetyProjection(rel, doc) {
+  if (!doc || typeof doc !== "object") return {};
+  if (/(?:^|\/)\.claude\/settings(?:\.local)?\.json$/.test(rel)) {
+    const pick = (obj, re) => Object.fromEntries(Object.entries(obj && typeof obj === "object" ? obj : {}).filter(([key]) => re.test(key)));
+    return { disableAllHooks: doc.disableAllHooks ?? null, hooks: doc.hooks ?? null, plugins: pick(doc.enabledPlugins, /^craftsman(?:@|$)/i), env: pick(doc.env, SAFETY_ENV) };
+  }
+  return Object.fromEntries(SAFETY_CONFIG_KEYS.map((key) => [key, dig(doc, key)]));
+}
+
 // The self-scoped files any of `writeEntries` can reach, in list order.
 export function namesSelfScoped(writeEntries) {
   const entries = Array.isArray(writeEntries) ? writeEntries : [];

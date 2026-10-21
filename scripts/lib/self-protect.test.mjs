@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, namesSelfScoped } from "./self-protect.mjs";
+import { SELF_SCOPED, SAFETY_CONFIG_KEYS, SAFETY_ENV, namesSelfScoped, safetyProjection } from "./self-protect.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
   assert.deepEqual([...SELF_SCOPED], ["hooks/hooks.json", "craftsman.config.json", ".claude/settings.json", ".claude/settings.local.json"]);
@@ -26,6 +26,25 @@ test("self-protect: ordinary write entries name nothing", () => {
   for (const entry of ["src/a.ts", "scripts/pre-guard.mjs", "docs/plans/p.md", "scripts/*.mjs", "hooks/register.js", ".claudeignore"]) {
     assert.deepEqual(namesSelfScoped([entry]), [], entry);
   }
+});
+
+test("self-protect: every safety config key exists in the shipped config and the env pattern matches what it should", () => {
+  const shipped = JSON.parse(fs.readFileSync(new URL("../../craftsman.config.json", import.meta.url), "utf8"));
+  for (const key of SAFETY_CONFIG_KEYS) {
+    const value = key.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), shipped);
+    assert.notEqual(value, undefined, `${key} is a real key of craftsman.config.json`);
+  }
+  for (const name of ["NODE_OPTIONS", "NODE_PATH", "PATH", "CLAUDE_PLUGIN_ROOT", "CRAFTSMAN", "CRAFTSMAN_SAFETY", "craftsman_x"]) assert.match(name, SAFETY_ENV, name);
+  for (const name of ["DEBUG", "MY_PATH", "NODE_ENV", "PATHEXT"]) assert.doesNotMatch(name, SAFETY_ENV, name);
+});
+
+test("self-protect: safetyProjection reads dotted keys and the settings env", () => {
+  const cfg = safetyProjection("craftsman.config.json", { execution: { agentMode: "root-only", maxSubagents: 2 }, enabled: true });
+  assert.equal(cfg["execution.agentMode"], "root-only");
+  assert.equal(cfg.enabled, true);
+  assert.equal(cfg["execution.engine"], null);
+  const st = safetyProjection(".claude/settings.json", { env: { NODE_OPTIONS: "x", DEBUG: "1" } });
+  assert.deepEqual(st.env, { NODE_OPTIONS: "x" });
 });
 
 test("self-protect: scope.mjs and pre-guard.mjs import the list; no second copy remains", () => {

@@ -1539,3 +1539,51 @@ test("pre-guard: NotebookEdit is held to the same protected-path, doc and self-p
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Scrutiny round 2 (12.x): the config and settings keys that switch a guard off are protected, whatever else a Write keeps.
+test("pre-guard: the config and settings keys that disable a guard are protected (12.1-12.3)", () => {
+  const dir = selfDisableProject();
+  try {
+    const base = { maxFeedbackLines: 40, timeoutMs: 20000, enabled: true, protectedPaths: ["**/.env"],
+      docWriteGuard: { enabled: true, docPaths: ["docs/**"] }, execution: { agentMode: "root-only", engine: "workflow", maxSubagents: 0 }, stopGate: { enabled: true } };
+    const cfg = path.join(dir, "craftsman.config.json");
+    fs.writeFileSync(cfg, JSON.stringify(base, null, 2) + "\n");
+    const call = (tool, input) => run(GUARD, dir, { session_id: "ck-1", tool_name: tool, tool_input: input });
+    const variant = (mutate) => { const next = JSON.parse(JSON.stringify(base)); mutate(next); return call("Write", { file_path: cfg, content: JSON.stringify(next) }); };
+    const blocked = {
+      "protectedPaths emptied": (c) => { c.protectedPaths = []; },
+      "docWriteGuard disabled": (c) => { c.docWriteGuard.enabled = false; },
+      "docWriteGuard.docPaths emptied": (c) => { c.docWriteGuard.docPaths = []; },
+      "agentMode loosened": (c) => { c.execution.agentMode = "subagents"; },
+      "engine changed": (c) => { c.execution.engine = "root"; },
+      "enabled false": (c) => { c.enabled = false; },
+      "enabled removed": (c) => { delete c.enabled; },
+    };
+    for (const [name, mutate] of Object.entries(blocked)) assert.equal(variant(mutate).status, 2, name);
+    for (const [name, mutate] of Object.entries({
+      "maxFeedbackLines": (c) => { c.maxFeedbackLines = 10; }, "timeoutMs": (c) => { c.timeoutMs = 5000; },
+      "an unrelated execution key": (c) => { c.execution.maxSubagents = 1; },
+    })) assert.equal(variant(mutate).status, 0, `${name} stays editable`);
+
+    fs.mkdirSync(path.join(dir, ".claude"));
+    const settings = path.join(dir, ".claude", "settings.json");
+    fs.writeFileSync(settings, '{"theme":"dark"}\n');
+    const env = (obj) => call("Write", { file_path: settings, content: JSON.stringify({ theme: "dark", env: obj }) });
+    for (const key of ["NODE_OPTIONS", "NODE_PATH", "PATH", "CLAUDE_PLUGIN_ROOT", "CRAFTSMAN_SAFETY"]) assert.equal(env({ [key]: "x" }).status, 2, `env ${key}`);
+    assert.equal(env({ DEBUG: "1" }).status, 0, "an unrelated env key stays editable");
+
+    const notebook = (notebook_path) => call("NotebookEdit", { notebook_path, new_source: "x", cell_id: "c" });
+    assert.equal(notebook(settings).status, 2, "NotebookEdit of the settings file");
+    assert.equal(notebook(cfg).status, 2, "NotebookEdit of the config");
+    assert.equal(notebook(path.join(dir, "analysis.ipynb")).status, 0, "an ordinary notebook");
+
+    // A unit scope that names the config (made by /orchestrate) may still edit it.
+    assert.equal(typed(dir, "ck-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    const manifest = { session_id: "ck-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["craftsman.config.json"], docs: [], write: ["craftsman.config.json"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    const loosened = JSON.parse(JSON.stringify(base)); loosened.protectedPaths = [];
+    assert.equal(run(GUARD, dir, { session_id: "ck-2", tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify(loosened) } }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
-import { SELF_SCOPED } from "./lib/self-protect.mjs";
+import { SELF_SCOPED, safetyProjection } from "./lib/self-protect.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -1020,25 +1020,15 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
   // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*"];
-const SAFETY_CONFIG_KEYS = ["safety", "stopGate"];
 const selfKind = (relPath) => {
   const r = String(relPath).replace(/^\.\//, "");
   if (SELF_NEVER.some((p) => globToRe(p).test(r))) return "never";
   return SELF_SCOPED.some((p) => r === p || r.endsWith("/" + p)) ? "scoped" : null;
 };
 const scopeNames = (relPath) => (activeScope?.scope?.write || []).some((entry) => allowed(entry, String(relPath).replace(/^\.\//, "")));
-// What an edit of a scoped file may not change: craftsman.config.json's safety keys, or the harness settings
-// that decide whether craftsman's hooks run at all (every hook, craftsman's plugin entry, CRAFTSMAN* env).
-function safetyProjection(rel, doc) {
-  if (!doc || typeof doc !== "object") return {};
-  if (/(?:^|\/)\.claude\/settings(?:\.local)?\.json$/.test(rel)) {
-    const pick = (obj, re) => Object.fromEntries(Object.entries(obj && typeof obj === "object" ? obj : {}).filter(([key]) => re.test(key)));
-    return { disableAllHooks: doc.disableAllHooks ?? null, hooks: doc.hooks ?? null, plugins: pick(doc.enabledPlugins, /^craftsman(?:@|$)/i), env: pick(doc.env, /^CRAFTSMAN/i) };
-  }
-  return Object.fromEntries(SAFETY_CONFIG_KEYS.map((key) => [key, doc[key] ?? null]));
-}
 function safetyKeysChanged(current, next, relPath) {
-  if (next === null) return false; // the edit cannot apply; the tool fails on its own
+  // An edit that cannot be computed fails on its own, except a notebook edit: it has no after-state to compare.
+  if (next === null) return tool === "NotebookEdit";
   let after;
   try { after = JSON.parse(next); } catch { return true; } // a result that is not JSON cannot be shown safe
   let before = {};
