@@ -11,6 +11,7 @@ import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, s
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
+import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 
 const T0 = Date.now();
@@ -351,10 +352,21 @@ if (!inFlight.length) {
   } catch { /* no tracker ledger or unreadable — nothing to enforce */ }
 }
 
-if (!problems.length) { logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 }); process.exit(0); }
+// 5. Unpushed work (ARCH-SAFETY-06), from local refs only: reported to the user at every Stop, and a
+//    block only when stopGate.blockOnUnpushed is true.
+let unpushed = "";
+try { unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
+if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
+
+if (!problems.length) {
+  logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 });
+  if (unpushed) process.stdout.write(JSON.stringify({ systemMessage: unpushed }));
+  process.exit(0);
+}
 
 logEvent({ ev: "stop", sid, result: "block", count: problems.length, ms: Date.now() - T0 });
 process.stdout.write(JSON.stringify({
   decision: "block",
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
+  ...(unpushed && cfg.stopGate?.blockOnUnpushed !== true ? { systemMessage: unpushed } : {}),
 }));

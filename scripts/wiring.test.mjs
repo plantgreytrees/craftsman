@@ -256,3 +256,14 @@ test("wiring: onFailure block is on the pre-guard and agent-mode-guard entries o
   assert.deepEqual(blocking, ["agent-mode-guard.mjs", "pre-guard.mjs"]);
   assert.deepEqual(allHooks.filter(({ event, hook }) => event === "Stop" && "onFailure" in hook), []);
 });
+
+// 9.3: SessionEnd carries the unpushed-work report; ARCH-STATE-07 still forbids SubagentStop.
+test("wiring: a SessionEnd hook runs session-end.mjs with no matcher, and there is no SubagentStop", () => {
+  const entries = hooksConfig.hooks.SessionEnd || [];
+  assert.equal(entries.length, 1);
+  assert.equal("matcher" in entries[0], false);
+  const [hook] = entries[0].hooks;
+  assert.match(hook.command, /run\.sh" scripts\/session-end\.mjs$/);
+  assert.equal(hook.timeout, 20);
+  assert.equal("SubagentStop" in hooksConfig.hooks, false);
+});

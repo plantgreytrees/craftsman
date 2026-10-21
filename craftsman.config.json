@@ -112,6 +112,7 @@
     "requireAcceptanceCriteria": true,
     "testTimeoutMs": 250000,
     "totalBudgetMs": 280000,
+    "blockOnUnpushed": false,
     "commands": {
       "package.json": "npm test --silent",
       "Cargo.toml": "cargo test --quiet",

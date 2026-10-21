@@ -799,3 +799,38 @@ test("stop-gate: an edit of the acceptance file still does not mark the session 
     cleanup(dir);
   }
 });
+
+// 9.2: Stop reports unpushed work as a systemMessage and blocks only when stopGate.blockOnUnpushed is true.
+function unpushedFixture(extraStopGate = {}) {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, ...extraStopGate } });
+  fs.writeFileSync(path.join(dir, "wip.txt"), "wip\n"); // uncommitted
+  return dir;
+}
+
+test("stop-gate: unpushed work is reported as a systemMessage and does not block by default", async () => {
+  const dir = unpushedFixture();
+  try {
+    const { code, stdout } = await runStopGate(dir, "unpushed-default");
+    assert.equal(code, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, undefined, "advisory by default");
+    assert.match(out.systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    assert.match(out.systemMessage, /uncommitted changes in the main checkout/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: stopGate.blockOnUnpushed true turns the same report into a block", async () => {
+  const dir = unpushedFixture({ blockOnUnpushed: true });
+  try {
+    const { stdout } = await runStopGate(dir, "unpushed-block");
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, "block");
+    assert.match(out.reason, /UNPUSHED WORK/);
+    assert.match(out.reason, /uncommitted changes in the main checkout/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: the shipped default for stopGate.blockOnUnpushed is false", () => {
+  const cfg = JSON.parse(fs.readFileSync(new URL("../craftsman.config.json", import.meta.url), "utf8"));
+  assert.equal(cfg.stopGate.blockOnUnpushed, false);
+});

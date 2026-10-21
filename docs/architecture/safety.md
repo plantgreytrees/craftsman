@@ -32,8 +32,17 @@ flowchart LR
 | ARCH-SAFETY-03 | The guards also deny in process on bad input or an error | An uncaught error exits 1, which Claude Code treats as non-blocking, so the guard was silently off | Relying on `onFailure: block` alone (it needs 2.1.295+) |
 | ARCH-SAFETY-04 | Advisory hooks fail open but never silently, and SessionStart states the guard state | A guard that is off for a reason nobody saw is worse than one that is plainly off | Failing every advisory hook closed (it would block work over a formatter) |
 | ARCH-SAFETY-05 | Only `CRAFTSMAN_SAFETY=off` in the user's environment turns safety off; a tool call cannot touch the off flag, the safety config keys, `hooks.json` or the grant markers | `CRAFTSMAN=off`, `.craftsman/off` and `enabled:false` were all one tool call away for the model | One shared off switch for everything |
+| ARCH-SAFETY-06 | Stop and SessionEnd report unpushed work in every worktree, from local refs only; Stop blocks only when `stopGate.blockOnUnpushed` is true | Work that exists on one machine only is lost with the machine; blocking by default would stall every scratch session | Fetching to compare (slow, needs network and credentials) |
 
 ## Trade-offs & known limits
 - A machine without `node` now blocks every guarded tool call until node is installed. That is the point; the message names the cause.
 - `run.sh` adds one `sh` process in front of every hook. Step 14 of the plan measures it.
 - `onFailure: "block"` (Claude Code 2.1.295+) is recorded on the pre-guard and agent-mode-guard entries as a second layer; it has no effect on Stop hooks.
+
+## SessionEnd display (checked 2026-10-21, Claude Code 2.1.306)
+`scripts/session-end.mjs` writes the unpushed-work report and the hand-off to **stderr**, the channel the hooks reference
+documents for the user at exit. `claude plugin test` only runs mod tests, so it cannot show hook output; instead a headless
+`claude -p` run with a project `SessionEnd` hook that wrote to stderr and printed `{"systemMessage": ...}` to stdout showed:
+the hook fires (`SessionEnd:other`, exit 0) and the JSON is parsed, but **neither channel appears in `stream-json` output**
+(there is no UI in `-p`). Whether an interactive session shows `systemMessage` at exit is therefore **unconfirmed**; the report
+uses stderr only, and Stop (which does show `systemMessage`) carries the same report every turn.
