@@ -606,15 +606,19 @@ export function orchestrationEnabled(env = process.env) {
 export const DOC_WRITER_COMMANDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check"];
 // `instruction` writes nothing under docs/, so it is not a doc writer; it is recorded because goal-token.mjs mints only after it (or /auto).
 export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle", "instruction"];
+const COMMAND_TTL_MS = 3600000;
 const commandsFile = (sid, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), "commands.json");
 export function recordCommand(sid, command, via, context = null) {
   const file = commandsFile(sid, context);
   let known = {};
   try { known = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  // The user's typed command outranks a model's Skill call for the same command while it is fresh.
+  const held = known[command];
+  if (via !== "prompt" && held?.via === "prompt" && Date.now() - Date.parse(held.at) < COMMAND_TTL_MS) return;
   known[command] = { via, at: new Date().toISOString() };
   atomicWrite(file, JSON.stringify(known) + "\n");
 }
-export function commandInvoked(sid, names, { context = null, via = null, ttlMs = 3600000, now = Date.now() } = {}) {
+export function commandInvoked(sid, names, { context = null, via = null, ttlMs = COMMAND_TTL_MS, now = Date.now() } = {}) {
   let known;
   try { known = JSON.parse(fs.readFileSync(commandsFile(sid, context), "utf8")); } catch { return false; }
   return names.some((name) => {
@@ -805,6 +809,9 @@ async function runOne(cmdTemplate, file, timeoutMs, context = null) {
     return { ok: true, out: (stdout + stderr).trim(), bin };
   } catch (e) {
     if (e.killed) return { ok: false, timedOut: true, bin, out: `${bin}: timed out` };
+    // A tool that could not start, was killed by a signal or exited 126+ (not executable, not found,
+    // a crash) failed itself; it says nothing about the file.
+    if (typeof e.code === "string" || e.signal || (typeof e.code === "number" && e.code >= 126)) return { skipped: true, unavailable: true, bin };
     return {
       ok: false, bin, out: ((e.stdout || "") + (e.stderr || "")).trim() || e.message,
       stdout: e.stdout || "", code: e.code,

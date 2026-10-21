@@ -864,3 +864,57 @@ test("a directory is neither a doc-write grant nor an off flag", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A typed command is the user's word; a later model Skill call for the same command must not replace it.
+test("recordCommand: a skill record never replaces the user's typed (prompt) record, while a prompt record upgrades a skill one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    coreNs.recordCommand("r1", "toggle", "prompt", ctx);
+    coreNs.recordCommand("r1", "toggle", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("r1", ["toggle"], { context: ctx, via: "prompt" }), true, "the typed record survives");
+    coreNs.recordCommand("r2", "plan", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("r2", ["plan"], { context: ctx, via: "prompt" }), false);
+    coreNs.recordCommand("r2", "plan", "prompt", ctx);
+    assert.equal(coreNs.commandInvoked("r2", ["plan"], { context: ctx, via: "prompt" }), true, "typing it afterwards counts");
+    const stale = JSON.parse(fs.readFileSync(path.join(dir, "sessions", "r1", "commands.json"), "utf8"));
+    stale.toggle.at = new Date(Date.now() - 2 * 3600000).toISOString();
+    fs.writeFileSync(path.join(dir, "sessions", "r1", "commands.json"), JSON.stringify(stale));
+    coreNs.recordCommand("r1", "toggle", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("r1", ["toggle"], { context: ctx, via: "skill" }), true, "an expired typed record is replaced");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A check tool that could not run, or was killed by a signal, says nothing about the code.
+function runChecksWithTool(script) {
+  const bins = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tool-"));
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rc-"));
+  try {
+    fs.writeFileSync(path.join(bins, "faketool"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      const lang = { name: "python", check: ["faketool {file}"] };
+      const r = await m.runChecks(${JSON.stringify(path.join(proj, "a.py"))}, lang, {}, { root: ${JSON.stringify(proj)}, stateDir: ${JSON.stringify(proj + "/.craftsman")} });
+      console.log(JSON.stringify(r));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      cwd: proj, encoding: "utf8", env: fakeEnv({ PATH: `${bins}${path.delimiter}${process.env.PATH}` }),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  } finally {
+    fs.rmSync(bins, { recursive: true, force: true });
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+}
+
+test("runChecks: any check tool killed by a signal or exiting 126+ is unavailable, a plain nonzero exit is still a finding", () => {
+  for (const script of ["kill -SEGV $$", "exit 139", "exit 127", "exit 126"]) {
+    const r = runChecksWithTool(script);
+    assert.deepEqual(r.failures, [], script);
+    assert.deepEqual(r.unavailable, ["faketool"], script);
+  }
+  const finding = runChecksWithTool('echo "a.py:1:1: E501 line too long"; exit 1');
+  assert.equal(finding.failures.length, 1);
+  assert.deepEqual(finding.unavailable, []);
+});
