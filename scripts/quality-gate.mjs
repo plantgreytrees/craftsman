@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
-  filterAttributed, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
+  filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
   readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership,
 } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
@@ -44,15 +44,18 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
   process.exit(0);
 }
 
-// Mark this session dirty for the Stop gate: any real edit means the
-// session-start test snapshot can no longer be trusted as still-current, so
-// Stop must re-verify. Set unconditionally (before any language/ignore
-// filtering) so a false negative here — silently skipping a real regression
-// check — can't happen; the cost of an occasional unnecessary re-run is cheap
-// by comparison.
-try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
-
+// Mark this session dirty for the Stop gate: an edit to something a test could
+// regress on means the session-start test snapshot can no longer be trusted, so
+// Stop must re-verify. That is a source file of a configured language, or a
+// file that names the project's test command (package.json, go.mod, ...) —
+// and never an ignored path. A docs-only turn leaves nothing to re-run. Bash-made
+// edits are caught by the Stop gate's own `git status`, not by this marker.
 const lang = detectLang(file, cfg, context);
+const namesTestCommand = Object.keys(cfg.stopGate?.commands || {}).some((marker) => globToRe(marker).test(path.basename(file)));
+if ((lang || namesTestCommand) && !isIgnored(file, cfg, lang, context)) {
+  try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
+}
+
 if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 
 // Content-hash cache: unchanged file + unchanged check set => skip entirely.

@@ -719,3 +719,83 @@ test("stop-gate: terminal pass and block events carry numeric ms", async () => {
     cleanup(dir);
   }
 });
+
+// 3.x: the Stop gate re-runs the suite only when a turn edited something a test could
+// regress on. A docs-only turn leaves no `dirty` marker, so no test command runs.
+const QUALITY_GATE_PATH = fileURLToPath(new URL("./quality-gate.mjs", import.meta.url));
+
+function editThroughQualityGate(dir, sid, rel, content = "x\n") {
+  const file = path.join(dir, rel);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  return spawnSync(process.execPath, [QUALITY_GATE_PATH], {
+    cwd: dir, encoding: "utf8",
+    input: JSON.stringify({ session_id: sid, tool_name: "Edit", tool_input: { file_path: file } }),
+  });
+}
+
+// A green-at-start suite whose "test command" records that it ran.
+function seedGreenStart(dir, sid) {
+  fs.writeFileSync(path.join(dir, "mark.js"), "require('node:fs').appendFileSync('tests-ran.log', 'ran\\n');\n");
+  const sessionDir = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, "session-start.json"), JSON.stringify({ results: [{ cmd: "node mark.js", green: true }] }));
+  return { dirty: path.join(sessionDir, "dirty"), log: path.join(dir, "tests-ran.log") };
+}
+
+const quietFixture = () => makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+
+test("stop-gate: a turn that edits only docs leaves no dirty marker and runs no test command", async () => {
+  const dir = quietFixture();
+  try {
+    const sid = "docs-only";
+    const { dirty, log } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "docs/x.md", "# notes\n");
+    assert.equal(fs.existsSync(dirty), false, "docs/x.md is not source a test can regress on");
+    const { events } = await runStopGate(dir, sid);
+    assert.equal(fs.existsSync(log), false, "the suite was not re-run");
+    assert.ok(events.some((e) => e.ev === "stop-tests-skipped"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a .mjs edit still sets the dirty marker and the suite re-runs", async () => {
+  const dir = quietFixture();
+  try {
+    const sid = "mjs-edit";
+    const { dirty, log } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "src/a.mjs", "export const a = 1;\n");
+    assert.equal(fs.existsSync(dirty), true);
+    await runStopGate(dir, sid);
+    assert.equal(fs.readFileSync(log, "utf8"), "ran\n");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a test-command marker file (package.json) edit sets dirty; an ignored tree does not", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "markers";
+    const { dirty } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "node_modules/dep/index.js", "module.exports = 1;\n");
+    assert.equal(fs.existsSync(dirty), false, "an ignored path never marks the session dirty");
+    editThroughQualityGate(dir, sid, "package.json", "{}\n");
+    assert.equal(fs.existsSync(dirty), true, "package.json is a stopGate.commands marker");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: an edit of the acceptance file still does not mark the session dirty", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "acceptance-only";
+    const { dirty } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, ".craftsman/acceptance.md", "- [ ] a criterion\n");
+    assert.equal(fs.existsSync(dirty), false);
+  } finally {
+    cleanup(dir);
+  }
+});
