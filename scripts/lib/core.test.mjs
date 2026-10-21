@@ -839,3 +839,28 @@ test("RECORDED_COMMANDS: the doc writers, toggle and instruction (goal tokens ar
   for (const name of coreNs.DOC_WRITER_COMMANDS) assert.ok(coreNs.RECORDED_COMMANDS.includes(name), name);
   assert.equal(coreNs.DOC_WRITER_COMMANDS.includes("instruction"), false, "/instruction writes nothing under docs/");
 });
+
+// A directory is not a marker: `mkdir` can create one without writing a file,
+// so a grant or an off flag must be a regular file (ARCH-STATE-06, ARCH-SAFETY-05).
+test("a directory is neither a doc-write grant nor an off flag", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-isfile-"));
+  try {
+    const ctx = { root: dir, grantStateDir: dir, offFlag: path.join(dir, "off") };
+    fs.mkdirSync(path.join(dir, "doc-write-pending"));
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), false, "a pending directory grants nothing");
+    fs.mkdirSync(path.join(dir, "sessions", "s1", "doc-write"), { recursive: true });
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), false, "a session marker directory grants nothing");
+    fs.mkdirSync(ctx.offFlag);
+    assert.equal(coreNs.enabled({}, ctx), true, "an off directory does not switch the machinery off");
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: ctx, env: {}, tmp: dir, sid: "s1" }), { safety: [], quality: [] },
+      "guardState agrees with enabled()");
+    fs.rmSync(ctx.offFlag, { recursive: true });
+    fs.writeFileSync(ctx.offFlag, "");
+    assert.equal(coreNs.enabled({}, ctx), false, "a regular off file still does");
+    fs.rmSync(path.join(dir, "doc-write-pending"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "doc-write-pending"), "x");
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), true, "a regular pending file still grants");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

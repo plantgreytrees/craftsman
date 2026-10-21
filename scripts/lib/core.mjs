@@ -203,7 +203,10 @@ export function sessionDir(sid, context = null) {
   return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
 }
 
-const grantMtime = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
+// A marker is a regular file: `mkdir` can make a directory of the same name
+// without writing anything, so a directory never counts (ARCH-SAFETY-05).
+const isFlagFile = (file) => { try { return fs.statSync(file).isFile(); } catch { return false; } };
+const grantMtime = (file) => { try { const st = fs.statSync(file); return st.isFile() ? st.mtimeMs : null; } catch { return null; } };
 const grantTtl = (ttl) => typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0;
 
 // Pure grant rule: the session's own marker lives for ttlMs, the global
@@ -577,7 +580,7 @@ export function enabled(cfg, context = null) {
   const env = (process.env.CRAFTSMAN || "").toLowerCase();
   if (env === "off" || env === "0" || env === "false") return false;
   if (ROOT_SOURCE === "project-dir" && rootUnanchored()) return false;
-  if (fs.existsSync(context?.offFlag || OFF_FLAG)) return false;
+  if (isFlagFile(context?.offFlag || OFF_FLAG)) return false;
   return cfg.enabled !== false;
 }
 
@@ -642,7 +645,7 @@ export function guardState({ cfg, context = null, env = process.env, tmp = os.tm
   const safety = [];
   const quality = [];
   if (["off", "0", "false"].includes(String(env.CRAFTSMAN || "").toLowerCase())) quality.push("CRAFTSMAN=off is set in the environment");
-  if (fs.existsSync(context?.offFlag || OFF_FLAG)) quality.push(".craftsman/off exists");
+  if (isFlagFile(context?.offFlag || OFF_FLAG)) quality.push(".craftsman/off exists");
   if (cfg?.enabled === false) quality.push("enabled is false in craftsman.config.json");
   if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") safety.push("CRAFTSMAN_SAFETY=off is set in the environment");
   if (fs.existsSync(launcherMarker(sid, tmp))) safety.push("node was missing earlier this session (hooks/run.sh left its marker)");
