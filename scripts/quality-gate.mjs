@@ -7,15 +7,14 @@ import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
   filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
-  readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership,
-} from "./lib/core.mjs";
+  readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { acceptanceNotice, reconcileAcceptance } from "./tracker.mjs";
 
 const t0 = Date.now();
 
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+try { input = JSON.parse(await readStdin() || "{}"); } catch { advisorySkipped("quality-gate", "bad input"); process.exit(0); }
 const active = readScope(input);
 if (active?.scope_ambiguous) {
   process.stderr.write("craftsman: quality gate blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n");

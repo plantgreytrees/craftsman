@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
   sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
-  ROOT_SOURCE, rootUnanchored, writeRootPin,
+  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState,
 } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
@@ -31,7 +31,17 @@ if (ROOT_SOURCE === "project-dir" && rootUnanchored()) {
 }
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context)) process.exit(0);
+// ARCH-SAFETY-04: say whether the guards are on, and if not, why. Off for a reason the user may not
+// know about is the dangerous case, so it reaches the user as well as the model.
+const guardsOff = guardState({ cfg, context, sid: input.session_id });
+const guardsOffLine = `craftsman guards off: ${guardsOff.join("; ")}.`;
+if (!enabled(cfg, context)) {
+  process.stdout.write(JSON.stringify({
+    systemMessage: guardsOffLine,
+    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: guardsOffLine },
+  }));
+  process.exit(0);
+}
 // Bash-run scripts have no CLAUDE_PROJECT_DIR; this pin is how they find
 // the same root the hooks use.
 writeRootPin(sid, PROJECT_ROOT);
@@ -249,6 +259,7 @@ try {
 // rather than compressed into vagueness.
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
+  guardsOff.length ? guardsOffLine : "craftsman guards: on.",
   rootOnly
     ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, the one isolated agent each of /scrutinise, /idea and /architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
     : "",
@@ -270,5 +281,6 @@ const parts = [
 
 logEvent({ ev: "session_start", sid, langs, tools: present.length, rules: rules.length });
 process.stdout.write(JSON.stringify({
+  ...(guardsOff.length ? { systemMessage: guardsOffLine } : {}),
   hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: parts.join("\n") },
 }));

@@ -87,3 +87,53 @@ test("session-context: the HAND-OFF line carries the plan's level and adds no li
     assert.equal(withLevel.split("\n").length, bare.split("\n").length, "no new lines");
   });
 });
+
+// 7.2: SessionStart says whether the guards are on, and if not, why (ARCH-SAFETY-04).
+function startState(dir, { env = {}, setup } = {}) {
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  setup?.(dir);
+  const childEnv = { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env };
+  for (const key of ["CRAFTSMAN", "CRAFTSMAN_SAFETY", "CLAUDE_CODE_SESSION_ID"]) if (!(key in env)) delete childEnv[key];
+  const r = spawnSync(process.execPath, [SESSION_CONTEXT], { cwd: dir, input: JSON.stringify({ session_id: "guard-state" }), encoding: "utf8", env: childEnv });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  return { message: out.systemMessage || "", context: out.hookSpecificOutput?.additionalContext || "" };
+}
+
+test("session-context: guards on is one short line of context and no user-facing message", () => {
+  withProject((dir) => {
+    const { message, context } = startState(dir);
+    assert.match(context, /^craftsman guards: on\./m);
+    assert.equal(message, "");
+  });
+});
+
+for (const [name, reason, options] of [
+  ["CRAFTSMAN=off", "CRAFTSMAN=off is set in the environment", { env: { CRAFTSMAN: "off" } }],
+  [".craftsman/off", ".craftsman/off exists", { setup: (dir) => { fs.mkdirSync(path.join(dir, ".craftsman")); fs.writeFileSync(path.join(dir, ".craftsman", "off"), ""); } }],
+  ["enabled:false", "enabled is false in craftsman.config.json", { setup: (dir) => fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ enabled: false })) }],
+  ["CRAFTSMAN_SAFETY=off", "CRAFTSMAN_SAFETY=off is set in the environment", { env: { CRAFTSMAN_SAFETY: "off" } }],
+]) {
+  test(`session-context: guards off because ${name} is reported with its reason`, () => {
+    withProject((dir) => {
+      const { message, context } = startState(dir, options);
+      assert.match(message, new RegExp(`craftsman guards off: .*${reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.match(context, /craftsman guards off:/);
+      assert.doesNotMatch(context, /craftsman guards: on/);
+    });
+  });
+}
+
+test("session-context: a node-missing marker left by hooks/run.sh earlier in this session is reported", () => {
+  withProject((dir) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-launcher-tmp-"));
+    try {
+      const marker = path.join(tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, "node-missing-guard-state");
+      fs.mkdirSync(marker, { recursive: true });
+      const { message } = startState(dir, { env: { TMPDIR: tmp } });
+      assert.match(message, /craftsman guards off: .*node was missing earlier this session/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

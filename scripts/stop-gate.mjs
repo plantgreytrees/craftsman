@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, acceptancePath, ownsAcceptance, uncheckedAcceptance } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, acceptancePath, ownsAcceptance, uncheckedAcceptance, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
@@ -16,7 +16,7 @@ import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 const T0 = Date.now();
 const pexec = promisify(execFile);
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+try { input = JSON.parse(await readStdin() || "{}"); } catch { advisorySkipped("stop-gate", "bad input"); process.exit(0); }
 const active = readScope(input);
 const context = active?.project_root
   ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }

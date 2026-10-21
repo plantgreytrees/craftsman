@@ -730,3 +730,62 @@ test("hasDocWriteGrant: pending grant, session grant and none", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// 7.1: an advisory hook still fails open on bad input, but never silently (ARCH-SAFETY-04).
+test("advisorySkipped: one visible notice per hook per session, then silence", () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-advisory-"));
+  try {
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      process.stdout.write(JSON.stringify([m.advisorySkipped("quality-gate", "bad input"), m.advisorySkipped("quality-gate", "bad input"), m.advisorySkipped("stop-gate", "bad input")]));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      cwd: proj, encoding: "utf8", env: { ...fakeEnv({ CLAUDE_CODE_SESSION_ID: "advisory-unit" }) },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const notices = r.stdout.split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l).systemMessage);
+    assert.deepEqual(notices, ["craftsman: quality-gate skipped (bad input), advisory only", "craftsman: stop-gate skipped (bad input), advisory only"]);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+for (const script of ["quality-gate.mjs", "stop-gate.mjs", "builtin-skill-context.mjs"]) {
+  test(`${script}: bad JSON twice is exit 0 and exactly one notice`, () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-advisory-spawn-"));
+    try {
+      spawnSync("git", ["init", "-q"], { cwd: proj });
+      const file = fileURLToPath(new URL(`../${script}`, import.meta.url));
+      const run = () => spawnSync(process.execPath, [file], { cwd: proj, input: "not json", encoding: "utf8", env: fakeEnv({ CLAUDE_CODE_SESSION_ID: `advisory-${script}` }) });
+      const first = run();
+      const second = run();
+      for (const r of [first, second]) assert.equal(r.status, 0, r.stderr);
+      const name = script.replace(/\.mjs$/, "");
+      assert.equal(first.stdout.split(`craftsman: ${name} skipped (bad input), advisory only`).length - 1, 1);
+      assert.equal(second.stdout + second.stderr, "", "silent after the first notice");
+    } finally {
+      fs.rmSync(proj, { recursive: true, force: true });
+    }
+  });
+}
+
+// the SessionStart guard-state reasons, as a pure function
+test("guardState: lists every reason the guards are off, none when they are on", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-guardstate-"));
+  try {
+    const none = coreNs.guardState({ cfg: {}, context: { root: dir, offFlag: path.join(dir, "off") }, env: {}, tmp: dir, sid: "g1" });
+    assert.deepEqual(none, []);
+    fs.writeFileSync(path.join(dir, "off"), "");
+    const all = coreNs.guardState({
+      cfg: { enabled: false }, context: { root: dir, offFlag: path.join(dir, "off") },
+      env: { CRAFTSMAN: "0", CRAFTSMAN_SAFETY: "off" }, tmp: dir, sid: "g1",
+    });
+    assert.equal(all.length, 4);
+    const marker = path.join(dir, `craftsman-launcher-${process.getuid?.() ?? 0}`, "node-missing-g2");
+    fs.mkdirSync(marker, { recursive: true });
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: { root: dir, offFlag: path.join(dir, "none") }, env: {}, tmp: dir, sid: "g2" }),
+      ["node was missing earlier this session (hooks/run.sh left its marker)"]);
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: { root: dir, offFlag: path.join(dir, "none") }, env: {}, tmp: dir, sid: "has.dot" }), [],
+      "a session id run.sh would not accept is the shared marker, not this session's");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -580,6 +580,33 @@ export function enabled(cfg, context = null) {
   return cfg.enabled !== false;
 }
 
+// ARCH-SAFETY-04: an advisory hook still fails open on bad input, but never silently. The
+// first skip of each hook in a session says so; later ones stay quiet. The input is bad, so the
+// session id comes from the environment, not from stdin.
+export function advisorySkipped(hook, reason, { env = process.env, stateDir = STATE_DIR } = {}) {
+  const marker = path.join(sessionDir(sidOf({ session_id: env.CLAUDE_CODE_SESSION_ID }), { stateDir }), `advisory-skipped-${hook}`);
+  if (fs.existsSync(marker)) return false;
+  try { atomicWrite(marker, String(Date.now())); } catch { /* no state dir: the notice still goes out, once per call */ }
+  process.stdout.write(JSON.stringify({ systemMessage: `craftsman: ${hook} skipped (${reason}), advisory only` }) + "\n");
+  return true;
+}
+
+// hooks/run.sh names its once-per-session marker after the session id, or "shared" when the id
+// holds anything but [A-Za-z0-9_-]. Same rule here, so SessionStart finds the marker it left.
+export const launcherMarker = (sid, tmp = os.tmpdir()) => path.join(
+  tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, `node-missing-${/^[A-Za-z0-9_-]+$/.test(String(sid || "")) ? sid : "shared"}`);
+
+/** Why craftsman's guards are not running, as short reasons; [] when they are on (SessionStart). */
+export function guardState({ cfg, context = null, env = process.env, tmp = os.tmpdir(), sid } = {}) {
+  const reasons = [];
+  if (["off", "0", "false"].includes(String(env.CRAFTSMAN || "").toLowerCase())) reasons.push("CRAFTSMAN=off is set in the environment");
+  if (fs.existsSync(context?.offFlag || OFF_FLAG)) reasons.push(".craftsman/off exists");
+  if (cfg?.enabled === false) reasons.push("enabled is false in craftsman.config.json");
+  if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") reasons.push("CRAFTSMAN_SAFETY=off is set in the environment");
+  if (fs.existsSync(launcherMarker(sid, tmp))) reasons.push("node was missing earlier this session (hooks/run.sh left its marker)");
+  return reasons;
+}
+
 // ------------------------------------------------------------ glob / skip ---
 
 // Minimal glob -> RegExp. Supports **, *, ?, character classes and {a,b} groups.
