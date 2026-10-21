@@ -59,9 +59,26 @@ if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 const key = cacheKey(file, lang, cfg);
 if (cacheHit(key, context)) { logEvent({ ev: "gate", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
 
-const { failures, timedOut, skipped, ms } = await runChecks(file, lang, cfg, context);
+// A tool that crashed is unavailable, never a finding: say so once per session
+// and do not run it again (a marker in session state is the cache).
+const unavailableMarker = (bin) => path.join(sessionDir(sidOf(input), context), `tool-unavailable-${bin.replace(/[^A-Za-z0-9_.-]/g, "_")}`);
+const skipBins = (lang.check || []).map((c) => c.split(/\s+/)[0]).filter((bin) => fs.existsSync(unavailableMarker(bin)));
+
+const { failures, timedOut, skipped, unavailable = [], ms } = await runChecks(file, lang, cfg, context, { skipBins });
+
+const newlyUnavailable = unavailable.filter((bin) => !fs.existsSync(unavailableMarker(bin)));
+for (const bin of newlyUnavailable) {
+  try { atomicWrite(unavailableMarker(bin), String(Date.now())); } catch {}
+}
+if (newlyUnavailable.length) {
+  logEvent({ ev: "gate", file, lang: lang.name, result: "tool-unavailable", tools: newlyUnavailable });
+  process.stdout.write(JSON.stringify({
+    systemMessage: `craftsman: ${newlyUnavailable.join(", ")} crashed and is unavailable, so its check is skipped for the rest of this session (not a finding in your code).`,
+  }));
+}
 
 if (failures.length === 0) {
+  if (unavailable.length || skipBins.length) process.exit(0); // an unchecked file is not a pass: never cached
   cacheStore(key, context);
   logEvent({ ev: "gate", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
   process.exit(0); // a timeout is never a finding you wrote — never blocks, never shown

@@ -160,22 +160,22 @@
     "typescript": {
       "extensions": [".ts", ".tsx"],
       "format": ["prettier --write --log-level silent {file}"],
-      "check": ["eslint --no-color --format unix {file}"]
+      "check": ["eslint --no-color --format json {file}"]
     },
     "javascript": {
       "extensions": [".js", ".jsx", ".mjs", ".cjs"],
       "format": ["prettier --write --log-level silent {file}"],
-      "check": ["eslint --no-color --format unix {file}"]
+      "check": ["eslint --no-color --format json {file}"]
     },
     "vue": {
       "extensions": [".vue"],
       "format": ["prettier --write --log-level silent {file}"],
-      "check": ["eslint --no-color --format unix {file}"]
+      "check": ["eslint --no-color --format json {file}"]
     },
     "svelte": {
       "extensions": [".svelte"],
       "format": ["prettier --write --log-level silent {file}"],
-      "check": ["eslint --no-color --format unix {file}"]
+      "check": ["eslint --no-color --format json {file}"]
     },
     "go": {
       "extensions": [".go"],

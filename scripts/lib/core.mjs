@@ -733,24 +733,66 @@ async function runOne(cmdTemplate, file, timeoutMs, context = null) {
     return { ok: true, out: (stdout + stderr).trim(), bin };
   } catch (e) {
     if (e.killed) return { ok: false, timedOut: true, bin, out: `${bin}: timed out` };
-    return { ok: false, bin, out: ((e.stdout || "") + (e.stderr || "")).trim() || e.message };
+    return {
+      ok: false, bin, out: ((e.stdout || "") + (e.stderr || "")).trim() || e.message,
+      stdout: e.stdout || "", code: e.code,
+    };
   }
+}
+
+/** eslint's `--format json` output as the `path:line:col: message
+ * [Error/rule-id]` lines the baseline and `extractSig` already key on (the
+ * shape of the `unix` formatter eslint 9 removed). `null` when the text is not
+ * eslint's JSON, so a crash can never be read as findings. */
+export function parseEslintJson(text) {
+  let files;
+  try { files = JSON.parse(text); } catch { return null; }
+  if (!Array.isArray(files)) return null;
+  const lines = [];
+  for (const f of files) {
+    if (!f || typeof f.filePath !== "string" || !Array.isArray(f.messages)) return null;
+    for (const m of f.messages) {
+      const severity = m.severity === 2 ? "Error" : "Warning";
+      lines.push(`${f.filePath}:${m.line ?? 1}:${m.column ?? 1}: ${m.message} [${severity}${m.ruleId ? `/${m.ruleId}` : ""}]`);
+    }
+  }
+  return lines;
+}
+
+const usesEslintJson = (bin, cmdTemplate) => /(^|[\\/])eslint(\.cmd)?$/.test(bin) && /(--format|-f)[ =]json\b/.test(cmdTemplate);
+
+// An eslint JSON run is a finding only when it exited 1 with parseable JSON that
+// holds messages. Exit 2, a crash or unparseable output means the tool itself
+// failed: unavailable, never something the model must fix.
+function normalizeEslintJson(result) {
+  if (result.ok !== false || result.timedOut) return result;
+  const lines = result.code === 1 ? parseEslintJson(result.stdout) : null;
+  if (lines === null) return { skipped: true, unavailable: true, bin: result.bin };
+  return lines.length ? { ...result, out: lines.join("\n") } : { ok: true, out: "", bin: result.bin };
 }
 
 /** Run format commands (best-effort, silent) then checks in parallel.
  * `failures` excludes timeouts — a slow tool on a big file isn't a defect
- * the model introduced, so it's reported separately and never blocks. */
-export async function runChecks(file, lang, cfg, context = null) {
+ * the model introduced, so it's reported separately and never blocks.
+ * `unavailable` lists tools that crashed; `skipBins` names tools already known
+ * to be unavailable this session, which are not run again. */
+export async function runChecks(file, lang, cfg, context = null, { skipBins = [] } = {}) {
   const t0 = Date.now();
   for (const f of lang.format || []) await runOne(f, file, cfg.timeoutMs ?? 20000, context);
 
   const results = await Promise.all(
-    (lang.check || []).map((c) => runOne(c, file, cfg.timeoutMs ?? 20000, context))
+    (lang.check || []).map(async (c) => {
+      const [bin] = tokenize(c, file, context);
+      if (skipBins.includes(bin)) return { skipped: true, bin };
+      const result = await runOne(c, file, cfg.timeoutMs ?? 20000, context);
+      return usesEslintJson(bin, c) ? normalizeEslintJson(result) : result;
+    })
   );
   const failures = results.filter((r) => r.ok === false && !r.timedOut);
   const timedOut = results.filter((r) => r.timedOut).map((r) => r.bin);
   const skipped = results.filter((r) => r.skipped).map((r) => r.bin);
-  return { failures, timedOut, skipped, ms: Date.now() - t0 };
+  const unavailable = results.filter((r) => r.unavailable).map((r) => r.bin);
+  return { failures, timedOut, skipped, unavailable, ms: Date.now() - t0 };
 }
 
 // ----------------------------------------------------------- diff filter ---
