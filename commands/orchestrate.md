@@ -2,7 +2,7 @@
 description: Executor: implement an existing plan doc unit by unit; gate, review, merge. Does NOT plan.
 argument-hint: "<plan-doc path | tracker slug | feature request> [--step <tracker-id>] [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
-allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill
+allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill, AskUserQuestion
 ---
 
 # Orchestrate — the executor
@@ -15,7 +15,7 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 
 ## Phase A — Resolve the plan (no decomposition here)
 
-1. **`--step <tracker-id>`** — single-row, user-gated. Grep the main checkout's `docs/plans/TRACKER.md` for the row, resolve its plan doc, run Phases B–E for that one row **with a plan-approval stop**. Build the summary from the TRACKER.md row + plan doc only — don't `Read` either shared-machinery file yet. Present it and WAIT for approval before any edit; already-done row → say so and stop. After approval, `Read` `_shared-machinery.md`, then run Phases B–E (which reads `_shared-execution.md` itself, per Phase C).
+1. **`--step <tracker-id>`** — single-row, user-gated. Grep the main checkout's `docs/plans/TRACKER.md` for the row, resolve its plan doc, run Phases B–E for that one row **with a plan-approval stop**. Build the summary from the TRACKER.md row + plan doc only — don't `Read` either shared-machinery file yet. Present it and ask for approval with `AskUserQuestion` (`_shared-machinery.md`) before any edit; already-done row → say so and stop. After approval, `Read` `_shared-machinery.md`, then run Phases B–E (which reads `_shared-execution.md` itself, per Phase C).
 2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → its `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously
 3. **Tracker slug** with a linked plan doc → as (2). Unknown slug → `tracker.mjs lookup` before treating it as new.
 4. **Free-form request, no doc** → nothing to execute yet. Pick the right planner via Skill first, then continue at (2): bug/symptom → `/investigate`; anything else → `/plan`. A doc always exists before code.
@@ -40,18 +40,18 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 
 ## Phase D — Cross-cutting review & smoke (after a feature's units are MERGED/parked)
 
-1. **Skip entirely for a single-unit feature** — no cross-unit surface to check; that unit's merge-time panel (`_shared-execution.md` step 8) already reviewed it, and `/scrutinise` will again later. For 2+ units: `code-reviewer` (integration mode) — API-contract compatibility across units, logic that belongs in a shared library, naming/error/auth consistency.
+1. **Skip entirely for a single-unit feature** — no cross-unit surface to check; that unit's merge-time panel (`_shared-execution.md` step 8) already reviewed it. For 2+ units: `code-reviewer` (integration mode) — API-contract compatibility across units, logic that belongs in a shared library, naming/error/auth consistency.
 2. **Integration smoke** (if defined): run over the merged set. Failure → BLOCKED follow-up row (merged code stays). Unavailable → note it.
 3. **Deterministic drift:** any exported contract/API/route changed → re-run `consumer-tracer` (or the project's contract check) over the merged set; breaking change + un-updated consumer → BLOCKED follow-up.
 4. Actionable findings → NEW PENDING follow-up rows; never silently patch merged code here.
 
 ## Phase E — Finalization
 
-Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero survive — integration build if defined, tracker consistency via `phase-tracker`). Before marking feature rows → COMPLETE, write the phase hand-off (`scripts/handoff.mjs`, JSON: plan, completed units, tracker state, remaining units, changed files, next action), then start the next phase straight away, re-reading the tracker + that phase's scope manifests. Never ask for `/compact`; auto-compact handles context and SessionStart restores the hand-off after any compaction or `/clear` (pass the real `session_id`).
+Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero survive — integration build if defined, tracker consistency via `phase-tracker`). Before marking feature rows → COMPLETE, write the phase hand-off (`scripts/handoff.mjs`, JSON: plan, completed units, tracker state, remaining units, changed files, next action), then start the next phase straight away, re-reading the tracker + that phase's scope manifests. Never ask for `/compact`; auto-compact handles context and SessionStart restores the hand-off (pass the real `session_id`).
 
 ## Phase F — Whole-request verification (mandatory before COMPLETE)
 
-"All rows MERGED" ≠ done. Validate the merged state against the plan's promised outcomes:
+"All rows MERGED" ≠ done. Check the merged state against the plan's promised outcomes:
 0. **Mechanical pre-filter:** run the project's full check suite on the merged base.
 1. Re-read the plan's user-visible outcomes. Per feature, delegate a completeness investigation (`general-purpose`, or `code-reviewer` integration-mode with a completeness mandate): the whole path exists end-to-end — every contract consumer updated, every endpoint guarded, every UI call site rendering, tests on the new path, no dangling half-implementation. Hunt for **what the plan didn't mention**.
 2. In-scope gap → loop back to Phase C and close it; out-of-scope adjacent → PENDING row. No COMPLETE while an in-scope gap remains.
@@ -59,4 +59,4 @@ Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero sur
 
 ## Summary
 
-Print: features completed (units merged per feature); every BLOCKED/PARKED unit with reason + branch left behind; partial-shipment warnings; residual confidence (verified end-to-end vs unproven, e.g. smoke skipped because unavailable).
+Print: features completed (units merged per feature); every BLOCKED/PARKED unit with reason + branch left behind; partial-shipment warnings; residual confidence (verified end-to-end vs unproven).

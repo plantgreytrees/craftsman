@@ -2,7 +2,7 @@
 description: Prompt generator: one paste-ready /goal that drives plan to merge, with a size estimate.
 argument-hint: "<idea-slug | plan-slug | request> [--level epic|story|feature|unit] [--feature <id>]"
 model: sonnet
-allowed-tools: Bash, Read, Write, Glob, Grep
+allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
 ---
 
 # Instruction — the prompt generator
@@ -15,14 +15,14 @@ Target: `$ARGUMENTS`. With `--level`/`--feature`, read `commands/_features.md` �
 
 ## Phase 0 — Gather (slim — paths, not prose)
 
-1. **Resolve the source.** Unknown slug → `tracker.mjs lookup` before treating it as new. `docs/ideas/<slug>.md` → read verdict, `touches`, recommendations, answered questions. Verdict `reject`/`defer` → stop and say so. Status not `architected` while `touches` hits a governed area or the idea makes design decisions → recommend `/architect <slug>` first and stop unless the user said to proceed. A plan slug (`docs/plans/<slug>.md` exists) → the prompt starts at `/orchestrate`, not `/plan`. A bare request → note that `/idea`/`/architect` were skipped.
+1. **Resolve the source.** Unknown slug → `tracker.mjs lookup` before treating it as new. `docs/ideas/<slug>.md` → read verdict, `touches`, recommendations, answered questions. Verdict `reject`/`defer` → stop and say so. Status not `architected` while `touches` hits a governed area or the idea makes design decisions → recommend `/architect <slug>` first and ask with `AskUserQuestion` (`_shared-machinery.md`) whether to proceed. A plan slug (`docs/plans/<slug>.md` exists) → the prompt starts at `/orchestrate`, not `/plan`. A bare request → note that `/idea`/`/architect` were skipped.
 2. **Governing rules.** `node "${CLAUDE_PLUGIN_ROOT}/scripts/arch-check.mjs" governs <touches…>` → the `.rules.md` paths, and the `decided` ids relevant to the change. **Never** read or reference the human `<area>.md` files. No rules doc governs the touched paths → the prompt drops its rules clauses, and **Before you paste** says the loop runs unguarded and recommends `/architect --init` (or `--backfill`) first.
 3. **Proof commands.** The project's real test command (`craftsman.config.json` `stopGate.commands`, else repo markers), the tracker/acceptance locations, and the base branch + land mode (`repoExec.land`: `direct` merges and pushes base, `pr` opens an auto-merging PR) — the evidence `/goal`'s evaluator will need to see.
 4. **Acceptance criteria.** Plan exists → read each unit's `accept:` and `arch:` lines and its `[unit:<id>]` lines in `.craftsman/acceptance.md`. Collect the idea's "done" outcomes no criterion covers: the prompt makes `/plan` (or a plan amendment) add them as acceptance lines, so the criteria are the plan's own and the Stop gate and `tracker.mjs` enforce them.
 
 ## Phase 1 — Implementation weight (shown to the user, never in the prompt)
 
-Count the drivers from the idea doc, the architecture decisions, and the touched paths (estimate units as `/plan` would: one per coherent module/project boundary):
+Count the drivers from the idea doc, the architecture decisions, and the touched paths (estimate units as `/plan` would: one per module/project boundary):
 
 | weight | when ANY of these is true (take the highest band hit) |
 |---|---|
@@ -62,4 +62,4 @@ Adapt, don't pad: drop inapplicable steps — but never step 5, never the (A)/(P
 Print:
 1. **Implementation weight** line + drivers + main schedule risk (outside the prompt).
 2. The prompt in one fenced block, ready to paste, and its saved path + character count.
-3. **Before you paste** (≤ 4 bullets): run it in auto mode so turns run unattended; when the compact gate fires, run `/compact` yourself and send any message — the goal survives `/compact` but not `/clear`; `/goal` with no argument shows progress, `/goal clear` stops it; pasting it approves the final `/craftsman:merge` (merge + push to base, or a PR in `pr` mode) — drop step 5 first if you want to land by hand; any skipped prerequisite (`/idea`, `/architect`, or no governing rules doc, so (A) is unenforced) and its risk.
+3. **Before you paste** (≤ 4 bullets): run it in auto mode so turns run unattended; the goal survives `/compact` but not `/clear`; `/goal` with no argument shows progress, `/goal clear` stops it; pasting it approves the final `/craftsman:merge` (merge + push to base, or a PR in `pr` mode) — drop step 5 first if you want to land by hand; any skipped prerequisite (`/idea`, `/architect`, or no governing rules doc, so (A) is unenforced) and its risk.

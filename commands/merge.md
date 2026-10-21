@@ -1,13 +1,13 @@
 ---
 description: Land a finished branch on base yourself: merge, push, clean up. Run it when told to merge.
 argument-hint: "[branch | worktree path]"
-allowed-tools: Bash, Read, Edit, ExitWorktree
+allowed-tools: Bash, Read, Edit, ExitWorktree, AskUserQuestion
 ---
 
 # Merge — land a branch end to end
 
 The user saying "merge" is the go-ahead to land on the base branch and push it.
-Finish the whole job in this session. Never end with "run this to merge".
+Finish the whole job in this session. Never end with "run this to merge". Ask the user with `AskUserQuestion` (`_shared-machinery.md`), never in prose.
 Landing goes through `repo-exec.mjs merge`, the same path `/orchestrate` uses
 for units. It re-runs the project's tests in the worktree, takes the merge lock,
 merges with `--no-ff` and pushes base. It then removes the worktree and deletes
@@ -16,10 +16,7 @@ auto-merging PR/MR instead.
 
 **It is also the loop's closing step:** PLAN → ORCHESTRATE → SCRUTINISE →
 SYNC-DOCS → MERGE. `/orchestrate` lands each unit's branch itself; this step
-lands what's left: the session's own branch or worktree, which carries the plan
-doc, tracker and `/scrutinise`/`/sync-docs` edits, and any branch for the slug
-that is still unlanded. A `/goal` prompt from `/instruction` that lists this
-step is the user's go-ahead, the same as saying "merge".
+lands what's left: the session's own branch or worktree (plan doc, tracker and `/scrutinise`/`/sync-docs` edits) and any unlanded branch for the slug. A `/goal` from `/instruction` that lists this step is the user's go-ahead, like saying "merge".
 
 ## 1. Pick the target
 
@@ -34,8 +31,7 @@ step is the user's go-ahead, the same as saying "merge".
   land. Commit this session's doc and tracker edits with a real message, then
   `git pull --ff-only && git push`. Never force-push. Report it and skip to step 6.
 
-Resolve its absolute worktree path, its branch, and the **main checkout**: the
-first entry of `git worktree list`. If the branch has no worktree, add one from
+Resolve its absolute worktree path, branch and the **main checkout** (first entry of `git worktree list`). If the branch has no worktree, add one from
 the main checkout: `git -C <main> worktree add .claude/worktrees/<branch> <branch>`.
 
 ## 2. Make it landable
@@ -55,9 +51,7 @@ the main checkout: `git -C <main> worktree add .claude/worktrees/<branch> <branc
 ## 3. Step out of the worktree
 
 If this session is inside the target worktree, call **ExitWorktree with
-`action: "keep"`**. Landing removes the worktree, and it must run from the main
-checkout: from inside a linked worktree the repo root resolves to the worktree
-itself.
+`action: "keep"`**. Landing removes the worktree and must run from the main checkout: inside a linked worktree the repo root is the worktree.
 
 ## 4. Land
 
@@ -67,8 +61,7 @@ From the main checkout:
 printf '%s' '{"action":"merge","worktree_path":"<abs worktree>","branch":"<branch>","session_id":"<session_id>"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/repo-exec.mjs"
 ```
 
-Add `"base_branch":"<base>"` only when the base can't be inferred (the script
-says so).
+Add `"base_branch":"<base>"` only when the script says it can't infer the base.
 
 ## 5. On failure — fix and retry, don't hand back
 
@@ -76,8 +69,7 @@ says so).
   rerun step 4.
 - **Merge conflict** (the merge is aborted, so base is untouched) → in the
   worktree, `git fetch origin && git merge origin/<base>`, resolve, re-run the
-  tests, commit, and rerun step 4. Stop and ask only when a conflict needs a
-  judgement call on intent.
+  tests, commit, and rerun step 4. Ask only when a conflict needs a judgement call on intent.
 - **`pull --ff-only` fails** (local base has commits origin doesn't) → report it.
   Never force-push.
 - **Merge lock busy** → another session is landing. Wait briefly, then retry.

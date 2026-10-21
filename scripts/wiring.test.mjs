@@ -344,3 +344,40 @@ test("wiring: the review-routing criteria exist once, in agents/review-router.md
   assert.deepEqual(holders, ["agents/review-router.md"]);
   for (const cmd of ["commands/_shared-execution.md", "commands/scrutinise.md"]) assert.match(read(cmd), /agents\/review-router\.md/, cmd);
 });
+
+// 23.0: a question for the user goes through the AskUserQuestion prompt, not prose. One rule in the shared
+// machinery states it; every command that asks lists the tool and points at the rule. Unattended runs keep
+// their contract: they PARK instead of asking mid-run (ARCH-AUTO-02, ARCH-ENGINE-07).
+const ASKING_COMMANDS = ["plan", "orchestrate", "merge", "sync-docs", "instruction", "account-switch", "idea", "architect", "init", "builtin-check", "auto"];
+const allowedToolsOf = (name) => (read(`commands/${name}.md`).split(/^---$/m)[1] || "").split("\n").find((l) => l.startsWith("allowed-tools:")) || "";
+const realCommands = fs.readdirSync(path.join(PLUGIN_ROOT, "commands")).filter((f) => f.endsWith(".md") && !f.startsWith("_")).map((f) => f.replace(/\.md$/, ""));
+
+test("wiring: the ask-through-the-prompt rule is stated once, in _shared-machinery.md", () => {
+  const holders = promptFiles.filter((f) => /AskUserQuestion`? \(batched, 2-4 options, the recommended one first\)/.test(fs.readFileSync(f, "utf8"))).map(relOf);
+  assert.deepEqual(holders, ["commands/_shared-machinery.md"]);
+  assert.match(read("commands/_shared-machinery.md"), /Prose questions are for unattended runs[^.]*PARK[^.]*ARCH-ENGINE-07/);
+});
+
+test("wiring: every command that asks the user lists AskUserQuestion and points at the shared rule", () => {
+  const bad = ASKING_COMMANDS.filter((name) => !/\bAskUserQuestion\b/.test(allowedToolsOf(name)) || !/AskUserQuestion/.test(read(`commands/${name}.md`).split(/^---$/m).slice(2).join("---")));
+  assert.deepEqual(bad, []);
+  for (const name of ["plan", "orchestrate", "merge", "sync-docs", "instruction", "account-switch"]) {
+    assert.match(read(`commands/${name}.md`), /_shared-machinery\.md/, `${name} points at the rule`);
+  }
+});
+
+test("wiring: a command whose body uses AskUserQuestion lists it, and a command that stops to ask is on the asking list", () => {
+  const unlisted = realCommands.filter((name) => /AskUserQuestion/.test(read(`commands/${name}.md`).split(/^---$/m).slice(2).join("---")) && !/\bAskUserQuestion\b/.test(allowedToolsOf(name)));
+  assert.deepEqual(unlisted, []);
+  const asks = realCommands.filter((name) => /\bstop and ask\b|\bSTOP for confirmation\b|\bWAIT for approval\b|\bask which\b/i.test(read(`commands/${name}.md`)));
+  assert.deepEqual(asks.filter((name) => !ASKING_COMMANDS.includes(name)), []);
+});
+
+test("wiring: unattended paths still PARK instead of asking mid-run", () => {
+  const auto = read("commands/auto.md");
+  assert.match(auto, /Never default an open decision/);
+  assert.match(auto, /PARKED row/);
+  assert.match(auto, /Questions first and last; the middle is unattended/);
+  assert.match(read("commands/_shared-execution.md"), /PARK/);
+  assert.match(read("commands/_shared-execution.md"), /Max 2 retries[^.]*PARK/);
+});
