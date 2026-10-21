@@ -1,5 +1,4 @@
-// The post-hoc check on guarded docs (ARCH-SAFETY-10). SessionStart snapshots the working-tree status and
-// the sha1 of every guarded doc; Stop snapshots again and reports guarded docs that changed WITHOUT the doc
+// The post-hoc check on guarded docs (ARCH-SAFETY-10). SessionStart snapshots the sha1 of every guarded doc; Stop snapshots again and reports guarded docs that changed WITHOUT the doc
 // guard allowing it (an editor, a script, a tool the guard never sees). It reports; it does not replace
 // the guard, and it never blocks.
 import fs from "node:fs";
@@ -17,7 +16,7 @@ function git(root, args) {
 }
 
 export function snapshotDocs(root, docPaths) {
-  const snap = { ts: Date.now(), status: "", docs: {} };
+  const snap = { ts: Date.now(), docs: {} };
   const listing = git(root, ["ls-files", "--cached", "--others", "--exclude-standard"]);
   if (listing === null) return snap;
   const guarded = (rel) => docPaths.some((p) => globToRe(p).test(rel) || globToRe(p).test("./" + rel));
@@ -28,8 +27,6 @@ export function snapshotDocs(root, docPaths) {
       if (stat.isFile() && stat.size <= MAX_BYTES) snap.docs[rel] = crypto.createHash("sha1").update(fs.readFileSync(file)).digest("hex");
     } catch { /* deleted or unreadable: absent from the snapshot */ }
   }
-  const status = git(root, ["status", "--porcelain", "--untracked-files=all"]) || "";
-  snap.status = status.split("\n").filter((l) => l && !/^.. \.craftsman(\/|$)/.test(l)).join("\n");
   return snap;
 }
 
@@ -44,9 +41,11 @@ export function docDrift(before, after) {
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-// tracker.mjs renders TRACKER.md itself, and an edit the guard logged as allowed was seen.
+// tracker.mjs renders TRACKER.md itself, and an edit the guard logged as allowed was seen. A Read, Grep
+// or Glob the guard allowed changed nothing, so it never explains a change.
+const EDIT_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 export function unseenDocChanges(drift, events, sid) {
-  const seen = new Set(events.filter((e) => e && e.ev === "preguard" && e.result === "allowed" && e.sid === sid).map((e) => e.file));
+  const seen = new Set(events.filter((e) => e && e.ev === "preguard" && e.result === "allowed" && e.sid === sid && EDIT_TOOLS.has(e.tool)).map((e) => e.file));
   return drift.filter((d) => d.path !== "docs/plans/TRACKER.md" && !seen.has(d.path));
 }
 

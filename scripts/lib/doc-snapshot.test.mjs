@@ -28,7 +28,6 @@ test("snapshotDocs: the sha1 of every guarded doc (tracked or not), none of the 
     const snap = ds.snapshotDocs(dir, DOC_PATHS);
     assert.deepEqual(Object.keys(snap.docs).sort(), ["docs/architecture/x.rules.md", "docs/ideas/i.md", "docs/plans/a.md", "docs/plans/new.md"]);
     assert.match(snap.docs["docs/plans/a.md"], /^[0-9a-f]{40}$/);
-    assert.match(snap.status, /\?\? docs\/plans\/new\.md/);
     assert.equal(typeof snap.ts, "number");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -38,7 +37,7 @@ test("snapshotDocs: craftsman's own state is not part of the status; not a repo 
   try {
     fs.mkdirSync(path.join(dir, ".craftsman"));
     fs.writeFileSync(path.join(dir, ".craftsman", "events.jsonl"), "{}");
-    assert.doesNotMatch(ds.snapshotDocs(dir, DOC_PATHS).status, /\.craftsman/);
+    assert.equal(Object.keys(ds.snapshotDocs(dir, DOC_PATHS).docs).some((rel) => rel.startsWith(".craftsman")), false);
     const bare = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-docsnap-bare-"));
     assert.deepEqual(ds.snapshotDocs(bare, DOC_PATHS).docs, {});
     fs.rmSync(bare, { recursive: true, force: true });
@@ -68,9 +67,9 @@ test("docDrift: no snapshot, or one from a repo with no docs, reports nothing", 
 test("unseenDocChanges: drops what the doc guard allowed this session and the generated tracker", () => {
   const drift = [{ path: "docs/plans/a.md", change: "modified" }, { path: "docs/plans/TRACKER.md", change: "modified" }, { path: "docs/ideas/i.md", change: "removed" }];
   const events = [
-    { ev: "preguard", sid: "s1", file: "docs/plans/a.md", result: "allowed" },
-    { ev: "preguard", sid: "s2", file: "docs/ideas/i.md", result: "allowed" },
-    { ev: "preguard", sid: "s1", file: "docs/ideas/i.md", result: "blocked" },
+    { ev: "preguard", sid: "s1", tool: "Write", file: "docs/plans/a.md", result: "allowed" },
+    { ev: "preguard", sid: "s2", tool: "Write", file: "docs/ideas/i.md", result: "allowed" },
+    { ev: "preguard", sid: "s1", tool: "Write", file: "docs/ideas/i.md", result: "blocked" },
   ];
   assert.deepEqual(ds.unseenDocChanges(drift, events, "s1"), [{ path: "docs/ideas/i.md", change: "removed" }]);
 });
@@ -79,4 +78,18 @@ test("formatDocDrift: a one-line-per-doc informational report, empty when there 
   assert.equal(ds.formatDocDrift([]), "");
   const text = ds.formatDocDrift([{ path: "docs/plans/a.md", change: "modified" }]);
   assert.match(text, /^craftsman: guarded docs changed this session without passing the doc guard \(informational\):\n  - docs\/plans\/a\.md \(modified\)$/);
+});
+
+test("unseenDocChanges: only an edit tool counts as seen; a doc that was merely read, or an old event without a tool, does not", () => {
+  const drift = [{ path: "docs/plans/a.md", change: "modified" }];
+  const event = (tool) => ({ ev: "preguard", sid: "s1", ...(tool ? { tool } : {}), file: "docs/plans/a.md", result: "allowed" });
+  for (const tool of ["Read", "Grep", "Glob", undefined]) assert.deepEqual(ds.unseenDocChanges(drift, [event(tool)], "s1"), drift, `${tool}`);
+  for (const tool of ["Write", "Edit", "NotebookEdit"]) assert.deepEqual(ds.unseenDocChanges(drift, [event(tool)], "s1"), [], tool);
+});
+
+test("snapshotDocs: the snapshot holds the docs and a timestamp, nothing that docDrift never reads", () => {
+  const dir = repo();
+  try {
+    assert.deepEqual(Object.keys(ds.snapshotDocs(dir, DOC_PATHS)).sort(), ["docs", "ts"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -185,8 +185,8 @@ test("session-context: no sandbox line when project settings, user settings or a
   assert.equal(sandboxNotice(({ managed }) => enable(path.join(managed, "managed-settings.json"))), "");
 });
 
-// 13.3a: SessionStart records the status and hashes of every guarded doc.
-test("session-context: SessionStart snapshots the working-tree status and the hash of every guarded doc", () => {
+// 13.3a: SessionStart records the hash of every guarded doc.
+test("session-context: SessionStart snapshots the hash of every guarded doc", () => {
   withProject((dir) => {
     startState(dir, {
       setup: (d) => {
@@ -200,6 +200,6 @@ test("session-context: SessionStart snapshots the working-tree status and the ha
     const snap = JSON.parse(fs.readFileSync(path.join(dir, ".craftsman", "sessions", "guard-state", "doc-snapshot.json"), "utf8"));
     assert.deepEqual(Object.keys(snap.docs).sort(), ["docs/architecture/x.rules.md", "docs/plans/a.md"]);
     assert.match(snap.docs["docs/plans/a.md"], /^[0-9a-f]{40}$/);
-    assert.match(snap.status, /docs\/plans\/a\.md/);
+    assert.equal("status" in snap, false, "nothing in the snapshot that Stop never reads");
   });
 });

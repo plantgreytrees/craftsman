@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, acceptancePath, ownsAcceptance, uncheckedAcceptance, advisorySkipped } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, uncheckedAcceptance, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
@@ -24,7 +24,14 @@ const context = active?.project_root
   ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) process.exit(0);
+if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) {
+  // The quality machinery is off, the safety report is not (ARCH-SAFETY-06): only the user's own switch silences it.
+  try {
+    const lines = safetyEnabled() ? formatReport(unpushedReport(context.root).lines) : "";
+    if (lines) process.stdout.write(JSON.stringify({ systemMessage: lines }));
+  } catch { /* a broken report never blocks */ }
+  process.exit(0);
+}
 const sid = sidOf(input);
 const sdir = sessionDir(sid, context);
 
@@ -356,7 +363,7 @@ if (!inFlight.length) {
 // 5. Unpushed work (ARCH-SAFETY-06), from local refs only: reported to the user at every Stop, and a
 //    block only when stopGate.blockOnUnpushed is true.
 let unpushed = "";
-try { unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
+try { if (safetyEnabled()) unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
 if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
 
 // 6. Guarded docs that changed without the doc guard allowing it (ARCH-SAFETY-10): compared with the

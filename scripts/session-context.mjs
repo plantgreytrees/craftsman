@@ -52,7 +52,7 @@ if (!enabled(cfg, context)) {
 // the same root the hooks use.
 writeRootPin(sid, PROJECT_ROOT);
 
-// ARCH-SAFETY-10: the post-hoc check on guarded docs starts here — their status and hashes at session start,
+// ARCH-SAFETY-10: the post-hoc check on guarded docs starts here — their hashes at session start,
 // compared at Stop. Best-effort: a snapshot that cannot be taken just means no report.
 if (cfg.docWriteGuard?.enabled !== false) {
   try {

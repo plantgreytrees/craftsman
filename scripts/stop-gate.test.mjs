@@ -60,9 +60,9 @@ function pushBase(dir) {
 // Spawns `node scripts/stop-gate.mjs` with cwd=dir and the given session_id
 // on stdin, matching real invocation shape. Returns stdout/stderr/exit code
 // plus the parsed `.craftsman/events.jsonl` lines for this session.
-function runStopGate(dir, sid, extra = {}) {
+function runStopGate(dir, sid, extra = {}, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [STOP_GATE_PATH], { cwd: dir });
+    const child = spawn(process.execPath, [STOP_GATE_PATH], { cwd: dir, env: { ...process.env, ...env } });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
@@ -913,10 +913,37 @@ test("stop-gate: a doc edit the doc guard allowed this session, or no snapshot a
     const sid = "seen-doc";
     docSnapshotFor(dir, sid);
     fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited through Write\n");
-    fs.appendFileSync(path.join(dir, ".craftsman", "events.jsonl"), JSON.stringify({ ts: Date.now(), ev: "preguard", sid, file: "docs/plans/a.md", result: "allowed" }) + "\n");
+    fs.appendFileSync(path.join(dir, ".craftsman", "events.jsonl"), JSON.stringify({ ts: Date.now(), ev: "preguard", sid, tool: "Write", file: "docs/plans/a.md", result: "allowed" }) + "\n");
     const seen = await runStopGate(dir, sid);
     assert.doesNotMatch(seen.stdout, /guarded docs changed/);
     const none = await runStopGate(dir, "never-snapshotted");
     assert.doesNotMatch(none.stdout, /guarded docs changed/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: a guarded doc that was only read, then changed out of band, is still reported", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "read-then-oob";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    fs.appendFileSync(path.join(dir, ".craftsman", "events.jsonl"), JSON.stringify({ ts: Date.now(), ev: "preguard", sid, tool: "Read", file: "docs/plans/a.md", result: "allowed" }) + "\n");
+    const { stdout } = await runStopGate(dir, sid);
+    assert.match(JSON.parse(stdout).systemMessage, /docs\/plans\/a\.md \(modified\)/);
+  } finally { cleanup(dir); }
+});
+
+// ARCH-SAFETY-06: Stop reports unpushed work whenever the safety side is on, even where the quality side is off.
+test("stop-gate: unpushed work is still reported with CRAFTSMAN=off or .craftsman/off, and not with CRAFTSMAN_SAFETY=off", async () => {
+  const dir = unpushedFixture();
+  try {
+    const off = await runStopGate(dir, "unpushed-env-off", {}, { CRAFTSMAN: "off" });
+    assert.match(JSON.parse(off.stdout).systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "off"), "");
+    const flag = await runStopGate(dir, "unpushed-flag-off");
+    assert.match(JSON.parse(flag.stdout).systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    const safety = await runStopGate(dir, "unpushed-safety-off", {}, { CRAFTSMAN_SAFETY: "off" });
+    assert.equal(safety.stdout.trim(), "", "the user's own off switch silences the report");
   } finally { cleanup(dir); }
 });

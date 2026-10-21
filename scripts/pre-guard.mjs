@@ -1197,5 +1197,5 @@ if (g.enabled !== false && writeTool && docSide) {
   }
 }
 
-logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), file: rel, result: "allowed" });
+logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);

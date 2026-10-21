@@ -1473,3 +1473,18 @@ test("pre-guard: git config, env config, value-taking wrappers and sh -c cannot 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("pre-guard: the allowed event names the tool, so the Stop drift report can tell a read from an edit", () => {
+  const dir = selfDisableProject();
+  try {
+    const file = path.join(dir, "notes.txt");
+    fs.writeFileSync(file, "x\n");
+    assert.equal(run(GUARD, dir, { session_id: "ev-1", tool_name: "Read", tool_input: { file_path: file } }).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: "ev-1", tool_name: "Write", tool_input: { file_path: file, content: "y" } }).status, 0);
+    const events = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      .filter((e) => e.ev === "preguard" && e.result === "allowed" && e.sid === "ev-1");
+    assert.deepEqual(events.map((e) => e.tool), ["Read", "Write"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
