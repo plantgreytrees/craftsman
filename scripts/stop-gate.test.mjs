@@ -854,3 +854,50 @@ test("stop-gate: the shipped default for stopGate.blockOnUnpushed is false", () 
   const cfg = JSON.parse(fs.readFileSync(new URL("../craftsman.config.json", import.meta.url), "utf8"));
   assert.equal(cfg.stopGate.blockOnUnpushed, false);
 });
+
+// 13.3: Stop reports guarded docs that changed without passing the doc guard (informational).
+function docSnapshotFor(dir, sid) {
+  const lib = new URL("./lib/doc-snapshot.mjs", import.meta.url).href;
+  const code = `import(${JSON.stringify(lib)}).then((m) => { const fs = require("node:fs"), path = require("node:path");
+    const d = path.join(${JSON.stringify(dir)}, ".craftsman", "sessions", ${JSON.stringify(sid)}); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "doc-snapshot.json"), JSON.stringify(m.snapshotDocs(${JSON.stringify(dir)}, ["docs/plans/**", "docs/ideas/**", "docs/architecture/**"]))); })`;
+  const r = spawnSync(process.execPath, ["-e", code], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(r.stderr);
+}
+
+function docFixture() {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# a\n");
+  pushBase(dir);
+  return dir;
+}
+
+test("stop-gate: a guarded doc edited out of band is reported, informationally and without blocking", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "oob-doc";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    const { code, stdout } = await runStopGate(dir, sid);
+    assert.equal(code, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, undefined, "report only");
+    assert.match(out.systemMessage, /guarded docs changed this session without passing the doc guard \(informational\)/);
+    assert.match(out.systemMessage, /docs\/plans\/a\.md \(modified\)/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: a doc edit the doc guard allowed this session, or no snapshot at all, is not reported", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "seen-doc";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited through Write\n");
+    fs.appendFileSync(path.join(dir, ".craftsman", "events.jsonl"), JSON.stringify({ ts: Date.now(), ev: "preguard", sid, file: "docs/plans/a.md", result: "allowed" }) + "\n");
+    const seen = await runStopGate(dir, sid);
+    assert.doesNotMatch(seen.stdout, /guarded docs changed/);
+    const none = await runStopGate(dir, "never-snapshotted");
+    assert.doesNotMatch(none.stdout, /guarded docs changed/);
+  } finally { cleanup(dir); }
+});

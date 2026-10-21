@@ -57,7 +57,7 @@ export const FILE_CAPS = {
   "commands/digest.md": 640,
   "commands/fix-tests.md": 5105,
   "commands/idea.md": 7232,
-  "commands/init.md": 4956,
+  "commands/init.md": 4934,
   "commands/instruction.md": 8699,
   "commands/investigate.md": 6227,
   "commands/merge.md": 6288,

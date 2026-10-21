@@ -9,13 +9,15 @@ import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
   sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
-  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState,
+  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState, atomicWrite,
 } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
+import { sandboxEnabledAnywhere } from "./lib/settings-merge.mjs";
+import { snapshotDocs } from "./lib/doc-snapshot.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
@@ -49,6 +51,21 @@ if (!enabled(cfg, context)) {
 // Bash-run scripts have no CLAUDE_PROJECT_DIR; this pin is how they find
 // the same root the hooks use.
 writeRootPin(sid, PROJECT_ROOT);
+
+// ARCH-SAFETY-10: the post-hoc check on guarded docs starts here — their status and hashes at session start,
+// compared at Stop. Best-effort: a snapshot that cannot be taken just means no report.
+if (cfg.docWriteGuard?.enabled !== false) {
+  try {
+    atomicWrite(path.join(sessionDir(sid, context), "doc-snapshot.json"), JSON.stringify(snapshotDocs(context.root, cfg.docWriteGuard?.docPaths || ["docs/**"])));
+  } catch { /* no snapshot, no report */ }
+}
+// ARCH-SAFETY-01: outside-root writes, deletes and credential reads are the sandbox's job; say when it is off everywhere.
+let sandboxLine = "";
+try {
+  if (!sandboxEnabledAnywhere({ root: context.root })) {
+    sandboxLine = "craftsman: the Claude Code sandbox is not enabled in any settings scope, so writes outside the project and credential reads are not isolated; /craftsman:init can add it.";
+  }
+} catch { /* unreadable settings: say nothing */ }
 
 const markers = {
   "package.json": "JavaScript/TypeScript", "deno.json": "Deno",
@@ -264,6 +281,7 @@ try {
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
   state.safety.length ? guardsOffLine : "craftsman guards: on.",
+  sandboxLine,
   rootOnly
     ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, the one isolated agent each of /scrutinise, /idea and /architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
     : "",

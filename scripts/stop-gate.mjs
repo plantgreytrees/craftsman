@@ -12,6 +12,7 @@ import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
 import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
+import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 
 const T0 = Date.now();
@@ -358,9 +359,26 @@ let unpushed = "";
 try { unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
 if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
 
+// 6. Guarded docs that changed without the doc guard allowing it (ARCH-SAFETY-10): compared with the
+//    snapshot SessionStart took. Informational only; the guard itself is not replaced by this.
+let unseenDocs = "";
+try {
+  const before = JSON.parse(fs.readFileSync(path.join(sdir, "doc-snapshot.json"), "utf8"));
+  const drift = docDrift(before, snapshotDocs(context.root, cfg.docWriteGuard?.docPaths || ["docs/**"]));
+  if (drift.length) {
+    let events = [];
+    try {
+      events = fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").slice(-20000)
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch { /* no event log: every change counts as unseen */ }
+    unseenDocs = formatDocDrift(unseenDocChanges(drift, events, sid));
+  }
+} catch { /* no snapshot, or unreadable: nothing to compare */ }
+const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs].filter(Boolean).join("\n");
+
 if (!problems.length) {
   logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 });
-  if (unpushed) process.stdout.write(JSON.stringify({ systemMessage: unpushed }));
+  if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice }));
   process.exit(0);
 }
 
@@ -368,5 +386,5 @@ logEvent({ ev: "stop", sid, result: "block", count: problems.length, ms: Date.no
 process.stdout.write(JSON.stringify({
   decision: "block",
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
-  ...(unpushed && cfg.stopGate?.blockOnUnpushed !== true ? { systemMessage: unpushed } : {}),
+  ...(notice ? { systemMessage: notice } : {}),
 }));

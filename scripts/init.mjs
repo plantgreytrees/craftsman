@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { checkDocSizes } from "./doc-size-policy.mjs";
 import { DEFAULT_DIR, loadRules, unmanagedDocs } from "./arch-check.mjs";
+import { mergeSettings, renderSettingsDiff } from "./lib/settings-merge.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(pluginRoot, "craftsman.config.json");
@@ -470,11 +471,47 @@ export function applyInitPlan(plan) {
   return result;
 }
 
+// The sandbox settings block (ARCH-SAFETY-10): previewed first, merged into .claude/settings.json without
+// overwriting anything, and only written when asked. The old file is backed up like every other init write.
+export function previewSandboxSettings(root) {
+  const file = path.join(root, ".claude", "settings.json");
+  const result = mergeSettings(textAt(file));
+  return { file, result, diff: renderSettingsDiff(result) };
+}
+export function applySandboxSettings(root) {
+  const preview = previewSandboxSettings(root);
+  if (!preview.result.ok) throw new Error(preview.result.error);
+  if (!preview.result.changed) return { ...preview, written: false, backup: null };
+  let backup = null;
+  if (fs.existsSync(preview.file)) {
+    backup = path.join(root, ".craftsman", "init-backups", new Date().toISOString().replaceAll(/[:.]/g, "-"), ".claude", "settings.json");
+    fs.mkdirSync(path.dirname(backup), { recursive: true });
+    fs.copyFileSync(preview.file, backup);
+  }
+  fs.mkdirSync(path.dirname(preview.file), { recursive: true });
+  const temp = `${preview.file}.${process.pid}.init.tmp`;
+  fs.writeFileSync(temp, preview.result.next);
+  fs.renameSync(temp, preview.file);
+  return { ...preview, written: true, backup };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     const args = new Set(process.argv.slice(2));
-    const modes = ["--check", "--diff", "--write", "--update"].filter((mode) => args.has(mode));
-    if (modes.length > 1) throw new Error("choose only one of --check, --diff, --write, or --update");
+    const modes = ["--check", "--diff", "--write", "--update", "--settings-diff", "--settings-write"].filter((mode) => args.has(mode));
+    if (modes.length > 1) throw new Error("choose only one of --check, --diff, --write, --update, --settings-diff or --settings-write");
+    if (modes[0] === "--settings-diff" || modes[0] === "--settings-write") {
+      const root = process.cwd();
+      if (modes[0] === "--settings-diff") {
+        const { result, diff } = previewSandboxSettings(root);
+        if (!result.ok) throw new Error(result.error);
+        process.stdout.write(diff + "\n");
+      } else {
+        const done = applySandboxSettings(root);
+        process.stdout.write((done.written ? `wrote .claude/settings.json${done.backup ? ` (previous copy: ${done.backup})` : ""}\n${done.diff}` : done.diff) + "\n");
+      }
+      process.exit(0);
+    }
     const mode = modes[0] ? modes[0].slice(2) : "audit";
     const plan = mode === "update" ? buildUpdatePlan(process.cwd()) : buildInitPlan(process.cwd());
     if (mode === "update" && !plan.plugin.healthy) {

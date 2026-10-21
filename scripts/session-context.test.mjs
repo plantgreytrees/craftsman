@@ -152,3 +152,54 @@ test("session-context: a node-missing marker left by hooks/run.sh earlier in thi
     }
   });
 });
+
+// 13.2: one line when the sandbox is enabled in no settings scope (ARCH-SAFETY-01 leaves those protections to it).
+function sandboxNotice(setup) {
+  let notice = "";
+  withProject((dir) => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-sandbox-home-"));
+    const managed = path.join(home, "managed");
+    fs.mkdirSync(managed);
+    try {
+      const { context } = startState(dir, {
+        setup: (d) => setup?.({ dir: d, home, managed }),
+        env: { CLAUDE_CONFIG_DIR: path.join(home, "user"), HOME: home, CRAFTSMAN_MANAGED_SETTINGS_DIR: managed },
+      });
+      notice = context.split("\n").filter((l) => /sandbox/i.test(l)).join("\n");
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+  return notice;
+}
+
+test("session-context: one line says the sandbox is enabled in no settings scope", () => {
+  const notice = sandboxNotice();
+  assert.match(notice, /the Claude Code sandbox is not enabled in any settings scope/);
+  assert.match(notice, /\/craftsman:init/);
+  assert.equal(notice.split("\n").length, 1);
+});
+
+test("session-context: no sandbox line when project settings, user settings or a managed file enable it", () => {
+  const enable = (file) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ sandbox: { enabled: true } })); };
+  assert.equal(sandboxNotice(({ dir }) => enable(path.join(dir, ".claude", "settings.json"))), "");
+  assert.equal(sandboxNotice(({ home }) => enable(path.join(home, "user", "settings.json"))), "");
+  assert.equal(sandboxNotice(({ managed }) => enable(path.join(managed, "managed-settings.json"))), "");
+});
+
+// 13.3a: SessionStart records the status and hashes of every guarded doc.
+test("session-context: SessionStart snapshots the working-tree status and the hash of every guarded doc", () => {
+  withProject((dir) => {
+    startState(dir, {
+      setup: (d) => {
+        fs.mkdirSync(path.join(d, "docs", "plans"), { recursive: true });
+        fs.writeFileSync(path.join(d, "docs", "plans", "a.md"), "# a\n");
+        fs.mkdirSync(path.join(d, "docs", "architecture"), { recursive: true });
+        fs.writeFileSync(path.join(d, "docs", "architecture", "x.rules.md"), "# x\n");
+        fs.writeFileSync(path.join(d, "app.js"), "1\n");
+      },
+    });
+    const snap = JSON.parse(fs.readFileSync(path.join(dir, ".craftsman", "sessions", "guard-state", "doc-snapshot.json"), "utf8"));
+    assert.deepEqual(Object.keys(snap.docs).sort(), ["docs/architecture/x.rules.md", "docs/plans/a.md"]);
+    assert.match(snap.docs["docs/plans/a.md"], /^[0-9a-f]{40}$/);
+    assert.match(snap.status, /docs\/plans\/a\.md/);
+  });
+});
