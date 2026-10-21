@@ -1587,3 +1587,35 @@ test("pre-guard: the config and settings keys that disable a guard are protected
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Scrutiny round 2 (13.x): self-protection reads shell words (quotes removed, cwd tracked), not the raw command text.
+test("pre-guard: a quote-split name or a cd into .craftsman cannot forge a marker, grant, record or scope (13.1-13.2)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".craftsman", "sessions", "s1"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "src"));
+    const blocked = [
+      `touch .craftsman/o""ff`, `touch .crafts''man/off`, `touch .craftsman/sessions/s1/doc-w""rite`,
+      `tee .craftsman/sessions/s1/command""s.json`, `tee .craftsman/sessions/s1/goal-token""s.json`, `tee .craftsman/sessions/s1/sco""pe.json`,
+      `ln -s .crafts''man x`, `cp x .craftsman/o''ff`, `install -m 644 x .craftsman/o""ff`, `mkdir .craftsman/doc-write-pen""ding`,
+      `dd if=/dev/null of=.craftsman/o""ff`, `sed -i s/a/b/ .craftsman/o""ff`, `perl -pi -e 's/a/b/' .craftsman/o""ff`,
+      `sudo touch .craftsman/o""ff`, `echo x | tee .craftsman/o""ff`,
+      `cd .craftsman && touch off`, `cd .craftsman; echo x > off`, `pushd .craftsman && touch off`, `cd .craftsman/sessions/s1 && tee doc-write`,
+    ];
+    for (const command of blocked) {
+      const r = bashIn(dir, "sw-1", command);
+      assert.equal(r.status, 2, `blocked: ${command} (${r.stderr})`);
+    }
+    const allowed = [
+      "ls .craftsman", "cat .craftsman/off", "touch notes.txt", "cd src && touch a.txt", "cd src; echo x > a.txt", "cp x src/y",
+      "tee src/log.txt", "sed -i s/a/b/ src/a.txt", "ln -s src/a src/b", "dd if=/dev/null of=src/a.bin", "mkdir -p src/deep/er",
+      "cd .craftsman && ls", "cd .craftsman && cat off",
+    ];
+    for (const command of allowed) {
+      const r = bashIn(dir, "sw-1", command);
+      assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -338,6 +338,9 @@ const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|ev
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
+// Writers beyond the removal words; only the self-protection scan (removedDocs `writes`) reads them as write targets.
+const WRITE_VERBS = new Set(["touch", "tee", "cp", "ln", "install", "mkdir", "dd", "sed", "perl"]);
+const WRITE_TEXT = /\b(?:touch|tee|cp|ln|install|mkdir|dd|sed|perl|mv|truncate)\b/;
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const SAFE_HEADS = new Set(["echo", "printf", "grep", "egrep", "fgrep"]);
 const DECLARERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
@@ -455,7 +458,7 @@ function tokenize(text, fail) {
   return cmds;
 }
 
-function removedDocs(cmd, docPaths) {
+function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const hits = [];
   const unsafe = (why) => { hits.push("(command the parser cannot prove safe: " + why + ")"); };
   // The gate reads the text with its quotes and backslashes removed as well as the
@@ -476,7 +479,8 @@ function removedDocs(cmd, docPaths) {
     };
     return walk(cmd, 0);
   };
-  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare) && !redirectsOntoDocs()) return hits;
+  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
+      && !(writes && WRITE_TEXT.test(bare)) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
   // One removal target, resolved from every directory the command may run in.
@@ -507,6 +511,35 @@ function removedDocs(cmd, docPaths) {
     }
     return out;
   };
+  // The files a writer other than a removal word writes (self-protection scan only): the words are already
+  // de-quoted, so `o""ff` is `off`, and the working directories come from the `cd` tracking above.
+  function writeTargets(verb, rest, st, env) {
+    const args = targetsOf(rest);
+    let files = [];
+    if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
+    else if (verb === "ln") {
+      files = args;
+      // A link into the state directory would let a later Write reach it under another name.
+      for (const a of args) for (const cwd of st.cwds || []) {
+        const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
+        if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
+      }
+    } else if (verb === "cp" || verb === "install") {
+      const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
+      const dir = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
+      files = dir !== undefined ? [dir] : args.slice(-1);
+    } else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
+    else if (verb === "sed" || verb === "perl") {
+      if (!rest.some((a) => /^-[A-Za-z]*i/.test(a))) return; // without -i neither writes a named file
+      let script = false;
+      const operands = [];
+      for (let i = 0; i < rest.length; i++) {
+        if (/^-[A-Za-z]*[ef]$/.test(rest[i])) { script = true; i++; } else if (!rest[i].startsWith("-")) operands.push(rest[i]);
+      }
+      files = script ? operands : operands.slice(1);
+    }
+    for (const f of files) if (f && f !== "-") target(f, st, verb, env);
+  }
   const noteRemoval = (verb, rest, env) => {
     if (!env.exec) return;
     env.exec.removal = true;
@@ -605,7 +638,7 @@ function removedDocs(cmd, docPaths) {
   function dispatch(words, c, prev, st, depth, env) {
     for (let i = 0; i < words.length; i++) {
       const w = words[i], b = path.basename(w), afterOption = i > 0 && words[i - 1].startsWith("-");
-      if (CANDIDATES.has(b)) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
+      if (CANDIDATES.has(b) || (writes && WRITE_VERBS.has(b))) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
       if (WRAPPERS.has(b) || w.startsWith("-") || ASSIGNMENT.test(w) || afterOption || /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
       const args = words.slice(i + 1);
       const safe = SAFE_HEADS.has(b) || (b === "node" && args.length > 0 && /(?:^|\/)scripts\/[\w.-]+\.mjs$/.test(args[0]));
@@ -621,7 +654,8 @@ function removedDocs(cmd, docPaths) {
       noteRemoval(verb, rest, env);
       if (env.unseen) return unsafe(verb + " with input the parser cannot see");
       for (const t of targetsOf(rest)) target(t, st, verb, env);
-    } else if (verb === "git") git(rest, st, env);
+    } else if (writes && WRITE_VERBS.has(verb)) writeTargets(verb, rest, st, env);
+    else if (verb === "git") git(rest, st, env);
     else if (verb === "find") find(rest, st, depth);
     else if (verb === "xargs") {
       let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += XARGS_ARG.has(rest[i]) ? 2 : 1;
@@ -1047,12 +1081,13 @@ if (tool === "Bash" && command) {
   const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate|mkdir)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
   const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json|goal-tokens\.json|\/scope[\w.-]*|[\w.-]*worktree-binding)/.test(command);
   const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
-  const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)])
+  const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true })
     .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
   // A link into the state directory would let a later Write reach it under another name.
   if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
+    if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
     const kind = selfKind(hit);
     if (kind === "never") denySelfDisable(`a command that writes ${hit}`);
     if (kind === "scoped" && !scopeNames(hit)) denySelfDisable(`a command that writes ${hit}`);
