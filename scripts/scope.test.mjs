@@ -175,7 +175,8 @@ test("scope.mjs: a manifest that names hooks.json or craftsman.config.json needs
     const manifest = (write) => JSON.stringify({ session_id: "scope-self", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: [], docs: [], write } });
     const activate = (write) => spawnSync(process.execPath, [scopeScript], { cwd: dir, input: manifest(write), encoding: "utf8", env });
     assert.match(activate(["a.txt"]).stdout, /scope active/, "an ordinary manifest needs nothing");
-    for (const write of [["hooks/hooks.json"], ["craftsman.config.json"], ["hooks/*.json"], ["**"]]) {
+    for (const write of [["hooks/hooks.json"], ["craftsman.config.json"], ["hooks/*.json"], ["**"],
+      [".claude/settings.json"], [".claude/settings.local.json"], [".claude/**"], [".claude/*"], ["*.json"], [".claude"], ["./.claude/settings.json"]]) {
       const refused = activate(write);
       assert.equal(refused.status, 2, JSON.stringify(write));
       assert.match(refused.stderr, /only a unit run by \/orchestrate or \/auto/);

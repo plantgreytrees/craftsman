@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
+import { SELF_SCOPED } from "./lib/self-protect.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -1019,7 +1020,6 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 const SELF_NEVER = [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
   // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*"];
-const SELF_SCOPED = ["hooks/hooks.json", "craftsman.config.json", ".claude/settings.json", ".claude/settings.local.json"];
 const SAFETY_CONFIG_KEYS = ["safety", "stopGate"];
 const selfKind = (relPath) => {
   const r = String(relPath).replace(/^\.\//, "");
