@@ -1406,3 +1406,37 @@ test("pre-guard: a symlinked directory into .craftsman cannot forge a goal token
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("pre-guard: every doc-write or toggle invocation is gated, with node options and several calls (self-protection)", () => {
+  const dir = selfDisableProject();
+  try {
+    const plugin = 'node --no-warnings "${CLAUDE_PLUGIN_ROOT}/scripts/';
+    const grants = [
+      "node scripts/doc-write.mjs off; node scripts/doc-write.mjs on", "node scripts/doc-write.mjs off && node scripts/doc-write.mjs",
+      "node -- scripts/doc-write.mjs on", `${plugin}doc-write.mjs"`, "node --no-warnings scripts/doc-write.mjs on",
+      "node -r ./x.js scripts/doc-write.mjs on", "node --input-type=module scripts/doc-write.mjs on",
+    ];
+    const offs = [
+      "node --no-warnings scripts/toggle.mjs off", "node scripts/toggle.mjs on; node scripts/toggle.mjs off", `${plugin}toggle.mjs" off`,
+      "node -- scripts/toggle.mjs",
+    ];
+    for (const command of [...grants, ...offs]) {
+      const r = bashIn(dir, "sg-1", command);
+      assert.equal(r.status, 2, `blocked: ${command} (${r.stderr})`);
+    }
+    for (const command of ["node --check scripts/toggle.mjs", "node --check scripts/doc-write.mjs", "node scripts/doc-write.mjs off",
+      "node --no-warnings scripts/doc-write.mjs off", "node scripts/toggle.mjs on", "node scripts/doc-write.mjs off; node scripts/toggle.mjs on"]) {
+      const r = bashIn(dir, "sg-1", command);
+      assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+    }
+    // The owning command opens exactly its own gate.
+    assert.equal(typed(dir, "sg-2", "/craftsman:plan add a feature").status, 0);
+    for (const command of grants) assert.equal(bashIn(dir, "sg-2", command).status, 0, `after /plan: ${command}`);
+    for (const command of offs) assert.equal(bashIn(dir, "sg-2", command).status, 2, `a plan run is not a toggle: ${command}`);
+    assert.equal(typed(dir, "sg-3", "/craftsman:toggle off").status, 0);
+    for (const command of offs) assert.equal(bashIn(dir, "sg-3", command).status, 0, `after /toggle: ${command}`);
+    for (const command of grants) assert.equal(bashIn(dir, "sg-3", command).status, 2, `a toggle run is not a doc writer: ${command}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

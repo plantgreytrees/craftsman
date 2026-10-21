@@ -1016,13 +1016,14 @@ if (tool === "Bash" && command) {
   }
   if (verb) for (const name of scopedMentioned) if (!scopeNames(name)) denySelfDisable(`a command that writes ${name}`);
   // The scripts that grant doc authority or flip the gates run only after the command that owns them.
-  const script = (name) => new RegExp(`\\bnode\\s+["']?[^\\s;&|"']*\\b${name}\\.mjs["']?(?:\\s+([^\\s;&|)]*))?`).exec(command);
-  const grant = script("doc-write");
-  if (grant && grant[1] !== "off" && !commandInvoked(sidOf(input), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
+  // Every `node … <name>.mjs` invocation counts, whatever node options precede it; `node --check` only parses.
+  const invocations = (name) => [...command.matchAll(new RegExp(`\\bnode\\b([^;&|\\n]*?)["']?[^\\s;&|"']*\\b${name}\\.mjs["']?(?:[ \\t]+([^\\s;&|)]*))?`, "g"))]
+    .filter((m) => !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]))
+    .map((m) => (m[2] || "").replace(/^["']|["']$/g, ""));
+  if (invocations("doc-write").some((arg) => arg !== "off") && !commandInvoked(sidOf(input), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
     denySelfDisable("doc-write.mjs on outside /plan, /orchestrate, /sync-docs, /idea, /architect or /builtin-check");
   }
-  const toggle = script("toggle");
-  if (toggle && toggle[1] !== "on" && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
+  if (invocations("toggle").some((arg) => arg !== "on") && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
     denySelfDisable("toggle.mjs off unless the user typed /craftsman:toggle");
   }
 }
