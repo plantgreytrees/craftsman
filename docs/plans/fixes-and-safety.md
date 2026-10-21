@@ -333,177 +333,178 @@ Every step: task N.0 first, red-before-green. Run the new tests against `origin/
 
 ### Step 1 — eslint-json (., javascript, normal)
 Depends on: none
-- [ ] 1.0 Write failing tests first and record the red run → accept: the cases in 1.1-1.3 fail on origin/main
-- [ ] 1.1 `craftsman.config.json:163,168` use `eslint --no-color --format json {file}`; add `parseEslintJson` in `scripts/lib/core.mjs` beside `extractSig` that turns the JSON into the same `path:line:col: message [Error/rule]` lines the baseline already keys on → accept: core.test: a fixture JSON gives lines whose `extractSig` is the rule id; baseline new-issues-only result is identical to the old unix-format fixture
-- [ ] 1.2 A tool crash, unparseable output, or exit code 2 is "tool unavailable": skipped, never findings; report once per session and cache the failure for the session (`quality-gate.mjs`) → accept: core.test and a quality-gate spawn test: crash twice, one notice, zero findings, no block
-- [ ] 1.3 Update `core.test.mjs:132-137` to the JSON path → accept: the unix-format assertions are gone and the suite is green
-- [ ] 1.4 Full CI set, commit `fix(quality): eslint 9 json format, tool crash is unavailable` → accept: all green
+- [x] 1.0 Write failing tests first and record the red run → accept: the cases in 1.1-1.3 fail on origin/main
+- [x] 1.1 `craftsman.config.json:163,168` use `eslint --no-color --format json {file}`; add `parseEslintJson` in `scripts/lib/core.mjs` beside `extractSig` that turns the JSON into the same `path:line:col: message [Error/rule]` lines the baseline already keys on → accept: core.test: a fixture JSON gives lines whose `extractSig` is the rule id; baseline new-issues-only result is identical to the old unix-format fixture
+- [x] 1.2 A tool crash, unparseable output, or exit code 2 is "tool unavailable": skipped, never findings; report once per session and cache the failure for the session (`quality-gate.mjs`) → accept: core.test and a quality-gate spawn test: crash twice, one notice, zero findings, no block
+- [x] 1.3 Update `core.test.mjs:132-137` to the JSON path → accept: the unix-format assertions are gone and the suite is green
+- [x] 1.4 Full CI set, commit `fix(quality): eslint 9 json format, tool crash is unavailable` → accept: all green
 
 ### Step 2 — ci-home-test (., javascript, normal)
 Depends on: none
-- [ ] 2.0 Reproduce the Linux failure: run `pre-guard.test.mjs` with the temp dir outside `$HOME` → accept: the `rm -rf ~` case fails on origin/main
-- [ ] 2.1 The `rm -rf ~` and `$HOME` cases (`pre-guard.test.mjs:~605`) spawn with `HOME` and `USERPROFILE` set to a mkdtemp dir and assert the env they passed → accept: passes with TMPDIR inside and outside the real `$HOME`; asserts HOME !== real home
-- [ ] 2.2 Full CI set, commit `test(pre-guard): pin HOME for rm ~ cases`
+- [x] 2.0 Reproduce the Linux failure: run `pre-guard.test.mjs` with the temp dir outside `$HOME` → accept: the `rm -rf ~` case fails on origin/main
+- [x] 2.1 The `rm -rf ~` and `$HOME` cases (`pre-guard.test.mjs:~605`) spawn with `HOME` and `USERPROFILE` set to a mkdtemp dir and assert the env they passed → accept: passes with TMPDIR inside and outside the real `$HOME`; asserts HOME !== real home
+- [x] 2.2 Full CI set, commit `test(pre-guard): pin HOME for rm ~ cases`
 
 ### Step 3 — stop-gate-gated (., javascript, normal)
 Depends on: none
-- [ ] 3.0 Failing tests first → accept: recorded red
-- [ ] 3.1 `quality-gate.mjs:53` writes the `dirty` marker only when `detectLang(file)` is a language with a check or a test mapping and the file is not ignored; the acceptance-file short circuit stays → accept: stop-gate.test: a turn that edits only `docs/x.md` leaves no `dirty`, the stop gate runs no test command; a `.mjs` edit still sets it and runs tests
-- [ ] 3.2 Full CI set, commit `fix(stop-gate): docs-only turns do not rerun the suite`
+- [x] 3.0 Failing tests first → accept: recorded red
+- [x] 3.1 `quality-gate.mjs:53` writes the `dirty` marker only when `detectLang(file)` is a language with a check or a test mapping and the file is not ignored; the acceptance-file short circuit stays → accept: stop-gate.test: a turn that edits only `docs/x.md` leaves no `dirty`, the stop gate runs no test command; a `.mjs` edit still sets it and runs tests
+- [x] 3.2 Full CI set, commit `fix(stop-gate): docs-only turns do not rerun the suite`
 
 ### Step 4 — tool-names (., json, normal)
 Depends on: ci-home-test
-- [ ] 4.0 Failing tests first: a wiring test that every `hooks.json` matcher token and every `allowed-tools` entry is in the verified current list → accept: red on origin/main for MultiEdit, SlashCommand, TodoWrite
-- [ ] 4.1 `hooks/hooks.json`: drop `MultiEdit`; PostToolUse `SlashCommand|Skill` becomes `Skill`; update the `ARCH-STATE-05` cite → accept: wiring.test; `arch-check.mjs lint`
-- [ ] 4.2 `pre-guard.mjs` and `orchestrate-scope-guard.mjs` drop MultiEdit/SlashCommand branches only where they are dead; keep reading a `tool_input.command` for the Skill shape → accept: orchestrate-scope-guard.test sends the `Skill` payload and still arms the guard
-- [ ] 4.3 Every `allowed-tools` list: `SlashCommand` removed (a `/plan` delegation uses `Skill`); `TodoWrite` becomes `TaskCreate, TaskUpdate` (TodoWrite is off by default; `CLAUDE_CODE_ENABLE_TASKS=0` re-enables it) → accept: wiring.test lists none of the dead names; `claude plugin validate .`
-- [ ] 4.3b The same swap in orchestrate.md, idea.md, _scrutinise-deep.md, sync-docs.md, scrutinise.md, tracker-sync.mjs (tool-name list) and docs/builtins.md → accept: grep for MultiEdit, SlashCommand and TodoWrite finds none outside docs/ideas, docs/plans and CHANGELOG
-- [ ] 4.4 Prose that tells the model to use "SlashCommand tool" in `understand.md`, `investigate.md` is reworded to "Skill tool" without raising any doc cap → accept: `doc-size-policy.mjs`
-- [ ] 4.5 Full CI set, commit `fix(hooks): use current tool names`
+- [x] 4.0 Failing tests first: a wiring test that every `hooks.json` matcher token and every `allowed-tools` entry is in the verified current list → accept: red on origin/main for MultiEdit, SlashCommand, TodoWrite
+- [x] 4.1 `hooks/hooks.json`: drop `MultiEdit`; PostToolUse `SlashCommand|Skill` becomes `Skill`; update the `ARCH-STATE-05` cite → accept: wiring.test; `arch-check.mjs lint`
+- [x] 4.2 `pre-guard.mjs` and `orchestrate-scope-guard.mjs` drop MultiEdit/SlashCommand branches only where they are dead; keep reading a `tool_input.command` for the Skill shape → accept: orchestrate-scope-guard.test sends the `Skill` payload and still arms the guard
+- [x] 4.3 Every `allowed-tools` list: `SlashCommand` removed (a `/plan` delegation uses `Skill`); `TodoWrite` becomes `TaskCreate, TaskUpdate` (TodoWrite is off by default; `CLAUDE_CODE_ENABLE_TASKS=0` re-enables it) → accept: wiring.test lists none of the dead names; `claude plugin validate .`
+- [x] 4.3b The same swap in orchestrate.md, idea.md, _scrutinise-deep.md, sync-docs.md, scrutinise.md, tracker-sync.mjs (tool-name list) and docs/builtins.md → accept: grep for MultiEdit, SlashCommand and TodoWrite finds none outside docs/ideas, docs/plans and CHANGELOG
+- [x] 4.4 Prose that tells the model to use "SlashCommand tool" in `understand.md`, `investigate.md` is reworded to "Skill tool" without raising any doc cap → accept: `doc-size-policy.mjs`
+- [x] 4.5 Full CI set, commit `fix(hooks): use current tool names`
 
 ### Step 5 — launcher (., shell, high)
 Depends on: tool-names
-- [ ] 5.0 Failing tests first → accept: `scripts/launcher.test.mjs` red (no `run.sh`)
-- [ ] 5.1 `hooks/run.sh <script>`: POSIX sh; if `node` is absent, a safety hook (a fixed list: pre-guard, agent-mode-guard, orchestrate-scope-guard) prints `craftsman: node not found, guards cannot run` to stderr and exits 2; every other hook prints one `craftsman disabled: node not found` warning (once per session via a marker file) and exits 0; otherwise `exec node "$CLAUDE_PLUGIN_ROOT/scripts/<script>"` with stdin forwarded → accept: launcher.test spawns it with a PATH lacking node: safety hooks exit 2 with the message, advisory hooks exit 0 with one warning on the first call and none on the second; with node present the stdin JSON reaches the script unchanged
-- [ ] 5.2 Every `hooks.json` command goes through `run.sh` (exec form or `sh`-form, whichever 2.1.306 validates); add `onFailure: "block"` to the pre-guard and agent-mode-guard entries only (no effect on Stop, so not added there) → accept: wiring.test; `claude plugin validate .`; `claude plugin test .`
-- [ ] 5.3 Create `docs/architecture/safety.rules.md` (`governs:` hooks/run.sh, scripts/pre-guard.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/session-context.mjs, scripts/worktree-sweep.mjs, scripts/session-end.mjs) and its human `safety.md`, with ARCH-SAFETY-01 (outside-root writes, deletes and credential reads are delegated to the Claude Code sandbox; craftsman adds no guard for them) and ARCH-SAFETY-02 (safety hooks fail closed: node missing, bad JSON or an exception denies) → accept: `arch-check.mjs lint`; each rule has a check and a live file:line cite
-- [ ] 5.4 Windows: launcher.test skips the PATH-less case with a notice on `win32`; CI still runs it on Linux and macOS → accept: test file shows the skip reason
-- [ ] 5.5 Full CI set, commit `feat(hooks): run.sh launcher, node-missing is loud`
+- [x] 5.0 Failing tests first → accept: `scripts/launcher.test.mjs` red (no `run.sh`)
+- [x] 5.1 `hooks/run.sh <script>`: POSIX sh; if `node` is absent, a safety hook (a fixed list: pre-guard, agent-mode-guard, orchestrate-scope-guard) prints `craftsman: node not found, guards cannot run` to stderr and exits 2; every other hook prints one `craftsman disabled: node not found` warning (once per session via a marker file) and exits 0; otherwise `exec node "$CLAUDE_PLUGIN_ROOT/scripts/<script>"` with stdin forwarded → accept: launcher.test spawns it with a PATH lacking node: safety hooks exit 2 with the message, advisory hooks exit 0 with one warning on the first call and none on the second; with node present the stdin JSON reaches the script unchanged
+- [x] 5.2 Every `hooks.json` command goes through `run.sh` (exec form or `sh`-form, whichever 2.1.306 validates); add `onFailure: "block"` to the pre-guard and agent-mode-guard entries only (no effect on Stop, so not added there) → accept: wiring.test; `claude plugin validate .`; `claude plugin test .`
+- [x] 5.3 Create `docs/architecture/safety.rules.md` (`governs:` hooks/run.sh, scripts/pre-guard.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/session-context.mjs, scripts/worktree-sweep.mjs, scripts/session-end.mjs) and its human `safety.md`, with ARCH-SAFETY-01 (outside-root writes, deletes and credential reads are delegated to the Claude Code sandbox; craftsman adds no guard for them) and ARCH-SAFETY-02 (safety hooks fail closed: node missing, bad JSON or an exception denies) → accept: `arch-check.mjs lint`; each rule has a check and a live file:line cite
+- [x] 5.4 Windows: launcher.test skips the PATH-less case with a notice on `win32`; CI still runs it on Linux and macOS → accept: test file shows the skip reason
+- [x] 5.5 Full CI set, commit `feat(hooks): run.sh launcher, node-missing is loud`
 
 ### Step 6 — failclosed-guards (., javascript, high)
 Depends on: launcher
-- [ ] 6.0 Failing tests first → accept: red
-- [ ] 6.1 `pre-guard.mjs:21`, `agent-mode-guard.mjs:57`, `orchestrate-scope-guard.mjs:73`: bad JSON on stdin denies (exit 2 and a reason), as does any exception thrown inside the safety path (wrap the main body once) → accept: each guard spawned with `not json`, empty stdin and a forced throw (env hook used only by the test) exits 2 and names the guard; the existing DESTRUCTIVE/ALLOWED tables are unchanged and green
-- [ ] 6.2 The projectContext() call is wrapped (plugin-overhaul Slice A): a throw there denies in a git project and is reported once, not silently off → accept: test with an unreadable `craftsman.config.json`
-- [ ] 6.3 ARCH-SAFETY-03 (fail closed in process, onFailure block recorded as a defence in depth needing 2.1.295+) → accept: `arch-check.mjs lint`
-- [ ] 6.4 Full CI set, commit `fix(guards): bad input or exception denies`
+- [x] 6.0 Failing tests first → accept: red
+- [x] 6.1 `pre-guard.mjs:21`, `agent-mode-guard.mjs:57`, `orchestrate-scope-guard.mjs:73`: bad JSON on stdin denies (exit 2 and a reason), as does any exception thrown inside the safety path (wrap the main body once) → accept: each guard spawned with `not json`, empty stdin and a forced throw (env hook used only by the test) exits 2 and names the guard; the existing DESTRUCTIVE/ALLOWED tables are unchanged and green
+- [x] 6.2 The projectContext() call is wrapped (plugin-overhaul Slice A): a throw there denies in a git project and is reported once, not silently off → accept: test with an unreadable `craftsman.config.json`
+- [x] 6.3 ARCH-SAFETY-03 (fail closed in process, onFailure block recorded as a defence in depth needing 2.1.295+) → accept: `arch-check.mjs lint`
+- [x] 6.4 Full CI set, commit `fix(guards): bad input or exception denies`
 
 ### Step 7 — loud-advisory (., javascript, normal)
 Depends on: launcher
-- [ ] 7.0 Failing tests first → accept: red
-- [ ] 7.1 `quality-gate.mjs:18`, `stop-gate.mjs:19`, `builtin-skill-context.mjs:19` keep failing open but write one visible `craftsman: <hook> skipped (bad input), advisory only` per session (marker file in session state) → accept: tests: bad JSON twice gives exit 0 and exactly one notice
-- [ ] 7.2 SessionStart reports the state once: guards on, or off and why (node missing seen by the launcher marker, `enabled:false`, `CRAFTSMAN_SAFETY=off`, not anchored) → accept: session-context.test covers each reason string
-- [ ] 7.3 ARCH-SAFETY-04 (advisory hooks fail open but never silently) → accept: lint
-- [ ] 7.4 Full CI set, commit `feat(hooks): advisory failures and guard state are visible`
+- [x] 7.0 Failing tests first → accept: red
+- [x] 7.1 `quality-gate.mjs:18`, `stop-gate.mjs:19`, `builtin-skill-context.mjs:19` keep failing open but write one visible `craftsman: <hook> skipped (bad input), advisory only` per session (marker file in session state) → accept: tests: bad JSON twice gives exit 0 and exactly one notice
+- [x] 7.2 SessionStart reports the state once: guards on, or off and why (node missing seen by the launcher marker, `enabled:false`, `CRAFTSMAN_SAFETY=off`, not anchored) → accept: session-context.test covers each reason string
+- [x] 7.3 ARCH-SAFETY-04 (advisory hooks fail open but never silently) → accept: lint
+- [x] 7.4 Full CI set, commit `feat(hooks): advisory failures and guard state are visible`
 
 ### Step 8 — self-disable (., javascript, high)
 Depends on: failclosed-guards, eslint-json, loud-advisory
-- [ ] 8.0 Failing tests first, in the DESTRUCTIVE/ALLOWED style → accept: red
-- [ ] 8.1 pre-guard denies Bash/Write/Edit that creates `.craftsman/off`, edits the safety keys in `craftsman.config.json` (the new `safety` block and `stopGate`), edits `hooks/hooks.json`, or runs `toggle.mjs off` or `doc-write.mjs on`, unless the command comes from a craftsman command that legitimately holds the grant. Find the existing grant path first (`hasDocWriteGrant`, the toggle command) and keep it working → accept: table: each form blocked; `/craftsman:toggle` and `/plan`'s grant call still pass; no new shell parsing, token match only
-- [ ] 8.2 `enabled()` (`core.mjs:575`) is split: the quality/doc side keeps `CRAFTSMAN=off` and `.craftsman/off`; a new `safetyEnabled()` ignores both and is false only when `CRAFTSMAN_SAFETY=off` is in the environment; SessionStart reports that case → accept: core.test and pre-guard.test: `CRAFTSMAN=off` and a `.craftsman/off` file leave pre-guard blocking; `CRAFTSMAN_SAFETY=off` lets the call through (the SessionStart line for it is step 7.2, asserted here via its reason string)
-- [ ] 8.3 ARCH-SAFETY-05 (only `CRAFTSMAN_SAFETY=off` from the user's environment disables safety) → accept: lint
-- [ ] 8.4 Full CI set, commit `feat(guard): the model cannot disable safety`
+- [x] 8.0 Failing tests first, in the DESTRUCTIVE/ALLOWED style → accept: red
+- [x] 8.1 pre-guard denies Bash/Write/Edit that creates `.craftsman/off`, edits the safety keys in `craftsman.config.json` (the new `safety` block and `stopGate`), edits `hooks/hooks.json`, or runs `toggle.mjs off` or `doc-write.mjs on`, unless the command comes from a craftsman command that legitimately holds the grant. Find the existing grant path first (`hasDocWriteGrant`, the toggle command) and keep it working → accept: table: each form blocked; `/craftsman:toggle` and `/plan`'s grant call still pass; no new shell parsing, token match only
+- [x] 8.2 `enabled()` (`core.mjs:575`) is split: the quality/doc side keeps `CRAFTSMAN=off` and `.craftsman/off`; a new `safetyEnabled()` ignores both and is false only when `CRAFTSMAN_SAFETY=off` is in the environment; SessionStart reports that case → accept: core.test and pre-guard.test: `CRAFTSMAN=off` and a `.craftsman/off` file leave pre-guard blocking; `CRAFTSMAN_SAFETY=off` lets the call through (the SessionStart line for it is step 7.2, asserted here via its reason string)
+- [x] 8.3 ARCH-SAFETY-05 (only `CRAFTSMAN_SAFETY=off` from the user's environment disables safety) → accept: lint
+- [x] 8.4 Full CI set, commit `feat(guard): the model cannot disable safety`
 
 ### Step 9 — unpushed-report (., javascript, normal)
 Depends on: stop-gate-gated, launcher
-- [ ] 9.0 Failing tests first against mkdtemp repos with a bare remote → accept: red
-- [ ] 9.1 `scripts/lib/unpushed.mjs`: for the main checkout and every worktree, report uncommitted changes, stashes, branches ahead of upstream, branches with no upstream, and detached commits → accept: unit tests build each situation in a temp repo and assert the report lines; no network access (local refs only)
-- [ ] 9.2 `stop-gate.mjs` appends the report as a `systemMessage`; blocks only when `stopGate.blockOnUnpushed` is true (default false in `craftsman.config.json`) → accept: stop-gate.test both modes
-- [ ] 9.3 New `scripts/session-end.mjs` and a SessionEnd entry (no matcher, `timeout` 20) print the report and the existing hand-off to stderr, which the docs say the user sees; test empirically whether `systemMessage` also shows with `claude plugin test .` and record the result in `safety.md`. No SubagentStop (ARCH-STATE-07) → accept: session-end.test; wiring.test asserts no SubagentStop
-- [ ] 9.4 ARCH-SAFETY-06 (Stop and SessionEnd report unpushed work in every worktree) → accept: lint
-- [ ] 9.5 Full CI set, commit `feat(stop): report unpushed work at Stop and SessionEnd`
+- [x] 9.0 Failing tests first against mkdtemp repos with a bare remote → accept: red
+- [x] 9.1 `scripts/lib/unpushed.mjs`: for the main checkout and every worktree, report uncommitted changes, stashes, branches ahead of upstream, branches with no upstream, and detached commits → accept: unit tests build each situation in a temp repo and assert the report lines; no network access (local refs only)
+- [x] 9.2 `stop-gate.mjs` appends the report as a `systemMessage`; blocks only when `stopGate.blockOnUnpushed` is true (default false in `craftsman.config.json`) → accept: stop-gate.test both modes
+- [x] 9.3 New `scripts/session-end.mjs` and a SessionEnd entry (no matcher, `timeout` 20) print the report and the existing hand-off to stderr, which the docs say the user sees; test empirically whether `systemMessage` also shows with `claude plugin test .` and record the result in `safety.md`. No SubagentStop (ARCH-STATE-07) → accept: session-end.test; wiring.test asserts no SubagentStop
+- [x] 9.4 ARCH-SAFETY-06 (Stop and SessionEnd report unpushed work in every worktree) → accept: lint
+- [x] 9.5 Full CI set, commit `feat(stop): report unpushed work at Stop and SessionEnd`
 
 ### Step 10 — sweep-safety (., javascript, high)
 Depends on: launcher
-- [ ] 10.0 Failing tests first → accept: red
-- [ ] 10.1 `baseRefs` (`worktree-sweep.mjs:43-48`) returns only remote-tracking refs (`origin/<head>`), never local `main`/`master`; a branch merged only into local main is kept; with no remote ref nothing is "merged" → accept: test: branch merged to local main but not origin/main is not swept
-- [ ] 10.2 Skip any worktree with ignored files other than disposable ones; new key `worktrees.disposable` defaults to the build dirs already in `ignore` (node_modules, dist, build, target, coverage, caches) → accept: test: a worktree holding an ignored `.env` or `data/local.db` is skipped with a reason; a worktree with only `node_modules` is swept
-- [ ] 10.3 Before every `branch -D` (`:144-146`) append `{branch, sha, reason, time}` to `.craftsman/sweep-log.jsonl`; if the append fails the branch is not deleted → accept: test: log line exists with the pre-delete sha, and `git branch <name> <sha>` restores it; unwritable log keeps the branch
-- [ ] 10.4 `.claude/worktrees/*` is never swept unless `worktrees.sweepClaudeWorktrees` is true (default false) → accept: test both values
-- [ ] 10.5 ARCH-SAFETY-07 (the sweep is evidence-based and reversible) → accept: lint
-- [ ] 10.6 Full CI set, commit `fix(sweep): remote-merged only, keep local data, log deletions`
+- [x] 10.0 Failing tests first → accept: red
+- [x] 10.1 `baseRefs` (`worktree-sweep.mjs:43-48`) returns only remote-tracking refs (`origin/<head>`), never local `main`/`master`; a branch merged only into local main is kept; with no remote ref nothing is "merged" → accept: test: branch merged to local main but not origin/main is not swept
+- [x] 10.2 Skip any worktree with ignored files other than disposable ones; new key `worktrees.disposable` defaults to the build dirs already in `ignore` (node_modules, dist, build, target, coverage, caches) → accept: test: a worktree holding an ignored `.env` or `data/local.db` is skipped with a reason; a worktree with only `node_modules` is swept
+- [x] 10.3 Before every `branch -D` (`:144-146`) append `{branch, sha, reason, time}` to `.craftsman/sweep-log.jsonl`; if the append fails the branch is not deleted → accept: test: log line exists with the pre-delete sha, and `git branch <name> <sha>` restores it; unwritable log keeps the branch
+- [x] 10.4 `.claude/worktrees/*` is never swept unless `worktrees.sweepClaudeWorktrees` is true (default false) → accept: test both values
+- [x] 10.5 ARCH-SAFETY-07 (the sweep is evidence-based and reversible) → accept: lint
+- [x] 10.6 Full CI set, commit `fix(sweep): remote-merged only, keep local data, log deletions`
 
 ### Step 11 — outside-git (., javascript, high)
 Depends on: self-disable
-- [ ] 11.0 Failing tests first, including a precedence test (safety check runs before the unanchored return) → accept: red
-- [ ] 11.1 When the session starts outside a git repo (`core.mjs:575-581`) the protected-path and fail-closed checks stay active; only quality, doc and tracker machinery returns off → accept: pre-guard.test from a non-git mkdtemp dir: a protected-path write and a bad-JSON call still deny; quality-gate and stop-gate stay quiet
-- [ ] 11.2 `session-context` says so in one line → accept: session-context.test
-- [ ] 11.3 ARCH-SAFETY-08 (safety does not depend on git anchoring) → accept: lint
-- [ ] 11.4 Full CI set, commit `fix(guard): safety stays on outside a git repo`
+- [x] 11.0 Failing tests first, including a precedence test (safety check runs before the unanchored return) → accept: red
+- [x] 11.1 When the session starts outside a git repo (`core.mjs:575-581`) the protected-path and fail-closed checks stay active; only quality, doc and tracker machinery returns off → accept: pre-guard.test from a non-git mkdtemp dir: a protected-path write and a bad-JSON call still deny; quality-gate and stop-gate stay quiet
+- [x] 11.2 `session-context` says so in one line → accept: session-context.test
+- [x] 11.3 ARCH-SAFETY-08 (safety does not depend on git anchoring) → accept: lint
+- [x] 11.4 Full CI set, commit `fix(guard): safety stays on outside a git repo`
 
 ### Step 12 — goal-token (., javascript, high)
 Depends on: none
-- [ ] 12.0 Failing tests first → accept: red
-- [ ] 12.1 A craftsman command that writes `.craftsman/instructions/*.goal.txt` (`/instruction`, `/auto`) also records a token in session state through `scripts/goal-token.mjs`; `register.js:94-110` submits only a goal whose name and mtime match a token recorded in this session, otherwise it surfaces the file name and does not submit → accept: register.test.ts and goal-token.test: a goal file written by something else is not submitted and is shown; one written via the token path is submitted
-- [ ] 12.2 ARCH-SAFETY-09 (the mod submits only craftsman-authored goals) and the ARCH-MOD-02 text updated to match → accept: lint
-- [ ] 12.3 Full CI set, commit `fix(mod): submit a goal only if craftsman wrote it this session`
+- [x] 12.0 Failing tests first → accept: red
+- [x] 12.1 A craftsman command that writes `.craftsman/instructions/*.goal.txt` (`/instruction`, `/auto`) also records a token in session state through `scripts/goal-token.mjs`; `register.js:94-110` submits only a goal whose name and mtime match a token recorded in this session, otherwise it surfaces the file name and does not submit → accept: register.test.ts and goal-token.test: a goal file written by something else is not submitted and is shown; one written via the token path is submitted
+- [x] 12.2 ARCH-SAFETY-09 (the mod submits only craftsman-authored goals) and the ARCH-MOD-02 text updated to match → accept: lint
+- [x] 12.3 Full CI set, commit `fix(mod): submit a goal only if craftsman wrote it this session`
 
 ### Step 13 — platform (., javascript, normal)
 Depends on: unpushed-report, loud-advisory
-- [ ] 13.0 Failing tests first → accept: red
-- [ ] 13.1 `/craftsman:init` offers to merge, never overwrite, a block into project `.claude/settings.json` (`sandbox.enabled: true`, ask rules for `rm -r(f)`, `sudo`, `git push --force`, `git reset --hard`, `git clean`), via `scripts/lib/settings-merge.mjs`; shows the diff before writing and writes nothing without a yes → accept: tests: existing keys and arrays are preserved, duplicate rules not added, invalid JSON aborts, a no leaves the file byte-identical
-- [ ] 13.2 SessionStart adds one line when the sandbox is enabled in no settings scope (user, project, local, managed) → accept: session-context.test
-- [ ] 13.3a session-context.mjs records the working-tree status and sha1 of every guarded doc path into session state at start (snapshot.mjs) → accept: session-context.test: snapshot file lists the guarded docs
-- [ ] 13.3 At Stop, compare `git status` and hashes of guarded docs with the session-start snapshot and report changes the guard did not see (informational unless `stopGate.blockOnUnpushed`-style key is added; default report only) → accept: stop-gate.test: an out-of-band edit to a guarded doc is reported
-- [ ] 13.4 ARCH-SAFETY-10 (post-hoc detection reports, it does not replace the guard) → accept: lint
-- [ ] 13.5 Full CI set, commit `feat(init): sandbox settings merge, sandbox notice, post-hoc doc check`
+- [x] 13.0 Failing tests first → accept: red
+- [x] 13.1 `/craftsman:init` offers to merge, never overwrite, a block into project `.claude/settings.json` (`sandbox.enabled: true`, ask rules for `rm -r(f)`, `sudo`, `git push --force`, `git reset --hard`, `git clean`), via `scripts/lib/settings-merge.mjs`; shows the diff before writing and writes nothing without a yes → accept: tests: existing keys and arrays are preserved, duplicate rules not added, invalid JSON aborts, a no leaves the file byte-identical
+- [x] 13.2 SessionStart adds one line when the sandbox is enabled in no settings scope (user, project, local, managed) → accept: session-context.test
+- [x] 13.3a session-context.mjs records the working-tree status and sha1 of every guarded doc path into session state at start (snapshot.mjs) → accept: session-context.test: snapshot file lists the guarded docs
+- [x] 13.3 At Stop, compare `git status` and hashes of guarded docs with the session-start snapshot and report changes the guard did not see (informational unless `stopGate.blockOnUnpushed`-style key is added; default report only) → accept: stop-gate.test: an out-of-band edit to a guarded doc is reported
+- [x] 13.4 ARCH-SAFETY-10 (post-hoc detection reports, it does not replace the guard) → accept: lint
+- [x] 13.5 Full CI set, commit `feat(init): sandbox settings merge, sandbox notice, post-hoc doc check`
 
 ### Step 14 — guard-filter (., json, high)
 Depends on: launcher, self-disable
-- [ ] 14.0 Failing tests first (timing and parity) → accept: red
-- [ ] 14.1 For `Read|Glob|Grep` the launcher skips node when no unit scope file exists; Write, Edit, NotebookEdit and Bash always run pre-guard. Use hook `if` only if `claude plugin test .` proves it on 2.1.306 and it keeps parity; otherwise the launcher check is the mechanism → accept: parity test: every existing DESTRUCTIVE/ALLOWED case produces the same exit code with and without the filter; a Read with an active scope still hits the scope allow-list
-- [ ] 14.2 Timing test through `run.sh` (not node alone): added work for the filtered path stays under ~20 ms p95 over 200 runs, measured as a delta against a no-op hook; the test prints the numbers and fails above the budget with a generous CI margin noted → accept: test passes locally, number recorded in the commit message
-- [ ] 14.3 ARCH-SAFETY-11 (a filter may skip pre-guard only where it cannot act) → accept: lint
-- [ ] 14.4 Full CI set, commit `perf(guard): skip pre-guard on reads when no scope is active`
+- [x] 14.0 Failing tests first (timing and parity) → accept: red
+- [x] 14.1 For `Read|Glob|Grep` the launcher skips node when no unit scope file exists; Write, Edit, NotebookEdit and Bash always run pre-guard. Use hook `if` only if `claude plugin test .` proves it on 2.1.306 and it keeps parity; otherwise the launcher check is the mechanism → accept: parity test: every existing DESTRUCTIVE/ALLOWED case produces the same exit code with and without the filter; a Read with an active scope still hits the scope allow-list
+- [x] 14.2 Timing test through `run.sh` (not node alone): added work for the filtered path stays under ~20 ms p95 over 200 runs, measured as a delta against a no-op hook; the test prints the numbers and fails above the budget with a generous CI margin noted → accept: test passes locally, number recorded in the commit message
+- [x] 14.3 ARCH-SAFETY-11 (a filter may skip pre-guard only where it cannot act) → accept: lint
+- [x] 14.4 Full CI set, commit `perf(guard): skip pre-guard on reads when no scope is active`
 
 ### Step 15 — bypass-flags (., javascript, high)
 Depends on: self-disable
-- [ ] 15.0 Failing tests first → accept: red
-- [ ] 15.1 The hook-bypass check (`pre-guard.mjs:842`) also blocks `git commit -n`, `git commit -an` and other clustered `-n`, `git -c core.hooksPath=… commit`, and `git -ccore.hooksPath=…`, by token matching on `shell-words.mjs` output, no new parser; existing allowed forms (`git commit -m "…-n…"`, `-F`) stay allowed → accept: table cases blocked/allowed; a command `shell-words` cannot tokenise falls through to the existing text check
-- [ ] 15.2 Full CI set, commit `fix(guard): catch short hook-bypass flags`
+- [x] 15.0 Failing tests first → accept: red
+- [x] 15.1 The hook-bypass check (`pre-guard.mjs:842`) also blocks `git commit -n`, `git commit -an` and other clustered `-n`, `git -c core.hooksPath=… commit`, and `git -ccore.hooksPath=…`, by token matching on `shell-words.mjs` output, no new parser; existing allowed forms (`git commit -m "…-n…"`, `-F`) stay allowed → accept: table cases blocked/allowed; a command `shell-words` cannot tokenise falls through to the existing text check
+- [x] 15.2 Full CI set, commit `fix(guard): catch short hook-bypass flags`
 
 ### Step 16 — invocable-partials (., markdown, normal)
 Depends on: tool-names
-- [ ] 16.0 Failing test first: every `commands/_*.md` has `user-invocable: false` → accept: red
-- [ ] 16.1 Add the key to the nine `_*.md` files, lowering no cap and raising none (each addition is offset by trimming the same file) → accept: `doc-size-policy.mjs`; `claude plugin validate .`; `claude plugin test .` shows the partials absent from the command list, and a command that reads a partial still loads it
-- [ ] 16.2 Full CI set, commit `fix(commands): hide internal partials from the / menu`
+- [x] 16.0 Failing test first: every `commands/_*.md` has `user-invocable: false` → accept: red
+- [x] 16.1 Add the key to the nine `_*.md` files, lowering no cap and raising none (each addition is offset by trimming the same file) → accept: `doc-size-policy.mjs`; `claude plugin validate .`; `claude plugin test .` shows the partials absent from the command list, and a command that reads a partial still loads it
+- [x] 16.2 Full CI set, commit `fix(commands): hide internal partials from the / menu`
 
 ### Step 17 — descriptions (., markdown, normal)
 Depends on: invocable-partials
-- [ ] 17.0 Failing test first: every command and agent `description` is ~80 characters (limit set in `descriptions.test.mjs`) → accept: red
-- [ ] 17.1 Rewrite each description to routing-sentence length; lower the file caps that shrink → accept: `descriptions.test.mjs` and `doc-size-policy.mjs` green; no cap raised
-- [ ] 17.2 Full CI set, commit `docs(commands): shorter descriptions`
+- [x] 17.0 Failing test first: every command and agent `description` is ~80 characters (limit set in `descriptions.test.mjs`) → accept: red
+- [x] 17.1 Rewrite each description to routing-sentence length; lower the file caps that shrink → accept: `descriptions.test.mjs` and `doc-size-policy.mjs` green; no cap raised
+- [x] 17.2 Full CI set, commit `docs(commands): shorter descriptions`
 
 ### Step 18 — instruction-consistency (., markdown, normal)
 Depends on: descriptions, failclosed-guards
-- [ ] 18.0 Failing tests first: no command says "delegate" to an agent the default root-only mode blocks without naming the exception; unit-runner and implementer agree on who commits → accept: red
-- [ ] 18.1 `commands/plan.md` and the shared machinery state one root-only default with the subagent path as the stated alternative; agent dispatch prose appears once → accept: wiring.test greps
-- [ ] 18.2 `unit-runner.md` and `implementer.md`: one rule on committing (the unit-runner commits through repo-exec; the implementer never commits) → accept: test asserts both files
-- [ ] 18.3 The routing criteria currently in three places live in one (`_shared-machinery.md`); the other two point to it → accept: grep finds one copy; no cap raised
-- [ ] 18.4 Full CI set, commit `docs(loop): one root-only instruction story`
+- [x] 18.0 Failing tests first: no command says "delegate" to an agent the default root-only mode blocks without naming the exception; unit-runner and implementer agree on who commits → accept: red
+- [x] 18.1 `commands/plan.md` and the shared machinery state one root-only default with the subagent path as the stated alternative; agent dispatch prose appears once → accept: wiring.test greps
+- [x] 18.2 `unit-runner.md` and `implementer.md`: one rule on committing (the unit-runner commits through repo-exec; the implementer never commits) → accept: test asserts both files
+- [x] 18.3 The routing criteria currently in three places live in one (`_shared-machinery.md`); the other two point to it → accept: grep finds one copy; no cap raised
+- [x] 18.4 Full CI set, commit `docs(loop): one root-only instruction story`
 
 ### Step 23 — ask-via-prompt (., markdown, normal)
 Depends on: instruction-consistency
 Decided by you: questions go through the AskUserQuestion prompt, not prose; enforced by tests plus one shared rule (no Stop-hook heuristic).
-- [ ] 23.0 Failing tests first → accept: red on origin/main
-- [ ] 23.1 One rule in `_shared-machinery.md`: any open decision, confirmation or choice for the user is asked with AskUserQuestion (batched, 2-4 options, recommended first); prose questions are for /auto-style unattended runs only, which PARK per ARCH-ENGINE-07 → accept: grep finds the rule once
-- [ ] 23.2 Every command that asks the user lists `AskUserQuestion` in `allowed-tools` and points at the shared rule: `plan`, `orchestrate`, `merge`, `sync-docs`, `instruction`, `account-switch` (the others already have it) → accept: wiring.test fails for any command whose body asks the user but whose allowed-tools lacks the tool; the six named commands are listed in it
-- [ ] 23.3 Unattended paths keep their contract: /auto and the workflow engine still PARK instead of asking mid-run (ARCH-AUTO-02, ARCH-ENGINE-07) → accept: wiring.test asserts the PARK wording remains in `auto.md` and `_shared-execution.md`
-- [ ] 23.4 No doc cap raised; trim the same files to pay for the added lines → accept: `doc-size-policy.mjs`
-- [ ] 23.5 Full CI set, commit `feat(commands): ask decisions through the prompt, enforced by test`
+- [x] 23.0 Failing tests first → accept: red on origin/main
+- [x] 23.1 One rule in `_shared-machinery.md`: any open decision, confirmation or choice for the user is asked with AskUserQuestion (batched, 2-4 options, recommended first); prose questions are for /auto-style unattended runs only, which PARK per ARCH-ENGINE-07 → accept: grep finds the rule once
+- [x] 23.2 Every command that asks the user lists `AskUserQuestion` in `allowed-tools` and points at the shared rule: `plan`, `orchestrate`, `merge`, `sync-docs`, `instruction`, `account-switch` (the others already have it) → accept: wiring.test fails for any command whose body asks the user but whose allowed-tools lacks the tool; the six named commands are listed in it
+- [x] 23.3 Unattended paths keep their contract: /auto and the workflow engine still PARK instead of asking mid-run (ARCH-AUTO-02, ARCH-ENGINE-07) → accept: wiring.test asserts the PARK wording remains in `auto.md` and `_shared-execution.md`
+- [x] 23.4 No doc cap raised; trim the same files to pay for the added lines → accept: `doc-size-policy.mjs`
+- [x] 23.5 Full CI set, commit `feat(commands): ask decisions through the prompt, enforced by test`
 
 ### Step 19 — release-identity (., json, normal)
 Depends on: instruction-consistency
-- [ ] 19.0 Failing test first: `metadata.release` must equal the newest `## [x.y.z]` heading in CHANGELOG.md → accept: red (2.1.0 vs 2.2.0)
-- [ ] 19.1 CHANGELOG is the source of truth; `metadata.release` is set to match and `changelog.test.mjs` fails on drift; no `version` field added; CONTRIBUTING says the release is derived from the changelog → accept: test green; plugin.json has no `version`
-- [ ] 19.2 Full CI set, commit `fix(release): one release identity`
+- [x] 19.0 Failing test first: `metadata.release` must equal the newest `## [x.y.z]` heading in CHANGELOG.md → accept: red (2.1.0 vs 2.2.0)
+- [x] 19.1 CHANGELOG is the source of truth; `metadata.release` is set to match and `changelog.test.mjs` fails on drift; no `version` field added; CONTRIBUTING says the release is derived from the changelog → accept: test green; plugin.json has no `version`
+- [x] 19.2 Full CI set, commit `fix(release): one release identity`
 
 ### Step 20 — reconcile-24-26 (., markdown, normal)
 Depends on: none
-- [ ] 20.0 Confirm each criterion in `docs/plans/scrutinise-feature-branch-plans.md` Steps 24-26 against code and tests on main (commits 54eb11e, ffba86b, 3c9a10b) → accept: a table of criterion → test name or file:line in the commit message
-- [ ] 20.1 Tick 24.x, 25.x, 26.x that have evidence; tick 24.2 citing the round-14 user acceptance of the six over-blocks; leave unticked, with a note, any criterion without evidence → accept: no tick without a cited test
-- [ ] 20.2 Full CI set, commit `docs(plans): tick merged guard-failclosed steps`
+- [x] 20.0 Confirm each criterion in `docs/plans/scrutinise-feature-branch-plans.md` Steps 24-26 against code and tests on main (commits 54eb11e, ffba86b, 3c9a10b) → accept: a table of criterion → test name or file:line in the commit message
+- [x] 20.1 Tick 24.x, 25.x, 26.x that have evidence; tick 24.2 citing the round-14 user acceptance of the six over-blocks; leave unticked, with a note, any criterion without evidence → accept: no tick without a cited test
+- [x] 20.2 Full CI set, commit `docs(plans): tick merged guard-failclosed steps`
 
 ### Step 21 — docs-final (., markdown, normal)
 Depends on: everything above
-- [ ] 21.0 Check that every new config key from steps 8-13 is in `craftsman.config.json` with a safe default → accept: a test lists the new keys and their defaults
-- [ ] 21.1 README `Safety` section: what is enforced where (sandbox versus craftsman), every new key, `CRAFTSMAN_SAFETY`, the minimum Claude Code versions table from Decision 4, and how to recover a swept branch → accept: docs-curator verifies each cite resolves
-- [ ] 21.2 Finish `safety.rules.md` and `safety.md`; list in `docs/architecture/README.md` → accept: `arch-check.mjs lint`; ARCH-SAFETY-01 through 11 present with check and cite
-- [ ] 21.3 CHANGELOG `[Unreleased]`: one entry per feature area (fix and safety), including the steps 24-26 line; total under 8 KB (ARCH-SLIM-08) → accept: `changelog.test.mjs`
-- [ ] 21.4 Full CI set, commit `docs: safety section, rules and changelog`
+- [x] 21.0 Check that every new config key from steps 8-13 is in `craftsman.config.json` with a safe default → accept: a test lists the new keys and their defaults
+- [x] 21.1 README `Safety` section: what is enforced where (sandbox versus craftsman), every new key, `CRAFTSMAN_SAFETY`, the minimum Claude Code versions table from Decision 4, and how to recover a swept branch → accept: docs-curator verifies each cite resolves
+- [x] 21.2 Finish `safety.rules.md` and `safety.md`; list in `docs/architecture/README.md` → accept: `arch-check.mjs lint`; ARCH-SAFETY-01 through 11 present with check and cite
+- [x] 21.3 CHANGELOG `[Unreleased]`: one entry per feature area (fix and safety), including the steps 24-26 line; total under 8 KB (ARCH-SLIM-08) → accept: `changelog.test.mjs`
+- [x] 21.4 Full CI set, commit `docs: safety section, rules and changelog`
 
 ### Step 22 — pr (., markdown, normal)
 Depends on: docs-final
+Status 2026-10-22: steps 1-21 and 23 are landed (commits 64b4718 to c27533d, then scrutinise round 1 ce003c9 to 5ef1ef9) and ticked on that evidence plus a green CI set on a42888c: 715 tests pass, model-policy, doc-size-policy, `arch-check lint --root <worktree>` (10 docs, 106 rules), `claude plugin validate .` and `claude plugin test .` (10/10) all pass. Overlaying this branch's tests on the old main code (792b8e4) fails 134 tests, which supports the red-first criteria in aggregate; it was not checked case by case. Round 2 of the scrutinise fixes (`scrutinise-fixes-and-safety` steps 11-17) is planned and NOT built: list it in the PR as open follow-up.
 - [ ] 22.1 Push `feat/fixes-and-safety` (never main) and open a PR with a table of item → commit → tests, the minimum-version table, and a list of what is deliberately left out → accept: PR URL recorded
 - [ ] 22.2 PR "Not done" list: outside-root write and delete guard, credential read denial, destructive-git ask outside /auto, interpreter-deletion detection (the sandbox owns them, ARCH-SAFETY-01); the review's restructure (one dispatcher per event, orchestration over /batch, tracker/ARCH/doc guard as an optional add-on) named as the next step → accept: both lists in the PR body
 
