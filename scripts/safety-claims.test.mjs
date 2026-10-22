@@ -153,6 +153,19 @@ test("the kept false positive is real: a read of a protected file next to an unr
   assert.equal(verdictOf(command), 2, "yet the guard refuses it, as safety.md says");
 });
 
+// Round 5 (39.1): the nonce, the SessionStart marker and the config-file list are rule text, so a change to them must change the rule.
+test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
+  const human = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.md"), "utf8");
+  const rule = (id) => rules.split("\n").find((l) => l.includes(`**${id}**`)) || "";
+  for (const needle of ["SessionStart", "safety-off", "permission prompt", "read, printf -v", "every -C"]) {
+    assert.ok(rule("ARCH-SAFETY-05").includes(needle), `ARCH-SAFETY-05 names: ${needle}`);
+  }
+  for (const needle of ["craftsman.project.json", "PROJECT_CONFIG_FILES"]) assert.ok(rule("ARCH-SAFETY-11").includes(needle), `ARCH-SAFETY-11 names: ${needle}`);
+  for (const needle of ["safety-off", "permission prompt"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
+});
+
 test("the rule names every limit this file pins, and safety.md repeats them", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
