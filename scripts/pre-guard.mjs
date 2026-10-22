@@ -191,7 +191,19 @@ function realResolve(cwd, p) {
     if (part === "" || part === ".") continue;
     if (part === "..") { cur = path.dirname(cur); continue; }
     const next = path.join(cur, part);
-    try { cur = fs.realpathSync(next); } catch { cur = next; }
+    try { cur = fs.realpathSync(next); } catch { cur = followDangling(next); }
+  }
+  return cur;
+}
+// A symlink whose target does not exist yet still decides where a write lands (it creates the target), so follow
+// it by hand, one link at a time, up to 40 hops. Anything that is not a dangling link stays as it is.
+function followDangling(p) {
+  let cur = p;
+  for (let hops = 0; hops < 40; hops++) {
+    let target;
+    try { if (!fs.lstatSync(cur).isSymbolicLink()) return cur; target = fs.readlinkSync(cur); } catch { return cur; }
+    const next = path.resolve(path.dirname(cur), target);
+    try { return fs.realpathSync(next); } catch { cur = next; }
   }
   return cur;
 }
@@ -621,7 +633,16 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     let files = [];
     if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
     else if (verb === "ln") {
-      files = placements(rest, st).placed;
+      const { sources, placed } = placements(rest, st);
+      files = placed;
+      // What each link points at is a path a later write can reach under another name, so it is judged like a write to it.
+      sources.forEach((source, i) => {
+        for (const cwd of st.cwds || []) {
+          const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
+          const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
+          target(aimed, { cwds: [cwd] }, "write", env);
+        }
+      });
       // A link into the state directory would let a later Write reach it under another name.
       for (const a of args) for (const cwd of st.cwds || []) {
         const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");

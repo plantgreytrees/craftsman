@@ -1900,3 +1900,33 @@ test("pre-guard: recursive copies, in-place edits, archives and find -delete tha
   ];
   for (const command of allowed) assertAllowed(command);
 });
+
+// Round 4 (27.x): a dangling symlink must not be a way to create a protected file.
+test("pre-guard: a dangling symlink cannot be written through, and ln refuses a link to a protected path (27.1-27.2)", { skip: process.platform === "win32" && "symlinks need privileges" }, () => {
+  const probe = attackProject();
+  try {
+    fs.symlinkSync(".claude/settings.local.json", path.join(probe.dir, "x.json"));
+    assert.equal(fs.existsSync(path.join(probe.dir, ".claude", "settings.local.json")), false, "the link dangles");
+    fs.writeFileSync(path.join(probe.dir, "x.json"), '{"disableAllHooks":true}');
+    assert.equal(fs.existsSync(path.join(probe.dir, ".claude", "settings.local.json")), true, "the attack is real: a Write through the dangling link creates the protected file");
+  } finally { fs.rmSync(probe.dir, { recursive: true, force: true }); fs.rmSync(probe.home, { recursive: true, force: true }); }
+
+  const p = attackProject();
+  try {
+    fs.symlinkSync(".claude/settings.local.json", path.join(p.dir, "x.json"));
+    fs.symlinkSync("x.json", path.join(p.dir, "y.json")); // a chain of two dangling links
+    fs.symlinkSync("src/new.txt", path.join(p.dir, "ok.json"));
+    fs.symlinkSync(".craftsman/off", path.join(p.dir, "z.json"));
+    const write = (rel) => run(GUARD, p.dir, { session_id: "dl", tool_name: "Write", tool_input: { file_path: path.join(p.dir, rel), content: '{"disableAllHooks":true}' } }, { HOME: p.home, USERPROFILE: p.home }).status;
+    assert.equal(write("x.json"), 2, "Write through a dangling link to settings.local.json");
+    assert.equal(write("y.json"), 2, "a chain of dangling links");
+    assert.equal(write("z.json"), 2, "a dangling link to the off flag");
+    assert.equal(write("ok.json"), 0, "a dangling link to an ordinary new file stays writable");
+    const bash = (command) => run(GUARD, p.dir, { session_id: "dl", tool_name: "Bash", tool_input: { command } }, { HOME: p.home, USERPROFILE: p.home }).status;
+    for (const command of [`ln -s .clau""de/settings.local.json w.json`, "ln -s hooks/hooks.json h.json", "ln -s .git/hooks/pre-commit p", "ln -s ../.claude/settings.json src/s.json", "ln hooks/hooks.json hard.json", "ln -s .craftsman/off o.json"]) {
+      assert.equal(bash(command), 2, `blocked: ${command}`);
+      assert.equal(fs.readdirSync(p.dir).filter((n) => ["w.json", "h.json", "p", "hard.json", "o.json"].includes(n)).length, 0, "the guard ran instead of the command");
+    }
+    for (const command of ["ln -s src/a.txt src/b", "ln -s /tmp/craftsman-nowhere out.link", "ln -s a.txt b.txt"]) assert.equal(bash(command), 0, `allowed: ${command}`);
+  } finally { fs.rmSync(p.dir, { recursive: true, force: true }); fs.rmSync(p.home, { recursive: true, force: true }); }
+});
