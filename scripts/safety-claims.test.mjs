@@ -161,11 +161,11 @@ test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
   const human = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.md"), "utf8");
   const rule = (id) => rules.split("\n").find((l) => l.includes(`**${id}**`)) || "";
-  for (const needle of ["SessionStart", "safety-off", "permission prompt", "read, printf -v", "every -C"]) {
+  for (const needle of ["never skipped", "no-op", "permission prompt", "read, printf -v", "allowlist"]) {
     assert.ok(rule("ARCH-SAFETY-05").includes(needle), `ARCH-SAFETY-05 names: ${needle}`);
   }
   for (const needle of ["craftsman.project.json", "PROJECT_CONFIG_FILES"]) assert.ok(rule("ARCH-SAFETY-11").includes(needle), `ARCH-SAFETY-11 names: ${needle}`);
-  for (const needle of ["safety-off", "permission prompt"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
+  for (const needle of ["no-op", "permission prompt", "allowlist"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
 });
 
 // Round 6 (41.x): variable setters the guard does not read stay with the sandbox. A loop variable or a brace-built name sets the
