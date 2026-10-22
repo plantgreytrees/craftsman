@@ -76,7 +76,7 @@ units:
   - id: guard-stats
     scope_id: guard-stats
     project: .
-    depends_on: [guard-narrowing]
+    depends_on: []
     module: scripts/stats.mjs
     language: javascript
     security: normal
@@ -180,7 +180,7 @@ units:
   - id: vendored-skills
     scope_id: vendored-skills
     project: .
-    depends_on: [tdd-step]
+    depends_on: [surface-trim]
     module: skills/*
     language: markdown
     security: normal
@@ -193,7 +193,7 @@ units:
   - id: approval-page
     scope_id: approval-page
     project: .
-    depends_on: [ledger-guard, baseline-metric, tool-slots]
+    depends_on: [ledger-guard, tool-slots]
     module: scripts/lib/approval-page.mjs
     language: javascript
     security: high
@@ -232,7 +232,7 @@ units:
   - id: approval-protocol
     scope_id: approval-protocol
     project: .
-    depends_on: [land-gate, vendored-skills]
+    depends_on: [land-gate, vendored-skills, baseline-metric]
     module: commands/_approval.md
     language: markdown
     security: normal
@@ -308,7 +308,7 @@ Depends on: force-lease
 
 ### Step 5 — guard-stats (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer
-Depends on: guard-narrowing
+Depends on: none (the stats code is tested with sample events, so it does not wait for the PR #1-gated guard unit)
 - [ ] 5.1 Add a blocks-by-reason table and the last-7-days `guard_unparsed` list to `stats.mjs` → accept: `stats.test.mjs` case with sample events passes
 - [ ] 5.2 No new retirement section (ARCH-DOCS-08) → accept: stats output has no new top-level section name beyond the reasons table
 
@@ -363,7 +363,7 @@ Depends on: surface-trim
 
 ### Step 13 — vendored-skills (., markdown, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
-Depends on: tdd-step
+Depends on: surface-trim
 - [ ] 13.1 Write three short SKILL.md files (test-driven-development, systematic-debugging, verification-before-completion), each with a description of at most 110 chars, an MIT attribution line to obra/superpowers and no dependency on it (ARCH-SLIM-11) → accept: `skills-vendored.test.mjs` checks attribution and description length
 - [ ] 13.2 Add each file's `FILE_CAPS` entry at its size → accept: `doc-size-policy` green
 - [ ] 13.3 Trim at least the excess over the 8,500-char description cap from the descriptions of the existing commands and agents in the write list (not underscore docs) → accept: `descriptions.test.mjs` green
@@ -371,7 +371,7 @@ Depends on: tdd-step
 
 ### Step 14 — approval-page (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor, ui-ux-reviewer
-Depends on: ledger-guard, baseline-metric, tool-slots
+Depends on: ledger-guard, tool-slots
 - [ ] 14.1 Add `approval-page.test.mjs` first: a fixture with a `.env` change renders the key name and never the value; sections are changes, attention list, evidence, risk and rollback → accept: red before the lib exists
 - [ ] 14.2 Implement `renderApproval(run)` returning a self-contained HTML page and a Markdown twin, plus `recommend(run)` (Open PR for protected base, security/infra/CI/env/migration/submodule-pointer paths or more than `repoExec.approval.prLines`; else Merge now) → accept: recommendation table test
 - [ ] 14.3 The page declares the db and user capabilities in its config output and offers two buttons; the click writes `approvals/<run> {choice, head_sha}` under an owner-write rule (ARCH-APPROVAL-03) → accept: test inspects the emitted capability config
@@ -394,7 +394,7 @@ Depends on: approval-record, retire-check, docs-budgets
 
 ### Step 17 — approval-protocol (., markdown, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
-Depends on: land-gate, vendored-skills
+Depends on: land-gate, vendored-skills, baseline-metric
 - [ ] 17.1 Write `commands/_approval.md` (underscore shared doc, `disable-model-invocation: true`, description ≤80 chars): how root publishes the page as a private Artifact with the db and user capabilities, watches for the republish, reads the `approvals/<run>` row with ArtifactData, calls `approval.mjs check`, then lands through `repo-exec` (ARCH-APPROVAL-01..07) → accept: `approval-protocol.test.mjs` finds each protocol sentence
 - [ ] 17.2 Wire `commands/auto.md` Phase B to end at the verification point and name `_approval.md`; trade bytes inside `auto.md` and `merge.md` so no cap rises and `INVOCATION_CAPS["auto"]` is unchanged (ARCH-SLIM-02/03) → accept: `doc-size-policy` green
 - [ ] 17.3 `session-context.mjs` prints one line naming approved-but-unlanded runs from `.craftsman/approvals/`; the byte cap from step 6 still holds (ARCH-APPROVAL-05, ARCH-SLIM-10) → accept: `session-context.test.mjs` case plus the cap test
@@ -414,7 +414,7 @@ Depends on: profile-and-release
 - [ ] 19.2 `metadata.release` is not touched here; releases are cut by the owner → accept: `plugin.json` unchanged by this unit
 
 ## Sequencing
-tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition) → vendored-skills (needs byte donors) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists.
+tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
