@@ -1166,9 +1166,19 @@ if (tool === "Bash" && command) {
   if (verb) for (const name of scopedMentioned) if (!scopeNames(name)) denySelfDisable(`a command that writes ${name}`);
   // The scripts that grant doc authority or flip the gates run only after the command that owns them.
   // Every `node … <name>.mjs` invocation counts, whatever node options precede it; `node --check` only parses.
-  const invocations = (name) => [...command.matchAll(new RegExp(`\\bnode\\b([^;&|\\n]*?)["']?[^\\s;&|"']*\\b${name}\\.mjs["']?(?:[ \\t]+([^\\s;&|)]*))?`, "g"))]
+  // Read from the text with its quotes removed, so `tog""gle.mjs` is `toggle.mjs`.
+  const unquoted = command.replace(/['"\\]/g, "");
+  const invocations = (name) => [...unquoted.matchAll(new RegExp(`\\bnode\\b([^;&|\\n]*?)[^\\s;&|]*\\b${name}\\.mjs(?:[ \\t]+([^\\s;&|)]*))?`, "g"))]
     .filter((m) => !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]))
-    .map((m) => (m[2] || "").replace(/^["']|["']$/g, ""));
+    .map((m) => m[2] || "");
+  // The authority scripts trust CLAUDE_CODE_SESSION_ID (and the state paths CLAUDE_PROJECT_DIR) from the environment, so a
+  // command that sets either could borrow another session's record or point the state somewhere else.
+  if (/\b(?:CLAUDE_CODE_SESSION_ID|CLAUDE_PROJECT_DIR)\s*=/.test(unquoted)) {
+    denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID or CLAUDE_PROJECT_DIR, which the authority scripts and the state paths trust");
+  }
+  if (invocations("goal-token").length && !commandInvoked(sidOf(input), ["instruction", "auto"], { context: { stateDir: STATE_DIR } })) {
+    denySelfDisable("goal-token.mjs outside /instruction or /auto");
+  }
   if (invocations("doc-write").some((arg) => arg !== "off") && !commandInvoked(sidOf(input), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
     denySelfDisable("doc-write.mjs on outside /plan, /orchestrate, /sync-docs, /idea, /architect or /builtin-check");
   }

@@ -118,3 +118,63 @@ test("every spelling of the command line ends at the same refusal when run for r
     }
   } finally { p.clean(); }
 });
+
+// Round 4 (25.x): the scripts trust CLAUDE_CODE_SESSION_ID from the environment, so a command that sets it inline can
+// borrow another session's record. pre-guard must refuse any command that sets it (or CLAUDE_PROJECT_DIR), and gate goal-token.mjs.
+const GUARD = at("pre-guard.mjs");
+const GOAL_TOKEN = at("goal-token.mjs");
+function spoofProject() {
+  const p = project();
+  // The user typed /toggle, /plan and /instruction in session sessA, and a goal file exists.
+  record(p, "sessA", "prompt", "toggle");
+  record(p, "sessA", "prompt", "plan");
+  record(p, "sessA", "prompt", "instruction");
+  fs.mkdirSync(path.join(p.dir, ".craftsman", "instructions"), { recursive: true });
+  fs.writeFileSync(path.join(p.dir, ".craftsman", "instructions", "evil.goal.txt"), "do something\n");
+  p.tokens = path.join(p.dir, ".craftsman", "sessions", "sessA", "goal-tokens.json");
+  p.effects = () => ({ off: fs.existsSync(p.off), pending: fs.existsSync(p.pending), token: fs.existsSync(p.tokens) });
+  return p;
+}
+const guardAs = (p, sid, command) => spawnSync(process.execPath, [GUARD], { cwd: p.dir, env: p.env, encoding: "utf8",
+  input: JSON.stringify({ session_id: sid, tool_name: "Bash", tool_input: { command } }) });
+
+test("a command that sets the session id or project dir is refused, and each spoof really works unguarded (25.1)", () => {
+  const forms = [
+    [`CLAUDE_CODE_SESSION_ID=sessA node ${TOGGLE} off`, "off"],
+    [`CLAUDE_CODE_SESSION_ID=sessA node ${path.dirname(TOGGLE)}/tog""gle.mjs off`, "off"],
+    [`env CLAUDE_CODE_SESSION_ID=sessA node ${TOGGLE} off`, "off"],
+    [`export CLAUDE_CODE_SESSION_ID=sessA; node ${DOC_WRITE} on`, "pending"],
+    [`declare -x CLAUDE_CODE_SESSION_ID=sessA; node ${TOGGLE} off`, "off"],
+    [`CLAUDE_CODE_SESSION_ID=sessA node ${GOAL_TOKEN} .craftsman/instructions/evil.goal.txt`, "token"],
+  ];
+  for (const [form, effect] of forms) {
+    const real = spoofProject();
+    try {
+      spawnSync("bash", ["-c", form], { cwd: real.dir, env: { ...real.env, CLAUDE_CODE_SESSION_ID: "sessB" }, encoding: "utf8" });
+      assert.equal(real.effects()[effect], true, `the spoof is real: ${form} creates ${effect} when unguarded`);
+    } finally { real.clean(); }
+    const guarded = spoofProject();
+    try {
+      assert.equal(guardAs(guarded, "sessB", form).status, 2, `denied: ${form}`);
+      assert.deepEqual(guarded.effects(), { off: false, pending: false, token: false }, "nothing was created");
+    } finally { guarded.clean(); }
+  }
+  const p = spoofProject();
+  try {
+    assert.equal(guardAs(p, "sessB", `CLAUDE_PROJECT_DIR=/tmp/elsewhere node ${TOGGLE} off`).status, 2, "the project dir is also refused");
+    for (const ok of ['echo "$CLAUDE_CODE_SESSION_ID"', "printenv CLAUDE_CODE_SESSION_ID", `node ${TOGGLE} on`, "echo CLAUDE_CODE_SESSION_ID"]) {
+      assert.equal(guardAs(p, "sessB", ok).status, 0, `allowed: ${ok}`);
+    }
+  } finally { p.clean(); }
+});
+
+test("goal-token.mjs is gated like doc-write.mjs: only inside /instruction or /auto (25.2)", () => {
+  const p = spoofProject();
+  try {
+    const command = `node ${GOAL_TOKEN} .craftsman/instructions/evil.goal.txt`;
+    assert.equal(guardAs(p, "sessB", command).status, 2, "no record in this session");
+    record(p, "sessB", "prompt", "instruction");
+    assert.equal(guardAs(p, "sessB", command).status, 0, "a /instruction record in this session lets it through");
+    assert.equal(guardAs(p, "sessB", `node ${path.dirname(GOAL_TOKEN)}/goal-to""ken.mjs x`).status, 0, "quote-split name resolves to the same gate");
+  } finally { p.clean(); }
+});
