@@ -38,8 +38,12 @@ Any `BLOCKED` return from implement, review or land → root runs `block` (ARCH-
 2. With a `worktree_path`: commit work as `wip:`, then `S repo-exec` `{action:"cleanup", …}`; name the kept branch in `evidence`.
 3. `S claim` `{action:"release", session_id, plan, unit}`. Return `BLOCKED`.
 
+## Network (ARCH-LAND-19)
+You have no credentials and must never look for any: no `gh auth`, no token, no reading `~/.config/gh`, no `-c credential.helper`. `repo-exec` fetches and pushes only where origin is reachable; here it works from the local `origin/<base>` that root fetched, and queues each push for root (`network_pending:true` in its result → say "push pending" in the MERGED evidence).
+Exit 3 with `{"needs_network":true,"action":{…},"message":…}` is not a failure: change nothing else, record no tracker status, and return `NEEDS_NETWORK` with `network_action` = that `action` as a JSON string (+`worktree_path` if known). Root runs it outside the sandbox and relaunches the run.
+
 ## Features
 Prompt has `feature:` or role `land-feature` → follow `commands/_features.md` (prepare/reattach, land-unit, scope release, publish).
 
 ## Return
-Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED`. Keep `evidence` ≤2k tokens. Never force-push, `--no-verify` or touch files outside the unit.
+Schema JSON only: `{unit, status, evidence, sha?, pr?, worktree_path?, network_action?, network_pending?, findings?[], parked[]}`. `status` is `IMPLEMENTED|APPROVED|CHANGES|MERGED|PARKED|BLOCKED|NEEDS_NETWORK`. Keep `evidence` ≤2k tokens. Never force-push, `--no-verify` or touch files outside the unit.
