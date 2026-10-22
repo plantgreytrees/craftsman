@@ -1901,6 +1901,49 @@ test("pre-guard: recursive copies, in-place edits, archives and find -delete tha
   for (const command of allowed) assertAllowed(command);
 });
 
+// Round 4 (28.x): git reads its hooks path from config it finds through HOME, XDG_CONFIG_HOME and GIT_CONFIG_KEY_n. The routes
+// are first proven real (a failing pre-commit hook is skipped), then the guard must refuse each spelling of them.
+test("pre-guard: HOME, XDG_CONFIG_HOME and quote-split GIT_CONFIG_KEY routes to a model-written git config are refused (28.1-28.2)", { skip: process.platform === "win32" && "needs a POSIX shell and git hooks" }, () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-hookskip-")));
+  try {
+    const repo = path.join(root, "repo");
+    fs.mkdirSync(repo);
+    const gitIn = (args, env = {}) => spawnSync("git", args, { cwd: repo, encoding: "utf8", env: { ...process.env, ...env } });
+    gitIn(["init", "-q"]);
+    gitIn(["config", "--local", "user.name", "t"]); gitIn(["config", "--local", "user.email", "t@example.com"]); gitIn(["config", "--local", "commit.gpgsign", "false"]);
+    fs.writeFileSync(path.join(repo, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const empty = path.join(root, "empty"); fs.mkdirSync(empty);
+    const isolated = { HOME: path.join(root, "iso-home"), XDG_CONFIG_HOME: path.join(root, "iso-xdg") };
+    fs.mkdirSync(isolated.HOME); fs.mkdirSync(isolated.XDG_CONFIG_HOME);
+    const fakeHome = path.join(root, "fakehome"); fs.mkdirSync(fakeHome);
+    fs.writeFileSync(path.join(fakeHome, ".gitconfig"), `[core]\n\thooksPath = ${empty}\n`);
+    const fakeXdg = path.join(root, "fakexdg"); fs.mkdirSync(path.join(fakeXdg, "git"), { recursive: true });
+    fs.writeFileSync(path.join(fakeXdg, "git", "config"), `[core]\n\thooksPath = ${empty}\n`);
+    const commit = (env) => gitIn(["commit", "--allow-empty", "-qm", "x"], { ...isolated, ...env }).status;
+    assert.notEqual(commit({}), 0, "the failing pre-commit hook blocks a normal commit");
+    const works = {
+      HOME: commit({ HOME: fakeHome }) === 0,
+      XDG: commit({ XDG_CONFIG_HOME: fakeXdg }) === 0,
+      KEY: commit({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.hooksPath", GIT_CONFIG_VALUE_0: empty }) === 0,
+    };
+    assert.ok(works.HOME, "the HOME route really skips the hook when run unguarded");
+    const bash = (command) => run(GUARD, repo, { session_id: "hs", tool_name: "Bash", tool_input: { command } }, { HOME: isolated.HOME, USERPROFILE: isolated.HOME }).status;
+    const c = "git commit --allow-empty -qm x";
+    const denied = [
+      `HOME=${fakeHome} ${c}`, `env HOME=${fakeHome} ${c}`, `export HOME=${fakeHome}; ${c}`, `HOME=${fakeHome}; ${c}`, `HOME=${fakeHome} git rebase main`, `HOME=${fakeHome} git push`,
+      `bash -c 'HOME=${fakeHome} ${c}'`, `HOME=${fakeHome} git merge topic`, `HOME=${fakeHome} git am p.patch`,
+    ];
+    if (works.XDG) denied.push(`XDG_CONFIG_HOME=${fakeXdg} ${c}`, `env XDG_CONFIG_HOME=${fakeXdg} git push`);
+    denied.push(`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hoo""ksPath GIT_CONFIG_VALUE_0=${empty} ${c}`, `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=includ""e.path GIT_CONFIG_VALUE_0=/tmp/g ${c}`);
+    for (const command of denied) assert.equal(bash(command), 2, `denied: ${command}`);
+    const allowed = [
+      `HOME=${fakeHome} git status`, `HOME=/dev/null ${c}`, `XDG_CONFIG_HOME=/dev/null ${c}`, 'git commit -m "HOME=x"', "echo HOME=x", "echo $HOME",
+      `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x ${c}`, `HOME=${fakeHome} ls`, c,
+    ];
+    for (const command of allowed) assert.equal(bash(command), 0, `allowed: ${command}`);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // Round 4 (27.x): a dangling symlink must not be a way to create a protected file.
 test("pre-guard: a dangling symlink cannot be written through, and ln refuses a link to a protected path (27.1-27.2)", { skip: process.platform === "win32" && "symlinks need privileges" }, () => {
   const probe = attackProject();

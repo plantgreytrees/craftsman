@@ -1108,6 +1108,7 @@ const SKIP_SUBCOMMANDS = new Set(["commit", "push", "merge", "rebase", "am", "ch
 const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|commit\.gpgsign|include\.path|includeif\.\S*?\.path)/i;
 // A config file git is told to read instead of (or besides) the usual ones can set core.hooksPath without the command
 // naming it. /dev/null (or nothing) reads as an empty file, which sets nothing.
+const HOME_ASSIGN = /^(?:HOME|XDG_CONFIG_HOME)=(?!\/dev\/null$)(?=.)/;
 const CONFIG_FILE_ENV = /\bGIT_CONFIG(?:_GLOBAL|_SYSTEM)?=(?!\/dev\/null(?:[\s"';&|)]|$))(?=\S)/;
 // `include.path` and `includeIf.<condition>.path` pull in another config file (key lowercased).
 const isIncludeKey = (key) => key === "include.path" || /^includeif\..*\.path$/.test(key);
@@ -1131,14 +1132,17 @@ function configBypasses(args) {
 }
 function bypassesHooks(text, depth = 0) {
   if (depth > 3) return true; // nesting this deep is not a commit
-  if (HOOK_ENV.test(text)) return true;
+  // The key text can be quote-split (`core.hoo""ksPath`), so the regex also reads the text with its quotes removed.
+  if (HOOK_ENV.test(text) || HOOK_ENV.test(text.replace(/['"\\]/g, ""))) return true;
   const configFileEnv = CONFIG_FILE_ENV.test(text);
   let segments;
   try { segments = shellSegments(text); } catch { return false; }
+  let homeSet = false; // HOME or XDG_CONFIG_HOME set (exported or assigned) earlier in this command
   for (const words of segments) {
     if (words.includes(UNEXPANDED)) continue;
     const body = shellBody(words);
     if (body !== null && bypassesHooks(body, depth + 1)) return true;
+    if ((words.length && words.every((w) => ASSIGNMENT_WORD.test(w)) || ["export", "declare", "typeset", "readonly"].includes(words[0])) && words.some((w) => HOME_ASSIGN.test(w))) homeSet = true;
     const at = gitWordIndex(words);
     if (at < 0) continue;
     const configs = [];
@@ -1164,6 +1168,8 @@ function bypassesHooks(text, depth = 0) {
     // The subcommands that run commit-msg, pre-commit-style hooks and take the skip flag.
     if (!SKIP_SUBCOMMANDS.has(sub)) continue;
     if (configFileEnv) return true; // GIT_CONFIG[_GLOBAL|_SYSTEM]=<file> with a hook-running subcommand
+    // HOME / XDG_CONFIG_HOME pointing anywhere but /dev/null makes git read a config the command (or an earlier one) can write.
+    if (homeSet || words.slice(0, at).some((w) => HOME_ASSIGN.test(w))) return true;
     for (const config of configs) {
       const eq = config.indexOf("=");
       const key = (eq < 0 ? config : config.slice(0, eq)).toLowerCase();
