@@ -19,7 +19,7 @@ const HOLDS = {
   "ARCH-SAFETY-04": { "scripts/lib/core.mjs": ["advisorySkipped", "guardState"], "scripts/session-context.mjs": ["guardState"] },
   "ARCH-SAFETY-05": {
     "scripts/lib/core.mjs": ["safetyEnabled"],
-    "scripts/pre-guard.mjs": ["selfKind", "denySelfDisable", "heldNever", "safetyKeysChanged", "hooks/hooks.json"],
+    "scripts/pre-guard.mjs": ["selfKind", "denySelfDisable", "heldNever", "safetyKeysChanged", "hooks/hooks.json", "CLAUDE_CODE_SESSION_ID"],
     "scripts/scope.mjs": ["namesSelfScoped"],
   },
   "ARCH-SAFETY-06": {
@@ -30,7 +30,7 @@ const HOLDS = {
   "ARCH-SAFETY-08": {
     "scripts/lib/core.mjs": ["rootUnanchored", "safetyEnabled"], "scripts/pre-guard.mjs": ["safetyEnabled", "docSide"],
   },
-  "ARCH-SAFETY-09": { "hooks/register.js": ["goal", "token"], "scripts/goal-token.mjs": ["mintGoalToken"] },
+  "ARCH-SAFETY-09": { "hooks/register.js": ["goal", "token"], "scripts/goal-token.mjs": ["mintGoalToken", "createHash"] },
   "ARCH-SAFETY-10": {
     "scripts/lib/doc-snapshot.mjs": ["docDrift", "snapshotDocs", "unseenDocChanges"], "scripts/stop-gate.mjs": ["stopReports", "docDrift"],
     "scripts/lib/settings-merge.mjs": ["mergeSettings", "export function"],
