@@ -391,6 +391,7 @@ export function sharedStateDir(context = null) {
   try {
     const commonGitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
       cwd: context?.root || PROJECT_ROOT, encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"], // outside a repository git says so on stderr, which a denial must not carry
     }).trim();
       if (commonGitDir) return path.resolve(path.resolve(context?.root || PROJECT_ROOT, commonGitDir), ".craftsman");
   } catch {}

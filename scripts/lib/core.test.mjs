@@ -918,3 +918,24 @@ test("runChecks: any check tool killed by a signal or exiting 126+ is unavailabl
   assert.equal(finding.failures.length, 1);
   assert.deepEqual(finding.unavailable, []);
 });
+
+// Round 4 (30.1): outside a repository the shared-state lookup must not leak git's own "fatal:" text into a denial the model reads.
+test("sharedStateDir is quiet outside a repository, so a pre-guard call there writes only craftsman's own message (30.1)", { skip: process.platform === "win32" && "needs a POSIX tmp dir" }, () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-norepo-")));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-norepo-home-")));
+  try {
+    const guard = fileURLToPath(new URL("../pre-guard.mjs", import.meta.url));
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, USERPROFILE: home, GIT_CEILING_DIRECTORIES: path.dirname(dir) };
+    delete env.CRAFTSMAN; delete env.CRAFTSMAN_SAFETY;
+    const call = (command) => spawnSync(process.execPath, [guard], { cwd: dir, env, encoding: "utf8", input: JSON.stringify({ session_id: "nr", tool_name: "Bash", tool_input: { command } }) });
+    const denied = call("echo x > .craftsman/off");
+    assert.equal(denied.status, 2, "a protected write is still denied outside a repository");
+    assert.doesNotMatch(denied.stderr, /fatal:/, `the denial carries no git noise: ${denied.stderr}`);
+    const allowed = call("ls");
+    assert.equal(allowed.status, 0);
+    assert.doesNotMatch(allowed.stderr, /fatal:/, `an allowed call writes no git noise: ${allowed.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

@@ -57,12 +57,16 @@ function stopReports() {
   if (!safetyEnabled()) return reports;
   try { reports.unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
   try {
-    const before = JSON.parse(fs.readFileSync(path.join(sdir, "doc-snapshot.json"), "utf8"));
-    const drift = docDrift(before, snapshotDocs(context.root, cfg.docWriteGuard?.docPaths || ["docs/**"]));
+    // SessionStart took the snapshot at the project ROOT, and pre-guard logs its decisions there, so the comparison reads
+    // the root even while a unit scope has pointed `context` at that unit's worktree.
+    const rootContext = projectContext(input.project || ".");
+    const rootCfg = loadConfig(rootContext);
+    const before = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, rootContext), "doc-snapshot.json"), "utf8"));
+    const drift = docDrift(before, snapshotDocs(rootContext.root, rootCfg.docWriteGuard?.docPaths || ["docs/**"]));
     if (drift.length) {
       let events = [];
       try {
-        events = fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").slice(-20000)
+        events = fs.readFileSync(path.join(rootContext.stateDir, "events.jsonl"), "utf8").split("\n").slice(-20000)
           .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
       } catch { /* no event log: every change counts as unseen */ }
       reports.unseenDocs = formatDocDrift(unseenDocChanges(drift, events, sid));

@@ -1024,3 +1024,22 @@ test("stop-gate: the loop-guard Stop prints nothing for a clean repo or with CRA
     assert.equal(off.stdout.trim(), "", "the user's own off switch silences the report");
   } finally { cleanup(dir); }
 });
+
+// Round 4 (30.2): SessionStart writes the doc snapshot under the ROOT state dir; Stop must read it there even while a
+// unit scope points the gate at another root (a unit's worktree).
+test("stop-gate: the doc-drift report reads the root snapshot while a unit scope names another root (30.2)", async () => {
+  const dir = docFixture();
+  const unitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-unit-root-"));
+  try {
+    const sid = "wt-drift";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    const sessions = path.join(dir, ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(path.join(sessions, "scope.json"), JSON.stringify({ plan: "docs/plans/p.md", unit: "u", project: ".", project_root: unitRoot, scope: { read: [], docs: [], write: [] }, arch: [] }));
+    const { stdout } = await runStopGate(dir, sid);
+    assert.match(JSON.parse(stdout).systemMessage ?? "", /docs\/plans\/a\.md \(modified\)/, "the drift is reported although the active scope is another root");
+    const quiet = await runStopGate(dir, "wt-no-snapshot");
+    assert.doesNotMatch(quiet.stdout, /guarded docs changed/, "no snapshot, no report");
+  } finally { cleanup(dir); fs.rmSync(unitRoot, { recursive: true, force: true }); }
+});
