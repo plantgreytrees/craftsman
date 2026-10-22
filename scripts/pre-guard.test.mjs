@@ -682,7 +682,10 @@ test("pre-guard: a glob in the last path segment is matched against the guarded 
     for (const command of allowedForms) assert.equal(bash(command).status, 0, `allowed: ${command}`);
     for (const command of blockedForms) assert.equal(bash(command).status, 2, `blocked: ${command}`);
     assert.equal(grant(dir).status, 0);
-    for (const command of [...allowedForms, ...blockedForms]) assert.equal(bash(command).status, 0, `granted: ${command}`);
+    // The doc grant covers the docs. A find that would also delete craftsman's own state (the grant and command records now
+    // under .craftsman) is a different guard's business and stays refused (ARCH-SAFETY-05).
+    const alsoWipesState = new Set(["find . -delete", "find . ! -name '*.log' -delete"]);
+    for (const command of [...allowedForms, ...blockedForms]) assert.equal(bash(command).status, alsoWipesState.has(command) ? 2 : 0, `granted: ${command}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -711,7 +714,7 @@ test("pre-guard: heredoc bodies are not parsed as shell, the command after the t
   }
 });
 
-function grantedPair(prefix, sid, setup, blocked, allowedForms = []) {
+function grantedPair(prefix, sid, setup, blocked, allowedForms = [], stateWipers = []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   try {
     fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
@@ -722,7 +725,8 @@ function grantedPair(prefix, sid, setup, blocked, allowedForms = []) {
     for (const c of blocked) assert.equal(bash(c).status, 2, `blocked: ${c}`);
     for (const c of allowedForms) assert.equal(bash(c).status, 0, `allowed: ${c}`);
     assert.equal(grant(dir).status, 0);
-    for (const c of [...blocked, ...allowedForms]) assert.equal(bash(c).status, 0, `granted: ${c}`);
+    // `stateWipers` also delete craftsman's own state (the grant and records under .craftsman): the doc grant does not cover that.
+    for (const c of [...blocked, ...allowedForms]) assert.equal(bash(c).status, stateWipers.includes(c) ? 2 : 0, `granted: ${c}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -738,7 +742,9 @@ test("pre-guard: find is passed over only for the single safe form (14.2)", () =
   grantedPair("craftsman-find14-", "find14", null, [
     'find . -name "*.log" -o -type f -delete', 'find . -name "*.log" -or -type f -delete', "find . -delete -name nothing",
     "find . -type f -exec rm {} + -name zz", "find .. -name x.md -delete",
-  ], ["find . -name '*.log' -delete", "find . -type f -name '*.o' -exec rm {} +"]);
+  ], ["find . -name '*.log' -delete", "find . -type f -name '*.o' -exec rm {} +"], [
+    'find . -name "*.log" -o -type f -delete', 'find . -name "*.log" -or -type f -delete', "find . -delete -name nothing", "find . -type f -exec rm {} + -name zz",
+  ]);
 });
 
 test("pre-guard: git pathspec globs cross / and docPaths without ** use real entries (14.3)", () => {
@@ -1798,6 +1804,9 @@ function attackProject() {
   fs.writeFileSync(path.join(dir, "stage", "x"), "x\n");
   fs.writeFileSync(path.join(dir, "stage", ".claude", "settings.json"), '{"theme":"STAGED"}\n');
   fs.writeFileSync(path.join(dir, "stage", "hooks", "hooks.json"), '{"staged":true}\n');
+  fs.writeFileSync(path.join(dir, "stage", "x.patch"), '--- .claude/settings.json\n+++ .claude/settings.json\n@@ -1 +1 @@\n-{"theme":"dark"}\n+{"theme":"PATCHED"}\n');
+  spawnSync("tar", ["-cf", path.join(dir, "stage", "x.tar"), "-C", path.join(dir, "stage", ".claude"), "settings.json"]);
+  spawnSync("zip", ["-qj", path.join(dir, "stage", "x.zip"), path.join(dir, "stage", ".claude", "settings.json")]);
   assert.ok(home !== os.homedir(), "the attack runs against a temp HOME");
   return { dir, home, env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, USERPROFILE: home, CLAUDE_CODE_SESSION_ID: "atk" } };
 }
@@ -1806,7 +1815,14 @@ function treeOf(dir) {
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
-      if (e.name === ".git" && d === dir) continue;
+      if (e.name === ".git" && d === dir) {
+        // Only what git reads for hooks and config; the rest of .git changes with every command.
+        const cfg = path.join(p, "config");
+        if (fs.existsSync(cfg)) out[".git/config"] = fs.readFileSync(cfg, "utf8");
+        const hooks = path.join(p, "hooks");
+        if (fs.existsSync(hooks)) for (const h of fs.readdirSync(hooks)) out[".git/hooks/" + h] = fs.readFileSync(path.join(hooks, h), "utf8");
+        continue;
+      }
       if (e.isSymbolicLink()) out[path.relative(dir, p)] = "-> " + fs.readlinkSync(p);
       else if (e.isDirectory()) { out[path.relative(dir, p) + "/"] = ""; walk(p); }
       else out[path.relative(dir, p)] = fs.readFileSync(p, "utf8");
@@ -1860,4 +1876,27 @@ test("pre-guard: a write wrapped in a subshell that names a protected path is re
     `{ cd .claude; cat ../stage/x > settings.local.json; }`,
   ]) assertDenied(command);
   for (const command of ["(cd src && ls)", "(echo hi > notes.txt)", "(cat .craftsman/off)", "(git status)", "(echo hi > src/a.txt)", "x=$(cat hooks/hooks.json); echo $x", "(echo off > notes.txt) && ls"]) assertAllowed(command);
+});
+
+// Round 4 (26.x): recursive copies, in-place edits, archive extraction and find -delete that reach a protected path.
+const haveTool = (tool) => spawnSync("sh", ["-c", `command -v ${tool}`]).status === 0;
+test("pre-guard: recursive copies, in-place edits, archives and find -delete that reach a protected path are refused (26.1-26.3)", { skip: process.platform === "win32" && "needs a POSIX shell" }, () => {
+  const denied = [
+    "cp -r stage/.claude .", "cp -rT stage/.claude .claude", "cp -a stage/. .", "cp -r stage/hooks .git/", "cp -R stage/hooks .",
+    "sed --in-place s/dark/LIGHT/ .claude/settings.json", "sed --in-place=.bak s/dark/LIGHT/ .claude/settings.json",
+    "find .claude -delete", "find . -name settings.json -delete", "find . -name craftsman.config.json -delete",
+    "find .claude -name settings.json -exec rm {} +", "find . -name '*.json' -delete", "find hooks -type f -delete",
+  ];
+  if (haveTool("rsync")) denied.push("rsync -a stage/ ./", "rsync -a stage/.claude/ .claude/");
+  if (haveTool("gawk")) denied.push("gawk -i inplace '{sub(\"dark\",\"LIGHT\");print}' .claude/settings.json");
+  if (haveTool("patch")) denied.push("patch -p0 .claude/settings.json < stage/x.patch");
+  if (haveTool("tar")) denied.push("tar -xf stage/x.tar -C .claude", "tar xf stage/x.tar -C .claude");
+  if (haveTool("unzip") && haveTool("zip")) denied.push("unzip -o stage/x.zip -d .claude");
+  for (const command of denied) assertDenied(command);
+  const allowed = [
+    "cp -r src copy", "cp -r stage/.claude /tmp/craftsman-nowhere-out", "cp -r a b", "sed -n 1p .claude/settings.json", "sed --in-place s/a/b/ src/a.txt", "gawk '{print}' .claude/settings.json",
+    "find src -name x -print", "find . -name '*.log' -delete", "find build -delete", "find src -type f -delete", "tar -tf stage/x.tar", "tar -xf stage/x.tar -C src",
+    "unzip -l stage/x.zip", "patch --dry-run -p0 .claude/settings.json < stage/x.patch", "ed -V",
+  ];
+  for (const command of allowed) assertAllowed(command);
 });

@@ -341,11 +341,12 @@ const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rs
 // Writers beyond the removal words; only the self-protection scan (removedDocs `writes`) reads them as write targets.
 // Both lists come from the one WRITER_VERBS in lib/self-protect.mjs.
 const WRITE_VERBS = new Set(WRITER_VERBS.filter((verb) => !RM_LIKE.has(verb)));
-const WRITE_TEXT = new RegExp(`\\b(?:${WRITER_VERBS.join("|")})\\b`);
+// Writers whose target is not a plain operand: they edit in place, patch or unpack. Read only by the self-protection scan.
+const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
+const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`);
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
-const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean)$/;
-const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const SAFE_HEADS = new Set(["echo", "printf", "grep", "egrep", "fgrep"]);
 const DECLARERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
 const DYNAMIC = /[$`~]/;
@@ -528,22 +529,90 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // the joined one: `cp x .claude/` writes `.claude/x`, which is `.claude/settings.json` when x is named that.
   const destIsDir = (dest, st) => /\/$/.test(dest) || dest === "." || dest === ".."
     || (st.cwds || []).some((cwd) => { try { return fs.statSync(realResolve(cwd, expandHome(dest))).isDirectory(); } catch { return false; } });
-  function placements(rest, st) {
+  // Every file under a directory, relative to it, up to a budget (null: unreadable or larger than the budget).
+  function listTree(abs, budget = { n: 2000 }) {
+    const out = [];
+    const walk = (dir, prefix) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+      for (const e of entries) {
+        if (--budget.n < 0) return false;
+        const rel = prefix ? prefix + "/" + e.name : e.name;
+        out.push(rel);
+        if (e.isDirectory() && !e.isSymbolicLink() && walk(path.join(dir, e.name), rel) === false) return false;
+      }
+      return true;
+    };
+    return walk(abs, "") === false ? null : out;
+  }
+  const isDirAt = (abs) => { try { return fs.statSync(abs).isDirectory(); } catch { return false; } };
+  // `recursive` is true for cp -r/-R/-a, for rsync and for mv: a directory source then brings every file under it, so
+  // DEST/<each file> is judged as well as DEST/basename(SOURCE). A directory that cannot be listed is `unlisted`.
+  function placements(rest, st, recursive = false) {
     const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
     const dirOpt = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
     const operands = targetsOf(t < 0 ? rest : rest.filter((_, i) => i !== t && !(i === t + 1 && !rest[t].includes("="))));
     const sources = dirOpt !== undefined ? operands : operands.slice(0, -1);
     const dest = dirOpt !== undefined ? dirOpt : operands[operands.length - 1];
-    if (dest === undefined) return { sources: [], placed: [], dest: undefined };
+    if (dest === undefined) return { sources: [], placed: [], unlisted: [], dest: undefined };
     const asDir = dirOpt !== undefined || destIsDir(dest, st);
-    const join = (s) => dest.replace(/\/+$/, "") + "/" + path.basename(s.replace(/\/+$/, ""));
-    return { sources, dest, placed: !sources.length ? [dest] : asDir ? sources.map(join) : [dest] };
+    const dd = dest.replace(/\/+$/, "") || dest;
+    const join = (s) => dd + "/" + path.basename(s.replace(/\/+$/, ""));
+    const placed = !sources.length ? [dest] : asDir ? sources.map(join) : [dest];
+    const unlisted = [];
+    const deep = recursive || rest.some((a) => (/^-[A-Za-z]*[rRa]/.test(a) && !a.startsWith("--")) || a === "--recursive" || a === "--archive");
+    if (deep) for (const s of sources) {
+      const dirs = (st.cwds || []).map((cwd) => realResolve(cwd, expandHome(s))).filter(isDirAt);
+      if (!dirs.length) continue;
+      const listing = dirs.map((d) => listTree(d)).find(Boolean);
+      if (!listing) { unlisted.push(dd, join(s)); continue; }
+      for (const e of listing) { placed.push(dd + "/" + e); if (asDir) placed.push(join(s) + "/" + e); }
+    }
+    return { sources, dest, placed, unlisted };
+  }
+  // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names.
+  function copyTargets(rest, st, env, recursive = false) {
+    const { placed, unlisted } = placements(rest, st, recursive);
+    for (const p of placed) target(p, st, "write", env);
+    for (const u of unlisted) target(u, st, "holds", env);
   }
   // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
   function moveTargets(rest, st, env) {
-    const { sources, placed } = placements(rest, st);
+    const { sources, placed, unlisted } = placements(rest, st, true);
     for (const source of sources) target(source, st, "mv", env);
     for (const p of placed) target(p, st, "write", env);
+    for (const u of unlisted) target(u, st, "holds", env);
+  }
+  // Writers that edit in place, patch or unpack (`awk -i inplace`, `ed`, `patch`, `tar -x`, `unzip`): the files they name, and
+  // for an archive the directory it is unpacked into. What an archive or a patch on stdin contains is not read.
+  function otherWriters(verb, rest, st, env) {
+    const operands = (valued = []) => {
+      const out = [];
+      for (let i = 0; i < rest.length; i++) { if (valued.includes(rest[i])) { i++; continue; } if (!rest[i].startsWith("-")) out.push(rest[i]); }
+      return out;
+    };
+    const optionValue = (names) => { const i = rest.findIndex((a) => names.includes(a)); return i >= 0 ? rest[i + 1] : undefined; };
+    let files = [];
+    if (verb === "awk" || verb === "gawk") {
+      if (!rest.some((a, i) => (a === "-i" && /^inplace/.test(rest[i + 1] || "")) || /^--include=inplace/.test(a))) return;
+      const ops = operands(["-i", "--include", "-f", "--file", "-v", "--assign", "-F", "--field-separator"]);
+      files = rest.some((a) => a === "-f" || a === "--file" || a.startsWith("--file=")) ? ops : ops.slice(1);
+    } else if (verb === "ed") files = operands();
+    else if (verb === "patch") {
+      if (rest.some((a) => a === "--dry-run" || a === "--check" || a === "-C")) return;
+      files = operands(["-i", "--input", "-p", "--strip", "-d", "--directory", "-o", "--output", "-r", "--reject-file", "-B", "-V", "-z", "-D"]);
+    } else if (verb === "tar") {
+      const first = rest[0] ?? "";
+      const extracts = rest.some((a) => /^-[A-Za-z]*x/.test(a) || a === "--extract" || a === "--get") || (!first.startsWith("-") && /^[A-Za-z]*x[A-Za-z]*$/.test(first));
+      if (!extracts) return;
+      target(optionValue(["-C", "--directory"]) ?? ".", st, "holds", env);
+      return;
+    } else if (verb === "unzip") {
+      if (rest.some((a) => /^-[A-Za-z]*[ltpZ]/.test(a))) return; // list, test, pipe, zipinfo: nothing is written
+      target(optionValue(["-d"]) ?? ".", st, "holds", env);
+      return;
+    }
+    for (const f of files) if (f && f !== "-") target(f, st, verb, env);
   }
   // The files a writer other than a removal word writes (self-protection scan only): the words are already
   // de-quoted, so `o""ff` is `off`, and the working directories come from the `cd` tracking above.
@@ -558,10 +627,10 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
         if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
       }
-    } else if (verb === "cp" || verb === "install") files = placements(rest, st).placed;
+    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env);
     else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
     else if (verb === "sed" || verb === "perl") {
-      if (!rest.some((a) => /^-[A-Za-z]*i/.test(a))) return; // without -i neither writes a named file
+      if (!rest.some((a) => /^-[A-Za-z]*i/.test(a) || /^--in-place(?:=|$)/.test(a))) return; // without -i or --in-place neither writes a named file
       let script = false;
       const operands = [];
       for (let i = 0; i < rest.length; i++) {
@@ -626,20 +695,29 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     let e = s; while (e < rest.length && !rest[e].startsWith("-") && rest[e] !== "(" && rest[e] !== "!") e++;
     const starts = rest.slice(s, e), exprs = rest.slice(e);
     if (!exprs.some((x) => FIND_ACTION.test(x))) return; // selects only: removes nothing
-    const names = []; let kind = null, execdir = false, execCmd = [];
+    const names = [], pathRes = []; let kind = null, execdir = false, execCmd = [];
     for (let i = 0; i < exprs.length && kind === null;) {
       const t = exprs[i];
       if (FIND_ARG.has(t)) {
         const a = exprs[i + 1];
         if (a === undefined || DYNAMIC.test(a)) return unsafe("find " + t + " argument");
         if (t === "-name" || t === "-iname") { try { names.push(segmentRe(a, t === "-iname" ? "i" : "")); } catch { return unsafe("find pattern " + a); } }
+        // -path selects by the whole path, where `*` also crosses `/`.
+        if (t === "-path" || t === "-ipath" || t === "-wholename") {
+          pathRes.push(new RegExp("^" + a.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", t === "-ipath" ? "i" : ""));
+        }
         i += 2;
       } else if (FIND_FLAG.has(t)) i++;
+      else if (writes && ["!", "-not", "-o", "-or", "(", ")"].includes(t)) i++; // self-protection: the selection is then read as "everything"
       else if (t === "-delete" && i === exprs.length - 1) kind = "delete";
+      else if (writes && t === "-delete") { names.length = 0; pathRes.length = 0; kind = "delete"; } // not last: it acts before later tests, so it selects everything
       else if (t === "-exec" || t === "-execdir") {
         let m = i + 1;
         while (m < exprs.length && exprs[m] !== ";" && !(exprs[m] === "+" && exprs[m - 1] === "{}")) m++;
-        if (m !== exprs.length - 1) return unsafe("find " + t + " not ending the expression");
+        if (m !== exprs.length - 1) {
+          if (!writes || m >= exprs.length) return unsafe("find " + t + " not ending the expression"); // no terminator at all: malformed
+          names.length = 0; pathRes.length = 0; // self-protection: later tests cannot be relied on, so everything is selected
+        }
         kind = "exec"; execdir = t === "-execdir"; execCmd = exprs.slice(i + 1, m);
       } else return unsafe("find expression " + t + " outside the -name/-type ... -delete|-exec form");
     }
@@ -658,7 +736,39 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     if (deletes) for (const r of roots) for (const cwd of st.cwds) {
       const h = touchesGuarded(r, cwd, docPaths);
       if (h && !findNamesMiss(names, r, cwd, docPaths)) hits.push(h);
+      // Self-protection: every existing protected file under this start root that the -name tests select goes with it.
+      if (writes) {
+        const rootRel = path.relative(realRoot(), realResolve(cwd, r)).split(path.sep).join("/");
+        for (const f of existingProtectedFiles()) {
+          const under = rootRel === "" || f === rootRel || f.startsWith(rootRel + "/");
+          // A negation or an alternative (`!`, `-not`, `-o`) makes the selection unreadable: assume it selects everything.
+          const selectsAll = exprs.some((x) => x === "!" || x === "-not" || x === "-o" || x === "-or");
+          const selected = selectsAll || ((!names.length || names.some((re) => re.test(path.basename(f)))) && (!pathRes.length || pathRes.some((re) => re.test("./" + f))));
+          if (under && selected) hits.push("remove:" + f);
+        }
+      }
     }
+  }
+  // The protected files that exist now (relative to the project root): the self-scoped ones, and the never-written
+  // ones under .craftsman and .git/hooks, found by walking them (bounded).
+  function existingProtectedFiles() {
+    const base = realRoot(), out = [];
+    for (const name of SELF_SCOPED) if (fs.existsSync(path.join(base, name))) out.push(name);
+    for (const rel of [".git/config", ".git/config.worktree"]) if (fs.existsSync(path.join(base, rel))) out.push(rel);
+    let budget = 3000;
+    const walk = (dirRel, depth) => {
+      let entries;
+      try { entries = fs.readdirSync(path.join(base, dirRel), { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (--budget < 0 || depth > 6) return;
+        const rel = dirRel + "/" + e.name;
+        if (e.isDirectory() && !e.isSymbolicLink()) walk(rel, depth + 1);
+        else if (heldNever(rel)) out.push(rel);
+      }
+    };
+    walk(".craftsman", 0);
+    walk(".git/hooks", 0);
+    return out;
   }
 
   // Every word that may be the command is examined: leading wrappers, their
@@ -669,7 +779,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   function dispatch(words, c, prev, st, depth, env) {
     for (let i = 0; i < words.length; i++) {
       const w = words[i], b = path.basename(w), afterOption = i > 0 && words[i - 1].startsWith("-");
-      if (CANDIDATES.has(b) || (writes && WRITE_VERBS.has(b))) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
+      if (CANDIDATES.has(b) || (writes && (WRITE_VERBS.has(b) || OTHER_WRITERS.has(b)))) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
       if (WRAPPERS.has(b) || w.startsWith("-") || ASSIGNMENT.test(w) || afterOption || /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
       const args = words.slice(i + 1);
       const safe = SAFE_HEADS.has(b) || (b === "node" && args.length > 0 && /(?:^|\/)scripts\/[\w.-]+\.mjs$/.test(args[0]));
@@ -685,8 +795,10 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       noteRemoval(verb, rest, env);
       if (env.unseen) return unsafe(verb + " with input the parser cannot see");
       if (writes && verb === "mv") return moveTargets(rest, st, env);
+      if (writes && verb === "rsync") return copyTargets(rest, st, env, true);
       for (const t of targetsOf(rest)) target(t, st, verb, env);
     } else if (writes && WRITE_VERBS.has(verb)) writeTargets(verb, rest, st, env);
+    else if (writes && OTHER_WRITERS.has(verb)) otherWriters(verb, rest, st, env);
     else if (verb === "git") git(rest, st, env);
     else if (verb === "find") find(rest, st, depth);
     else if (verb === "xargs") {
