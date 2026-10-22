@@ -4,99 +4,97 @@ status: pursue-with-changes
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
-isolation: isolated
+isolation: NOT ISOLATED
 created: 2026-10-23
 updated: 2026-10-23
-related: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.md (same branch)]
-touches: [scripts/tracker.mjs, scripts/run-manifest.mjs, scripts/lib/core.mjs, craftsman.config.json, docs/architecture/tracker.rules.md, CHANGELOG.md]
+related: [docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, docs/architecture/landing.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.md (same branch)]
+touches: [scripts/digest.mjs, commands/digest.md, scripts/tracker.mjs, scripts/lib/plan-index.mjs, scripts/plan-graph.mjs, craftsman.config.json, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, CHANGELOG.md]
 ---
 
-# Idea: A kanban/roadmap view of Craftsman work, via an external project tool
+# Idea: A visual, multi-view layer over Craftsman's docs, with session planning
+
+> **Re-evaluation (2026-10-23).** Round 1 judged "move docs into GitHub Projects" and concluded *reject replace, defer mirror, build a read-only board*. The owner then corrected the problem: it is **not** lost status. They still want docs to monitor current sessions. The repo has become chunky and they cannot browse it, being a visual learner, and want to plan sessions ahead and persist next steps. That changes the verdict's reasoning, not its direction. Round 1's isolated critique (idea-critic, standard) stands for the GitHub-Projects readings. **Round 2's critique below is NOT ISOLATED**: the one dispatch an `/idea` run is granted was spent in round 1.
 
 ## Proposal (neutral restatement)
-**Problem.** Craftsman persists work as markdown: idea docs, architecture docs (`<area>.md` + `<area>.rules.md`), plan docs, and an event-sourced status ledger rendered to `docs/plans/TRACKER.md` and committed as `TRACKER.jsonl` by `tracker.mjs publish`. The maintainer runs about five repos with several concurrent sessions and finds the docs hard to see and manage at that scale. There is no cross-repo view. How often status is actually lost is unmeasured (UNPROVEN).
-**Proposal.** Let a project opt into an external project tool (GitHub Projects v2 through `gh`, which the plugin already uses for PR landing) so ideas, plans and roadmap items appear as tickets on a kanban board and roadmap. Craftsman would create tickets from plans, import existing ones, track status and take updates there, and might adopt other open-source tools to manage generated docs.
-**Three readings, judged separately.** (A) Replace: the board is the source of truth and the docs are not written. (B) Mirror: the ledger and docs stay authoritative, with a one-way projection to the board. (C) Import/export: a manual command, no continuous sync.
-**Beneficiary.** One maintainer, five repos (Gleam, also on Azure DevOps; Loost; Loost-Gallery; Podling; Craftsman).
-**Done.** A board (or equivalent) shows every repo's work by status on one screen, without a second place to keep it up to date.
+**Problem.** Craftsman's output is dense markdown the maintainer finds hard to scan: `docs/ideas` 7 files / 172 KB, `docs/architecture` 19 files / 100 KB, `docs/plans` 17 files / 404 KB (largest: `scrutinise-autonomous-e2e-loop.md` 60 KB, `scrutinise-feature-branch-plans.md` 59 KB), plus `docs/plans/TRACKER.md` (111 lines). The maintainer reads visually and wants to scroll, see structure and switch views (board, roadmap, map, tree) instead of opening long files. They also want to lay out upcoming sessions in advance and have "next steps" persist between sessions.
+**Claimed benefit.** Faster orientation, easier planning, less cumbersome review of trackers, architecture docs, ideas and plans.
+**Beneficiary.** One maintainer, ~5 repos, several concurrent sessions.
+**Done.** From any repo the maintainer can open one visual view, see ideas by verdict, plans by ledger state, the plan hierarchy, the architecture areas and what each governs, and an ordered "next sessions" queue, and can write down that queue so the next session starts from it. The docs stay; nothing is replaced.
 
 ## Verdict
-**PURSUE-WITH-CHANGES** (medium), in a much smaller form than proposed. **Reject A. Defer B and C.** Build first a read-only, locally generated cross-repo board from each repo's committed `TRACKER.jsonl`. It needs no credentials, no external service and no second writer, and it works on any forge. **Deciding fact:** the docs are machine input the loop and hooks read at tool-call time, and the ledger is the declared single truth (`docs/architecture/tracker.rules.md:11`, `:14`). A board that is also written to is a second status store. The owner's own architected design rejected exactly that, for Backlog.md, as "a third tracker … the exact failure in Loost-Gallery" (source Artifact, "Dev Lifecycle & Docs Plan"). **Most likely to flip it:** the maintainer needs to share the roadmap with, or assign work to, other humans on GitHub. Then B (one-way) is worth its cost.
+**PURSUE-WITH-CHANGES** (medium). The reframing *strengthens* the case for a visual layer and *removes* the case for GitHub Projects. Pursue, in this order:
+1. A **generated, local, read-only visual dashboard** from data Craftsman already has (idea/plan frontmatter, the ledger, `governs:` globs, existing Mermaid). Extend `/digest`, which already reads the ledger and carries "no new state to maintain" (`scripts/digest.mjs:1-5`), with an HTML output.
+2. A **session queue**: a computed "ready, ordered" list (the future script `ARCH-PLAN-05` already reserves) plus one small hand-written file holding only the order and intent of planned sessions.
+3. **Spike an off-the-shelf viewer first** (Obsidian over the repo folder) for a day, to learn which views you actually use, before writing generator code.
+**Deciding facts:** (a) the data to draw already exists as structure: all 7 idea docs carry `status, verdict, confidence, created, updated, related, touches`, plans carry `slug, goal, priority, parent, idea, units, tracker_rows`, and 9 of 19 architecture docs already hold a Mermaid diagram; (b) plan frontmatter has **no `status` key**, because status lives in the ledger (ARCH-TRACKER-01, `tracker.rules.md:11`), so a generic frontmatter viewer can board the *ideas* but not the *plans*, and only a ledger-aware generator can; (c) the earlier rejection of a docs site was conditioned on "nobody but you and Claude reads these docs" in the source Artifact; the owner is a reader and says so. **Most likely to flip it:** the Obsidian spike showing an off-the-shelf viewer covers every view you want, so the generator is not worth maintaining.
 
-| criterion | A Replace | B Mirror | C Import/Export | Smallest slice (static board) |
-|---|---|---|---|---|
-| value | 2 | 3 | 2 | 4 |
-| system fit | 1 | 2 | 3 | 5 |
-| cost (5 = cheap) | 1 | 2 | 3 | 4 |
-| risk (5 = low) | 1 | 2 | 3 | 5 |
-| reversibility | 1 | 4 | 4 | 5 |
-| evidence strength | 2 | 2 | 2 | 3 |
-
-Evidence for the scores is in the sections below. Value is capped at 4 because the pain is anecdotal.
+| criterion | score | evidence |
+|---|---|---|
+| value | 4 | Stated first-hand pain (chunky repo, visual learner, session planning); size numbers above. Frequency still unmeasured |
+| system fit | 4 | Reads derived data only, no second writer; extends `/digest` and the reserved queue slot; consistent with generated, pre-guard-protected views (ARCH-TRACKER-10, `tracker.rules.md:20`) |
+| cost (5 = cheap) | 3 | One generator script plus a rule amendment; viewer spike costs a day; no service |
+| risk (5 = low) | 4 | Read-only; local file, nothing leaves the machine; one hand-written queue file is the only new truth |
+| reversibility | 5 | Delete the script and the flag; no migration |
+| evidence strength | 3 | Repo facts verified; tool claims mostly from vendor pages, several features unconfirmed (see Research) |
 
 ## Overlap & prior work
-Searched: `docs/ideas/*.md`, `docs/plans/TRACKER.md`, `TRACKER-archive.md`, `docs/architecture/*.rules.md`, `CHANGELOG.md`, `README.md` on main, grepping for kanban, github project, projects v2, gh issue, backlog.md, linear and jira. No hits on main: **novel on main**.
-- **Extends / conflicts with a sibling, not yet merged:** branch `worktree-idea-dev-lifecycle-docs-plan` (commits `b0328f6`, `0d94f59`) holds the architected "Slim Craftsman" design, which was produced from the owner's Artifact "Dev Lifecycle & Docs Plan" (https://claude.ai/artifact/Lwwwn7ZyuLRmKqGjD8Psx6). Relevant decisions in it:
-  - Principle "Docs as code, in git … no external database owns the truth … portable between GitHub, Azure DevOps or a future Forgejo".
-  - "One fact, one home": status lives in the ledger, bugs in the forge's issues, the rest is generated.
-  - Backlog.md (MIT) was considered and rejected as a third tracker. A static docs site was also deferred "until a non-Claude reader appears".
-  - Doc budgets and an approval page (private Artifact) already attack the sprawl. `ARCH-STATE-13` on that branch makes external publication wait for approval.
-- The existing tools list in that Artifact (just, pre-commit, markdownlint-cli2, lychee, gitleaks, git-cliff) already answers "other open-source tools to manage the docs". It reaches the plugin as config slots (`ARCH-ENGINE-20` on the sibling branch). Nothing further is needed for that part.
+Searched: `docs/ideas/*.md`, `docs/plans/TRACKER.md` and `TRACKER-archive.md`, `docs/architecture/*.rules.md`, `CHANGELOG.md`, `README.md` on main, plus `commands/` and `scripts/` for digest, focus, queue, kanban, graph. Nothing on main proposes a visual layer. **Novel on main; extends two shipped pieces.**
+- **`/digest` (extends).** `commands/digest.md` and `scripts/digest.mjs` already render what shipped, what needs a decision, what is next and % complete from the ledger, read-only, as text.
+- **`ARCH-PLAN-05` (extends).** `plan.rules.md:15` reserves `execution.maxSessions` "for a future ready/queue script". The session queue is that script.
+- **Sibling design (conflict resolved).** Branch `worktree-idea-dev-lifecycle-docs-plan` (`dev-lifecycle-docs-plan`) deferred a docs site and rejected Backlog.md as a third tracker. Both rejections stand for status. It also adds an approval page (private Artifact) and doc budgets. A dashboard must not become another truth, and any publishing to claude.ai counts as external publication under its ARCH-STATE-13.
+- **Round 1 (GitHub Projects).** Reject replace (A), defer mirror (B), defer import/export (C). Reasons unchanged: ARCH-TRACKER-01/04 (`tracker.rules.md:11`, `:14`), unit runners hold no credentials (`agents/unit-runner.md:42`, ARCH-LAND-19 `landing.rules.md:29`), forge-neutral host table (`scripts/lib/land.mjs:54,70,88`), and the token lacks the `project` scope.
 
 ## System fit (whole project)
-- **contract ripple:** a projection hooks in at `tracker.mjs publish` (`docs/architecture/tracker.rules.md:21`, ARCH-TRACKER-11), the single path that commits derived progress. The ledger and run manifest are unchanged (ARCH-TRACKER-01, `:11`).
-- **data:** the static slice reads `TRACKER.jsonl` (already derived and committed, ARCH-TRACKER-12, `:22`) and writes one generated page. Any external mirror needs a new row-to-item key map, which is a new derived store.
-- **config & flags:** candidate `tracker.board` (off | static | github) beside `tracker {nudgeLines, publish}` at `craftsman.config.json:95-98`.
-- **security:** `gh` is logged in as `plantgreytrees` with scopes gist, read:org, repo, workflow, so it **lacks `project`**. Projects mutations need `project` (https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects). In Actions, `GITHUB_TOKEN` cannot access projects, and a user-owned project needs a classic PAT with `project` and `repo` (https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions). Unit runners hold no credentials (`agents/unit-runner.md:42`, ARCH-LAND-19 at `docs/architecture/landing.rules.md:29`), so any write would run at root and queue like `network drain`.
-- **tests:** fixtures for idempotent render; for B, a duplicate-item fixture under two concurrent worktree publishes.
-- **observability:** a `board_rendered` or `board_sync_failed` event (B only).
-- **UI:** the board itself. The static slice could be a section of the sibling's approval page instead of a new surface.
-- **docs:** one tracker-area rule amendment through `/architect`. Prose added to commands pays bytes under ARCH-SLIM-01/02 (`docs/architecture/slim.rules.md:11-12`).
-- **forge fit:** `scripts/lib/land.mjs` keeps a per-host table (`gh` at `:54`, `glab` at `:70`, `az` at `:88`), so the plugin is forge-neutral today. GitHub Projects is GitHub-only and Gleam is also on Azure DevOps.
-- **Second-order:** B makes main's board lag (external writes wait for approval), adds a reconcile problem the moment a card is dragged, and adds ID caching, field bootstrap and retry. About 44% of the maintainer's time has two or more concurrent sessions (source Artifact), and each could publish.
+- **contract ripple:** `digest.mjs` imports `currentState` from `tracker.mjs`; a new output mode and a queue reader reuse it. Ledger and run manifest unchanged.
+- **data:** inputs are existing (ledger, frontmatter parsed by `scripts/lib/plan-index.mjs`, rules `governs:`). New: a generated `docs/plans/DASHBOARD.html` (or `.craftsman/` if it should stay uncommitted) and **one** hand-written `docs/plans/NEXT.md` holding an ordered list of plan slugs with a one-line intent each, and no status copies.
+- **config & flags:** candidate `digest.html: off|on` and `queue.file`; the reserved `execution.maxSessions` (ARCH-PLAN-05) stays unread by the mod.
+- **security:** local file only; no credentials, no network. Do **not** publish the dashboard to a claude.ai Artifact by default (code summaries leave the machine; external publication waits for approval under the sibling's ARCH-STATE-13). Plan titles and goals may name private repos.
+- **tests:** golden-file test for the HTML from a fixed ledger and fixtures; a test that the queue never contradicts the ledger (a COMPLETE plan in `NEXT.md` is flagged, not hidden).
+- **observability:** `N/A(read-only report)`, except a lint warning for a `NEXT.md` slug that no longer resolves (ARCH-DOCS-06 slug lookup).
+- **UI:** the dashboard itself is the UI. It must be one self-contained file (inline CSS/JS, no CDN) to open from `file://` and survive offline.
+- **docs:** one amendment each to the tracker and plan areas through `/architect`. `commands/digest.md` gains a line, paying bytes under ARCH-SLIM-01/02 (`slim.rules.md:11-12`). Scripts are only warn-only size-checked (ARCH-SLIM-07, `scripts/script-size-delta.mjs:2`).
+- **Second-order:** a generated file in git adds merge noise (keep it uncommitted by default); `NEXT.md` can rot if nothing checks it (hence the lint); the generator is code that must keep pace with frontmatter changes.
 
 ## Research
-- `gh project` offers item-add, item-create, item-edit, field-create, field-list, item-list, view and more, with minimum token scope `project` (https://cli.github.com/manual/gh_project). `item-edit` changes one field value per call and needs project and field ids (https://cli.github.com/manual/gh_project_item-edit, via search summary).
-- Projects offer table, board and roadmap layouts, up to 50 fields, and can be user- or org-owned (https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects). The item-count limit was not on that page: UNPROVEN. The github.com GraphQL point budget was not confirmed (the page found was Enterprise Server): UNPROVEN.
-- The built-in project workflow auto-adds items by filter and does not sweep existing items; per-plan caps on auto-add workflows come from a secondary post (https://dev.to/suzukishunsuke/pull-together-github-issues-and-pull-requests-across-repositories-to-github-projects-automatically-a87): UNPROVEN.
-- Backlog.md (MIT) stores each task as a markdown file in the repo with a terminal and local web kanban and an MCP server; it advises using its commands over hand edits (https://github.com/MrLesk/Backlog.md). It is a **second writer to a tracker**, which the owner already rejected. The smaller git-issue tools surfaced have tiny adoption (maturity UNPROVEN).
-- Viable approaches: (1) replace docs with board items; (2) one-way projection at publish; (3) manual export/import; (4) adopt a git-native tracker; (5) do nothing, or render a generated board from existing derived data. (5) fits this codebase best.
+- **Obsidian Bases** (core plugin) makes database-like views of notes and their properties with **Table, List, Cards, Kanban and Map** layouts, saved as `.base` files or embedded in markdown, with formulas and filters (https://obsidian.md/help/bases). The page does not say how properties are stored, so reading YAML frontmatter is **UNPROVEN** from this source; a secondary blog says Bases and Dataview both read frontmatter (https://blog.openreplay.com/5-obsidian-note-taking-tips/, secondary). Obsidian is **free for personal and commercial use but not stated to be open source** (https://obsidian.md/pricing). It adds a `.obsidian/` folder to the repo (gitignore it). Whether markdown-relative links, as Craftsman uses, feed its graph view is **UNPROVEN**.
+- **Foam** (MIT) runs inside VS Code with graph view, backlinks and wikilinks, and warns of "alpha-grade software" (https://github.com/foambubble/foam). Mermaid support is not stated. It leans on `[[wikilinks]]`, which Craftsman docs do not use.
+- **Quartz** (MIT) builds a static site from a folder of markdown, 13.4k stars (https://github.com/jackyzha0/quartz); it has a local and global graph view (https://quartz.jzhao.xyz/features/graph-view). Search, backlinks and Mermaid are **UNPROVEN** from the pages opened. It needs a Node build and hosting for sharing; the sibling design deferred a docs site.
+- **Markwhen** (MIT, but "the web app (the editor) is the only thing that isn't open source") turns markdown-ish dated text into a timeline and has a VS Code extension (https://github.com/mark-when/markwhen). HTML export and CLI are not stated. It needs dates written in its syntax; session planning is ordering, not dating, so it fits poorly.
+- **mdBook, Docusaurus, Zensical** (MIT): books and doc sites with search and sidebars; Mermaid support not confirmed in the results (https://docsio.co/blog/zensical-vs-docusaurus, secondary). Material for MkDocs entered maintenance mode in Nov 2025 per the same source. They give navigation, not kanban or roadmap views.
+- **Backlog.md** (MIT) gives a kanban terminal and a local web UI over per-task markdown files plus an MCP server (https://github.com/MrLesk/Backlog.md). It is a second task writer, which the sibling design rejected. It is the right shape only if Craftsman's ledger were not the truth.
+- **GitHub Projects** gives table, board and roadmap views (https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects) but needs the `project` token scope, cannot use `GITHUB_TOKEN`, and is GitHub-only (round 1).
+- **Viable approaches:** (1) off-the-shelf viewer over the folder (Obsidian); (2) a generated static dashboard (extend `/digest`); (3) a published docs site (Quartz or similar); (4) external board mirror (round 1, deferred); (5) do nothing. (2), tried after a short (1), fits this codebase best.
 
-## Critique
-- **Steelman.** The pain is real for one person running five repos: seeing status means reading `docs/plans/TRACKER.md` (111 lines) plus about 15 plan docs per repo, with no cross-repo view. A board gives table, kanban and roadmap views and filters for free. The plugin already calls `gh` and has a host-adapter pattern, and `publish` is already the single choke point for derived output, so a projection is structurally cheap.
-- **Strongest case against.** (A) fights the enforcement loop: ARCH-TRACKER-04 gates COMPLETE on ticked `[unit:]` criteria held in plan docs (`tracker.rules.md:14`), ARCH-DOCS-03 fails lint if a rules `source:` file is missing (`docs.rules.md:13`), `/idea`'s overlap scan reads idea docs (ARCH-DOCS-05, `:15`), and hooks need local files and cannot make a GraphQL call per tool use. (B) adds the second visible status store the owner already rejected, and once cards exist they will be dragged; one-way then silently diverges and two-way breaks ARCH-TRACKER-01/04. (C) solves moving data, not visibility, and its issues go stale on creation.
+## Critique (NOT ISOLATED)
+- **Steelman.** The docs are fine as machine input and bad as human reading; the cheap fix is a derived view, not a new store. The structure is already there (frontmatter, ledger, `governs:`, Mermaid), `/digest` is the existing precedent for "render from the ledger, keep no state", and the queue slot is already reserved.
+- **Strongest case against.** A generator is another thing to maintain and it chases a moving frontmatter schema; Obsidian might do 80% for free. And "plan sessions in advance" could quietly re-create a second tracker if `NEXT.md` grows status.
 - **Hidden assumptions, with tests.**
-  1. They want a GUI board, not one place to look. Test: render the static page and see whether it is opened weekly for two weeks.
-  2. They will not edit cards. Test: ask, or check whether they edit GitHub issues by hand today.
-  3. GitHub covers every repo. It does not (Gleam is also on Azure DevOps). Test: list each repo's forge.
-  4. Approval-gated writes are acceptable. Test: count publish events per `/auto` run (ARCH-TRACKER-11 lists at least four triggers).
-  5. Item and rate limits are fine at five repos. UNPROVEN.
-- **Failure modes.** Board and ledger diverge after a card drag. A renamed or deleted project field breaks sync silently. Two worktrees publish at once and create duplicate items unless keys are stored. The token must be widened to `project`. An offline session must queue the update. The GitHub-only adapter rots in repos that never use it.
-- **Kill criteria.**
-  - The maintainer edits cards during any trial: kill B.
-  - The static page is opened weekly and no gap remains: kill B and C.
-  - Board updates need a per-event approval prompt in `/auto`: kill B.
-  - Any in-scope repo cannot use GitHub Projects: kill B as a general feature.
-  - The sibling design merges and its approval page already gives the cross-session view: kill everything beyond the static board.
-- **Cheaper alternatives.** Do nothing (the sibling's budgets and approval page already attack sprawl). A generated cross-repo static board (recommended). Manual export only when a human collaborator appears.
+  1. A rendered view is easier for them than the markdown. Test: the one-day Obsidian spike; note which views they open.
+  2. Ideas and architecture need only frontmatter-level views. Test: does the spike's ideas-by-verdict board feel enough?
+  3. The ledger kanban (plans by state) is the view they most want, and only a generator can give it. Test: ask which view comes first.
+  4. They are fine with a local file rather than a hosted page. Test: do they need to open it on a phone or share it?
+  5. Obsidian reads markdown-link graphs and frontmatter as the secondary sources claim. UNPROVEN until the spike.
+- **Failure modes.** `NEXT.md` gains status and contradicts the ledger. The HTML grows heavy on 400 KB of plans if it inlines bodies (render titles, goals and links only). A renamed frontmatter key silently empties a column (golden test). The Obsidian config pollutes the repo (gitignore it).
+- **Kill criteria.** The spike covers every wanted view: do not build the generator. `NEXT.md` is edited with status text: delete the queue file, keep the computed queue. The dashboard goes unopened for two weeks: remove it.
+- **Cheaper alternatives.** Only the Obsidian spike (a day, no code). `/digest` text output with Mermaid blocks (no HTML).
 
 ## Disputed
-- The critic's line cites were off for ARCH-DOCS-03 (`docs.rules.md:13`, not 11), ARCH-DOCS-05 (`:15`, not 13) and the `az` adapter (`land.mjs:88`, not 92). Corrected here; the claims themselves hold.
-- The critic could not find the Backlog.md rejection in the sibling branch's docs and marked it UNPROVEN. It is verified: it is in the source Artifact ("Considered and rejected for now"), which I read in full. It is not in any repo file.
-- The proposer's own wording suggested reading (A) and two-way updates. These are judged and rejected above, not softened.
+- Round 1's critic recommended "read-only generated cross-repo board from TRACKER.jsonl" as the whole answer. Kept as the base, but widened to ideas, architecture and the session queue because the problem is browsing, not status. Round 1 also assumed "no non-Claude reader"; the owner has clarified they are the reader.
+- Round 1 listed `docs/plans/TRACKER.jsonl` as "already derived and committed". On main it does not exist in this repo (`ls docs/plans/TRACKER.jsonl` fails; only `.craftsman/events.jsonl` is present), because `tracker.publish` is the sibling design's subject (`tracker.rules.md:21-22`). A cross-repo view must read each repo's local ledger or committed `TRACKER.jsonl` where present.
 
 ## Recommendations
-1. **Reject A** outright and record why (ARCH-TRACKER-01/04, ARCH-LAND-19, forge neutrality).
-2. **Reframe the problem as cross-repo status visibility.** Build first `tracker.mjs board`: read-only, generated from each configured repo's `TRACKER.jsonl`, rendering a kanban-style page (columns by ledger state, links to plan docs). Make it a section of the sibling's approval page if that lands first.
-3. **Sequence after** `worktree-idea-dev-lifecycle-docs-plan` merges (ledger guard first), so the board is not built over a ledger that can lose rows.
-4. **Use the trial as the test.** Use the static board for two weeks. Only if a human collaborator appears, or a real gap remains, build B: one-way, hooked at `publish`, behind `tracker.board: github`, titles and status only, a stored row-to-item key map, cards marked "managed by Craftsman", never read back, writes batched at approval (ARCH-STATE-13).
-5. **Take the docs-tool half as already answered.** just, markdownlint-cli2, lychee and pre-commit reach Craftsman through config slots; no new Craftsman work.
+1. **Spike Obsidian for a day**, before any code. Open the repo folder as a vault, gitignore `.obsidian/`, build one Base for ideas (by `verdict`) and one for plans (by `priority`, `parent`). Write down which views you used and what is missing, especially a ledger kanban for plans.
+2. **Extend `/digest` with `--html`**: one self-contained file with (a) plans by ledger state as a board, (b) ideas by verdict, (c) the epic > story > feature tree from `plan-index.mjs`, (d) architecture areas with their `governs:` paths and their existing Mermaid, (e) a size bar per doc so the chunky files are obvious, (f) the session queue. Titles, goals and links only, never doc bodies.
+3. **Add the session queue in two halves.** A computed ready list from `plan-graph.mjs` and priority (fulfilling ARCH-PLAN-05), and a hand-written `docs/plans/NEXT.md` of ordered slugs plus one-line intent. Lint that every slug resolves and none is COMPLETE.
+4. **Keep it local.** No Artifact publish by default; opt-in only, under the sibling's approval rule.
+5. **Sequence** after the sibling's ledger-guard step, so the views are not built over a ledger that can lose rows. The Obsidian spike needs no sequencing and can start now.
+6. **Revisit GitHub Projects (mirror, one-way)** only if you want to share the roadmap with others; unchanged from round 1.
 
 ## Open questions
-- Do you need to share or assign work to other people on GitHub, or is the board for you alone? (This is the fact most likely to flip the verdict.)
-- Would you ever drag a card to change status? If yes, one-way mirroring is unsound.
-- Which repos are GitHub-only, and which are Azure DevOps-primary?
-- How often do you actually lose track of status today? Even a rough count would anchor the value score.
+- Which view do you want first: plans by state (kanban), the architecture map, ideas by verdict, or the session queue?
+- Is Obsidian acceptable (free but not open source), or must the viewer be open source? The open-source routes are Foam (alpha, VS Code, wikilink-centric) or the generated HTML.
+- Do you need to open the view on your phone or share it, or is local enough?
+- Should the session queue live in the repo (`docs/plans/NEXT.md`, travels with git) or stay local to the machine?
 
 ## Next step
-For the smallest slice: `/architect external-project-board` (a short amendment to the tracker area for a read-only board command), after the sibling's ledger-guard step lands. To reopen B: answer the first two open questions above.
+Run the Obsidian spike (no code). If a gap remains, `/architect external-project-board` for the `/digest --html` and queue amendment, after the sibling design's ledger-guard step.
