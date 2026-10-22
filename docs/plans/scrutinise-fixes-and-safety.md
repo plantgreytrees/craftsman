@@ -20,6 +20,7 @@ coverage:
   docs:          selfprotect-settings-notebook # README and ARCH-SAFETY-05 text changed only after the code holds
   round2:        self-scoped-shared | config-keys-protected | selfprotect-shell-words | script-authority-in-scripts | bypass-flags-3 | prompt-failclosed | stop-loopguard-reports # security/correctness; followups are PENDING and not driven
   round3:        selfprotect-directories | selfprotect-symlinks | bypass-config-includes | worktrees-keys-protected | md-dirty-marker | rules-cites-and-limits # security/correctness; followups are PENDING and not driven
+  round4:        selfprotect-subshell | authority-session-spoof | writers-recursive-inplace | dangling-links | hookskip-env-routes | settings-keys-and-case | state-root-reports | goal-token-hash | project-config-override | rules-claims-and-limits # security/correctness; user chose to fix every finding
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -321,6 +322,136 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/safety.md, scripts/safety-cites.test.mjs, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05, ARCH-SAFETY-08]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: selfprotect-subshell
+    scope_id: selfprotect-subshell
+    project: .
+    depends_on: [rules-cites-and-limits]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: authority-session-spoof
+    scope_id: authority-session-spoof
+    project: .
+    depends_on: [selfprotect-subshell]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/goal-token.mjs, scripts/script-authority.test.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/auto.rules.md, docs/architecture/plan.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/script-authority.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-05, ARCH-SAFETY-09]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: writers-recursive-inplace
+    scope_id: writers-recursive-inplace
+    project: .
+    depends_on: [authority-session-spoof]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, docs/architecture/safety.rules.md, docs/architecture/safety.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: dangling-links
+    scope_id: dangling-links
+    project: .
+    depends_on: [writers-recursive-inplace]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/self-protect.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: hookskip-env-routes
+    scope_id: hookskip-env-routes
+    project: .
+    depends_on: [dangling-links]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/architecture/safety.md, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-03, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: settings-keys-and-case
+    scope_id: settings-keys-and-case
+    project: .
+    depends_on: [hookskip-env-routes]
+    module: scripts/lib/self-protect.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, README.md, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-01, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: state-root-reports
+    scope_id: state-root-reports
+    project: .
+    depends_on: []
+    module: scripts/stop-gate.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/stop-gate.mjs, scripts/session-context.mjs, scripts/lib/core.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/stop-gate.mjs, scripts/stop-gate.test.mjs, scripts/lib/core.mjs, scripts/lib/core.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-01, ARCH-SAFETY-06, ARCH-SAFETY-10]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: goal-token-hash
+    scope_id: goal-token-hash
+    project: .
+    depends_on: []
+    module: scripts/goal-token.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/goal-token.mjs, hooks/register.js, hooks/register.test.ts, scripts/goal-token.test.mjs]
+      docs: [docs/architecture/mod.rules.md, docs/architecture/safety.rules.md, docs/architecture/auto.rules.md, docs/architecture/plan.rules.md]
+      write: [scripts/goal-token.mjs, scripts/goal-token.test.mjs, hooks/register.js, hooks/register.test.ts, docs/architecture/safety.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-MOD-02, ARCH-SAFETY-09]
+    tooling: { implementer: implementer, gates: [security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: project-config-override
+    scope_id: project-config-override
+    project: .
+    depends_on: [state-root-reports, settings-keys-and-case]
+    module: scripts/lib/core.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/core.mjs, scripts/lib/self-protect.mjs, craftsman.config.json]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/engine.rules.md]
+      write: [scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/stop-gate.test.mjs, craftsman.project.json, EXTENDING.md, README.md, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-01, ARCH-SAFETY-05, ARCH-ENGINE-08]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-claims-and-limits
+    scope_id: rules-claims-and-limits
+    project: .
+    depends_on: [selfprotect-subshell, authority-session-spoof, writers-recursive-inplace, dangling-links, hookskip-env-routes, settings-keys-and-case, state-root-reports, goal-token-hash, project-config-override]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: [scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/safety.md, scripts/safety-cites.test.mjs, scripts/safety-claims.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-SAFETY-08]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -433,6 +564,29 @@ Isolated (one `scrutineer`, lenses code-reviewer, security-auditor, consumer-tra
 **Acceptance verdict.** `.craftsman/acceptance.md` has no unticked line. The review contradicts these ticks, recorded as UNMET Correctness Warnings and not edited away: `fixes-and-safety` 8.3 and 15.5 (no claim in the docs exceeds a test) by findings 1-4 and 9; round 1 step 2.2 here (symlinked directories judged by real path) holds for `.craftsman` but not for `hooks/hooks.json` (finding 2) or the scope exemption (finding 3). Steps 18-23 close them.
 
 **Residual risk** (stated, not planned): `COMMAND_TTL_MS` (1 h) on command records, `core.mjs:617`, may refuse `doc-write.mjs on` in an /orchestrate or /auto run longer than an hour unless the /goal re-prompt records the command again (untested); the `run.sh` Read skip walks up from `CLAUDE_PROJECT_DIR` or `$PWD`, so a unit worktree outside the root with `CLAUDE_PROJECT_DIR` unset would skip pre-guard on reads; a settings `env` key such as `CLAUDE_PROJECT_DIR` or `HOME`, if it can override what Claude Code passes to hooks, would re-root the state dir and protected-path base; a Bash write to the main repo's `.git/config` from a linked-worktree session is outside the root (sandbox territory), and `.git/worktrees/<n>/config.worktree` is not matched by `**/.git/config.worktree`; whether Claude Code treats exit 2 from a PostToolUse(Skill) `orchestrate-scope-guard` as intended is unchecked.
+
+### Round 4 (`/scrutinise`, 792b8e4..187f39b)
+Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tracer), ESCALATE, floor clean (757 tests, policies, plugin validate/test), no Disputed. **The user chose to fix every finding** (asked via AskUserQuestion), not only the structural ones. This time the root verified each write finding by what the command really wrote in a throwaway project (HOME and USERPROFILE set to temp), not by the guard's exit code alone: that corrects the round 3 habit of counting an allowed exit as a reproduction. Headline: 1 Critical, 8 Warning, 4 Suggestion.
+
+| # | Finding | Class / severity | Verified by the root | Unit |
+|---|---|---|---|---|
+| 1 | any write wrapped in `( ... )` passes every Bash self-protection check: `tokenize` stops at `(`, the `(`-hit is dropped (`pre-guard.mjs:~1142`), and the text gate needs a writer verb while `>` is not one (`:~1143`) | Security / Critical | REAL EFFECT: created `.claude/settings.local.json` with `disableAllHooks`, forged `.craftsman/sessions/<sid>/doc-write`, rewrote `hooks/hooks.json`, created `.craftsman/off`. The brace-group example was denied in the root's probe | selfprotect-subshell |
+| 2 | the scripts trust `CLAUDE_CODE_SESSION_ID` from the environment and a Bash command sets it inline (`doc-write.mjs:26-30`, `toggle.mjs:22-25`, `goal-token.mjs:46`); `goal-token.mjs` has no pre-guard gate | Security / Warning | REAL EFFECT: with session A holding a fresh `/toggle` record, `CLAUDE_CODE_SESSION_ID=sessA node .../tog""gle.mjs off` created `.craftsman/off`; the honest id was refused | authority-session-spoof |
+| 3 | the writer-verb list is closed: `cp -r`, `cp -rT`, `sed --in-place` (and per the review `cp -a`, `awk -i inplace`, `ed`, `patch`, `tar -x`, `unzip`) reach protected files; `placements` joins only `DEST/basename(SOURCE)` (`pre-guard.mjs:~550-571`, `self-protect.mjs:~91`) | Security / Warning | REAL EFFECT: `cp -r`, `cp -rT` and `sed --in-place` modified `.claude/settings.json`. `rsync -a stage/ ./` was denied (not reproduced); the rest unverified | writers-recursive-inplace |
+| 4 | `find ... -delete` / `-exec rm` on protected files is never judged: `find()` pushes plain hits, not `remove:` hits (`pre-guard.mjs:~658-661`) | Security / Warning | REAL EFFECT: removed `.claude/settings.json` and `craftsman.config.json` | writers-recursive-inplace |
+| 5 | a dangling symlink lets a Write create a protected file: `realResolve` keeps a link whose target is absent (`pre-guard.mjs:~188-196`), and `ln` checks only `.craftsman` link targets | Security / Warning | REAL EFFECT: `ln -s .clau""de/settings.local.json x.json` then `Write x.json` created `.claude/settings.local.json` | dangling-links |
+| 6 | git hook-skip routes still open: `HOOK_ENV` is tested on raw text (quote-split `GIT_CONFIG_KEY_0=core.hoo""ksPath`), and `HOME=` / `XDG_CONFIG_HOME=` pointing git at a model-written config (`pre-guard.mjs:~975-1001`) | Security / Warning | the guard ALLOWS these (confirmed); the hook skip itself was NOT confirmed (the test commit failed for lack of an identity) | hookskip-env-routes |
+| 7 | the settings projection omits `sandbox` and `permissions.defaultMode`, and `SAFETY_ENV` omits `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `CLAUDE_PROJECT_DIR` (`self-protect.mjs:~44-55`) | Security / Warning | the guard ALLOWS `sandbox.enabled:false` and `env.LD_PRELOAD` (confirmed); `NODE_OPTIONS` is denied (control); effect on the harness is runtime-only | settings-keys-and-case |
+| 8 | every path comparison is case-sensitive; on a case-insensitive filesystem `.Claude/...` and `.Craftsman/OFF` match no rule (`pre-guard.mjs:~1113-1117`, `self-protect.mjs`) | Security / Warning | NOT reproduced (Linux host); from code reading | settings-keys-and-case |
+| 9 | `sharedStateDir` runs `git rev-parse` without `stdio` ignore, so outside a repo every pre-guard denial starts with "fatal: not a git repository" (`core.mjs:~392-394`) | Cross-unit / Suggestion | from code reading | state-root-reports |
+| 10 | the doc-drift report is silently skipped while a worktree unit scope is active: Stop reads `doc-snapshot.json` and `events.jsonl` under the worktree, SessionStart and pre-guard write them under the root (`stop-gate.mjs:~21-23,55-64`) | Cross-unit / Suggestion | from code reading | state-root-reports |
+| 11 | this repo's own tests read markdown, but `stopGate.markdownTests` cannot be set here (this repo's config IS the shipped default) | Cross-unit / Suggestion | root build (round 3 step 22) | project-config-override |
+| 12 | the goal token binds name and mtime only; rewrite plus `touch -r` keeps it valid (`hooks/register.js:~108-110`, `goal-token.mjs:~33`) | Security / Suggestion | from code reading | goal-token-hash (promotes `followup-goal-token-hash`) |
+| 13 | no test rows for the bypass forms above, none that asserts a real write, no spoofed-id case, and `safety-cites.test.mjs` proves cites exist, not that the rule's claims are true | Test-coverage / Warning | confirmed by reading the suite | folded into every step's red tests, plus `rules-claims-and-limits` |
+
+**Acceptance verdict.** No unticked line in `.craftsman/acceptance.md`. Contradicted ticks, recorded as UNMET Correctness Warnings and not edited away: round 3 step 18.2 (removal or move of a directory that holds protected state is refused) by findings 3 and 4; the ARCH-SAFETY-05 wording "a tool call is refused, by token matching, when it would ..." by findings 1, 2, 3 and 5; `fixes-and-safety` 8.3 and 15.5 again.
+
+**Residual risk** (stated, not planned): the probes ran in throwaway projects; the git-anchored paths (worktree binding, the sweep against real remotes) were judged by reading; whether Claude Code's Write follows a dangling symlink, reloads sandbox settings mid-session, lets a settings `env` key override `CLAUDE_PROJECT_DIR` for hooks, or asks before editing `.claude/settings*.json` can be confirmed only in a live session; interpreter writes and command text built at run time (for example `d=.craft; echo > ${d}sman/doc-write-pending`) remain accepted limits; and a token-matching guard is only as strong as its shell parsing: this is the fourth round of the same class, and rounds 5 and later should be expected to find more of it.
 
 ## Scope Steps (executable core)
 
@@ -610,6 +764,92 @@ Closes findings 8 and 9. Last, so the cites it writes are final. Cite lines for 
 - [x] 23.2 ARCH-SAFETY-05 gains a limits clause: interpreter-written files (`node -e`, `python3 -c`, `sponge`) and command text built at run time stay with the sandbox (ARCH-SAFETY-01), and the claim is worded as "token-matched" not "cannot" → accept: `safety-docs.test` green; `safety.md` limits and the rule agree word for word on the two limits
 - [x] 23.3 Full CI set, tick, commit `docs(arch): safety cites re-pointed and checked, limits stated in the rule`
 
+### Step 24 — selfprotect-subshell (., javascript, high) — round 4
+Depends on: rules-cites-and-limits
+Closes finding 1 (Critical) and its share of 13. Every write case below is executed for real in a throwaway project (HOME and USERPROFILE set to temp, asserted) and the test asserts what the command wrote, not only the guard's exit code. Same file as steps 25-29, so they run in this order.
+- [ ] 24.0 Failing tests first → accept: red on 187f39b: each blocked form below writes its file when run unguarded and is allowed by the guard
+- [ ] 24.1 A `(`-hit from the tokenizer ("cannot prove safe") fails closed when the de-quoted text names a protected path: `NEVER_TEXT`, a `SELF_SCOPED` name, or a basename of any `SELF_NEVER`/`SELF_SCOPED` entry (`off`, `doc-write`, `commands.json`, `settings.local.json`, `hooks.json`, `craftsman.config.json`) (`pre-guard.mjs:~1141-1143`) → accept: `(echo '{"disableAllHooks":true}' > .claude/settings.local.json)`, `(echo granted > .craftsman/sessions/s1/doc-write)`, `true && (cat x > hooks/hooks.json)`, `(echo hi > .craftsman/off)` and `x=1; (touch .craftsman/off)` are blocked and leave the project unchanged; `(cd src && ls)`, `(echo hi > notes.txt)`, `(cat .craftsman/off)` and `(git status)` are allowed
+- [ ] 24.2 A `>` or `>>` redirect counts as a writer in the raw-text gate, so a redirect the tokenizer cannot read still meets the protected-path check → accept: `echo $(date) > .claude/settings.local.json` and `cat <(echo x) > hooks/hooks.json` are blocked; `echo $(date) > notes.txt` is allowed
+- [ ] 24.3 The brace-group example `{ cd .claude; cat x > settings.local.json; }` was denied in the root's probe: pin it as a must-deny row so a regression shows; add the nested forms `{ (echo x > .craftsman/off); }` and `if true; then (echo x > .craftsman/off); fi` → accept: all blocked, project unchanged
+- [ ] 24.4 Full CI set (`arch-check lint --root <worktree>`), tick `[unit:selfprotect-subshell]`, commit `fix(guard): a subshell cannot hide a write to a protected path`
+
+### Step 25 — authority-session-spoof (., javascript, high) — round 4
+Depends on: selfprotect-subshell
+Closes finding 2 and its share of 13.
+- [ ] 25.0 Failing tests first, driving the three scripts for real with a record in session A and the guard called as session B → accept: red on 187f39b: the spoofed forms create `.craftsman/off`, the pending grant and a goal token
+- [ ] 25.1 pre-guard refuses any Bash command that sets `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PROJECT_DIR`: an env prefix, `env X=...`, `export X=...`, `declare -x X=...`, `set -a`, a quote-split name (`CLAUDE_CODE_SESSION_""ID=...`) → accept: each form in front of `node .../toggle.mjs off`, `node .../doc-write.mjs on` and `node .../goal-token.mjs <file>` is blocked and leaves no `.craftsman/off`, no `doc-write-pending` and no `goal-tokens.json`; `echo "$CLAUDE_CODE_SESSION_ID"` and `printenv CLAUDE_CODE_SESSION_ID` are allowed
+- [ ] 25.2 `goal-token.mjs` invocations are gated like `doc-write.mjs`: allowed only when `/instruction` or `/auto` was typed or called in this session (`commandInvoked`) → accept: `node scripts/goal-token.mjs .craftsman/instructions/x.goal.txt` is blocked with no record and allowed with a `/craftsman:instruction` record
+- [ ] 25.3 The ARCH-SAFETY-05 and -09 text says the scripts' own check is a second layer over a pre-guard check on the id, and the one-shot nonce stays the PENDING `followup-authority-session-binding` → accept: `safety-docs.test` green
+- [ ] 25.4 Full CI set, tick, commit `fix(guard): a command cannot set the session id or project dir the authority scripts trust`
+
+### Step 26 — writers-recursive-inplace (., javascript, high) — round 4
+Depends on: authority-session-spoof
+Closes findings 3 and 4 and their share of 13.
+- [ ] 26.0 Failing tests first, each executed for real in a throwaway project with a staged directory → accept: red on 187f39b: `cp -r`, `cp -rT`, `sed --in-place` and the `find` forms modify or remove the protected file
+- [ ] 26.1 A directory source (or `-r`/`-R`/`-a`/`-T`/`--recursive`/`--archive`) of `cp`, `install` and `rsync` is expanded: the source is listed (bounded, 2000 entries) and `DEST/<entry>` plus `DEST/basename(source)` are judged with `heldNever`/`heldScoped`; a source that cannot be listed counts as holding any protected path under DEST (`placements`, `pre-guard.mjs:~550-571`) → accept: `cp -r STAGE/.claude .`, `cp -rT STAGE/.claude .claude`, `cp -a STAGE/. .`, `cp -r STAGE/hooks .git/`, `rsync -a STAGE/ ./` are blocked and the protected files stay as they were; `cp -r STAGE/src src`, `cp -r a b` and `cp -r STAGE/.claude /tmp/out` are allowed; a unit scope that names `.claude/settings.json` still allows the first
+- [ ] 26.2 `sed` and `perl` match `--in-place[=SUFFIX]` as well as `-i` (`pre-guard.mjs:~569`, `self-protect.mjs`); `awk -i inplace`, `ed`, `patch`, `tar -x*`, `unzip` and `7z x` are blocked when the command names a protected path or a directory that holds one, and stay allowed otherwise → accept: `sed --in-place s/dark/LIGHT/ .claude/settings.json`, `awk -i inplace '{}' .claude/settings.json`, `patch -p0 .claude/settings.json < x.patch`, `tar -xf x.tar -C .claude`, `unzip -o x.zip -d .claude` are blocked; `tar -tf x.tar`, `patch --dry-run -p0 src/a.txt < x.patch`, `unzip -l x.zip`, `sed -n 1p .claude/settings.json` and `sed --in-place s/a/b/ src/a.txt` are allowed
+- [ ] 26.3 `find` with `-delete`, `-exec rm|mv ...` or `-execdir` pushes `remove:<rel>` for each start root, and for any start root that holds an existing file whose basename matches a `-name`/`-iname` pattern and is a protected basename, so `heldNever`/`heldScoped` judge it (`find()`, `pre-guard.mjs:~658-661`) → accept: `find .claude -delete`, `find . -name settings.json -delete`, `find . -name craftsman.config.json -delete`, `find .claude -name settings.json -exec rm {} +` are blocked and the files stay; `find build -delete`, `find . -name '*.log' -delete`, `find src -name x -print` are allowed
+- [ ] 26.4 The recursion, in-place and find limits that remain (an archive whose contents cannot be listed, a script written earlier) are named in the rule and in `safety.md` → accept: `safety-docs.test` green; each limit names a test or says it has none
+- [ ] 26.5 Full CI set, tick, commit `fix(guard): recursive copies, in-place edits and find -delete are judged by what they reach`
+
+### Step 27 — dangling-links (., javascript, high) — round 4
+Depends on: writers-recursive-inplace
+Closes finding 5 and its share of 13.
+- [ ] 27.0 Failing tests first → accept: red on 187f39b: the link is created and the Write through it creates `.claude/settings.local.json`
+- [ ] 27.1 `realResolve` follows a dangling final component with `readlinkSync` (bounded to 40 hops) so a Write or Edit through a link whose target is absent is judged by the target (`pre-guard.mjs:~188-196`) → accept: with `x.json -> .claude/settings.local.json` made outside the tool call and the target absent, `Write x.json` with `disableAllHooks` is blocked and creates nothing; a dangling link to `src/new.txt` stays writable
+- [ ] 27.2 `ln` judges every link target with `selfKind`, `heldNever` and `heldScoped`, not only `.craftsman`, from the de-quoted words (`writeTargets`, `:~550-571`) → accept: `ln -s .clau""de/settings.local.json x.json`, `ln -s ../hooks/hooks.json h.json` and `ln -s .git/hooks/pre-commit p` are blocked and create no link; `ln -s src/a src/b` is allowed
+- [ ] 27.3 Full CI set, tick, commit `fix(guard): a dangling symlink cannot be used to write a protected file`
+
+### Step 28 — hookskip-env-routes (., javascript, high) — round 4
+Depends on: dangling-links
+Closes finding 6 and its share of 13. The guard's allow verdict was confirmed but the hook skip itself was not, so this step's test proves the skip first.
+- [ ] 28.0 Failing tests first. One test builds a throwaway repository with a local identity and a failing `pre-commit` hook, runs the route unguarded (`HOME=<fake> git commit`) and records whether the hook was skipped, then asserts the guard blocks the same command → accept: red on 187f39b for the guard; the unguarded result is printed in the test so a route that does not skip a hook is visible as such
+- [ ] 28.1 `HOOK_ENV` is tested against the de-quoted words as well as the raw text (`pre-guard.mjs:~975`) → accept: `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hoo""ksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x` is blocked; the same without the hooks path key is allowed
+- [ ] 28.2 A `HOME=` or `XDG_CONFIG_HOME=` assignment (prefix, `env`, `export`) on a command or text that runs `commit|push|merge|rebase|am` is treated like `CONFIG_FILE_ENV`, with `/dev/null` and an empty value exempt (`:~976-1001`) → accept: `HOME=/tmp/fakehome git commit -m x`, `XDG_CONFIG_HOME=/tmp/xdg git push`, `env HOME=/tmp/h git rebase main` and `export HOME=/tmp/h; git commit -m x` are blocked; `HOME=/tmp/h git status`, `HOME=/dev/null git commit -m x` and `git commit -m "HOME=x"` are allowed
+- [ ] 28.3 The comment at `:~976` and the `safety.md` limits say exactly which routes are read → accept: `safety-docs.test` green
+- [ ] 28.4 Full CI set, tick, commit `fix(guard): git config routes through quote-split env and HOME are hook-skip routes`
+
+### Step 29 — settings-keys-and-case (., javascript, high) — round 4
+Depends on: hookskip-env-routes
+Closes findings 7 and 8 and their share of 13.
+- [ ] 29.0 Failing tests first → accept: red on 187f39b for each Write/Edit below
+- [ ] 29.1 The settings projection adds `sandbox` and `permissions.defaultMode`; `SAFETY_ENV` adds `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*` and `CLAUDE_PROJECT_DIR` (`self-protect.mjs:~44-55`), and the ARCH-SAFETY-05 key list and README off-switch bullet name them → accept: Write and Edit of `.claude/settings.json` setting `sandbox.enabled:false` or `permissions.defaultMode` are blocked, as is `env.LD_PRELOAD` in `.claude/settings.local.json`; `permissions.allow`, `theme` and `env.DEBUG` stay editable; a unit scope that names the file still allows
+- [ ] 29.2 Protected-path comparisons are case-folded in `selfKind`, `heldNever`, `heldScoped`, `NEVER_TEXT`, `namesSelfScoped` and the hooks.json test, explicitly (a lowercase helper), not by relying on the filesystem (`pre-guard.mjs:~1113-1117`, `self-protect.mjs`) → accept: on this Linux host `Write .Claude/settings.local.json`, `Write .Craftsman/OFF` and `touch .CRAFTSMAN/Off` are blocked; `src/Hooks/readme.md` and `Docs/x.md` stay writable
+- [ ] 29.3 Full CI set, tick, commit `fix(guard): sandbox and preload settings keys are protected, paths compare case-folded`
+
+### Step 30 — state-root-reports (., javascript, normal) — round 4
+Depends on: none
+Closes findings 9 and 10.
+- [ ] 30.0 Failing tests first → accept: red on 187f39b: a denial outside a repository starts with "fatal: not a git repository"; with an active worktree unit scope the drift report is missing
+- [ ] 30.1 `sharedStateDir` runs `git rev-parse` with `stdio: ["ignore","pipe","ignore"]` (`core.mjs:~392-394`) → accept: pre-guard run from a non-repository directory, allowed and denied, writes nothing to stderr beyond its own message
+- [ ] 30.2 `stopReports` reads `doc-snapshot.json` and `events.jsonl` from the ROOT state dir, not from `active.project_root/.craftsman` (`stop-gate.mjs:~21-23,55-64`) → accept: `stop-gate.test` with an active worktree scope, a snapshot taken at the root and a drifted guarded doc prints the drift report; with no snapshot nothing is printed
+- [ ] 30.3 Full CI set, tick, commit `fix(state): outside a repo pre-guard is quiet, and Stop reads doc drift from the root state`
+
+### Step 31 — goal-token-hash (., javascript, high) — round 4
+Depends on: none
+Closes finding 12 (promotes the PENDING `followup-goal-token-hash`).
+- [ ] 31.0 Failing tests first → accept: red on 187f39b: rewriting a tokened goal file and restoring its mtime still launches
+- [ ] 31.1 The token stores the sha256 of the goal file's content next to name and mtime (`goal-token.mjs:~33`), and the mod compares it before it submits (`hooks/register.js:~108-110`); a mismatch surfaces the file and does not submit → accept: `goal-token.test`: the token holds a 64-hex digest; `register.test.ts`: a goal rewritten and `touch -r`-restored is shown, not submitted; an untouched one still launches
+- [ ] 31.2 ARCH-SAFETY-09 text says the token binds content as well → accept: `safety-docs.test` green
+- [ ] 31.3 Full CI set, tick, commit `fix(mod): a goal token binds the goal's content`
+
+### Step 32 — project-config-override (., javascript, high) — round 4
+Depends on: state-root-reports, settings-keys-and-case
+Closes finding 11 on the user's choice: a tracked override file (asked via AskUserQuestion; the alternatives were keeping CI as the catcher and a dev-only switch).
+- [ ] 32.0 Failing tests first → accept: red on 187f39b: a value in `craftsman.project.json` is ignored
+- [ ] 32.1 `loadConfig` also reads an optional `craftsman.project.json` in the project root and deep-merges it after the base project file (`core.mjs:loadConfig`); absent means today's behaviour, malformed is ignored with the existing warning → accept: `core.test`: the override wins over the base, an absent file changes nothing, a malformed one warns and is ignored, the plugin's own default file is not read twice
+- [ ] 32.2 `craftsman.project.json` is self-protected exactly like `craftsman.config.json`: it joins `SELF_SCOPED` and the safety-key projection (it can set `enabled`, `protectedPaths`, `docWriteGuard`, `stopGate`, `worktrees`), and a unit scope that names it is the only way a tool call edits those keys → accept: `self-protect.test` and `pre-guard.test`: Write of `{"protectedPaths":[]}` to it is blocked outside a unit scope that names the file and allowed inside; a key outside the safety list stays editable; `scope.mjs` refuses a manifest that can reach it without /orchestrate or /auto
+- [ ] 32.3 This repo's `craftsman.project.json` sets `stopGate.markdownTests` to `README.md`, `commands/*.md`, `agents/*.md`, `docs/architecture/*.md` and `CHANGELOG.md` (the markdown its tests read); the shipped default in `craftsman.config.json` stays `[]` → accept: `stop-gate.test` with the file in the fixture: an edit of `README.md` marks the session dirty and Stop re-runs; with the file absent a README edit does not; `safety-docs.test` still pins the shipped default
+- [ ] 32.4 `EXTENDING.md` and the README Safety table document the file and what it can and cannot override → accept: `safety-docs.test` green; `doc-size-policy.mjs` green, no cap raised
+- [ ] 32.5 Full CI set, tick, commit `feat(config): a tracked project override file, used here for markdownTests`
+
+### Step 33 — rules-claims-and-limits (., markdown, normal) — round 4
+Depends on: selfprotect-subshell, authority-session-spoof, writers-recursive-inplace, dangling-links, hookskip-env-routes, settings-keys-and-case, state-root-reports, goal-token-hash, project-config-override
+Closes the rest of finding 13: the rule's claims, not only its cites, are tested. Last, so the text and cites are final.
+- [ ] 33.0 Failing tests first: `scripts/safety-claims.test.mjs` holds a must-deny table that is the rule's claim made executable (the forms from steps 18-29 for ARCH-SAFETY-05, the three authority scripts under a spoofed id for -09) and runs every row for real in a throwaway project with HOME and USERPROFILE set to temp, asserting the guard denies AND the protected state is unchanged; `safety-cites.test.mjs` extended to the new rule text → accept: red on 187f39b for the rows steps 24-29 fixed
+- [ ] 33.1 The ARCH-SAFETY-05 and -09 text, the key lists, the limits clause and every cite are brought up to date and `verified_at` is bumped → accept: `safety-cites.test` and `arch-check lint --root <worktree>` green; the rule lists exactly the limits the claims table does not cover (interpreter writes, run-time-built text, archives it cannot list)
+- [ ] 33.2 Full CI set, tick, commit `docs(arch): the safety rule's claims are tested, not only its cites`
+
 ## Status 2026-10-22 (round 3)
 Round 3 (steps 18-23) landed in c43a6ee (18), 16058a2 (19), cd9e239 (20), 626fe9a (21), 3860539 (22) and f1156f4 (23). Each step's new tests were seen red against the previous commit's sources (a throwaway checkout with the new tests copied in) and green after; the full CI set passed on each: 757 node tests at f1156f4, model-policy, doc-size-policy, `arch-check lint --root <worktree>` (10 docs, 106 rules), `claude plugin validate .`, `claude plugin test .`, `git diff --check`. Boxes for steps 18-23 are ticked on that evidence.
 
@@ -630,7 +870,13 @@ Round 2: steps 11 → 12 → 13 → 15 share `pre-guard.mjs` and `lib/self-prote
 
 Round 3: steps 18 → 19 → 20 share `pre-guard.mjs` and run in that order (19 also writes `scope.mjs` and `lib/self-protect.mjs`); step 21 follows 19 (both write `lib/self-protect.mjs`); step 22 is independent (`quality-gate.mjs`, config); step 23 is last, after 18-22, so its cites are final. The three new follow-up rows (`followup-goal-token-hash`, `followup-authority-session-binding`, `followup-writer-operand`) stay PENDING, flagged not driven; `followup-md-dirty-marker` is promoted to step 22.
 
+Round 4: steps 24 → 25 → 26 → 27 → 28 → 29 share `pre-guard.mjs` (26, 27 and 29 also write `lib/self-protect.mjs`) and run in that order; step 30 (`core.mjs`, `stop-gate.mjs`) and step 31 (`goal-token.mjs`, `register.js`) are independent of them; step 32 follows 29 and 30 (`core.mjs`, `lib/self-protect.mjs`); step 33 is last. The still-PENDING rows are `followup-skill-record`, `followup-authority-session-binding` and `followup-writer-operand`; `followup-goal-token-hash` is promoted to step 31 and `followup-md-dirty-marker` was promoted in round 3.
+
 ## Verification background
+- Round 4 evidence: the isolated review's report (range 792b8e4..187f39b) and the root's probe `probe3.mjs` (scratch, not committed), which runs each command through `scripts/pre-guard.mjs` and, when the guard allows it, runs it for real in a throwaway project with a temp HOME and diffs the project before and after. Results at 187f39b: the four subshell forms, `cp -r`, `cp -rT`, `sed --in-place`, the three `find` forms, the dangling-link Write and the session-id spoof all changed protected state; the brace group and `rsync -a` were denied; the two git routes were allowed by the guard but their effect was not shown; `sandbox.enabled:false` and `env.LD_PRELOAD` were allowed, `NODE_OPTIONS` denied.
+- Round 4 CONSUMERS: `SELF_NEVER`, `SELF_SCOPED`, `SAFETY_CONFIG_KEYS`, `SAFETY_ENV`, `heldNever`, `heldScoped`, `NEVER_TEXT`, `WRITER_VERBS` and `realEntries` (`lib/self-protect.mjs`) are consumed by `pre-guard.mjs` and `scope.mjs`; `loadConfig` (`lib/core.mjs`) by every hook script and by `arch-check.mjs`, `init.mjs`, `stats.mjs` and `baseline.mjs`, so step 32's second file reaches all of them (the change is additive: absent file, same result); `sharedStateDir` by `pre-guard.mjs`, `stop-gate.mjs` and `session-context.mjs`; the goal token file by `goal-token.mjs` and `hooks/register.js` only.
+- Blind re-derivation for round 4: skipped, the decomposition was supplied by an isolated `/scrutinise` with file-level fixes and the root re-verified the write findings by running them.
+- Acceptance lines for steps 24-33 are NOT yet in `.craftsman/acceptance.md` (`/orchestrate` adds them first); no tracker rows are registered (the main checkout's `TRACKER.md` carries an uncommitted user change).
 - Round 3 evidence: the isolated review's report (range 792b8e4..3a7b386) and the root's own re-run of the probes against `scripts/pre-guard.mjs` at 3a7b386 in a throwaway project (exit 0 for `cp /tmp/x .claude/`, `mv /tmp/x .claude/`, `cp /tmp/off .craftsman`, `cp /tmp/h hooks`, `rm -rf .craftsman/sessions/s1`, the three config-include forms, and an Edit through `h -> hooks`; exit 2 for the controls `cd .claude && cp /tmp/x settings.json`, `cp /tmp/x .claude/settings.json` and Edit of `hooks/hooks.json`). Probe file: scratch `probe.mjs`, not committed.
 - Round 3 CONSUMERS: `SELF_NEVER`, `SELF_SCOPED`, `SAFETY_CONFIG_KEYS`, `safetyProjection` (`lib/self-protect.mjs`) are consumed by `pre-guard.mjs` (`selfKind`, the Bash scan, `afterEdit` checks) and `SELF_SCOPED` also by `scope.mjs`; `writeTargets`, `removedDocs` and `bypassesHooks` are private to `pre-guard.mjs` and pinned by `pre-guard.test.mjs`; `stopGate.markdownTests` (new) is read by `quality-gate.mjs` only and is a config key documented in README; the ARCH-SAFETY cites are read by `arch-check.mjs lint` (existence of the range only) and by the new `safety-cites.test.mjs`.
 - Blind re-derivation for round 3: skipped, the decomposition was supplied by an isolated `/scrutinise` with file-level fixes, the Critical and three Warnings reproduced by the root.
@@ -655,7 +901,15 @@ Round 3: steps 18 → 19 → 20 share `pre-guard.mjs` and run in that order (19 
 - Step 22 changes what turns the suite on at Stop: with the shipped default `[]` nothing changes for other projects; only this repo's own config lists markdown. Confirm the choice (config list versus marking every `.md`) before building.
 - Step 19's realpath resolution runs only for write entries and targets that already matched a self-protected name, so the guard's latency does not grow (the p95 test in `launcher.test` still applies).
 
+- Step 24's text-gate rule is deliberately broad (a `(`-hit that names a protected basename is refused even when it only reads it). Reads such as `(cat .craftsman/off)` stay allowed because the gate needs a write signal (a writer verb or a redirect); the tests pin both sides.
+- Step 26 lists a source directory at analysis time (bounded to 2000 entries). A source that is a pipe, an unreadable path or larger than the bound counts as holding anything, so a legitimate large `cp -r` into `.claude` is refused until the user runs it; copies elsewhere are unaffected.
+- Step 28 refuses `HOME=<dir> git commit`. Tests and tools that isolate git with a fake HOME must use `/dev/null` (exempt) or set the identity another way.
+- Step 32 adds a second config file that every hook script reads: a malformed or hostile `craftsman.project.json` must not weaken the guard, hence its self-protection in the same step (it joins the protected files and the safety-key projection like `craftsman.config.json`). Revert is one commit.
+- The fourth round of the same class: if round 5 again finds new bypasses, the cost-benefit of per-form patching should be reviewed with the user before round 6, because the sandbox, not the guard, is the boundary the user designed around.
+
 ## Out of scope (flagged, not driven)
+- Round 4 follow-ups, PENDING: `followup-authority-session-binding` (finding 2's stronger fix: a one-shot nonce minted by pre-guard that the scripts consume; step 25 closes the inline-assignment route only), `followup-writer-operand` (the writer-verb-anywhere false positive, finding 13 of round 3), `followup-skill-record` (a model Skill call counts as a typed command).
+- Round 4 residual risk (see the Round 4 section): runtime-only behaviour of Claude Code (dangling-symlink Write, mid-session settings reload, settings `env` over `CLAUDE_PROJECT_DIR`, a permission prompt on `.claude/settings*.json`), interpreter writes and run-time-built text, archives the guard cannot list.
 - Round 3 follow-ups, PENDING: `followup-goal-token-hash` (finding 10: store a sha256 of the goal file's content in the token and compare in `register.js`), `followup-authority-session-binding` (finding 11: require the command record to post-date the session's own start, or an unexpired record whose argument was `off`; needs the `followup-skill-record` decision first), `followup-writer-operand` (finding 13: deny only when the protected name is an operand of the writer segment, not anywhere in the command).
 - Round 3 residual risk (see the Round 3 section): the one-hour command-record TTL in long runs, the `run.sh` Read skip when `CLAUDE_PROJECT_DIR` is unset, settings `env` keys that could re-root the state dir, the main repo's `.git/config` and `config.worktree` from a linked-worktree session, and the PostToolUse(Skill) exit-2 handling.
 - Moving the `failClosed` + handler block, copied in `pre-guard.mjs:21-36`, `agent-mode-guard.mjs:56-71` and `orchestrate-scope-guard.mjs:72-87`, into `core.mjs`: a Suggestion whose unit would read `pre-guard.mjs` and `core.mjs` together and exceed the context cap; the three copies are pinned by the same test.
