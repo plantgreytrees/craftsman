@@ -616,17 +616,6 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       for (let i = 0; i < rest.length; i++) { if (valued.includes(rest[i])) { i++; continue; } if (!rest[i].startsWith("-")) out.push(rest[i]); }
       return out;
     };
-    // Every value of an option, in order, in its four spellings: `-C X`, `--directory X`, `--directory=X` and `-CX`.
-    const optionValues = (short, long) => {
-      const out = [];
-      for (let i = 0; i < rest.length; i++) {
-        const a = rest[i];
-        if (a === `-${short}` || a === `--${long}`) { if (rest[i + 1] !== undefined) out.push(rest[++i]); }
-        else if (a.startsWith(`--${long}=`)) out.push(a.slice(long.length + 3));
-        else if (a.startsWith(`-${short}`) && !a.startsWith("--") && a.length > 2) out.push(a.slice(2));
-      }
-      return out;
-    };
     let files = [];
     if (verb === "awk" || verb === "gawk") {
       // In-place mode is the xgawk `inplace` library: `-i inplace`, `-iinplace`, `--include inplace`, `--include=inplace`.
@@ -641,19 +630,56 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       const first = rest[0] ?? "";
       const extracts = rest.some((a) => /^-[A-Za-z]*x/.test(a) || a === "--extract" || a === "--get") || (!first.startsWith("-") && /^[A-Za-z]*x[A-Za-z]*$/.test(first));
       if (!extracts) return;
-      // Each -C is relative to the one before it, so every directory on the way is judged, not only the first or the last.
-      let here = ".";
-      const dirs = optionValues("C", "directory");
-      if (!dirs.length) target(here, st, "holds", env);
-      for (const dir of dirs) {
-        here = dir.startsWith("/") ? dir : path.posix.join(here, dir);
-        target(here, st, "holds", env);
+      // An allowlist, not a parser of every spelling: only the option words below are read exactly. Any other word (a cluster that
+      // holds C, an abbreviated or unknown long option) leaves the destination unknown, so every word of the command that can name
+      // a directory is judged as one (unreadable → treated as unpacked into whatever it names).
+      const flags = /^-?[xvzjJpkoOmPSwa]+f?$/, longFlags = /^--(?:extract|get|verbose|gzip|gunzip|xz|bzip2|keep-old-files|overwrite|no-same-owner|same-owner|preserve-permissions|keep-newer-files|skip-old-files|totals|wildcards|no-same-permissions|strip-components=\d+)$/;
+      const dirs = [];
+      let known = true;
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (i === 0 && !a.startsWith("-") && /^[A-Za-z]+$/.test(a)) { if (flags.test(a)) { if (a.endsWith("f")) i++; } else known = false; continue; }
+        if (a.startsWith("-") && !a.startsWith("--") && flags.test(a)) { if (a.endsWith("f")) i++; continue; }
+        if (a === "-f" || a === "--file") { i++; continue; }
+        if (a.startsWith("--file=") || longFlags.test(a)) continue;
+        if (a === "-C" || a === "--directory") { if (rest[i + 1] === undefined) known = false; else dirs.push(rest[++i]); continue; }
+        if (a.startsWith("--directory=")) { dirs.push(a.slice(12)); continue; }
+        if (/^-C./.test(a)) { dirs.push(a.slice(2)); continue; }
+        if (a.startsWith("-")) { known = false; continue; }
+      }
+      if (known) {
+        // Each -C is relative to the one before it, so every directory on the way is judged, not only the first or the last.
+        let here = ".";
+        if (!dirs.length) target(here, st, "holds", env);
+        for (const dir of dirs) {
+          here = dir.startsWith("/") ? dir : path.posix.join(here, dir);
+          target(here, st, "holds", env);
+        }
+        return;
+      }
+      for (const word of rest) {
+        const candidate = word.startsWith("-") ? (word.includes("=") ? word.slice(word.indexOf("=") + 1) : /^-[A-Za-z]./.test(word) && !/^-[A-Za-z]+$/.test(word) ? word.slice(2) : "") : word;
+        if (candidate) target(candidate, st, "holds", env);
       }
       return;
     } else if (verb === "unzip") {
       if (rest.some((a) => /^-(?!\w*d)[A-Za-z]*[ltpZ][A-Za-z]*$/.test(a))) return; // list, test, pipe, zipinfo: nothing is written
-      const dirs = optionValues("d", "directory");
-      for (const dir of dirs.length ? dirs : ["."]) target(dir, st, "holds", env);
+      // The same allowlist: clusters of argument-free letters, `-d DIR` / `-dDIR`, and operands. Anything else leaves the destination
+      // unknown, and every word that can name a directory is judged as one.
+      const dirs = [];
+      let known = true;
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (/^-[oqnjufaLVb]+$/.test(a)) continue;
+        if (a === "-d") { if (rest[i + 1] === undefined) known = false; else dirs.push(rest[++i]); continue; }
+        if (/^-d./.test(a)) { dirs.push(a.slice(2)); continue; }
+        if (a.startsWith("-")) known = false;
+      }
+      if (known) { for (const dir of dirs.length ? dirs : ["."]) target(dir, st, "holds", env); return; }
+      for (const word of rest) {
+        const candidate = word.startsWith("-") ? (/^-d./.test(word) ? word.slice(2) : "") : word;
+        if (candidate) target(candidate, st, "holds", env);
+      }
       return;
     }
     for (const f of files) if (f && f !== "-") target(f, st, verb, env);

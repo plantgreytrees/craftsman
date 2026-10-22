@@ -101,7 +101,8 @@ const CLAIMS = [
   // the same writers in every spelling of their destination and in-place options (round 5)
   ...(have("tar") ? ["tar -xf stage/off.tar --directory=.craftsman", "tar -x -f stage/off.tar -C.craftsman", "tar -xf stage/off.tar -C src -C ../.craftsman",
 "tar xf stage/off.tar --directory .craftsman"] : []),
-  ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip -d.craftsman", "unzip -qo stage/off.zip -d .craftsman"] : []),
+  ...(have("tar") ? ["tar -xvC .craftsman -f stage/off.tar", "tar -x --file=stage/off.tar --dir=.craftsman", "tar xfC stage/off.tar .craftsman", "tar -xvC .claude -f stage/x.tar"] : []),
+  ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip -d.craftsman", "unzip -qo stage/off.zip -d .craftsman", "unzip -od .craftsman stage/off.zip"] : []),
   ...(have("gawk") ? [`gawk -iinplace '{sub("dark","LIGHT");print}' .claude/settings.json`, `gawk --include inplace '{sub("dark","LIGHT");print}' .claude/settings.json`] : []),
   // case-folded names reach the same files on a case-insensitive filesystem
   "touch .Craftsman/OFF", "echo x > .CLAUDE/settings.local.json",
@@ -122,7 +123,7 @@ test("ARCH-SAFETY-05 claims: every form changes protected state when run unguard
 // The spellings above must not make every use of those tools a denial.
 test("the archive and awk spellings that write nothing protected are allowed (36.x)", { skip }, () => {
   const allowed = [
-    "tar -xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
+    "tar -xf stage/x.tar -C src", "tar -xvf stage/x.tar -C src", "tar -xzf stage/x.tar --directory=src", "tar -xvC src -f stage/x.tar", "tar xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
     ...(have("unzip") ? ["unzip -l stage/off.zip", "unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
     ...(have("gawk") ? ["gawk -i ordchr 1 src/a.txt", "awk 1 .claude/settings.json", "gawk -v x=1 '{print}' src/a.txt"] : []),
   ];
