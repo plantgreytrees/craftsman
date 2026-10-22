@@ -182,6 +182,24 @@ test("run.sh filter: a scope or scope-required file for the session, here or in 
   } finally { f.cleanup(); }
 });
 
+// Round 5 (37.x): the filter must look in every file loadConfig merges, or a Read skips a guard the project asked for.
+test("run.sh filter: protectedPaths in any config file loadConfig reads keeps the guard on reads (37.1, 37.2)", { skip: skipWindows }, () => {
+  const core = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "lib", "core.mjs"), "utf8");
+  const names = /for \(const name of (\[[^\]]*craftsman\.config\.json[^\]]*\])\)/.exec(core)?.[1];
+  assert.ok(names, "found the list of project config files in loadConfig");
+  const files = JSON.parse(names);
+  assert.ok(files.length >= 2 && files.includes("craftsman.project.json"));
+  for (const name of files) {
+    const f = filterFixture();
+    try {
+      fs.writeFileSync(path.join(f.project, name), JSON.stringify({ protectedPaths: ["secrets/**"] }));
+      f.reset();
+      assert.equal(f.call(payload("Read", { file_path: "/p/secrets/key.txt" })).status, 2, `${name}: protectedPaths keeps the guard on reads`);
+      assert.equal(f.nodeRan(), true, `${name}: the guard ran`);
+    } finally { f.cleanup(); }
+  }
+});
+
 test("run.sh filter: a protected-looking path, a project protectedPaths override, an odd session id or unreadable input runs the guard", { skip: skipWindows }, () => {
   const f = filterFixture();
   try {

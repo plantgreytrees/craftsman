@@ -36,9 +36,12 @@ guard_cannot_act() {
   d=${CLAUDE_PROJECT_DIR:-$PWD}
   while :; do
     for f in "$d/.craftsman/sessions/$sid"/scope*; do [ -e "$f" ] && return 1; done
-    if [ -f "$d/craftsman.config.json" ]; then
-      while IFS= read -r line || [ -n "$line" ]; do case $line in *protectedPaths*) return 1 ;; esac; done < "$d/craftsman.config.json"
-    fi
+    # every file loadConfig merges over the defaults (scripts/lib/core.mjs; launcher.test pins that the lists agree)
+    for cfg in craftsman.config.json craftsman.project.json; do
+      if [ -f "$d/$cfg" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do case $line in *protectedPaths*) return 1 ;; esac; done < "$d/$cfg"
+      fi
+    done
     case $d in /|'') break ;; esac
     d=${d%/*}
     [ -z "$d" ] && d=/

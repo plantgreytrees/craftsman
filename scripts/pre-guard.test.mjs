@@ -1321,6 +1321,11 @@ test("pre-guard: the launcher filter gives the same verdict as the guard for eve
     fs.writeFileSync(path.join(dir, "secrets", "key.txt"), "k");
     assert.equal(parity(dir, "project protectedPaths", { session_id: "parity-4", tool_name: "Read", tool_input: { file_path: at("secrets/key.txt") } }), 2);
 
+    // the same list in the other file loadConfig merges (craftsman.project.json) is honoured through the launcher too
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ maxFeedbackLines: 5 }));
+    fs.writeFileSync(path.join(dir, "craftsman.project.json"), JSON.stringify({ protectedPaths: ["secrets/**"] }));
+    assert.equal(parity(dir, "project override file protectedPaths", { session_id: "parity-5", tool_name: "Read", tool_input: { file_path: at("secrets/key.txt") } }), 2);
+
     // CRAFTSMAN_SAFETY=off is the one off switch, with or without the launcher
     assert.equal(parity(dir, "safety off", tool("Read", { file_path: at(".env") }), { CRAFTSMAN_SAFETY: "off" }), 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
