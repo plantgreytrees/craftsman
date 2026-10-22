@@ -21,6 +21,7 @@ coverage:
   round2:        self-scoped-shared | config-keys-protected | selfprotect-shell-words | script-authority-in-scripts | bypass-flags-3 | prompt-failclosed | stop-loopguard-reports # security/correctness; followups are PENDING and not driven
   round3:        selfprotect-directories | selfprotect-symlinks | bypass-config-includes | worktrees-keys-protected | md-dirty-marker | rules-cites-and-limits # security/correctness; followups are PENDING and not driven
   round4:        selfprotect-subshell | authority-session-spoof | writers-recursive-inplace | dangling-links | hookskip-env-routes | settings-keys-and-case | state-root-reports | goal-token-hash | project-config-override | rules-claims-and-limits # security/correctness; user chose to fix every finding
+  round5:        nonce-safety-marker | env-word-mentions | archive-and-awk-options | launcher-project-config | config-source-names | rules-cites-round5 # security/correctness/architecture; user chose to fix every finding
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -452,6 +453,84 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/safety.md, scripts/safety-cites.test.mjs, scripts/safety-claims.test.mjs, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05, ARCH-SAFETY-08]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: nonce-safety-marker
+    scope_id: nonce-safety-marker
+    project: .
+    depends_on: [rules-claims-and-limits]
+    module: scripts/lib/core.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/core.mjs, scripts/session-context.mjs, scripts/doc-write.mjs, scripts/toggle.mjs, scripts/goal-token.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/session-context.mjs, scripts/session-context.test.mjs, scripts/doc-write.mjs, scripts/toggle.mjs, scripts/goal-token.mjs, scripts/script-authority.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-SAFETY-04, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: env-word-mentions
+    scope_id: env-word-mentions
+    project: .
+    depends_on: [nonce-safety-marker]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/script-authority.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: archive-and-awk-options
+    scope_id: archive-and-awk-options
+    project: .
+    depends_on: [env-word-mentions]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/safety-claims.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: launcher-project-config
+    scope_id: launcher-project-config
+    project: .
+    depends_on: [archive-and-awk-options]
+    module: hooks/run.sh
+    language: shell
+    security: high
+    scope:
+      read: [hooks/run.sh, scripts/lib/core.mjs]
+      docs: [docs/architecture/safety.rules.md]
+      write: [hooks/run.sh, scripts/launcher.test.mjs, scripts/pre-guard.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-11, ARCH-SAFETY-02]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: config-source-names
+    scope_id: config-source-names
+    project: .
+    depends_on: [nonce-safety-marker, launcher-project-config]
+    module: scripts/lib/core.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/lib/core.mjs, scripts/init.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/plan.rules.md]
+      write: [scripts/lib/core.mjs, scripts/lib/core.test.mjs, scripts/session-context.test.mjs, scripts/init.mjs, scripts/init.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-01, ARCH-SAFETY-04, ARCH-PLAN-04]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-cites-round5
+    scope_id: rules-cites-round5
+    project: .
+    depends_on: [nonce-safety-marker, env-word-mentions, archive-and-awk-options, launcher-project-config, config-source-names]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: [scripts/lib/self-protect.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/plan.rules.md, docs/architecture/safety.md, scripts/safety-cites.test.mjs, scripts/safety-claims.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-SAFETY-11]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -587,6 +666,19 @@ Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tra
 **Acceptance verdict.** No unticked line in `.craftsman/acceptance.md`. Contradicted ticks, recorded as UNMET Correctness Warnings and not edited away: round 3 step 18.2 (removal or move of a directory that holds protected state is refused) by findings 3 and 4; the ARCH-SAFETY-05 wording "a tool call is refused, by token matching, when it would ..." by findings 1, 2, 3 and 5; `fixes-and-safety` 8.3 and 15.5 again.
 
 **Residual risk** (stated, not planned): the probes ran in throwaway projects; the git-anchored paths (worktree binding, the sweep against real remotes) were judged by reading; whether Claude Code's Write follows a dangling symlink, reloads sandbox settings mid-session, lets a settings `env` key override `CLAUDE_PROJECT_DIR` for hooks, or asks before editing `.claude/settings*.json` can be confirmed only in a live session; interpreter writes and command text built at run time (for example `d=.craft; echo > ${d}sman/doc-write-pending`) remain accepted limits; and a token-matching guard is only as strong as its shell parsing: this is the fourth round of the same class, and rounds 5 and later should be expected to find more of it.
+
+### Round 5 findings (isolated review of 187f39b..1e8c40b: 0 Critical, 4 Warning, 5 Suggestion)
+| # | Finding | Class / severity | Unit |
+|---|---|---|---|
+| 1 | `consumeNonce` skips the nonce when the script's own env has `CRAFTSMAN_SAFETY=off`; `read`/`export NAME` sets the session id unseen (`core.mjs:648-649`, `pre-guard.mjs:1326`) | Security / Warning | nonce-safety-marker, env-word-mentions |
+| 2 | `tar --directory=`, `-CX`, repeated `-C`, `unzip -dX` are not read (`pre-guard.mjs:630,634`) | Security / Warning | archive-and-awk-options |
+| 3 | awk in-place seen only as `-i inplace` and `--include=inplace` (`pre-guard.mjs:619`) | Security / Warning | archive-and-awk-options |
+| 4 | `run.sh` scans only `craftsman.config.json` for `protectedPaths` (`hooks/run.sh:39-41`) | Architecture / Warning | launcher-project-config |
+| 5 | the nonce is minted before later denials (`pre-guard.mjs:1339-1342`) | Security / Suggestion | env-word-mentions |
+| 6 | the id/dir check refuses plain comparisons (`pre-guard.mjs:1326`) | Correctness / Suggestion | env-word-mentions |
+| 7 | `read HOME` is not seen (`pre-guard.mjs:1155`) | Security / Suggestion | env-word-mentions |
+| 8 | SessionStart message and `init.mjs:47` ignore `craftsman.project.json` (`core.mjs:679`) | Cross-unit / Suggestion | config-source-names |
+| 9 | two declarations on one line (`pre-guard.mjs:361`) | Style / Suggestion | archive-and-awk-options |
 
 ## Scope Steps (executable core)
 
@@ -850,6 +942,58 @@ Closes the rest of finding 13: the rule's claims, not only its cites, are tested
 - [x] 33.1 The ARCH-SAFETY-05 and -09 text, the key lists, the limits clause and every cite are brought up to date and `verified_at` is bumped → accept: `safety-cites.test` and `arch-check lint --root <worktree>` green; the rule lists exactly the limits the claims table does not cover (interpreter writes, run-time-built text, archives it cannot list)
 - [x] 33.2 Full CI set, tick, commit `docs(arch): the safety rule's claims are tested, not only its cites`
 
+### Step 34 — nonce-safety-marker (., javascript, high) — round 5
+Depends on: rules-claims-and-limits
+Closes finding 1's first half (Warning, reproduced). `consumeNonce` asks the script's own environment whether safety is off, and any child process can set that. The user's environment is only visible to a hook, so SessionStart records it. Every attack below is run for real in a throwaway project (HOME and USERPROFILE temp, asserted).
+- [ ] 34.0 Failing tests first → accept: red on 1e8c40b: `CRAFTSMAN_SAFETY=off node doc-write.mjs on`, with a `/plan` record for the session and no nonce, creates the grant; same for `toggle.mjs off` and `goal-token.mjs`
+- [ ] 34.1 `session-context.mjs` (SessionStart, which sees the user's environment and the hook `session_id`) writes `sessions/<sid>/safety-off` only when `CRAFTSMAN_SAFETY=off` is in its env, and removes a stale one otherwise; `consumeNonce` no longer reads `env` but returns true only when that marker exists for the session (a regular file; a directory does not count, as for `.craftsman/off`) → accept: `session-context.test`: marker written with the env var, absent without, a stale marker removed; `core.test`: nonce required when no marker, skipped with one
+- [ ] 34.2 The marker path is never writable by a tool call (it sits under `.craftsman/sessions/`, already in `SELF_NEVER`; add the explicit row to the table) → accept: `echo x > .craftsman/sessions/s1/safety-off`, `touch` and `cp` of it are blocked and create nothing, each first shown to create it when unguarded
+- [ ] 34.3 Edge, written down: `CRAFTSMAN_SAFETY=off` set after the session started is not seen; the scripts then ask for a nonce that no pre-guard will mint and refuse (fail closed) → accept: a case in `script-authority.test` pins it
+- [ ] 34.4 Full CI set (`arch-check lint --root <worktree>`), tick `[unit:nonce-safety-marker]`, commit `fix(guard): the nonce is skipped only when SessionStart saw safety off`
+
+### Step 35 — env-word-mentions (., javascript, high) — round 5
+Depends on: nonce-safety-marker
+Closes finding 1's second half, Suggestions 6 and 7, and Suggestion 5. Same file as steps 36 and 37's tests, so they run in this order.
+- [ ] 35.0 Failing tests first, each form run for real unguarded to prove it borrows the id or the HOME → accept: red on 1e8c40b: `read CLAUDE_CODE_SESSION_ID <<< sessA; export CLAUDE_CODE_SESSION_ID; S=doc-wri; node …/${S}te.mjs on` (with the script refusing at the nonce once step 34 is in, the effect is shown by the borrowed id reaching `commandInvoked`) and `read HOME <<< /tmp/x; git commit -m a` are allowed by the guard
+- [ ] 35.1 The session-id / project-dir / safety-switch check (`pre-guard.mjs:1326`) refuses a command that sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR` or `CRAFTSMAN_SAFETY` by assignment word, `read NAME`, `printf -v NAME`, `declare/typeset/export/readonly NAME` (with or without `=`), `env NAME=…`, `env -S`, or `setenv`-like wrappers, on the de-quoted text; a plain mention that does not set anything is allowed → accept: the two reproduced forms, `export CLAUDE_CODE_SESSION_ID` after a `read`, `printf -v CLAUDE_PROJECT_DIR x`, `declare -x CLAUDE_CODE_SESSION_ID` and `env "$X=sessA" CRAFTSMAN_SAFETY=off node …` are blocked; `[ "$CLAUDE_PROJECT_DIR" = /x ] && echo y`, `echo "$CLAUDE_CODE_SESSION_ID"`, `printenv CLAUDE_CODE_SESSION_ID` and `test -n "$CRAFTSMAN_SAFETY"` are allowed
+- [ ] 35.2 The HOME / XDG_CONFIG_HOME check on hook-running git subcommands (`pre-guard.mjs:1155`) also sees `read HOME`, `printf -v HOME`, `declare HOME`, `export HOME` without `=` → accept: `read HOME <<< /tmp/x; git commit -m a` is blocked (first shown to skip a failing pre-commit hook through the fake HOME); `read HOME <<< /dev/null; git commit` and `echo "$HOME"; git commit` are allowed
+- [ ] 35.3 The nonce is minted as the last step before pre-guard exits 0, after the doc-removal guard and every later denial (`pre-guard.mjs:1339-1342` moves); the permission prompt that can still follow is stated as a limit → accept: a command that is allowed by the authority block and denied by a later guard (`node …/doc-write.mjs on && rm docs/x.md` without the grant) leaves no `nonce-*` file; `script-authority.test` 26.3 gains the case
+- [ ] 35.4 Full CI set, tick, commit `fix(guard): setting the session id, project dir or safety switch is refused by name, not only by assignment`
+
+### Step 36 — archive-and-awk-options (., javascript, high) — round 5
+Depends on: env-word-mentions
+Closes findings 2 and 3 (Warnings, reproduced) and Suggestion 9. Every row is run for real in a throwaway project with a staged archive.
+- [ ] 36.0 Failing tests first → accept: red on 1e8c40b: `tar -xf a.tar --directory=.craftsman`, `tar -x -f a.tar -C.craftsman`, `tar -xf a.tar -C sub -C ../.craftsman`, `unzip -o a.zip -d.craftsman`, `gawk -iinplace 1 .craftsman/off` and `gawk --include inplace 1 .craftsman/off` each overwrite `.craftsman/off` unguarded and are allowed by the guard
+- [ ] 36.1 `optionValue` (`pre-guard.mjs:~630-634`) reads the separate, attached (`-CX`, `-dX`), `=` (`--directory=X`) and clustered (`-xfC X`) forms, and the tar judge walks every `-C` in order, each relative to the one before, judging the final directory and every intermediate one → accept: the four tar/unzip rows are blocked and `.craftsman/off` is unchanged; `tar -xf a.tar -C sub`, `tar -tf a.tar --directory=.craftsman`, `unzip -l a.zip`, `unzip -o a.zip -d out` are allowed
+- [ ] 36.2 awk in-place is recognised as `-i inplace`, `-iinplace`, `--include=inplace` and `--include inplace`, and the operand skipping follows the same forms (`pre-guard.mjs:619`) → accept: the two reproduced gawk rows and `gawk -i inplace`/`awk -i inplace` are blocked; `gawk -i /usr/share/awk/ordchr.awk 1 src/a.txt` (an include file, not in-place) and `awk 1 .craftsman/off` are allowed
+- [ ] 36.3 The two declarations sharing a line (`pre-guard.mjs:361`) are split → accept: `node --check` and the existing tests green
+- [ ] 36.4 Rows are added to the self-disable table and the claims table → accept: `safety-claims.test` has them under CLAIMS
+- [ ] 36.5 Full CI set, tick, commit `fix(guard): archive destinations and awk in-place are read in every option spelling`
+
+### Step 37 — launcher-project-config (., shell, high) — round 5
+Depends on: archive-and-awk-options
+Closes finding 4 (Warning, reproduced; ARCH-SAFETY-11 broken since step 32). Shares `pre-guard.test.mjs` with steps 35-36, hence the order.
+- [ ] 37.0 Failing tests first → accept: red on 1e8c40b: with `{"protectedPaths":["secrets/**"]}` in `craftsman.project.json`, a Read of `secrets/key.txt` is denied by pre-guard but exits 0 through `hooks/run.sh`
+- [ ] 37.1 The Read/Glob/Grep filter scans `craftsman.project.json` for `protectedPaths` exactly as it scans `craftsman.config.json` (`hooks/run.sh:39-41`) → accept: `launcher.test`: the read goes through the guard (exit 2) with the key in either file; with neither, the skip still applies and the timing case stays under budget
+- [ ] 37.2 A parity case sits beside `pre-guard.test.mjs:1318`, built from the list of config files `loadConfig` reads, so a third file would fail the test → accept: the case enumerates `craftsman.config.json` and `craftsman.project.json` and fails if run.sh scans fewer than `loadConfig` reads
+- [ ] 37.3 Full CI set, tick, commit `fix(launcher): protectedPaths in craftsman.project.json keeps the guard on reads`
+
+### Step 38 — config-source-names (., javascript, normal) — round 5
+Depends on: nonce-safety-marker, launcher-project-config
+Closes finding 8 (Suggestions, cross-unit).
+- [ ] 38.0 Failing tests first → accept: red on 1e8c40b: with `enabled:false` only in `craftsman.project.json`, SessionStart says "in craftsman.config.json"; `init` reads `architecture.dir` from `craftsman.config.json` only
+- [ ] 38.1 The SessionStart reason (`core.mjs:679`) names the file the value came from, or "the project config" when both set it → accept: `session-context.test` / `core.test` for each file and both
+- [ ] 38.2 `init.mjs:47` reads `architecture.dir` through `loadConfig` so the override applies → accept: `init.test` with the key in `craftsman.project.json`
+- [ ] 38.3 Full CI set, tick, commit `fix(config): messages and init read the merged project config`
+
+### Step 39 — rules-cites-round5 (., markdown, normal) — round 5
+Depends on: all of steps 34-38
+Last, so the text and cites are final.
+- [ ] 39.0 Failing tests first: `safety-cites.test` and `safety-claims.test` extended for the new rule text and the new CLAIMS rows → accept: red until the text is updated
+- [ ] 39.1 ARCH-SAFETY-05 and -11 text, `safety.md` and every cite are brought up to date, `verified_at` bumped; the rule states that the nonce is skipped only when SessionStart saw safety off, that a permission prompt after the nonce is minted is not covered, and that `loadConfig`'s file list and run.sh's scan agree → accept: `safety-cites.test`, `safety-docs.test` and `arch-check lint --root <worktree>` green
+- [ ] 39.2 Residual risk recorded (below) → accept: the plan's Round 5 section lists it
+- [ ] 39.3 Full CI set, tick, commit `docs(arch): safety rules and cites follow round 5`
+
 ## Status 2026-10-22 (follow-ups after round 4)
 Decided with the user, built in 509f7fa. `followup-authority-session-binding`: built. pre-guard leaves a one-shot 60-second nonce, per session and script, when it lets a plain `doc-write.mjs on`, `toggle.mjs off` or `goal-token.mjs` command through; the scripts consume it (`consumeNonce` in `core.mjs`), so a record alone, another session's nonce or a spawned child no longer grants. Red first: 4 tests failed on the old code (26.1, 26.2, 26.4 and the spoof precondition, which now shows the script refuses the spoof unguarded). `followup-skill-record`: decided "allow, document it": a Skill call of a doc writer counts as a record; only toggle needs the typed command. Written into ARCH-SAFETY-05 and `safety.md`. `followup-writer-operand`: decided "leave it denied"; the false positive is documented and pinned by a test in `safety-claims.test.mjs`. Existing callers (`grant()` in `pre-guard.test`, `mint` in `goal-token.test`) now pass the command through pre-guard first. CI: 783 node tests, model-policy, doc-size-policy, arch lint, plugin validate, plugin test (12), `git diff --check`. Still open: `followup-md-dirty-marker` is done (round 3); the residual risks listed in the Round 4 section; a fresh isolated review.
 
@@ -891,7 +1035,13 @@ Round 3: steps 18 → 19 → 20 share `pre-guard.mjs` and run in that order (19 
 
 Round 4: steps 24 → 25 → 26 → 27 → 28 → 29 share `pre-guard.mjs` (26, 27 and 29 also write `lib/self-protect.mjs`) and run in that order; step 30 (`core.mjs`, `stop-gate.mjs`) and step 31 (`goal-token.mjs`, `register.js`) are independent of them; step 32 follows 29 and 30 (`core.mjs`, `lib/self-protect.mjs`); step 33 is last. The still-PENDING rows are `followup-skill-record`, `followup-authority-session-binding` and `followup-writer-operand`; `followup-goal-token-hash` is promoted to step 31 and `followup-md-dirty-marker` was promoted in round 3.
 
+Round 5: steps 34 → 35 → 36 share the guard's code (34: `core.mjs`, `session-context.mjs`, the three authority scripts; 35 and 36: `pre-guard.mjs`) and run in that order; step 37 (`run.sh`) follows 36 only because they share `pre-guard.test.mjs`; step 38 (`core.mjs`, `init.mjs`) follows 34 and 37; step 39 is last. The still-PENDING rows are none from round 4: the nonce was built, Skill-record and writer-operand were decided and documented.
+
 ## Verification background
+- Round 5 evidence: the isolated review's report (range 187f39b..1e8c40b: 0 Critical, 4 Warning, 5 Suggestion). Every security finding was run through `scripts/pre-guard.mjs` or `hooks/run.sh` and, where applicable, for real in throwaway repos with a temp HOME: the borrowed-id grant plus a docs Write allowed afterwards, four `tar`/`unzip` forms overwriting `.craftsman/off`, two `gawk` forms rewriting it, and a Read of a `craftsman.project.json`-protected path skipping the guard through `run.sh`. Refuted by the reviewer: forging nonce files, the mod's SHA-256 (900 inputs), recursive copies, two processes consuming one nonce.
+- Round 5 CONSUMERS: `consumeNonce`/`mintNonce` (`lib/core.mjs`) are consumed by `doc-write.mjs`, `toggle.mjs`, `goal-token.mjs` and `pre-guard.mjs` only; the new `sessions/<sid>/safety-off` marker is written by `session-context.mjs` and read by `consumeNonce`; `loadConfig` readers are unchanged (the files it reads are, `run.sh` must match them); `optionValue`, the awk in-place check and the HOME/XDG check are private to `pre-guard.mjs`.
+- Blind re-derivation for round 5: skipped, the decomposition was supplied by an isolated `/scrutinise` with file-level fixes that the reviewer reproduced. The plan-strategist and plan-reviewer agents were not run for the same reason.
+- Acceptance lines for steps 34-39 are NOT yet in `.craftsman/acceptance.md` (`/orchestrate` adds them, tagged `[unit:<scope_id>]`); no tracker rows are registered (the main checkout's `TRACKER.md` carries an uncommitted user change).
 - Round 4 evidence: the isolated review's report (range 792b8e4..187f39b) and the root's probe `probe3.mjs` (scratch, not committed), which runs each command through `scripts/pre-guard.mjs` and, when the guard allows it, runs it for real in a throwaway project with a temp HOME and diffs the project before and after. Results at 187f39b: the four subshell forms, `cp -r`, `cp -rT`, `sed --in-place`, the three `find` forms, the dangling-link Write and the session-id spoof all changed protected state; the brace group and `rsync -a` were denied; the two git routes were allowed by the guard but their effect was not shown; `sandbox.enabled:false` and `env.LD_PRELOAD` were allowed, `NODE_OPTIONS` denied.
 - Round 4 CONSUMERS: `SELF_NEVER`, `SELF_SCOPED`, `SAFETY_CONFIG_KEYS`, `SAFETY_ENV`, `heldNever`, `heldScoped`, `NEVER_TEXT`, `WRITER_VERBS` and `realEntries` (`lib/self-protect.mjs`) are consumed by `pre-guard.mjs` and `scope.mjs`; `loadConfig` (`lib/core.mjs`) by every hook script and by `arch-check.mjs`, `init.mjs`, `stats.mjs` and `baseline.mjs`, so step 32's second file reaches all of them (the change is additive: absent file, same result); `sharedStateDir` by `pre-guard.mjs`, `stop-gate.mjs` and `session-context.mjs`; the goal token file by `goal-token.mjs` and `hooks/register.js` only.
 - Blind re-derivation for round 4: skipped, the decomposition was supplied by an isolated `/scrutinise` with file-level fixes and the root re-verified the write findings by running them.
@@ -925,6 +1075,12 @@ Round 4: steps 24 → 25 → 26 → 27 → 28 → 29 share `pre-guard.mjs` (26, 
 - Step 28 refuses `HOME=<dir> git commit`. Tests and tools that isolate git with a fake HOME must use `/dev/null` (exempt) or set the identity another way.
 - Step 32 adds a second config file that every hook script reads: a malformed or hostile `craftsman.project.json` must not weaken the guard, hence its self-protection in the same step (it joins the protected files and the safety-key projection like `craftsman.config.json`). Revert is one commit.
 - The fourth round of the same class: if round 5 again finds new bypasses, the cost-benefit of per-form patching should be reviewed with the user before round 6, because the sandbox, not the guard, is the boundary the user designed around.
+
+- Step 34 makes the scripts depend on SessionStart having seen the user's environment: `CRAFTSMAN_SAFETY=off` set after the session starts is not seen, and the scripts then refuse (no pre-guard is minting). Fail closed; the user restarts the session.
+- Step 35 refuses any command that sets the session id, project dir or safety switch by `read`, `printf -v`, `declare`, `export` or `env`; tools that need one of them set must run outside the model's Bash.
+- Step 36 reads `tar -C` chains; a tar whose members' paths escape the destination are still the archive-contents limit already stated in the rule.
+- The fifth round of the same class: the sandbox, not the guard, is the boundary the user designed around. If round 6 finds new bypasses of this kind, review with the user whether to stop patching forms and keep only the nonce and the documented limits.
+- Round 5 residual risk: Claude Code is assumed to set `CLAUDE_CODE_SESSION_ID` in the Bash environment equal to the hook `session_id`, and the scripts to resolve the same state dir as pre-guard (unverified; if wrong, the plain authority path breaks at run time and fails closed); how the mod host decodes text (BOM, invalid UTF-8) is untested (a mismatch fails closed: no goal launches); `listTree` and `existingProtectedFiles` stop at 2000 and 3000 entries and 6 levels; a permission prompt can follow a minted nonce (the nonce expires after 60 seconds).
 
 ## Out of scope (flagged, not driven)
 - Round 4 follow-ups, PENDING: `followup-authority-session-binding` (finding 2's stronger fix: a one-shot nonce minted by pre-guard that the scripts consume; step 25 closes the inline-assignment route only), `followup-writer-operand` (the writer-verb-anywhere false positive, finding 13 of round 3), `followup-skill-record` (a model Skill call counts as a typed command).
