@@ -113,6 +113,7 @@
     "testTimeoutMs": 250000,
     "totalBudgetMs": 280000,
     "blockOnUnpushed": false,
+    "markdownTests": [],
     "commands": {
       "package.json": "npm test --silent",
       "Cargo.toml": "cargo test --quiet",

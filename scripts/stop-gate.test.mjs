@@ -827,6 +827,46 @@ test("stop-gate: an edit to a fixture, tsconfig or env file marks the session di
   }
 });
 
+// Round 3 (22.x): markdown that the project's own tests read is named in stopGate.markdownTests and marks the session dirty.
+test("stop-gate: markdown listed in stopGate.markdownTests marks the session dirty and Stop re-runs the suite; other markdown does not (22.1)", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, markdownTests: ["README.md", "commands/*.md", "docs/architecture/*.md"] } });
+  try {
+    const sid = "md-tests";
+    const { dirty, log } = seedGreenStart(dir, sid);
+    for (const rel of ["notes/a.md", "docs/y.md", "CHANGELOG.md", "commands/deep/x.md"]) {
+      editThroughQualityGate(dir, sid, rel, "# n\n");
+      assert.equal(fs.existsSync(dirty), false, `${rel} is not listed, so it stays a docs-only edit`);
+    }
+    for (const rel of ["README.md", "commands/plan.md", "docs/architecture/safety.md"]) {
+      try { fs.unlinkSync(dirty); } catch {}
+      editThroughQualityGate(dir, sid, rel, "# n\n");
+      assert.equal(fs.existsSync(dirty), true, `${rel} is read by a test, so it marks the session dirty`);
+    }
+    await runStopGate(dir, sid);
+    assert.equal(fs.readFileSync(log, "utf8"), "ran\n", "Stop re-ran the suite");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: with the shipped default (no stopGate.markdownTests) a README edit is still a docs-only edit, and .craftsman state never counts (22.1)", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "md-default";
+    const { dirty } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "README.md", "# n\n");
+    assert.equal(fs.existsSync(dirty), false);
+    const listed = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, markdownTests: [".craftsman/**", "**/*.md"] } });
+    try {
+      const { dirty: d2 } = seedGreenStart(listed, "md-state");
+      editThroughQualityGate(listed, "md-state", ".craftsman/runs/r.md", "# n\n");
+      assert.equal(fs.existsSync(d2), false, "even a broad list never makes craftsman's own state count");
+    } finally { cleanup(listed); }
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("stop-gate: an edit of the acceptance file still does not mark the session dirty", () => {
   const dir = quietFixture();
   try {

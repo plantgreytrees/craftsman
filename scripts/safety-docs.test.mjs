@@ -16,6 +16,7 @@ const safetySection = readme.match(/^## Safety\n([\s\S]*?)(?=^## )/m)?.[1] ?? ""
 // 21.0: every key the safety steps added ships with its safe default (today's behaviour unless a step said otherwise).
 const NEW_KEYS = [
   ["stopGate.blockOnUnpushed", (c) => c.stopGate?.blockOnUnpushed, false],
+  ["stopGate.markdownTests", (c) => c.stopGate?.markdownTests, []],
   ["worktrees.sweepClaudeWorktrees", (c) => c.worktrees?.sweepClaudeWorktrees, false],
 ];
 
@@ -29,7 +30,7 @@ test("every config key the safety steps added is in craftsman.config.json with i
 
 test("README has a Safety section with a row for every new key, env var and recovery step", () => {
   assert.ok(safetySection.length > 500, "README has a ## Safety section");
-  for (const needle of ["stopGate.blockOnUnpushed", "worktrees.disposable", "worktrees.sweepClaudeWorktrees", "CRAFTSMAN_SAFETY", "CRAFTSMAN=off",
+  for (const needle of ["stopGate.blockOnUnpushed", "stopGate.markdownTests", "worktrees.disposable", "worktrees.sweepClaudeWorktrees", "CRAFTSMAN_SAFETY", "CRAFTSMAN=off",
     ".craftsman/sweep-log.jsonl", "git branch <name> <sha>", "goal-token", "--settings-diff", "sandbox", "node is missing"]) {
     assert.ok(safetySection.includes(needle), `README Safety mentions ${needle}`);
   }

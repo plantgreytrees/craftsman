@@ -47,12 +47,16 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
 // regress on means the session-start test snapshot can no longer be trusted, so
 // Stop must re-verify. A denylist: only markdown, the guarded doc paths,
 // craftsman's own state and ignored paths leave nothing a test could regress
-// on, so a fixture, a tsconfig or an env file still counts. Bash-made edits are
-// caught by the Stop gate's own `git status`, not by this marker.
+// on, so a fixture, a tsconfig or an env file still counts. The exception is
+// markdown a test reads: stopGate.markdownTests names it (default none, so a
+// docs-only turn runs no tests). Bash-made edits are NOT caught by this marker:
+// the Stop gate's `git status` (treeDirty) only gates the secrets scan, and the
+// test re-run depends on this marker alone.
 const lang = detectLang(file, cfg, context);
 const docPaths = cfg.docWriteGuard?.docPaths || [];
-const isDocOrState = rel0.endsWith(".md") || rel0.startsWith(".craftsman/")
-  || docPaths.some((p) => globToRe(p).test(rel0) || globToRe(p).test("./" + rel0));
+const named = (p) => globToRe(p).test(rel0) || globToRe(p).test("./" + rel0);
+const testsRead = (Array.isArray(cfg.stopGate?.markdownTests) ? cfg.stopGate.markdownTests : []).some(named);
+const isDocOrState = rel0.startsWith(".craftsman/") || (!testsRead && (rel0.endsWith(".md") || docPaths.some(named)));
 if (!isDocOrState && !isIgnored(file, cfg, lang, context)) {
   try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
 }

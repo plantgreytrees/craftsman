@@ -273,6 +273,7 @@ The Claude Code **sandbox** owns writes and deletes outside the project and read
 | Key | Default | Meaning |
 |---|---|---|
 | `stopGate.blockOnUnpushed` | `false` | block Stop on unpushed work |
+| `stopGate.markdownTests` | `[]` | markdown globs your tests read (README, `commands/*.md`); an edit of one marks the session dirty so Stop re-runs the suite. By default a docs-only turn runs no tests |
 | `worktrees.disposable` | build dirs and caches | ignored globs a sweep may delete |
 | `worktrees.sweepClaudeWorktrees` | `false` | let the sweep touch `.claude/worktrees/*` |
 
