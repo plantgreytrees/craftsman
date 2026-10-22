@@ -223,3 +223,62 @@ test("force block: allows the plain publish push, still blocks force flags", asy
     assert.ok(await forceBlocked(cmd), cmd);
   }
 });
+
+function manyRows(n) {
+  return Array.from({ length: n }, (_, i) => ({ ...EVENTS[0], key: `.::docs/plans/p.md::m${i}`, unit: `m${i}` }));
+}
+
+function shrunkFixture({ dropJsonl = false } = {}) {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a, manyRows(50));
+  assert.equal(publishTracker({}, a).published, true);
+  if (dropJsonl) {
+    const other = clone(bare);
+    git(other.root, "rm", "-q", "docs/plans/TRACKER.jsonl");
+    git(other.root, "commit", "-m", "drop jsonl"); git(other.root, "push", "origin", "main");
+  }
+  const fresh = clone(bare);
+  seedLedger(fresh, manyRows(5));
+  return { bare, fresh };
+}
+
+test("publish guard: 50 committed rows vs 5 local rows is refused and logs the dropped keys", () => {
+  const { bare, fresh } = shrunkFixture();
+  const before = git(bare, "rev-parse", "main");
+  const result = publishTracker({}, fresh);
+  assert.equal(result.published, false);
+  assert.ok(result.refused);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+  const log = fs.readFileSync(path.join(fresh.stateDir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const ev = log.find((e) => e.ev === "tracker_publish_refused");
+  assert.equal(ev.dropped.length, 45);
+});
+
+test("publish guard: TRACKER.jsonl absent, the committed block alone guards the rows", () => {
+  const { bare, fresh } = shrunkFixture({ dropJsonl: true });
+  const before = git(bare, "rev-parse", "main");
+  assert.equal(publishTracker({}, fresh).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish guard: an archive event for another plan does not excuse the dropped rows; one for the dropped plan does", () => {
+  const planLog = (ctx, plan) => {
+    fs.mkdirSync(ctx.stateDir, { recursive: true });
+    fs.writeFileSync(path.join(ctx.stateDir, "events.jsonl"), JSON.stringify({ ts: 1, ev: "tracker_archived", plan, units: 1 }) + "\n");
+  };
+  const other = shrunkFixture();
+  planLog(other.fresh, "docs/plans/other.md");
+  assert.equal(publishTracker({}, other.fresh).published, false);
+  const same = shrunkFixture();
+  planLog(same.fresh, "docs/plans/p.md");
+  assert.equal(publishTracker({}, same.fresh).published, true);
+});
+
+test("publish guard: archived:true or a later archive event lets the shrink through", () => {
+  const { fresh } = shrunkFixture();
+  assert.equal(publishTracker({ archived: true }, fresh).published, true);
+  const second = shrunkFixture();
+  writeLog(second.fresh, "tracker_archived");
+  assert.equal(publishTracker({}, second.fresh).published, true);
+});
