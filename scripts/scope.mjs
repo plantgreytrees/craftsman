@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  PROJECT_ROOT, atomicWrite, enabled, isGitRoot, loadConfig, logEvent, readStdin,
+  PROJECT_ROOT, PLUGIN_ROOT, mainCheckoutRoot, atomicWrite, enabled, isGitRoot, loadConfig, logEvent, readStdin,
   projectContext, resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
   sessionDir, sidOf, sha1, worktreeBindingPath,
 } from "./lib/core.mjs";
@@ -56,11 +56,26 @@ function scopeName(input, prefix, suffix) {
   const worktree = input?.worktree_path ? `-${sha1(path.resolve(input.worktree_path)).slice(0, 16)}` : "";
   return `${prefix}${project}${worktree}${suffix}`;
 }
-const rootSessionDir = (input) => sessionDir(sidOf(input));
+// Resolved through the git common dir: scope.mjs run from a linked worktree and a
+// hook running in the main checkout (or the reverse) must see the same files.
+const rootSessionDir = (input) => path.join(mainCheckoutRoot(PROJECT_ROOT), ".craftsman", "sessions", sidOf(input));
 export function scopeFile(input) { return path.join(rootSessionDir(input), scopeName(input, "scope", ".json")); }
 export function requiredFile(input) { return path.join(rootSessionDir(input), scopeName(input, "scope-required", "")); }
 
 const inside = (root, target) => target === root || target.startsWith(root + path.sep);
+
+// Is `target` under ${CLAUDE_PLUGIN_ROOT}? Not when the plugin root encloses the project itself
+// (developing the plugin in its own checkout), where this would open the whole repository.
+export function insidePluginRoot(target, project = PROJECT_ROOT) {
+  if (typeof target !== "string" || !target || !PLUGIN_ROOT || !process.env.CLAUDE_PLUGIN_ROOT) return false;
+  let plugin, real, proj;
+  try { plugin = fs.realpathSync(PLUGIN_ROOT); proj = fs.realpathSync(project); } catch { return false; }
+  if (inside(plugin, proj)) return false;
+  let ancestor = path.resolve(target);
+  while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
+  try { real = path.resolve(fs.realpathSync(ancestor), path.relative(ancestor, path.resolve(target))); } catch { return false; }
+  return inside(plugin, real);
+}
 const targetOf = (input) => path.resolve(input?.tool_input?.file_path || input?.tool_input?.path || input?.cwd || process.cwd());
 
 // Required when the session is armed, or when the target sits in a unit
@@ -137,9 +152,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(0);
     }
     const scope = normalizeScope(input);
-    for (const list of Object.values(scope.scope)) {
+    for (const [bucket, list] of Object.entries(scope.scope)) {
       for (const entry of list) {
         const absolute = path.resolve(scope.project_root, entry);
+        // The plugin's own reference files (plan template, shared command docs) are readable, never writable.
+        if (bucket !== "write" && insidePluginRoot(absolute)) continue;
         if (absolute !== scope.project_root && !absolute.startsWith(scope.project_root + path.sep)) {
           throw new Error(`scope path escapes project root: ${entry}`);
         }

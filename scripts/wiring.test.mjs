@@ -185,7 +185,7 @@ test("wiring: trimmed loadable docs stay at or below 95% of their size cap (ARCH
     "commands/plan.md": 10000,
     "commands/orchestrate.md": 10000,
     "commands/_architecture.md": 4000,
-    "agents/unit-runner.md": 4800, // + ARCH-LAND-19 network section
+    "agents/unit-runner.md": 3800,
   };
   for (const [file, cap] of Object.entries(caps)) {
     const size = fs.statSync(path.join(PLUGIN_ROOT, file)).size;

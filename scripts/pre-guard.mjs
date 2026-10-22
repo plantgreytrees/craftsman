@@ -12,7 +12,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
-import { readScope, scopeRequired } from "./scope.mjs";
+import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
@@ -804,7 +804,9 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
     candidates.push(path.relative(activeRoot, searchRoot).split(path.sep).join("/") || ".");
   }
   const buckets = bucket === "read" ? ["read", "docs"] : ["write"];
-  const violation = scopeVerdict(activeScope, tool, bucket, buckets, candidates);
+  // Read-only access to the plugin's own reference files (never a write).
+  const pluginRead = bucket === "read" && insidePluginRoot(tool === "Read" ? file : path.resolve(activeRoot, toolInput.path || "."), activeRoot);
+  const violation = pluginRead ? null : scopeVerdict(activeScope, tool, bucket, buckets, candidates);
   if (violation) {
     const message = `craftsman: ${tool} blocked outside active unit scope (${activeScope.unit}). ` +
       `Required target: ${violation}. Stop and re-analyse the unit dependencies; add the exact ` +
@@ -873,7 +875,8 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
   }
 }
 
-if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
+const pluginReadOnly = ["Read", "Glob", "Grep"].includes(tool) && insidePluginRoot(tool === "Read" ? file : path.resolve(activeRoot, toolInput.path || "."), activeRoot);
+if (!activeScope && !pluginReadOnly && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
   process.stderr.write(
     `craftsman: ${tool} blocked because this session requires an active unit scope. ` +
     `Re-analyse the unit boundary, activate scripts/scope.mjs with the exact read/docs/write ` +
