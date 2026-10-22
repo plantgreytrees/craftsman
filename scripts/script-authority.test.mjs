@@ -257,11 +257,61 @@ test("goal-token.mjs run from the command line also needs the nonce (26.4)", () 
   } finally { p.clean(); }
 });
 
-test("with the safety hooks off by the user (CRAFTSMAN_SAFETY=off) there is no pre-guard to mint, so the nonce is not asked for (26.5)", () => {
+// Round 5 (34.x): whether safety is off is the USER's environment, which only a hook sees. SessionStart records it as a marker the
+// scripts read; the script's own environment, which any child can set, no longer decides.
+const SESSION_CONTEXT = at("session-context.mjs");
+const safetyMarker = (p, sid = "sa-1") => path.join(p.dir, ".craftsman", "sessions", sid, "safety-off");
+const startSession = (p, env = p.env, sid = "sa-1") => spawnSync(process.execPath, [SESSION_CONTEXT], { cwd: p.dir, env, encoding: "utf8", input: JSON.stringify({ session_id: sid }) });
+
+test("a child process that sets CRAFTSMAN_SAFETY=off cannot skip the nonce (34.1)", () => {
   const p = project();
   try {
     record(p, "sa-1", "prompt", "plan");
+    record(p, "sa-1", "prompt", "toggle");
     const env = { ...p.env, CRAFTSMAN_SAFETY: "off" };
-    assert.equal(node(p, DOC_WRITE, ["on"], env).status, 0);
+    assert.equal(node(p, DOC_WRITE, ["on"], env).status, 2, "env off in the script, no marker: refused");
+    assert.ok(!fs.existsSync(p.pending));
+    assert.equal(node(p, TOGGLE, ["off"], env).status, 2);
+    assert.ok(!fs.existsSync(p.off));
+    // 34.3: off set after the session started was never seen by SessionStart, so it stays refused
+    startSession(p);
+    assert.ok(!fs.existsSync(safetyMarker(p)));
+    assert.equal(node(p, DOC_WRITE, ["on"], env).status, 2);
   } finally { p.clean(); }
+});
+
+test("SessionStart records CRAFTSMAN_SAFETY=off as a marker, and the scripts then ask for no nonce (34.1)", () => {
+  const p = project();
+  try {
+    record(p, "sa-1", "prompt", "plan");
+    const off = { ...p.env, CRAFTSMAN_SAFETY: "off" };
+    assert.equal(startSession(p, off).status, 0);
+    assert.ok(fs.statSync(safetyMarker(p)).isFile(), "the marker is a regular file");
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 0, "no nonce is asked for while the user has safety off for this session");
+    // a stale marker does not outlive an environment that no longer says off
+    assert.equal(startSession(p).status, 0);
+    assert.ok(!fs.existsSync(safetyMarker(p)), "removed when the next start does not see off");
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "and the nonce is asked for again");
+  } finally { p.clean(); }
+});
+
+test("the safety-off marker cannot be written by a tool call, and each write form really would (34.2)", () => {
+  const forms = ["echo x > .craftsman/sessions/sa-1/safety-off", "touch .craftsman/sessions/sa-1/safety-off", "cp stage-file .craftsman/sessions/sa-1/safety-off", "printf x | tee .craftsman/sessions/sa-1/safety-off"];
+  for (const form of forms) {
+    const real = project();
+    try {
+      fs.mkdirSync(path.join(real.dir, ".craftsman", "sessions", "sa-1"), { recursive: true });
+      fs.writeFileSync(path.join(real.dir, "stage-file"), "x\n");
+      spawnSync("bash", ["-c", form], { cwd: real.dir, env: real.env, encoding: "utf8" });
+      assert.ok(fs.existsSync(safetyMarker(real)), `the form is real: ${form} creates the marker unguarded`);
+    } finally { real.clean(); }
+    const guarded2 = project();
+    try {
+      fs.mkdirSync(path.join(guarded2.dir, ".craftsman", "sessions", "sa-1"), { recursive: true });
+      assert.equal(guardAs(guarded2, "sa-1", form).status, 2, `denied: ${form}`);
+      const write = spawnSync(process.execPath, [GUARD], { cwd: guarded2.dir, env: guarded2.env, encoding: "utf8",
+        input: JSON.stringify({ session_id: "sa-1", tool_name: "Write", tool_input: { file_path: safetyMarker(guarded2), content: "x" } }) });
+      assert.equal(write.status, 2, "a Write of the marker is denied too");
+    } finally { guarded2.clean(); }
+  }
 });

@@ -20,7 +20,7 @@ export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE
     throw new Error("goal tokens are minted only inside /instruction or /auto, and neither ran in this session");
   }
   // The command line asks for pre-guard's one-shot nonce (ARCH-SAFETY-05); a library caller has already passed its own checks.
-  if (nonce && !consumeNonce(sidOf({ session_id: sid }), "goal-token", { context: { stateDir }, env })) {
+  if (nonce && !consumeNonce(sidOf({ session_id: sid }), "goal-token", { context: { stateDir } })) {
     throw new Error("no nonce from pre-guard for this session: run it as a plain `node …/goal-token.mjs <file>` Bash command, not through another program");
   }
   const instructions = fs.realpathSync(path.join(root, ".craftsman", "instructions"));

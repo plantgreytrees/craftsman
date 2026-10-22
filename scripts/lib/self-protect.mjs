@@ -15,7 +15,7 @@ export const SELF_SCOPED = Object.freeze([
 
 // Paths no tool call may write: craftsman's own scripts (and git itself) are their only writers.
 export const SELF_NEVER = Object.freeze([
-  ".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json",
+  ".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json", ".craftsman/sessions/**/safety-off", ".craftsman/sessions/**/nonce-*",
   // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*",
   // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
@@ -111,7 +111,7 @@ export const NEVER_TEXT = new RegExp(SELF_NEVER.map(globToText).join("|"), "i");
 
 // Words that, once the quotes are gone, name craftsman state or the files this layer protects. A bare `off` or
 // `doc-write` is not here on purpose (too common): those are caught as paths by NEVER_TEXT.
-const PROTECTED_WORDS = new Set([".craftsman", ".claude", "doc-write-pending", "commands.json", "goal-tokens.json",
+const PROTECTED_WORDS = new Set([".craftsman", ".claude", "doc-write-pending", "commands.json", "goal-tokens.json", "safety-off",
   "settings.json", "settings.local.json", "hooks.json", "craftsman.config.json"]);
 // Does a command line (read after its quotes are removed) name a protected path? Used where the shell parser gave up,
 // so what a command writes cannot be read: it is refused only when it also names craftsman state.
