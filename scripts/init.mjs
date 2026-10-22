@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { checkDocSizes } from "./doc-size-policy.mjs";
 import { DEFAULT_DIR, loadRules, unmanagedDocs } from "./arch-check.mjs";
 import { mergeSettings, renderSettingsDiff } from "./lib/settings-merge.mjs";
+import { loadConfig } from "./lib/core.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(pluginRoot, "craftsman.config.json");
@@ -44,7 +45,8 @@ export function pluginVersion(manifest, root = pluginRoot) {
 // closes the gap — so `--update` tells an older project how to adopt /architect.
 function architectureAudit(root) {
   let dir = DEFAULT_DIR;
-  try { dir = readJson(path.join(root, "craftsman.config.json")).architecture?.dir || dir; } catch {}
+  // the merged project config (craftsman.config.json, then craftsman.project.json), so the override file applies
+  try { dir = loadConfig({ root }).architecture?.dir || dir; } catch {}
   const docs = loadRules(root, dir);
   const unmanaged = unmanagedDocs(root, docs, dir);
   const hasPlans = fs.existsSync(path.join(root, "docs", "plans"));

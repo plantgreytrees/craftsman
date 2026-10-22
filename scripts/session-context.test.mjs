@@ -130,6 +130,20 @@ for (const [name, reason, options] of [
   });
 }
 
+// Round 5 (38.1): the reason names the file the value came from.
+for (const [files, expected, unexpected] of [
+  [{ "craftsman.project.json": { enabled: false } }, "enabled is false in craftsman.project.json", /craftsman\.config\.json/],
+  [{ "craftsman.config.json": { enabled: false }, "craftsman.project.json": { enabled: false } }, "enabled is false in craftsman.config.json and craftsman.project.json", null],
+]) {
+  test(`session-context: enabled:false from ${Object.keys(files).join(" and ")} is attributed to ${Object.keys(files).length > 1 ? "both files" : "that file"} (38.1)`, () => {
+    withProject((dir) => {
+      const { message } = startState(dir, { setup: (d) => { for (const [name, value] of Object.entries(files)) fs.writeFileSync(path.join(d, name), JSON.stringify(value)); } });
+      assert.ok(message.includes(expected), `${expected} in: ${message}`);
+      if (unexpected) assert.doesNotMatch(message, unexpected);
+    });
+  });
+}
+
 test("session-context: CRAFTSMAN_SAFETY=off is the one thing reported as guards off", () => {
   withProject((dir) => {
     const { message, context } = startState(dir, { env: { CRAFTSMAN_SAFETY: "off" } });

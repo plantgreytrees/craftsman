@@ -282,3 +282,11 @@ test("init: the settings merge and the other modes are mutually exclusive", () =
   assert.match(r.stderr, /choose only one/);
   assert.equal(typeof initMod.previewSandboxSettings, "function");
 });
+
+// Round 5 (38.2): the architecture dir comes from the merged project config, so craftsman.project.json applies.
+test("init update reads architecture.dir from craftsman.project.json too (38.2)", () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "craftsman.project.json"), JSON.stringify({ architecture: { dir: "docs/arch-from-override" } }));
+  const plan = buildUpdatePlan(root, { checkTools: false });
+  assert.equal(plan.update.architecture.dir, "docs/arch-from-override");
+});

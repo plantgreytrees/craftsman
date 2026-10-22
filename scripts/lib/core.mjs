@@ -542,6 +542,8 @@ export function pruneSessions(maxAgeMs = 7 * 24 * 3600 * 1000, context = null) {
 
 // ---------------------------------------------------------------- config ---
 
+// The project config files loadConfig merges over the defaults, in order (run.sh scans the same list for protectedPaths; launcher.test pins that).
+export const PROJECT_CONFIG_FILES = ["craftsman.config.json", "craftsman.project.json"];
 export function loadConfig(context = null) {
   const defaults = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, "craftsman.config.json"), "utf8")
@@ -551,7 +553,7 @@ export function loadConfig(context = null) {
   // An absent file adds nothing; a malformed one is ignored with a warning.
   const root = context?.root || PROJECT_ROOT;
   let merged = defaults;
-  for (const name of ["craftsman.config.json", "craftsman.project.json"]) {
+  for (const name of PROJECT_CONFIG_FILES) {
     const file = path.join(root, name);
     if (!fs.existsSync(file)) continue;
     try {
@@ -672,6 +674,15 @@ export function advisorySkipped(hook, reason, { env = process.env, stateDir = ST
 export const launcherMarker = (sid, tmp = os.tmpdir()) => path.join(
   tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, `node-missing-${/^[A-Za-z0-9_-]+$/.test(String(sid || "")) ? sid : "shared"}`);
 
+// Which of the project config files hold a value (`test` on its parsed content), as "a.json and b.json" for a message.
+function projectFilesSetting(context, test) {
+  const root = context?.root || PROJECT_ROOT;
+  const names = PROJECT_CONFIG_FILES.filter((name) => {
+    try { return Boolean(test(JSON.parse(fs.readFileSync(path.join(root, name), "utf8")))); } catch { return false; }
+  });
+  return names.join(" and ");
+}
+
 /** Why craftsman is not fully running, as short reasons (SessionStart). `safety` lists what turns
  * the guards off; `quality` lists what turns off only the quality, doc and tracker machinery. */
 export function guardState({ cfg, context = null, env = process.env, tmp = os.tmpdir(), sid } = {}) {
@@ -679,7 +690,7 @@ export function guardState({ cfg, context = null, env = process.env, tmp = os.tm
   const quality = [];
   if (["off", "0", "false"].includes(String(env.CRAFTSMAN || "").toLowerCase())) quality.push("CRAFTSMAN=off is set in the environment");
   if (isFlagFile(context?.offFlag || OFF_FLAG)) quality.push(".craftsman/off exists");
-  if (cfg?.enabled === false) quality.push("enabled is false in craftsman.config.json");
+  if (cfg?.enabled === false) quality.push(`enabled is false in ${projectFilesSetting(context, (c) => c?.enabled === false) || "the project config"}`);
   if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") safety.push("CRAFTSMAN_SAFETY=off is set in the environment");
   if (fs.existsSync(launcherMarker(sid, tmp))) safety.push("node was missing earlier this session (hooks/run.sh left its marker)");
   return { safety, quality };
