@@ -972,7 +972,12 @@ function shellBody(words) {
   return at < 0 ? null : shellBodyAfter(words.slice(at + 1)).body;
 }
 const SKIP_SUBCOMMANDS = new Set(["commit", "push", "merge", "rebase", "am", "cherry-pick"]);
-const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|commit\.gpgsign)/i;
+const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|commit\.gpgsign|include\.path|includeif\.\S*?\.path)/i;
+// A config file git is told to read instead of (or besides) the usual ones can set core.hooksPath without the command
+// naming it. /dev/null (or nothing) reads as an empty file, which sets nothing.
+const CONFIG_FILE_ENV = /\bGIT_CONFIG(?:_GLOBAL|_SYSTEM)?=(?!\/dev\/null(?:[\s"';&|)]|$))(?=\S)/;
+// `include.path` and `includeIf.<condition>.path` pull in another config file (key lowercased).
+const isIncludeKey = (key) => key === "include.path" || /^includeif\..*\.path$/.test(key);
 // `git config` that points hooks elsewhere, or defines an alias that itself skips them.
 function configBypasses(args) {
   if (args.some((a) => /^(?:--get\S*|--unset\S*|--list|-l|--remove-section|--rename-section)$/.test(a))) return false;
@@ -987,13 +992,14 @@ function configBypasses(args) {
   if (operands[0] === "set") operands.shift();
   const key = (operands[0] ?? "").toLowerCase();
   const value = operands.slice(1).join(" ");
-  if (key === "core.hookspath") return true;
+  if (key === "core.hookspath" || isIncludeKey(key)) return true;
   if (key.startsWith("alias.") && value) return bypassesHooks("git " + value, 1) || bypassesHooks(value.replace(/^!/, ""), 1);
   return false;
 }
 function bypassesHooks(text, depth = 0) {
   if (depth > 3) return true; // nesting this deep is not a commit
   if (HOOK_ENV.test(text)) return true;
+  const configFileEnv = CONFIG_FILE_ENV.test(text);
   let segments;
   try { segments = shellSegments(text); } catch { return false; }
   for (const words of segments) {
@@ -1024,11 +1030,12 @@ function bypassesHooks(text, depth = 0) {
     }
     // The subcommands that run commit-msg, pre-commit-style hooks and take the skip flag.
     if (!SKIP_SUBCOMMANDS.has(sub)) continue;
+    if (configFileEnv) return true; // GIT_CONFIG[_GLOBAL|_SYSTEM]=<file> with a hook-running subcommand
     for (const config of configs) {
       const eq = config.indexOf("=");
       const key = (eq < 0 ? config : config.slice(0, eq)).toLowerCase();
       const value = eq < 0 ? "" : config.slice(eq + 1).toLowerCase();
-      if (key === "core.hookspath" || (key === "commit.gpgsign" && ["false", "no", "off", "0"].includes(value))) return true;
+      if (key === "core.hookspath" || isIncludeKey(key) || (key === "commit.gpgsign" && ["false", "no", "off", "0"].includes(value))) return true;
     }
     const rest = words.slice(i + 1);
     for (let j = 0; j < rest.length; j++) {

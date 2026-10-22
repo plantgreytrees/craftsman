@@ -1729,3 +1729,31 @@ test("pre-guard: hooks.json and the scope exemption are judged by real path thro
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Round 3 (20.x): a config include or an alternative config file reaches core.hooksPath without naming it.
+const INC = "include" + ".path";
+const INCIF = "includeIf.gitdir:/x/" + ".path";
+const CFGENV = (name, value = "/tmp/g") => `GIT_CONFIG${name}=${value}`;
+test("pre-guard: config includes and alternative config files are hook-skip routes (20.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass4-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const bash = (command) => run(GUARD, dir, { session_id: "bypass-20", tool_name: "Bash", tool_input: { command } });
+    const blocked = [
+      `git -c ${INC}=/tmp/g commit -m x`, `git -c ${INCIF}=/tmp/g commit -m x`, `git -c ${INC}=/tmp/g merge topic`, `git -c includeIf.onbranch:main.path=/tmp/g rebase main`,
+      `${CFGENV("_GLOBAL")} git commit -m x`, `${CFGENV("_SYSTEM")} git commit -m x`, `${CFGENV("")} git rebase main`, `env ${CFGENV("_GLOBAL")} git push`,
+      `export ${CFGENV("_GLOBAL")}; git commit -m x`, `bash -c '${CFGENV("_SYSTEM")} git commit -m x'`, `${CFGENV("_GLOBAL", '"/tmp/g"')} git commit -m x`,
+      `git config ${INC} /tmp/g`, `git config --add ${INC} /tmp/g`, `git config --global ${INC} /tmp/g`, `git config set ${INCIF} /tmp/g`, `git config set --local ${INC} /tmp/g`,
+      `${CFGENV("_KEY_0", INC)} git commit -m x`.replace("GIT_CONFIG_KEY_0=", "GIT_CONFIG_KEY_0="),
+    ];
+    for (const command of blocked) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    const allowed = [
+      `git config get ${INC}`, `git config --get ${INC}`, `git config --list`, "git config user.name x", "git -c user.name=x commit -m y",
+      `${CFGENV("_GLOBAL")} git status`, `${CFGENV("_GLOBAL", "/dev/null")} git commit -m y`, `${CFGENV("_SYSTEM", "/dev/null")} git push`, `git -c ${INC}=/x status`,
+      "git commit -m 'about an include'", `echo ${INC}`,
+    ];
+    for (const command of allowed) assert.equal(bash(command).status, 0, `allowed: ${command}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
