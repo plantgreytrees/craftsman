@@ -12,9 +12,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, consumeNonce, sessionDir, sidOf } from "./lib/core.mjs";
+import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, consumeNonce, safetyEnabled, sessionDir, sidOf } from "./lib/core.mjs";
 
 export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, nonce = false }) {
+  if (nonce && !safetyEnabled()) throw new Error("CRAFTSMAN_SAFETY=off: no guard is running, so a goal token needs a session with safety on");
   if (!sid) throw new Error("no session id (CLAUDE_CODE_SESSION_ID is not set), so no token can be tied to this session");
   if (!commandInvoked(sid, ["instruction", "auto"], { context: { stateDir } })) {
     throw new Error("goal tokens are minted only inside /instruction or /auto, and neither ran in this session");

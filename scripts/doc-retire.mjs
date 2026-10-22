@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
 import { descendantSlugs, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
@@ -69,7 +69,8 @@ export function retire(input, context = projectContext(".")) {
   if (fs.realpathSync(trackerRoot(context)) !== fs.realpathSync(context.root)) {
     return refuse("retire refused: run doc-retire from the main checkout");
   }
-  if (!hasGrant(input.sid, context)) {
+  // Under CRAFTSMAN_SAFETY=off no guard runs, so there is nothing to be granted; nothing is granted through the variable either.
+  if (safetyEnabled() && !hasGrant(input.sid, context)) {
     return refuse("retire refused: no doc-write grant (run doc-write.mjs first)");
   }
   const dir = path.posix.dirname(plan);

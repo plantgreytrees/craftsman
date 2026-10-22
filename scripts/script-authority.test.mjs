@@ -299,6 +299,20 @@ test("under CRAFTSMAN_SAFETY=off doc-write.mjs on is a no-op that grants nothing
   } finally { p.clean(); }
 });
 
+test("under CRAFTSMAN_SAFETY=off toggle.mjs off and goal-token.mjs refuse and say that safety off is the cause (45.2)", () => {
+  const p = spoofProject();
+  try {
+    const off = { ...p.env, CRAFTSMAN_SAFETY: "off", CLAUDE_CODE_SESSION_ID: "sessA" };
+    const t = node(p, TOGGLE, ["off"], off);
+    assert.equal(t.status, 2);
+    assert.match(t.stderr, /CRAFTSMAN_SAFETY=off/);
+    assert.ok(!fs.existsSync(p.off));
+    const g = spawnSync(process.execPath, [GOAL_TOKEN, ".craftsman/instructions/evil.goal.txt"], { cwd: p.dir, env: off, encoding: "utf8" });
+    assert.notEqual(g.status, 0);
+    assert.match(g.stderr, /CRAFTSMAN_SAFETY=off/);
+  } finally { p.clean(); }
+});
+
 test("with safety on, doc-write.mjs on still needs the record and the nonce (42.2)", () => {
   const p = project();
   try {

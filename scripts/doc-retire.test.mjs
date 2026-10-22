@@ -75,6 +75,18 @@ test("doc-retire: no doc-write grant refuses and changes no file and no ledger r
   assert.ok(fs.existsSync(path.join(context.root, PLAN)));
 });
 
+test("doc-retire: under CRAFTSMAN_SAFETY=off no guard runs, so no grant is asked for; with safety on it still is (45.1)", () => {
+  const was = process.env.CRAFTSMAN_SAFETY;
+  try {
+    process.env.CRAFTSMAN_SAFETY = "off";
+    assert.equal(retire({ plan: PLAN }, repo({ grant: false })).retired, PLAN);
+    delete process.env.CRAFTSMAN_SAFETY;
+    const out = retire({ plan: PLAN }, repo({ grant: false }));
+    assert.equal(out.refused, true);
+    assert.match(out.reason, /no doc-write grant/);
+  } finally { if (was === undefined) delete process.env.CRAFTSMAN_SAFETY; else process.env.CRAFTSMAN_SAFETY = was; }
+});
+
 test("doc-retire: the session marker is accepted as the grant when sid is given", () => {
   const context = repo({ grant: false });
   assert.equal(retire({ plan: PLAN, sid: "s1" }, context).refused, true);

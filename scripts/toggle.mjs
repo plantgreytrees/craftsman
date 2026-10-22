@@ -7,7 +7,7 @@
 // no spelling of the command line can switch the quality side off. `on` stays open.
 import fs from "node:fs";
 import path from "node:path";
-import { STATE_DIR, commandInvoked, consumeNonce, sidOf } from "./lib/core.mjs";
+import { STATE_DIR, commandInvoked, consumeNonce, safetyEnabled, sidOf } from "./lib/core.mjs";
 
 const flag = path.join(STATE_DIR, "off");
 
@@ -19,6 +19,7 @@ else target = !fs.existsSync(flag); // no arg => flip
 
 if (target) {
   const refuse = (why) => { process.stderr.write(`craftsman: toggle off refused: ${why}\n`); process.exit(2); };
+  if (!safetyEnabled()) refuse("CRAFTSMAN_SAFETY=off: no guard is running, so this needs a session with safety on (or create .craftsman/off yourself)");
   const sid = process.env.CLAUDE_CODE_SESSION_ID;
   if (!sid) refuse("no session id (CLAUDE_CODE_SESSION_ID is not set), so no command record can be tied to this session");
   if (!commandInvoked(sidOf({ session_id: sid }), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
