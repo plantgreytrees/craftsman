@@ -11,6 +11,7 @@
 // (Bash-run scripts get it as CLAUDE_CODE_SESSION_ID). pre-guard never lets a tool call write the token file.
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, sessionDir, sidOf } from "./lib/core.mjs";
 
 export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, env = process.env }) {
@@ -29,9 +30,12 @@ export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE
   const tokensFile = path.join(sessionDir(sidOf({ session_id: sid }), { stateDir }), "goal-tokens.json");
   let tokens = {};
   try { tokens = JSON.parse(fs.readFileSync(tokensFile, "utf8")); } catch { /* first token this session */ }
-  tokens[name] = fs.statSync(real).mtimeMs;
+  // Name and mtime say which file; the digest says what it held. Restoring an mtime after a rewrite (`touch -r`) is cheap,
+  // matching a SHA-256 of different content is not.
+  const mtimeMs = fs.statSync(real).mtimeMs;
+  tokens[name] = { mtimeMs, sha256: createHash("sha256").update(fs.readFileSync(real)).digest("hex") };
   atomicWrite(tokensFile, JSON.stringify(tokens) + "\n");
-  return { name, mtimeMs: tokens[name] };
+  return { name, mtimeMs, sha256: tokens[name].sha256 };
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname)) {

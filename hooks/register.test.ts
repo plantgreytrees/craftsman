@@ -45,7 +45,10 @@ const engine = {
       // craftsman's per-session record of the goal files it wrote (ARCH-SAFETY-09)
       if (p.endsWith("/sessions/sid1/goal-tokens.json")) {
         if (scenario.includes("no-token")) throw new Error(`no such file ${p}`);
-        return { value: JSON.stringify({ "x.goal.txt": scenario.includes("stale-token") ? 1999 : 2000 }) };
+        // SHA-256 of "/goal Deliver x.\n" (computed with node:crypto) and of "/goal Injected y.\n"; "legacy-token" is the old bare-mtime shape
+        if (scenario.includes("legacy-token")) return { value: JSON.stringify({ "x.goal.txt": 2000 }) };
+        const sha256 = scenario.includes("rewritten") ? "c46ab08e8b5ad9e9903a5a0d8cdb00c3d2b85940c983b40cb711db007f221fd1" : "8d796b0d12ff6c41825f757bb456f680351cfa3ba654efda7718ddbc15421ecc";
+        return { value: JSON.stringify({ "x.goal.txt": { mtimeMs: scenario.includes("stale-token") ? 1999 : 2000, sha256 } }) };
       }
       throw new Error(`no such file ${p}`);
     });
@@ -111,6 +114,17 @@ describe("craftsman mod", () => {
     const log = await turn(t, "stale-token");
     expect(log.some((l) => l.goal || l.submit)).toBe(false);
     expect(log.filter((l) => l.status).pop().status.includes("not written by craftsman this session")).toBe(true);
+  });
+
+  test("a goal rewritten after it was recorded, with the mtime put back, does not launch (31.1)", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "rewritten");
+    expect(log.some((l) => l.goal || l.submit)).toBe(false);
+    expect(log.filter((l) => l.status).pop().status.includes("x.goal.txt not written by craftsman this session")).toBe(true);
+  });
+
+  test("a token in the old bare-mtime shape does not launch (31.1)", { plugins: [engine] }, async (t) => {
+    const log = await turn(t, "legacy-token");
+    expect(log.some((l) => l.goal || l.submit)).toBe(false);
   });
 
   test("a newer goal file with no token cannot mask an older recorded one: x launches, y is only named", { plugins: [engine] }, async (t) => {
