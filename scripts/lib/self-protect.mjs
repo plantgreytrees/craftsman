@@ -21,16 +21,18 @@ export const SELF_NEVER = Object.freeze([
   "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
 ]);
 
+// A glob as a case-insensitive RegExp: the filesystems this runs on (default macOS, Windows) reach `.Claude` as `.claude`.
+const ci = (glob) => new RegExp(globToRe(glob).source, "i");
 const clean = (entry) => String(entry).replaceAll("\\", "/").replace(/^(?:\.\/)+/, "").replace(/\/+$/, "");
 
 // Does one `scope.write` entry (a path, a directory or a glob) reach `name`?
 function reaches(entry, name) {
-  const e = clean(entry);
+  const e = clean(entry).toLowerCase();
   if (e === "" || e === ".") return true; // the whole project
   // Over-matching only demands an /orchestrate run, so a bare filename counts as a hit too.
   if (e === name || e.endsWith("/" + name) || name.endsWith("/" + e)) return true;
   if (!/[*?{[]/.test(e)) return name.startsWith(e + "/"); // a directory that holds it
-  return globToRe(e).test(name);
+  return ci(e).test(name);
 }
 
 // craftsman.config.json keys that switch a guard off or loosen it; an edit that changes one needs a unit scope
@@ -41,7 +43,7 @@ export const SAFETY_CONFIG_KEYS = Object.freeze([
 ]);
 
 // Environment keys in the harness settings that decide whether node runs craftsman's hooks, or which code it loads.
-export const SAFETY_ENV = /^(?:CRAFTSMAN|(?:NODE_OPTIONS|NODE_PATH|PATH|CLAUDE_PLUGIN_ROOT)$)/i;
+export const SAFETY_ENV = /^(?:CRAFTSMAN|DYLD_|(?:NODE_OPTIONS|NODE_PATH|PATH|CLAUDE_PLUGIN_ROOT|CLAUDE_PROJECT_DIR|CLAUDE_CODE_SESSION_ID|LD_PRELOAD|LD_LIBRARY_PATH)$)/i;
 
 const dig = (obj, dotted) => dotted.split(".").reduce((value, key) => (value && typeof value === "object" ? value[key] : undefined), obj) ?? null;
 
@@ -49,9 +51,9 @@ const dig = (obj, dotted) => dotted.split(".").reduce((value, key) => (value && 
 // that decide whether craftsman's hooks run at all (every hook, craftsman's plugin entry, the safety env).
 export function safetyProjection(rel, doc) {
   if (!doc || typeof doc !== "object") return {};
-  if (/(?:^|\/)\.claude\/settings(?:\.local)?\.json$/.test(rel)) {
+  if (/(?:^|\/)\.claude\/settings(?:\.local)?\.json$/i.test(rel)) {
     const pick = (obj, re) => Object.fromEntries(Object.entries(obj && typeof obj === "object" ? obj : {}).filter(([key]) => re.test(key)));
-    return { disableAllHooks: doc.disableAllHooks ?? null, hooks: doc.hooks ?? null, plugins: pick(doc.enabledPlugins, /^craftsman(?:@|$)/i), env: pick(doc.env, SAFETY_ENV) };
+    return { disableAllHooks: doc.disableAllHooks ?? null, hooks: doc.hooks ?? null, sandbox: doc.sandbox ?? null, defaultMode: doc.permissions?.defaultMode ?? null, plugins: pick(doc.enabledPlugins, /^craftsman(?:@|$)/i), env: pick(doc.env, SAFETY_ENV) };
   }
   return Object.fromEntries(SAFETY_CONFIG_KEYS.map((key) => [key, dig(doc, key)]));
 }
@@ -104,7 +106,7 @@ function globToText(glob) {
   return re + "(?![\\w.-])";
 }
 // The raw-text gate: does a command line name a never-written path? Derived from SELF_NEVER, so it cannot drift.
-export const NEVER_TEXT = new RegExp(SELF_NEVER.map(globToText).join("|"));
+export const NEVER_TEXT = new RegExp(SELF_NEVER.map(globToText).join("|"), "i");
 
 // Words that, once the quotes are gone, name craftsman state or the files this layer protects. A bare `off` or
 // `doc-write` is not here on purpose (too common): those are caught as paths by NEVER_TEXT.
@@ -116,7 +118,7 @@ export function namesProtected(text) {
   const bare = String(text).replace(/['"\\]/g, "");
   if (NEVER_TEXT.test(bare)) return true;
   if (SELF_SCOPED.some((name) => bare.includes(name))) return true;
-  return bare.split(/[\s;&|()<>={}]+/).some((word) => PROTECTED_WORDS.has(word) || PROTECTED_WORDS.has(word.split("/").pop()) || word.startsWith(".craftsman/") || word.startsWith(".claude/settings"));
+  return bare.split(/[\s;&|()<>={}]+/).some((word) => PROTECTED_WORDS.has(word.toLowerCase()) || PROTECTED_WORDS.has(word.split("/").pop().toLowerCase()) || word.toLowerCase().startsWith(".craftsman/") || word.toLowerCase().startsWith(".claude/settings"));
 }
 
 const lastSegment = (glob) => glob.split("/").pop().replace(/\*+/g, "x");
@@ -131,10 +133,10 @@ const literalBase = (glob) => {
 function holds(rel, pattern) {
   const r = clean(rel);
   if (r === "" || r === "." || r.startsWith("..")) return false;
-  const re = globToRe(pattern);
+  const re = ci(pattern);
   if (re.test(r) || re.test(r + "/" + lastSegment(pattern))) return true;
-  const base = literalBase(pattern);
-  return base !== "" && (base === r || base.startsWith(r + "/"));
+  const base = literalBase(pattern).toLowerCase(), rl = r.toLowerCase();
+  return base !== "" && (base === rl || base.startsWith(rl + "/"));
 }
 export const heldNever = (rel) => SELF_NEVER.some((pattern) => holds(rel, pattern));
 // Only the project-root names: a directory that merely might hold a nested copy of one is not what this guards.

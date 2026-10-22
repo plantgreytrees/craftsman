@@ -484,7 +484,9 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const bare = cmd.replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
-  const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))));
+  // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
+  const foldedSelf = (t) => { const rel = path.relative(realRoot(), realResolve(process.cwd(), expandHome(t))).split(path.sep).join("/"); return rel !== "" && !rel.startsWith("..") && !!selfKind(rel); };
+  const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))) || (writes && foldedSelf(t)));
   const redirectsOntoDocs = () => {
     for (const m of cmd.matchAll(/>>?\|?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>()]*))/g)) {
       if (redirectBad(m[1] ?? m[2] ?? m[3] ?? "")) return true;
@@ -517,6 +519,14 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     if (!st.cwds) return hits.push("(" + label + " in a directory the parser cannot resolve)");
     if (env.execdir && /(?:^|\/)\.\.(?:\/|$)/.test(arg)) return hits.push("(" + label + " target above a find -execdir directory: " + arg + ")");
     for (const cwd of st.cwds) { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(label === "redirect" ? "redirect:" + h : h); }
+    // Self-protection only: touchesGuarded matches the patterns in their exact case, so a target such as `.Craftsman/OFF`
+    // (reachable on a case-insensitive filesystem) is also judged by selfKind, which compares case-folded.
+    if (writes && !/[*?[{]/.test(arg)) {
+      for (const cwd of st.cwds) {
+        const rel = path.relative(realRoot(), realResolve(cwd, arg)).split(path.sep).join("/");
+        if (rel !== "" && !rel.startsWith("..") && selfKind(rel) && !hits.includes(rel)) hits.push(rel);
+      }
+    }
     // Self-protection only: a path that is removed or moved takes everything under it along, so a directory that
     // HOLDS a protected path counts too (touchesGuarded sees only ancestors of a literal base, not of a wildcard one).
     if (writes && REMOVER_LABELS.test(label) && !/[*?[{]/.test(arg)) {
@@ -1251,8 +1261,9 @@ if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "E
 // tool call. "scoped" paths can be edited by a unit whose scope manifest (made by /orchestrate) names them.
 const selfKind = (relPath) => {
   const r = String(relPath).replace(/^\.\//, "");
-  if (SELF_NEVER.some((p) => globToRe(p).test(r))) return "never";
-  return SELF_SCOPED.some((p) => r === p || r.endsWith("/" + p)) ? "scoped" : null;
+  const lower = r.toLowerCase(); // a case-insensitive filesystem reaches `.Claude` as `.claude`
+  if (SELF_NEVER.some((p) => globToRe(p.toLowerCase()).test(lower))) return "never";
+  return SELF_SCOPED.some((p) => lower === p || lower.endsWith("/" + p)) ? "scoped" : null;
 };
 const scopeNames = (relPath) => (activeScope?.scope?.write || []).some((entry) => allowed(entry, String(relPath).replace(/^\.\//, "")));
 function safetyKeysChanged(current, next, relPath) {
@@ -1276,7 +1287,7 @@ if (tool === "Bash" && command) {
   // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
   const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
   const never = NEVER_TEXT.test(command);
-  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
+  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
   const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });
   const concrete = allHits.filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
   // A "(...)" hit means the parser gave up on part of the command (a subshell, a construct it cannot read): what it
@@ -1360,7 +1371,7 @@ if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
   // The exemption is for a scope that names the file itself (by its real path); a name that only reaches it through a
   // symlink the session made does not count. hooks.json is judged by both spellings of its path.
   if (kinds.includes("scoped") && !scopeNames(realTarget)) {
-    if ([rel, realTarget].some((p) => p.endsWith("hooks/hooks.json"))) denySelfDisable(`editing ${rel}`);
+    if ([rel, realTarget].some((p) => p.toLowerCase().endsWith("hooks/hooks.json"))) denySelfDisable(`editing ${rel}`);
     let current = "";
     try { current = fs.readFileSync(path.resolve(activeRoot, file), "utf8"); } catch {}
     if (safetyKeysChanged(current, afterEdit(current), realTarget)) denySelfDisable(`editing the safety settings of ${rel}`);

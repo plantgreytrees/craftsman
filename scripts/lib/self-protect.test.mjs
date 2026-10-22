@@ -84,6 +84,21 @@ test("self-protect: namesProtected reads a command's de-quoted words for craftsm
   for (const text of ["(cd src && ls)", "(echo off > notes.txt)", "(echo hi > src/a.txt)", "git status", "(cat README.md)", "echo hooks", "(cp a b)"]) assert.equal(namesProtected(text), false, text);
 });
 
+test("self-protect: path comparisons are case-folded, and the settings projection holds sandbox and the permission mode (29.1-29.2)", () => {
+  for (const rel of [".CRAFTSMAN/Off", ".Craftsman/sessions/S1/Doc-Write", ".GIT/hooks/Pre-Commit", ".Craftsman"]) assert.equal(heldNever(rel), true, rel);
+  assert.deepEqual(heldScoped("HOOKS"), ["hooks/hooks.json"]);
+  assert.deepEqual(heldScoped(".Claude"), [".claude/settings.json", ".claude/settings.local.json"]);
+  assert.deepEqual(namesSelfScoped(["HOOKS/Hooks.json"]), ["hooks/hooks.json"]);
+  assert.deepEqual(namesSelfScoped([".CLAUDE/**"]), [".claude/settings.json", ".claude/settings.local.json"]);
+  for (const text of [".Craftsman/OFF", "x > .CRAFTSMAN/Doc-Write-Pending", ".GIT/Config"]) assert.match(text, NEVER_TEXT, text);
+  assert.equal(namesProtected("(echo x > .Claude/Settings.Local.json)"), true);
+  assert.equal(namesProtected("(echo x > Docs/x.txt)"), false);
+  const projection = safetyProjection(".Claude/settings.json", { sandbox: { enabled: true }, permissions: { defaultMode: "default", allow: ["Bash(ls)"] }, theme: "dark" });
+  assert.deepEqual(projection.sandbox, { enabled: true });
+  assert.equal(projection.defaultMode, "default");
+  assert.equal(JSON.stringify(projection).includes("Bash(ls)"), false, "permissions.allow is not part of the projection");
+});
+
 test("self-protect: ordinary write entries name nothing", () => {
   for (const entry of ["src/a.ts", "scripts/pre-guard.mjs", "docs/plans/p.md", "scripts/*.mjs", "hooks/register.js", ".claudeignore"]) {
     assert.deepEqual(namesSelfScoped([entry]), [], entry);
@@ -96,8 +111,8 @@ test("self-protect: every safety config key exists in the shipped config and the
     const value = key.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), shipped);
     assert.notEqual(value, undefined, `${key} is a real key of craftsman.config.json`);
   }
-  for (const name of ["NODE_OPTIONS", "NODE_PATH", "PATH", "CLAUDE_PLUGIN_ROOT", "CRAFTSMAN", "CRAFTSMAN_SAFETY", "craftsman_x"]) assert.match(name, SAFETY_ENV, name);
-  for (const name of ["DEBUG", "MY_PATH", "NODE_ENV", "PATHEXT"]) assert.doesNotMatch(name, SAFETY_ENV, name);
+  for (const name of ["NODE_OPTIONS", "NODE_PATH", "PATH", "CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "CRAFTSMAN", "CRAFTSMAN_SAFETY", "craftsman_x", "path"]) assert.match(name, SAFETY_ENV, name);
+  for (const name of ["DEBUG", "MY_PATH", "NODE_ENV", "PATHEXT", "LD_DEBUG", "DYLD", "CLAUDE_MODEL"]) assert.doesNotMatch(name, SAFETY_ENV, name);
 });
 
 test("self-protect: safetyProjection reads dotted keys and the settings env", () => {

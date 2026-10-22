@@ -1901,6 +1901,37 @@ test("pre-guard: recursive copies, in-place edits, archives and find -delete tha
   for (const command of allowed) assertAllowed(command);
 });
 
+// Round 4 (29.x): the settings keys that make the sandbox, the permission mode and the process environment, and path comparisons that ignore case.
+test("pre-guard: sandbox, permission mode and preload settings are protected, and protected paths compare case-folded (29.1-29.2)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".claude"));
+    const settings = path.join(dir, ".claude", "settings.json");
+    const local = path.join(dir, ".claude", "settings.local.json");
+    fs.writeFileSync(settings, '{"theme":"dark","permissions":{"allow":["Bash(ls)"]}}\n');
+    const call = (sid, tool, input) => run(GUARD, dir, { session_id: sid, tool_name: tool, tool_input: input });
+    const write = (file, doc) => call("sk-1", "Write", { file_path: file, content: JSON.stringify({ theme: "dark", permissions: { allow: ["Bash(ls)"] }, ...doc }) });
+    for (const file of [settings, local]) {
+      assert.equal(write(file, { sandbox: { enabled: false } }).status, 2, `sandbox in ${file}`);
+      assert.equal(write(file, { permissions: { allow: ["Bash(ls)"], defaultMode: "bypassPermissions" } }).status, 2, "permission mode");
+      for (const key of ["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID"]) {
+        assert.equal(write(file, { env: { [key]: "/tmp/x" } }).status, 2, `env ${key}`);
+      }
+      assert.equal(write(file, { permissions: { allow: ["Bash(ls)", "Bash(cat *)"] }, env: { DEBUG: "1", MY_PATH: "x", PATHEXT: ".EXE" } }).status, 0, "unrelated permission and env keys stay editable");
+    }
+    assert.equal(call("sk-1", "Edit", { file_path: settings, old_string: '"theme":"dark"', new_string: '"theme":"dark","sandbox":{"enabled":false}' }).status, 2, "Edit form");
+    // 29.2: the same paths with other capitals (a case-insensitive filesystem reaches them).
+    for (const rel of [".Claude/settings.local.json", ".CLAUDE/Settings.json", ".Craftsman/OFF", ".craftsman/Doc-Write-Pending", "Hooks/Hooks.json", "CRAFTSMAN.CONFIG.JSON"]) {
+      assert.equal(call("sk-2", "Write", { file_path: path.join(dir, rel), content: '{"disableAllHooks":true,"enabled":false}' }).status, 2, `Write ${rel}`);
+    }
+    for (const command of ["touch .Craftsman/OFF", "echo x > .CLAUDE/settings.local.json", "cp x Hooks/hooks.json", "(echo x > .Claude/Settings.local.json)", "rm -rf .CRAFTSMAN"]) {
+      assert.equal(run(GUARD, dir, { session_id: "sk-2", tool_name: "Bash", tool_input: { command } }).status, 2, `blocked: ${command}`);
+    }
+    assert.equal(call("sk-2", "Write", { file_path: path.join(dir, "src", "Hooks", "readme.md"), content: "x\n" }).status, 0, "an ordinary file with a protected word in its path stays writable");
+    assert.equal(call("sk-2", "Write", { file_path: path.join(dir, "Docs", "x.txt"), content: "x\n" }).status, 0);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 // Round 4 (28.x): git reads its hooks path from config it finds through HOME, XDG_CONFIG_HOME and GIT_CONFIG_KEY_n. The routes
 // are first proven real (a failing pre-commit hook is skipped), then the guard must refuse each spelling of them.
 test("pre-guard: HOME, XDG_CONFIG_HOME and quote-split GIT_CONFIG_KEY routes to a model-written git config are refused (28.1-28.2)", { skip: process.platform === "win32" && "needs a POSIX shell and git hooks" }, () => {
