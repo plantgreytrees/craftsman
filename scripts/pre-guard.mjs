@@ -360,7 +360,8 @@ const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
 const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`);
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
-const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const SAFE_HEADS = new Set(["echo", "printf", "grep", "egrep", "fgrep"]);
 const DECLARERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
 const DYNAMIC = /[$`~]/;
@@ -615,10 +616,21 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       for (let i = 0; i < rest.length; i++) { if (valued.includes(rest[i])) { i++; continue; } if (!rest[i].startsWith("-")) out.push(rest[i]); }
       return out;
     };
-    const optionValue = (names) => { const i = rest.findIndex((a) => names.includes(a)); return i >= 0 ? rest[i + 1] : undefined; };
+    // Every value of an option, in order, in its four spellings: `-C X`, `--directory X`, `--directory=X` and `-CX`.
+    const optionValues = (short, long) => {
+      const out = [];
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (a === `-${short}` || a === `--${long}`) { if (rest[i + 1] !== undefined) out.push(rest[++i]); }
+        else if (a.startsWith(`--${long}=`)) out.push(a.slice(long.length + 3));
+        else if (a.startsWith(`-${short}`) && !a.startsWith("--") && a.length > 2) out.push(a.slice(2));
+      }
+      return out;
+    };
     let files = [];
     if (verb === "awk" || verb === "gawk") {
-      if (!rest.some((a, i) => (a === "-i" && /^inplace/.test(rest[i + 1] || "")) || /^--include=inplace/.test(a))) return;
+      // In-place mode is the xgawk `inplace` library: `-i inplace`, `-iinplace`, `--include inplace`, `--include=inplace`.
+      if (!rest.some((a, i) => ((a === "-i" || a === "--include") && /^inplace/.test(rest[i + 1] || "")) || /^-iinplace/.test(a) || /^--include=inplace/.test(a))) return;
       const ops = operands(["-i", "--include", "-f", "--file", "-v", "--assign", "-F", "--field-separator"]);
       files = rest.some((a) => a === "-f" || a === "--file" || a.startsWith("--file=")) ? ops : ops.slice(1);
     } else if (verb === "ed") files = operands();
@@ -629,11 +641,19 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       const first = rest[0] ?? "";
       const extracts = rest.some((a) => /^-[A-Za-z]*x/.test(a) || a === "--extract" || a === "--get") || (!first.startsWith("-") && /^[A-Za-z]*x[A-Za-z]*$/.test(first));
       if (!extracts) return;
-      target(optionValue(["-C", "--directory"]) ?? ".", st, "holds", env);
+      // Each -C is relative to the one before it, so every directory on the way is judged, not only the first or the last.
+      let here = ".";
+      const dirs = optionValues("C", "directory");
+      if (!dirs.length) target(here, st, "holds", env);
+      for (const dir of dirs) {
+        here = dir.startsWith("/") ? dir : path.posix.join(here, dir);
+        target(here, st, "holds", env);
+      }
       return;
     } else if (verb === "unzip") {
-      if (rest.some((a) => /^-[A-Za-z]*[ltpZ]/.test(a))) return; // list, test, pipe, zipinfo: nothing is written
-      target(optionValue(["-d"]) ?? ".", st, "holds", env);
+      if (rest.some((a) => /^-(?!\w*d)[A-Za-z]*[ltpZ][A-Za-z]*$/.test(a))) return; // list, test, pipe, zipinfo: nothing is written
+      const dirs = optionValues("d", "directory");
+      for (const dir of dirs.length ? dirs : ["."]) target(dir, st, "holds", env);
       return;
     }
     for (const f of files) if (f && f !== "-") target(f, st, verb, env);

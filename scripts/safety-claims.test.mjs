@@ -37,6 +37,8 @@ function project() {
   put("stage/root.patch", '--- a/.claude/settings.json\n+++ b/.claude/settings.json\n@@ -1 +1 @@\n-{"theme":"dark"}\n+{"theme":"ROOT"}\n');
   spawnSync("tar", ["-cf", path.join(dir, "stage", "x.tar"), "-C", path.join(dir, "stage", ".claude"), "settings.json"]);
   spawnSync("tar", ["-cf", path.join(dir, "stage", "root.tar"), "-C", path.join(dir, "stage"), ".claude"]);
+  spawnSync("tar", ["-cf", path.join(dir, "stage", "off.tar"), "-C", path.join(dir, "stage"), "off"]);
+  spawnSync("zip", ["-q", "off.zip", "off"], { cwd: path.join(dir, "stage") });
   return { dir, home, env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, USERPROFILE: home, CLAUDE_CODE_SESSION_ID: "claims" },
     clean() { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); } };
 }
@@ -96,6 +98,11 @@ const CLAIMS = [
   ...(have("patch") ? ["patch -p0 .claude/settings.json < stage/x.patch"] : []),
   ...(have("gawk") ? [`gawk -i inplace '{sub("dark","LIGHT");print}' .claude/settings.json`] : []),
   ...(have("rsync") ? ["rsync -a stage/.claude/ .claude/"] : []),
+  // the same writers in every spelling of their destination and in-place options (round 5)
+  ...(have("tar") ? ["tar -xf stage/off.tar --directory=.craftsman", "tar -x -f stage/off.tar -C.craftsman", "tar -xf stage/off.tar -C src -C ../.craftsman",
+"tar xf stage/off.tar --directory .craftsman"] : []),
+  ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip -d.craftsman", "unzip -qo stage/off.zip -d .craftsman"] : []),
+  ...(have("gawk") ? [`gawk -iinplace '{sub("dark","LIGHT");print}' .claude/settings.json`, `gawk --include inplace '{sub("dark","LIGHT");print}' .claude/settings.json`] : []),
   // case-folded names reach the same files on a case-insensitive filesystem
   "touch .Craftsman/OFF", "echo x > .CLAUDE/settings.local.json",
 ];
@@ -110,6 +117,17 @@ test("ARCH-SAFETY-05 claims: every form changes protected state when run unguard
     if (verdictOf(command) !== 2) failures.push(`allowed by the guard: ${command}`);
   }
   assert.deepEqual(failures, []);
+});
+
+// The spellings above must not make every use of those tools a denial.
+test("the archive and awk spellings that write nothing protected are allowed (36.x)", { skip }, () => {
+  const allowed = [
+    "tar -xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
+    ...(have("unzip") ? ["unzip -l stage/off.zip", "unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
+    ...(have("gawk") ? ["gawk -i ordchr 1 src/a.txt", "awk 1 .claude/settings.json", "gawk -v x=1 '{print}' src/a.txt"] : []),
+  ];
+  const denied = allowed.filter((command) => verdictOf(command) !== 0);
+  assert.deepEqual(denied, []);
 });
 
 // What the rule says it does not read. Each row is a real way to change protected state that the guard lets through; when a
