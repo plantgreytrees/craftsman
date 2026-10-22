@@ -49,3 +49,6 @@ files that are already at their caps.
 ## Glossary
 - **Per-invocation load:** a command's bytes plus every shared doc it reads unconditionally.
 - **Ratchet:** a cap that can only go down.
+
+## Slim amendments (2026-10-23)
+ARCH-SLIM-10 measures always-loaded bytes: a 3 KB SessionStart target and a per-session "baseline" context sample, so start-up cost and growth can be told apart. ARCH-SLIM-11 borrows Superpowers' patterns (TDD, systematic debugging, verification before completion, a tiny bootstrap) as vendored, attributed skills, with no dependency. ARCH-SLIM-12 limits the model-invocable surface to ten entry points; other commands become internal and are deleted only after 30 idle days. See [approval](./approval.md).

@@ -47,3 +47,6 @@ them. A README cite pins a plan doc until someone removes the cite.
 
 ## Plan-hierarchy amendments (2026-10-18)
 ARCH-DOCS-01 is superseded by ARCH-DOCS-09 (rollups removed with the plan; parents with live children refused). See [plan](./plan.md).
+
+## Budget amendments (2026-10-23)
+ARCH-DOCS-10: per-project doc budgets in `arch-check lint`, enforced by default. Caps start at today's sizes and only go down; a new plan gets 60 KB and a new scrutinise doc 30 KB. ARCH-DOCS-11: a scrutinise doc keeps one rolling summary and the latest round, with history in git (Gleam has one at 575 KB). ARCH-DOCS-02 is unchanged. A dry run found 22 of 23 finished Gleam plans and 12 of 15 here are cited elsewhere, so auto-delete was rejected. ARCH-LAND-26 logs candidates instead. See [approval](./approval.md).
