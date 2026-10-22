@@ -136,6 +136,7 @@ test("the archive and awk spellings that write nothing protected are allowed (36
 const LIMITS = [
   { what: "an interpreter writing the file", command: `node -e "require('fs').writeFileSync('.craftsman/off','x')"` },
   { what: "command text built at run time", command: "d=.craft; echo x > ${d}sman/off" },
+  ...(have("gawk") && fs.existsSync("/usr/share/awk/inplace.awk") ? [{ what: "awk in-place by the path of its include (the guard reads -i inplace, not a path)", command: `gawk -i /usr/share/awk/inplace.awk '{sub("dark","LIGHT");print}' .claude/settings.json` }] : []),
   ...(have("tar") ? [{ what: "an archive unpacked into the project root (its contents are not read)", command: "tar -xf stage/root.tar" }] : []),
   ...(have("patch") ? [{ what: "a patch whose target file is named only inside the patch", command: "patch -p1 < stage/root.patch" }] : []),
 ];
@@ -167,6 +168,25 @@ test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
   for (const needle of ["safety-off", "permission prompt"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
 });
 
+// Round 6 (41.x): variable setters the guard does not read stay with the sandbox. A loop variable or a brace-built name sets the
+// variable (shown by reading it back); the guard lets it through. With the nonce bound to the real session, the session-id forms
+// no longer gain anything, and a fake HOME needs an adversarial model already inside the session.
+test("the loop and brace variable setters are real and not read, and prose naming a setter next to a safety variable is refused (41.0)", { skip }, () => {
+  const setters = [
+    ["for CLAUDE_CODE_SESSION_ID in sessA; do printenv CLAUDE_CODE_SESSION_ID; done", "sessA"],
+    ["for HOME in /tmp/fakehome; do printenv HOME; done", "/tmp/fakehome"],
+    ["export CLAUDE_CODE_SESSION_{ID,X}=sessA; printenv CLAUDE_CODE_SESSION_ID", "sessA"],
+  ];
+  for (const [command, value] of setters) {
+    const real = spawnSync("bash", ["-c", command], { env: { PATH: process.env.PATH, HOME: "/home/orig", CLAUDE_CODE_SESSION_ID: "orig" }, encoding: "utf8" });
+    assert.equal(real.stdout.trim(), value, `the form really sets the variable: ${command}`);
+    assert.equal(verdictOf(command), 0, `the guard does not read it, as the rule says: ${command}`);
+  }
+  const prose = "echo 'hooks read CLAUDE_PROJECT_DIR first'";
+  assert.deepEqual(effectOf(prose), [], "the prose changes nothing");
+  assert.equal(verdictOf(prose), 2, "yet it is refused: the kept fail-closed false positive");
+});
+
 test("the rule names every limit this file pins, and safety.md repeats them", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
@@ -176,7 +196,7 @@ test("the rule names every limit this file pins, and safety.md repeats them", ()
   assert.ok(start > 0, "ARCH-SAFETY-05 has a limits clause");
   const clause = line.slice(start, line.indexOf(" — check:"));
   const limitsSection = human.slice(human.indexOf("Anything they cannot read stays with the sandbox"));
-  for (const needle of ["interpreter", "built at run time", "archive", "patch"]) {
+  for (const needle of ["interpreter", "built at run time", "archive", "patch", "for NAME in", "include path", "prose"]) {
     assert.ok(clause.includes(needle), `the limits clause of ARCH-SAFETY-05 names: ${needle}`);
     assert.ok(limitsSection.includes(needle), `safety.md's limits section names: ${needle}`);
   }
