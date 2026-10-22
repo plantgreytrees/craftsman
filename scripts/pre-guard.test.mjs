@@ -1783,3 +1783,81 @@ test("pre-guard: config includes and alternative config files are hook-skip rout
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Round 4: a self-protection claim is about a REAL write, so each attack form below is run for real in a throwaway
+// project, unguarded, to prove it changes protected state, and then offered to the guard in a fresh one, which must deny it.
+function attackProject() {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-attack-")));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-attack-home-")));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  for (const d of [".claude", "hooks", ".craftsman/sessions/s1", "src", "stage/.claude", "stage/hooks"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude", "settings.json"), '{"theme":"dark"}\n');
+  fs.writeFileSync(path.join(dir, "hooks", "hooks.json"), "{}\n");
+  fs.writeFileSync(path.join(dir, "craftsman.config.json"), '{"maxFeedbackLines":40}\n');
+  fs.writeFileSync(path.join(dir, "src", "a.txt"), "a\n");
+  fs.writeFileSync(path.join(dir, "stage", "x"), "x\n");
+  fs.writeFileSync(path.join(dir, "stage", ".claude", "settings.json"), '{"theme":"STAGED"}\n');
+  fs.writeFileSync(path.join(dir, "stage", "hooks", "hooks.json"), '{"staged":true}\n');
+  assert.ok(home !== os.homedir(), "the attack runs against a temp HOME");
+  return { dir, home, env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, USERPROFILE: home, CLAUDE_CODE_SESSION_ID: "atk" } };
+}
+function treeOf(dir) {
+  const out = {};
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.name === ".git" && d === dir) continue;
+      if (e.isSymbolicLink()) out[path.relative(dir, p)] = "-> " + fs.readlinkSync(p);
+      else if (e.isDirectory()) { out[path.relative(dir, p) + "/"] = ""; walk(p); }
+      else out[path.relative(dir, p)] = fs.readFileSync(p, "utf8");
+    }
+  };
+  walk(dir);
+  return out;
+}
+const PROTECTED_TREE = [/^\.claude\//, /^hooks\//, /^craftsman\.config\.json$/, /^\.craftsman\/(?:off|doc-write-pending)$/, /^\.craftsman\/sessions\//, /^\.git\/(?:hooks|config)/];
+const changedProtected = (before, after) => [...new Set([...Object.keys(before), ...Object.keys(after)])]
+  .filter((k) => before[k] !== after[k] && PROTECTED_TREE.some((re) => re.test(k)) && !k.startsWith("stage/"));
+// Returns what the command changes among the protected paths when run unguarded.
+function unguardedEffect(command) {
+  const p = attackProject();
+  try {
+    const before = treeOf(p.dir);
+    spawnSync("sh", ["-c", command], { cwd: p.dir, env: p.env, encoding: "utf8" });
+    return changedProtected(before, treeOf(p.dir));
+  } finally { fs.rmSync(p.dir, { recursive: true, force: true }); fs.rmSync(p.home, { recursive: true, force: true }); }
+}
+// Asserts: the command really changes protected state when run unguarded, the guard denies it, and (re-run guarded) nothing changed.
+function assertDenied(command, why = "") {
+  const effect = unguardedEffect(command);
+  assert.ok(effect.length > 0, `the attack form is real: ${command} changes protected state when run unguarded${why}`);
+  const p = attackProject();
+  try {
+    const r = run(GUARD, p.dir, { session_id: "atk", tool_name: "Bash", tool_input: { command } }, { HOME: p.home, USERPROFILE: p.home });
+    assert.equal(r.status, 2, `denied: ${command} (would have changed ${effect.join(", ")})`);
+  } finally { fs.rmSync(p.dir, { recursive: true, force: true }); fs.rmSync(p.home, { recursive: true, force: true }); }
+}
+function assertAllowed(command) {
+  const p = attackProject();
+  try {
+    const r = run(GUARD, p.dir, { session_id: "atk", tool_name: "Bash", tool_input: { command } }, { HOME: p.home, USERPROFILE: p.home });
+    assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+  } finally { fs.rmSync(p.dir, { recursive: true, force: true }); fs.rmSync(p.home, { recursive: true, force: true }); }
+}
+
+// Round 4 (24.x): a subshell cannot hide a write to a protected path.
+test("pre-guard: a write wrapped in a subshell that names a protected path is refused (24.1-24.3)", () => {
+  for (const command of [
+    `(echo '{"disableAllHooks":true}' > .claude/settings.local.json)`,
+    `(echo granted > .craftsman/sessions/s1/doc-write)`,
+    `true && (cat stage/x > hooks/hooks.json)`,
+    `(echo hi > .craftsman/off)`,
+    `x=1; (touch .craftsman/off)`,
+    `echo $(date) > .claude/settings.local.json`,
+    `cat <(echo x) > hooks/hooks.json`,
+    `{ (echo x > .craftsman/off); }`,
+    `if true; then (echo x > .craftsman/off); fi`,
+    `{ cd .claude; cat ../stage/x > settings.local.json; }`,
+  ]) assertDenied(command);
+  for (const command of ["(cd src && ls)", "(echo hi > notes.txt)", "(cat .craftsman/off)", "(git status)", "(echo hi > src/a.txt)", "x=$(cat hooks/hooks.json); echo $x", "(echo off > notes.txt) && ls"]) assertAllowed(command);
+});

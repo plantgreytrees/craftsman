@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesSelfScoped, realEntries, safetyProjection } from "./self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, namesSelfScoped, realEntries, safetyProjection } from "./self-protect.mjs";
 import os from "node:os";
 import path from "node:path";
 import { globToRe } from "./core.mjs";
@@ -76,6 +76,12 @@ test("self-protect: realEntries follows the symlinks in a write entry's literal 
     assert.deepEqual(realEntries("not an array", root), []);
     assert.deepEqual(realEntries(["c/**"], path.join(root, "missing")), []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("self-protect: namesProtected reads a command's de-quoted words for craftsman state (24.1)", () => {
+  for (const text of ["(echo x > .claude/settings.local.json)", "(cd .craftsman && touch off)", "(echo y > hooks/hooks.json)", "cp x .craft\"\"sman/off", "(tee commands.json)",
+    "x > craftsman.config.json", "(touch .craftsman/sessions/s1/doc-write)", "(echo > .git/hooks/pre-commit)"]) assert.equal(namesProtected(text), true, text);
+  for (const text of ["(cd src && ls)", "(echo off > notes.txt)", "(echo hi > src/a.txt)", "git status", "(cat README.md)", "echo hooks", "(cp a b)"]) assert.equal(namesProtected(text), false, text);
 });
 
 test("self-protect: ordinary write entries name nothing", () => {

@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
-import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, safetyProjection } from "./lib/self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -1138,8 +1138,13 @@ if (tool === "Bash" && command) {
   const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
   const never = NEVER_TEXT.test(command);
   const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
-  const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true })
-    .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
+  const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });
+  const concrete = allHits.filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
+  // A "(...)" hit means the parser gave up on part of the command (a subshell, a construct it cannot read): what it
+  // writes is unknown. Fail closed when such a command can write and also names craftsman state.
+  if (allHits.some((h) => h.startsWith("(")) && (command.includes(">") || WRITE_TEXT.test(command.replace(/['"\\]/g, ""))) && namesProtected(command)) {
+    denySelfDisable("a command the guard cannot read that writes and names craftsman state");
+  }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
   // A link into the state directory would let a later Write reach it under another name.
   if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");

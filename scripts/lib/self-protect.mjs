@@ -106,6 +106,19 @@ function globToText(glob) {
 // The raw-text gate: does a command line name a never-written path? Derived from SELF_NEVER, so it cannot drift.
 export const NEVER_TEXT = new RegExp(SELF_NEVER.map(globToText).join("|"));
 
+// Words that, once the quotes are gone, name craftsman state or the files this layer protects. A bare `off` or
+// `doc-write` is not here on purpose (too common): those are caught as paths by NEVER_TEXT.
+const PROTECTED_WORDS = new Set([".craftsman", ".claude", "doc-write-pending", "commands.json", "goal-tokens.json",
+  "settings.json", "settings.local.json", "hooks.json", "craftsman.config.json"]);
+// Does a command line (read after its quotes are removed) name a protected path? Used where the shell parser gave up,
+// so what a command writes cannot be read: it is refused only when it also names craftsman state.
+export function namesProtected(text) {
+  const bare = String(text).replace(/['"\\]/g, "");
+  if (NEVER_TEXT.test(bare)) return true;
+  if (SELF_SCOPED.some((name) => bare.includes(name))) return true;
+  return bare.split(/[\s;&|()<>={}]+/).some((word) => PROTECTED_WORDS.has(word) || PROTECTED_WORDS.has(word.split("/").pop()) || word.startsWith(".craftsman/") || word.startsWith(".claude/settings"));
+}
+
 const lastSegment = (glob) => glob.split("/").pop().replace(/\*+/g, "x");
 const literalBase = (glob) => {
   const parts = [];
