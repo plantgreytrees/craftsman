@@ -3,7 +3,7 @@ area: safety
 governs: ["hooks/run.sh", "scripts/pre-guard.mjs", "scripts/agent-mode-guard.mjs", "scripts/orchestrate-scope-guard.mjs", "scripts/session-context.mjs", "scripts/worktree-sweep.mjs", "scripts/session-end.mjs"]
 human: docs/architecture/safety.md
 source: docs/plans/fixes-and-safety.md
-verified_at: 6d6c83483aab25ff1e34616281b95aa8a3d35845
+verified_at: 509f7fa25dc521e4427dc049d8e1e81f18986fff
 updated: 2026-10-21
 ---
 # ARCH safety — enforced rules
