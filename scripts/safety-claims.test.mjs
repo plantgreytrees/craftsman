@@ -129,7 +129,7 @@ test("ARCH-SAFETY-05 claims: every form changes protected state when run unguard
 test("the archive and awk spellings that write nothing protected are allowed (36.x)", { skip }, () => {
   const allowed = [
     "tar -xf stage/x.tar -C src", "tar -xvf stage/x.tar -C src", "tar -xzf stage/x.tar --directory=src", "tar xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
-    ...(have("unzip") ? ["unzip -l stage/off.zip", "unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
+    ...(have("unzip") ? ["unzip -v stage/off.zip", "unzip -c stage/off.zip", "unzip -z stage/off.zip", "unzip -hh", "unzip -l stage/off.zip", "unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
     ...(have("gawk") ? ["gawk -i ordchr 1 src/a.txt", "awk 1 .claude/settings.json", "gawk -v x=1 '{print}' src/a.txt"] : []),
   ];
   const denied = allowed.filter((command) => verdictOf(command) !== 0);
@@ -181,6 +181,9 @@ test("an extraction with an unreadable option is refused outright with a message
     assert.match(r.stderr, /archive extraction with an option the guard cannot read/, command);
     assert.match(r.stderr, /-C DIR \/ -d DIR/, "and how to spell it");
   }
+  // it names the word it could not read (48.2)
+  assert.match(resultOf("tar -xf stage/x.tar --warning=none -C src").stderr, /--warning=none/);
+  assert.match(resultOf("unzip -od out stage/off.zip").stderr, /-od/);
 });
 
 // Round 6 (41.x): variable setters the guard does not read stay with the sandbox. A loop variable or a brace-built name sets the

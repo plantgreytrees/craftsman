@@ -612,12 +612,10 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // for an archive the directory it is unpacked into. What an archive or a patch on stdin contains is not read.
   // The destination of an extraction cannot be read, so the command is refused whatever it names (the cost is a legitimate unusual
   // spelling; the message says how to write it so the guard can read it).
-  function denyArchive(verb) {
-    const what = `${verb} extraction with an option the guard cannot read`;
-    logEvent({ ms: Date.now() - T0, ev: "selfguard", sid: sidOf(input), what, result: "blocked" });
-    process.stderr.write(`craftsman: archive extraction with an option the guard cannot read (${verb}) is blocked: spell the destination as -C DIR / -d DIR, ` +
-      `or ask the user to run it. The guard reads only plain spellings because a clustered or abbreviated one can hide where the archive is unpacked.\n`);
-    process.exit(2);
+  function denyArchive(verb, word) {
+    denySelfDisable(`archive extraction with an option the guard cannot read (${verb} ${word || "?"})`,
+      `spell the destination as -C DIR / -d DIR, or ask the user to run it. The guard reads only plain spellings because a clustered or ` +
+      `abbreviated one can hide where the archive is unpacked.`);
   }
   function otherWriters(verb, rest, st, env) {
     const operands = (valued = []) => {
@@ -643,17 +641,17 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       // holds C, an abbreviated or unknown long option, --transform) leaves the destination unknown, and the command is refused.
       const flags = /^-?[xvzjJpkoOmPSwa]+f?$/, longFlags = /^--(?:extract|get|verbose|gzip|gunzip|xz|bzip2|keep-old-files|overwrite|no-same-owner|same-owner|preserve-permissions|keep-newer-files|skip-old-files|totals|wildcards|no-same-permissions|strip-components=\d+)$/;
       const dirs = [];
-      let known = true;
+      let known = true, bad = "";
       for (let i = 0; i < rest.length; i++) {
         const a = rest[i];
-        if (i === 0 && !a.startsWith("-") && /^[A-Za-z]+$/.test(a)) { if (flags.test(a)) { if (a.endsWith("f")) i++; } else known = false; continue; }
+        if (i === 0 && !a.startsWith("-") && /^[A-Za-z]+$/.test(a)) { if (flags.test(a)) { if (a.endsWith("f")) i++; } else { known = false; bad ||= a; } continue; }
         if (a.startsWith("-") && !a.startsWith("--") && flags.test(a)) { if (a.endsWith("f")) i++; continue; }
         if (a === "-f" || a === "--file") { i++; continue; }
         if (a.startsWith("--file=") || longFlags.test(a)) continue;
-        if (a === "-C" || a === "--directory") { if (rest[i + 1] === undefined) known = false; else dirs.push(rest[++i]); continue; }
+        if (a === "-C" || a === "--directory") { if (rest[i + 1] === undefined) { known = false; bad ||= a; } else dirs.push(rest[++i]); continue; }
         if (a.startsWith("--directory=")) { dirs.push(a.slice(12)); continue; }
         if (/^-C./.test(a)) { dirs.push(a.slice(2)); continue; }
-        if (a.startsWith("-")) { known = false; continue; }
+        if (a.startsWith("-")) { known = false; bad ||= a; continue; }
       }
       if (known) {
         // Each -C is relative to the one before it, so every directory on the way is judged, not only the first or the last.
@@ -665,22 +663,22 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         }
         return;
       }
-      denyArchive(verb);
+      denyArchive(verb, bad);
     } else if (verb === "unzip") {
-      if (rest.some((a) => /^-(?!\w*d)[A-Za-z]*[ltpZ][A-Za-z]*$/.test(a))) return; // list, test, pipe, zipinfo: nothing is written
+      if (rest.some((a) => /^-(?!\w*d)[A-Za-z]*[ltpZvczh][A-Za-z]*$/.test(a))) return; // list, test, pipe, zipinfo, verbose, stdout, comment, help: nothing is written
       // The same allowlist: clusters of argument-free letters, `-d DIR` / `-dDIR`, and operands. Anything else leaves the destination
       // unknown, and the command is refused.
       const dirs = [];
-      let known = true;
+      let known = true, bad = "";
       for (let i = 0; i < rest.length; i++) {
         const a = rest[i];
         if (/^-[oqnjufaLVb]+$/.test(a)) continue;
-        if (a === "-d") { if (rest[i + 1] === undefined) known = false; else dirs.push(rest[++i]); continue; }
+        if (a === "-d") { if (rest[i + 1] === undefined) { known = false; bad ||= a; } else dirs.push(rest[++i]); continue; }
         if (/^-d./.test(a)) { dirs.push(a.slice(2)); continue; }
-        if (a.startsWith("-")) known = false;
+        if (a.startsWith("-")) { known = false; bad ||= a; }
       }
       if (known) { for (const dir of dirs.length ? dirs : ["."]) target(dir, st, "holds", env); return; }
-      denyArchive(verb);
+      denyArchive(verb, bad);
     }
     for (const f of files) if (f && f !== "-") target(f, st, verb, env);
   }
@@ -1337,11 +1335,12 @@ function safetyKeysChanged(current, next, relPath) {
   try { before = JSON.parse(current); } catch { /* an unreadable current file counts as empty */ }
   return JSON.stringify(safetyProjection(relPath, before)) !== JSON.stringify(safetyProjection(relPath, after));
 }
-function denySelfDisable(what) {
+function denySelfDisable(what, advice) {
   logEvent({ ms: Date.now() - T0, ev: "selfguard", sid: sidOf(input), what, result: "blocked" });
   process.stderr.write(
-    `craftsman: ${what} is blocked: craftsman's own guards cannot be switched off or rewritten by a tool call. ` +
-    `Ask the user to make this change themselves, or run the craftsman command that owns it.\n`
+    `craftsman: ${what} is blocked: ` +
+    (advice || `craftsman's own guards cannot be switched off or rewritten by a tool call. ` +
+    `Ask the user to make this change themselves, or run the craftsman command that owns it.`) + `\n`
   );
   process.exit(2);
 }
