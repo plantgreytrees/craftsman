@@ -25,7 +25,12 @@ const envFor = (dir, sid) => {
   delete env.CRAFTSMAN_SAFETY;
   return env;
 };
-const mint = (dir, file, sid = "gt-1") => spawnSync(process.execPath, [TOKEN, file], { cwd: dir, encoding: "utf8", env: envFor(dir, sid) });
+// pre-guard sees the command first and leaves the nonce the script consumes (ARCH-SAFETY-05).
+const GUARD = path.join(ROOT, "pre-guard.mjs");
+const mint = (dir, file, sid = "gt-1") => {
+  spawnSync(process.execPath, [GUARD], { cwd: dir, encoding: "utf8", env: envFor(dir, sid), input: JSON.stringify({ session_id: sid || "none", tool_name: "Bash", tool_input: { command: `node ${TOKEN} ${file}` } }) });
+  return spawnSync(process.execPath, [TOKEN, file], { cwd: dir, encoding: "utf8", env: envFor(dir, sid) });
+};
 const typed = (dir, sid, prompt) => spawnSync(process.execPath, [OSG], { cwd: dir, input: JSON.stringify({ session_id: sid, prompt }), encoding: "utf8", env: envFor(dir, sid) });
 const tokens = (dir, sid) => JSON.parse(fs.readFileSync(path.join(dir, ".craftsman", "sessions", sid, "goal-tokens.json"), "utf8"));
 

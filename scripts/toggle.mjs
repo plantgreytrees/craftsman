@@ -7,7 +7,7 @@
 // no spelling of the command line can switch the quality side off. `on` stays open.
 import fs from "node:fs";
 import path from "node:path";
-import { STATE_DIR, commandInvoked, sidOf } from "./lib/core.mjs";
+import { STATE_DIR, commandInvoked, consumeNonce, sidOf } from "./lib/core.mjs";
 
 const flag = path.join(STATE_DIR, "off");
 
@@ -23,6 +23,9 @@ if (target) {
   if (!sid) refuse("no session id (CLAUDE_CODE_SESSION_ID is not set), so no command record can be tied to this session");
   if (!commandInvoked(sidOf({ session_id: sid }), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
     refuse("the user did not type /craftsman:toggle in this session");
+  }
+  if (!consumeNonce(sidOf({ session_id: sid }), "toggle", { context: { stateDir: STATE_DIR } })) {
+    refuse("no nonce from pre-guard for this session: run it as a plain `node …/toggle.mjs off` Bash command, not through another program");
   }
 }
 fs.mkdirSync(STATE_DIR, { recursive: true });

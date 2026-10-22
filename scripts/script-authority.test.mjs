@@ -38,25 +38,31 @@ const record = (p, sid, how, name) => spawnSync(process.execPath, [OSG], {
     : { session_id: sid, tool_name: "Skill", tool_input: { skill: `craftsman:${name}` } }),
 });
 const without = (env, key) => { const copy = { ...env }; delete copy[key]; return copy; };
+// Run the script the way Claude Code does: pre-guard sees the command first (and, when it allows it, leaves the one-shot nonce the script consumes).
+const guarded = (p, script, args = [], env = p.env, sid = "sa-1") => {
+  spawnSync(process.execPath, [GUARD], { cwd: p.dir, env: p.env, encoding: "utf8",
+    input: JSON.stringify({ session_id: sid, tool_name: "Bash", tool_input: { command: `node ${script} ${args.join(" ")}`.trim() } }) });
+  return node(p, script, args, env);
+};
 
 test("doc-write.mjs on refuses without the owning command's record, for this session (14.1)", () => {
   const p = project();
   try {
-    let r = node(p, DOC_WRITE, ["on"]);
+    let r = guarded(p, DOC_WRITE, ["on"]);
     assert.equal(r.status, 2, "no record at all");
     assert.match(r.stderr, /craftsman:.*(?:\/plan|doc writer|command)/i);
     assert.ok(!fs.existsSync(p.pending), "no grant was written");
 
     record(p, "other-session", "prompt", "plan");
-    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "a record for another session");
+    assert.equal(guarded(p, DOC_WRITE, ["on"]).status, 2, "a record for another session");
     record(p, "sa-1", "prompt", "instruction");
-    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "a record of a command that does not write docs");
+    assert.equal(guarded(p, DOC_WRITE, ["on"]).status, 2, "a record of a command that does not write docs");
     assert.ok(!fs.existsSync(p.pending));
 
     record(p, "sa-1", "prompt", "plan");
-    assert.equal(node(p, DOC_WRITE, ["on"], without(p.env, "CLAUDE_CODE_SESSION_ID")).status, 2, "a missing session id refuses");
+    assert.equal(guarded(p, DOC_WRITE, ["on"], without(p.env, "CLAUDE_CODE_SESSION_ID")).status, 2, "a missing session id refuses");
     assert.ok(!fs.existsSync(p.pending));
-    r = node(p, DOC_WRITE, ["on"]);
+    r = guarded(p, DOC_WRITE, ["on"]);
     assert.equal(r.status, 0, r.stderr);
     assert.ok(fs.existsSync(p.pending), "the owning command's record lets the grant through");
     assert.equal(node(p, DOC_WRITE, ["off"], without(p.env, "CLAUDE_CODE_SESSION_ID")).status, 0, "off stays open");
@@ -68,26 +74,26 @@ test("a Skill-call record of a doc writer also counts for doc-write.mjs on (14.1
   const p = project();
   try {
     record(p, "sa-1", "skill", "orchestrate");
-    assert.equal(node(p, DOC_WRITE, ["on"]).status, 0);
+    assert.equal(guarded(p, DOC_WRITE, ["on"]).status, 0);
   } finally { p.clean(); }
 });
 
 test("toggle.mjs off refuses unless the user typed /craftsman:toggle; on stays open (14.1)", () => {
   const p = project();
   try {
-    assert.equal(node(p, TOGGLE, ["off"]).status, 2, "no record");
-    assert.equal(node(p, TOGGLE, []).status, 2, "no argument flips to off, so it needs the record too");
+    assert.equal(guarded(p, TOGGLE, ["off"]).status, 2, "no record");
+    assert.equal(guarded(p, TOGGLE, []).status, 2, "no argument flips to off, so it needs the record too");
     assert.ok(!fs.existsSync(p.off));
     record(p, "sa-1", "skill", "toggle");
-    assert.equal(node(p, TOGGLE, ["off"]).status, 2, "a model Skill call is not the user typing it");
+    assert.equal(guarded(p, TOGGLE, ["off"]).status, 2, "a model Skill call is not the user typing it");
     assert.ok(!fs.existsSync(p.off));
     record(p, "other-session", "prompt", "toggle");
-    assert.equal(node(p, TOGGLE, ["off"]).status, 2, "a record for another session");
+    assert.equal(guarded(p, TOGGLE, ["off"]).status, 2, "a record for another session");
     assert.equal(node(p, TOGGLE, ["on"]).status, 0, "on needs nothing");
 
     record(p, "sa-1", "prompt", "toggle");
-    assert.equal(node(p, TOGGLE, ["off"], without(p.env, "CLAUDE_CODE_SESSION_ID")).status, 2, "a missing session id refuses");
-    assert.equal(node(p, TOGGLE, ["off"]).status, 0);
+    assert.equal(guarded(p, TOGGLE, ["off"], without(p.env, "CLAUDE_CODE_SESSION_ID")).status, 2, "a missing session id refuses");
+    assert.equal(guarded(p, TOGGLE, ["off"]).status, 0);
     assert.ok(fs.existsSync(p.off), "the typed command lets off through");
     assert.equal(node(p, TOGGLE, ["on"], without(p.env, "CLAUDE_CODE_SESSION_ID")).status, 0);
     assert.ok(!fs.existsSync(p.off));
@@ -151,7 +157,8 @@ test("a command that sets the session id or project dir is refused, and each spo
     const real = spoofProject();
     try {
       spawnSync("bash", ["-c", form], { cwd: real.dir, env: { ...real.env, CLAUDE_CODE_SESSION_ID: "sessB" }, encoding: "utf8" });
-      assert.equal(real.effects()[effect], true, `the spoof is real: ${form} creates ${effect} when unguarded`);
+      // Before the nonce (26.x below) this created the effect; now the script itself refuses without pre-guard's nonce.
+      assert.equal(real.effects()[effect], false, `the script refuses the spoof on its own: ${form} creates no ${effect} unguarded`);
     } finally { real.clean(); }
     const guarded = spoofProject();
     try {
@@ -176,5 +183,85 @@ test("goal-token.mjs is gated like doc-write.mjs: only inside /instruction or /a
     record(p, "sessB", "prompt", "instruction");
     assert.equal(guardAs(p, "sessB", command).status, 0, "a /instruction record in this session lets it through");
     assert.equal(guardAs(p, "sessB", `node ${path.dirname(GOAL_TOKEN)}/goal-to""ken.mjs x`).status, 0, "quote-split name resolves to the same gate");
+  } finally { p.clean(); }
+});
+
+// Round 5 (followup-authority-session-binding): a record in the session is not enough. pre-guard, which alone knows the real
+// session id of the tool call, leaves a one-shot nonce for the script it lets through; the script consumes it. A script
+// started any other way (an interpreter, another process, a borrowed id) has no nonce and refuses.
+const nonceFile = (p, sid, name) => path.join(p.dir, ".craftsman", "sessions", sid, `nonce-${name}`);
+
+test("with the owning record but no nonce from pre-guard, the scripts refuse (26.1)", () => {
+  const p = project();
+  try {
+    record(p, "sa-1", "prompt", "plan");
+    record(p, "sa-1", "prompt", "toggle");
+    let r = node(p, DOC_WRITE, ["on"]);
+    assert.equal(r.status, 2, "a record alone no longer grants");
+    assert.match(r.stderr, /nonce|pre-guard/i);
+    assert.ok(!fs.existsSync(p.pending));
+    r = node(p, TOGGLE, ["off"]);
+    assert.equal(r.status, 2);
+    assert.ok(!fs.existsSync(p.off));
+    // the same session through pre-guard still works
+    assert.equal(guarded(p, DOC_WRITE, ["on"]).status, 0);
+    assert.equal(guarded(p, TOGGLE, ["off"]).status, 0);
+  } finally { p.clean(); }
+});
+
+test("the nonce is one-shot, per script, per session and short-lived (26.2)", () => {
+  const p = project();
+  try {
+    record(p, "sa-1", "prompt", "plan");
+    record(p, "other", "prompt", "plan");
+    record(p, "sa-1", "prompt", "toggle");
+    guardAs(p, "sa-1", `node ${DOC_WRITE} on`);
+    assert.ok(fs.existsSync(nonceFile(p, "sa-1", "doc-write")), "pre-guard left a nonce for the session of the tool call");
+    assert.equal(node(p, TOGGLE, ["off"]).status, 2, "a doc-write nonce does not open toggle");
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 0, "the nonce is consumed by the script");
+    assert.ok(!fs.existsSync(nonceFile(p, "sa-1", "doc-write")));
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "a second run has no nonce");
+
+    guardAs(p, "other", `node ${DOC_WRITE} on`);
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "another session's nonce does not count for this id");
+
+    guardAs(p, "sa-1", `node ${DOC_WRITE} on`);
+    fs.writeFileSync(nonceFile(p, "sa-1", "doc-write"), String(Date.now() - 120000));
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "a stale nonce is refused");
+  } finally { p.clean(); }
+});
+
+test("pre-guard leaves no nonce for a denied command, for doc-write off, or for toggle on (26.3)", () => {
+  const p = project();
+  try {
+    assert.equal(guardAs(p, "sa-1", `node ${DOC_WRITE} on`).status, 2, "no record: denied");
+    assert.ok(!fs.existsSync(nonceFile(p, "sa-1", "doc-write")));
+    record(p, "sa-1", "prompt", "plan");
+    guardAs(p, "sa-1", `node ${DOC_WRITE} off`);
+    guardAs(p, "sa-1", `node ${TOGGLE} on`);
+    assert.ok(!fs.existsSync(nonceFile(p, "sa-1", "doc-write")) && !fs.existsSync(nonceFile(p, "sa-1", "toggle")));
+  } finally { p.clean(); }
+});
+
+test("goal-token.mjs run from the command line also needs the nonce (26.4)", () => {
+  const p = spoofProject();
+  try {
+    record(p, "sa-1", "prompt", "instruction");
+    const run = () => spawnSync(process.execPath, [GOAL_TOKEN, ".craftsman/instructions/evil.goal.txt"], { cwd: p.dir, env: p.env, encoding: "utf8" });
+    const tokens = path.join(p.dir, ".craftsman", "sessions", "sa-1", "goal-tokens.json");
+    assert.notEqual(run().status, 0, "record alone: refused");
+    assert.ok(!fs.existsSync(tokens));
+    guardAs(p, "sa-1", `node ${GOAL_TOKEN} .craftsman/instructions/evil.goal.txt`);
+    assert.equal(run().status, 0);
+    assert.ok(fs.existsSync(tokens));
+  } finally { p.clean(); }
+});
+
+test("with the safety hooks off by the user (CRAFTSMAN_SAFETY=off) there is no pre-guard to mint, so the nonce is not asked for (26.5)", () => {
+  const p = project();
+  try {
+    record(p, "sa-1", "prompt", "plan");
+    const env = { ...p.env, CRAFTSMAN_SAFETY: "off" };
+    assert.equal(node(p, DOC_WRITE, ["on"], env).status, 0);
   } finally { p.clean(); }
 });

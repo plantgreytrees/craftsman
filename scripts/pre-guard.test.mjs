@@ -28,6 +28,7 @@ function run(script, dir, input, extraEnv = {}) {
 function grant(dir, extraEnv = {}) {
   const env = { CLAUDE_CODE_SESSION_ID: "grant-session", ...extraEnv };
   run(path.join(ROOT, "orchestrate-scope-guard.mjs"), dir, { session_id: env.CLAUDE_CODE_SESSION_ID, prompt: "/craftsman:plan x" }, env);
+  run(GUARD, dir, { session_id: env.CLAUDE_CODE_SESSION_ID, tool_name: "Bash", tool_input: { command: `node ${DOC_WRITE} on` } }, env);
   return run(DOC_WRITE, dir, {}, env);
 }
 

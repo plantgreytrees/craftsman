@@ -12,12 +12,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, sessionDir, sidOf } from "./lib/core.mjs";
+import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, consumeNonce, sessionDir, sidOf } from "./lib/core.mjs";
 
-export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, env = process.env }) {
+export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, env = process.env, nonce = false }) {
   if (!sid) throw new Error("no session id (CLAUDE_CODE_SESSION_ID is not set), so no token can be tied to this session");
   if (!commandInvoked(sid, ["instruction", "auto"], { context: { stateDir } })) {
     throw new Error("goal tokens are minted only inside /instruction or /auto, and neither ran in this session");
+  }
+  // The command line asks for pre-guard's one-shot nonce (ARCH-SAFETY-05); a library caller has already passed its own checks.
+  if (nonce && !consumeNonce(sidOf({ session_id: sid }), "goal-token", { context: { stateDir }, env })) {
+    throw new Error("no nonce from pre-guard for this session: run it as a plain `node …/goal-token.mjs <file>` Bash command, not through another program");
   }
   const instructions = fs.realpathSync(path.join(root, ".craftsman", "instructions"));
   const absolute = path.resolve(root, file);
@@ -42,7 +46,7 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new 
   try {
     const file = process.argv[2];
     if (!file) throw new Error("usage: goal-token.mjs <path to .craftsman/instructions/<slug>.goal.txt>");
-    const { name } = mintGoalToken({ file, sid: process.env.CLAUDE_CODE_SESSION_ID });
+    const { name } = mintGoalToken({ file, sid: process.env.CLAUDE_CODE_SESSION_ID, nonce: true });
     process.stdout.write(`goal token recorded for ${name}\n`);
   } catch (error) {
     process.stderr.write(`craftsman: goal-token ${error.message}\n`);

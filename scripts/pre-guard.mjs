@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
+import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, mintNonce, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
 import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
@@ -1335,6 +1335,11 @@ if (tool === "Bash" && command) {
   if (invocations("toggle").some((arg) => arg !== "on") && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
     denySelfDisable("toggle.mjs off unless the user typed /craftsman:toggle");
   }
+  // Allowed so far: leave the one-shot nonce each of these scripts asks for, for the session this tool call belongs to.
+  const mint = (name) => mintNonce(sidOf(input), name, { context: { stateDir: STATE_DIR } });
+  if (invocations("goal-token").length) mint("goal-token");
+  if (invocations("doc-write").some((arg) => arg !== "off")) mint("doc-write");
+  if (invocations("toggle").some((arg) => arg !== "on")) mint("toggle");
 }
 
 // Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.

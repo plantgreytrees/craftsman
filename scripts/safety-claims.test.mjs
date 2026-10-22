@@ -128,6 +128,13 @@ test("ARCH-SAFETY-05 limits: each stated limit is real, so the rule's limits cla
   }
 });
 
+// safety.md names one false positive it keeps on purpose: a writer verb plus a protected name that is only read.
+test("the kept false positive is real: a read of a protected file next to an unrelated writer is refused and changes nothing", { skip }, () => {
+  const command = "mkdir -p build && cat craftsman.config.json";
+  assert.deepEqual(effectOf(command), [], "nothing protected changes");
+  assert.equal(verdictOf(command), 2, "yet the guard refuses it, as safety.md says");
+});
+
 test("the rule names every limit this file pins, and safety.md repeats them", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");

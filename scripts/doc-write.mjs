@@ -14,7 +14,7 @@
 // of the command line that pre-guard's text check misses can reach the grant. `off` stays open.
 import fs from "node:fs";
 import path from "node:path";
-import { STATE_DIR, DOC_WRITER_COMMANDS, commandInvoked, sidOf } from "./lib/core.mjs";
+import { STATE_DIR, DOC_WRITER_COMMANDS, commandInvoked, consumeNonce, sidOf } from "./lib/core.mjs";
 
 const arg = (process.argv[2] || "on").toLowerCase();
 const pending = path.join(STATE_DIR, "doc-write-pending");
@@ -29,6 +29,9 @@ if (arg === "off") {
   if (!sid) refuse("no session id (CLAUDE_CODE_SESSION_ID is not set), so no command record can be tied to this session");
   if (!commandInvoked(sidOf({ session_id: sid }), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
     refuse(`none of /${DOC_WRITER_COMMANDS.join(", /")} ran in this session; only a doc-writing command may grant doc authority`);
+  }
+  if (!consumeNonce(sidOf({ session_id: sid }), "doc-write", { context: { stateDir: STATE_DIR } })) {
+    refuse("no nonce from pre-guard for this session: run it as a plain `node …/doc-write.mjs on` Bash command, not through another program");
   }
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.writeFileSync(pending, `granted ${new Date().toISOString()}\n`);
