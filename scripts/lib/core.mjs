@@ -123,12 +123,28 @@ export function loadWorkspaceManifest() {
     if (!fs.existsSync(lexical)) throw new Error(`workspace project ${id} does not exist: ${entry.root}`);
     const root = fs.realpathSync(lexical);
     if (!isInside(workspaceRoot, root)) throw new Error(`workspace project ${id} resolves outside workspace root`);
-    if (!isGitRoot(root)) throw new Error(`workspace project ${id} is not a Git root`);
+    // A superproject worktree carries its submodules as empty directories. Those are
+    // listed but marked uninitialised, so a command that does not touch them still
+    // loads; anything that needs one fails in resolveSelectedProject (ARCH-LAND-07).
+    const initialized = isGitRoot(root);
+    if (!initialized && fs.readdirSync(root).length) throw new Error(`workspace project ${id} is not a Git root`);
     if (roots.has(root)) throw new Error(`workspace projects share a root: ${id}`);
     roots.add(root);
-    projects[id] = { id, root, relativeRoot: path.relative(workspaceRoot, root).split(path.sep).join("/") };
+    projects[id] = { id, root, initialized, relativeRoot: path.relative(workspaceRoot, root).split(path.sep).join("/"), declaredRoot: path.posix.normalize(entry.root.replaceAll("\\", "/")).replace(/^(\.\/)+/, "").replace(/\/+$/, "") };
   }
   return { file, workspaceRoot, projects };
+}
+
+// A plan unit may name its project by manifest id (`ui_nuxt`) or by the root path the
+// manifest declares for it (`src/UI/ui_nuxt`). Returns the id, "." or null.
+export function projectIdOf(manifest, ref) {
+  if (!manifest || typeof ref !== "string" || !ref.trim()) return null;
+  if (ref === ".") return ".";
+  if (Object.hasOwn(manifest.projects, ref)) return ref;
+  const wanted = path.posix.normalize(ref.replaceAll("\\", "/")).replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+  if (!wanted || wanted === "." || wanted.startsWith("/") || wanted.startsWith("..")) return null;
+  const hit = Object.values(manifest.projects).find((project) => project.relativeRoot === wanted || project.declaredRoot === wanted);
+  return hit ? hit.id : null;
 }
 
 export function resolveSelectedProject(project = ".") {
@@ -138,8 +154,11 @@ export function resolveSelectedProject(project = ".") {
     return { id: ".", root: PROJECT_ROOT, workspaceRoot: PROJECT_ROOT, manifest: null };
   }
   if (project === ".") return { id: ".", root: PROJECT_ROOT, workspaceRoot: manifest.workspaceRoot, manifest };
-  const selected = manifest.projects[project];
+  const selected = manifest.projects[projectIdOf(manifest, project)];
   if (!selected) throw new Error(`unknown workspace project: ${project}`);
+  if (selected.initialized === false) {
+    throw new Error(`workspace project ${selected.id} is not checked out (an uninitialised submodule in this worktree): run \`git -C ${manifest.workspaceRoot} submodule update --init -- ${selected.relativeRoot}\``);
+  }
   return { id: selected.id, root: selected.root, workspaceRoot: manifest.workspaceRoot, manifest };
 }
 
@@ -151,7 +170,7 @@ export function projectContext(project = ".") {
 
 export function isGitRoot(root) {
   try {
-    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() === root;
+    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() === root;
   } catch { return false; }
 }
 

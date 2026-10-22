@@ -181,6 +181,22 @@ host merges once its checks and approvals pass:
 - A unit that depends on another unit's still-open request is parked until
   that request merges, because new units branch from `origin/<base>`.
 
+### Remotes that need credentials (sandboxed runners)
+
+`/craftsman:auto` and `/orchestrate` with `execution.engine: "workflow"` run each
+unit in a sandboxed agent that holds no credentials, and the sandbox should keep
+denying credential directories such as `~/.config/gh`. So `repo-exec` splits the
+network from the work: the root session runs `{"action":"network","step":"fetch"}`
+before a run and `{"action":"network","step":"drain"}` after it (outside the
+sandbox, with your approval for that call), and runners only do local git,
+queueing each push for the drain. Pushes stay plain; nothing is forced. If a
+runner needs the network for something else (`"pr"` mode, a fetch older than
+`repoExec.offlineMaxFetchAgeMinutes`, default 120) the run stops with
+`needs_network` and root runs the named action and relaunches. Nothing to
+configure for the common case; `commands/_network.md` has the exact steps.
+`repoExec.attachDetached` (default `true`) lets `repo-exec` attach a detached
+submodule checkout that sits exactly on `origin/<base>`.
+
 ### Plan levels, feature worktrees and published progress
 
 Plans form a tree: an epic has stories, a story has features, a feature has

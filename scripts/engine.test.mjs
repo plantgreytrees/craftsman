@@ -224,3 +224,48 @@ test("wiring: feature-mode tracker fields and publish/park triggers are stated i
   assert.match(features, /Publish after prepare \(ARCH-TRACKER-11\)/);
   assert.match(features, /land-feature park → `S tracker` `PARKED` with `decision`/);
 });
+
+// ARCH-LAND-19: a runner with no credentials returns NEEDS_NETWORK; the run stops cleanly for root.
+test("engine: NEEDS_NETWORK stops the run without blocking or parking, and resumes at the stage it stopped at", async () => {
+  const action = JSON.stringify({ action: "network", step: "fetch", project: "p", base_branch: "main" });
+  const needs = (u, extra = {}) => ({ unit: u, status: "NEEDS_NETWORK", evidence: "origin/main is stale", network_action: action, parked: [], ...extra });
+
+  const first = await runPlan([unit("a"), unit("b", ["a"])], (role, u) => (role === "implement" ? needs(u) : happy(role, u)));
+  assert.deepEqual(first.calls.map((c) => c.role), ["implement"], "no park, no block, no later unit");
+  assert.equal(first.needs_network.unit, "a");
+  assert.equal(first.needs_network.action, action);
+  assert.equal(first.needs_network.resume.stage, "implement");
+  assert.equal(first.results[0].status, "NEEDS_NETWORK");
+
+  // Stops at land: the committed, approved work is kept and only the landing reruns.
+  const landStop = await runPlan([unit("a"), unit("b", ["a"])], (role, u) => (role === "land" ? needs(u) : happy(role, u)));
+  assert.deepEqual(landStop.calls.map((c) => c.role), ["implement", "review", "land"]);
+  assert.equal(landStop.needs_network.resume.stage, "land");
+  assert.equal(landStop.needs_network.resume.worktree_path, "/w/a");
+
+  const resumed = await runPlan([unit("a"), unit("b", ["a"])], happy, { resume: { a: { stage: "land", worktree_path: "/w/a" } } });
+  assert.deepEqual(resumed.calls.filter((c) => c.unit === "a").map((c) => c.role), ["land"], "no second implement or review");
+  assert.match(resumed.calls[0].prompt, /worktree_path: \/w\/a/);
+  assert.deepEqual(resumed.results.map((r) => [r.unit, r.status]), [["a", "MERGED"], ["b", "MERGED"]]);
+  assert.equal(resumed.needs_network, undefined);
+
+  // Units landed before the stop are skipped, and count as landed for their dependants.
+  const relaunch = await runPlan([unit("a"), unit("b", ["a"])], happy, { landed: ["a"] });
+  assert.deepEqual(relaunch.calls.map((c) => c.unit), ["b", "b", "b"]);
+  assert.deepEqual(relaunch.results.map((r) => [r.unit, r.status]), [["b", "MERGED"]]);
+});
+
+test("engine: a land-feature that needs the network stops the run; featuresDone and featureWorktrees resume past it", async () => {
+  const units = [{ ...unit("a"), feature: "f1" }, { ...unit("b"), feature: "f2" }];
+  const action = JSON.stringify({ action: "land-feature", network: "online" });
+  const respond = (role, u) => (role === "land-feature" ? { unit: u, status: "NEEDS_NETWORK", evidence: "needs origin", network_action: action, parked: [] } : happy(role, u));
+  const stopped = await runPlan(units, respond, { featureBranches: true });
+  assert.equal(stopped.needs_network.resume.stage, "land-feature");
+  assert.equal(stopped.needs_network.feature, "f1");
+  assert.deepEqual(stopped.calls.map((c) => c.unit), ["a", "a", "a", "a"], "f2 waits for root");
+
+  const resumed = await runPlan(units, happy, { featureBranches: true, landed: ["a"], featuresDone: ["f1"], featureWorktrees: { f2: "/w/f2" } });
+  assert.deepEqual([...new Set(resumed.calls.map((c) => c.unit))], ["b"]);
+  assert.match(resumed.calls[0].prompt, /worktree_path: \/w\/f2/);
+  assert.equal(resumed.calls.filter((c) => c.role === "land-feature").length, 1);
+});

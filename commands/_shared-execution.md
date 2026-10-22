@@ -2,13 +2,13 @@
 description: Shared per-unit execution loop for /orchestrate Phase C. Not invoked.
 disable-model-invocation: true
 ---
-> `Read` only when about to run Phase X — a run short of execution never pays for it.
+> `Read` only when about to run Phase X.
 
 ## Phase L — Merge-only locking
 
 A lock guards **the merge only**, never the work. Sessions may share a base branch.
 
-- Locking, base-branch discovery, worktrees, and merges are repository-local via `scripts/repo-exec.mjs` for each step's selected `project` — never assume `main`/`origin/main`/the controller checkout. Its atomic lock lives under that repository's Git-common directory (real session id, project, unit).
+- Locking, base-branch discovery, worktrees, and merges are repository-local via `scripts/repo-exec.mjs` for each step's selected `project` — never assume `main`/`origin/main`/the controller checkout. Its atomic lock lives in that repository's Git-common directory.
 - Every unit works in its own worktree/branch (Phase X.2) — implement → gates → review → conflict-resolution are all **lockless**. Acquire the lock only for the final merge; release the instant it validates.
 - Merge-time rules (Phase X.9d):
   - **Absent** → create lock, `checkout <base> && pull` + `merge --no-ff` + validate + push, delete lock immediately.
@@ -20,7 +20,7 @@ A lock guards **the merge only**, never the work. Sessions may share a base bran
 
 ## Phase X — Per-unit execution loop
 
-For each unit, dependency order (shared/library → consumers → UI last). **Engine** (`execution.engine`, ARCH-ENGINE-12): `workflow` (default) → launch `craftsman:run` (`workflows/run.js`); Workflow unavailable → `subagent` (`/auto` only; else say so and run root), one `unit-runner` per unit via Agent, never silently `root`; `root` (explicit opt-in only) → run the steps below yourself. Both engines follow `agents/unit-runner.md` (ARCH-ENGINE-04):
+For each unit, dependency order (shared/library → consumers → UI last). **Engine** (`execution.engine`, ARCH-ENGINE-12): `workflow` (default) → launch `craftsman:run` (`workflows/run.js`; args: `scripts/run-args.mjs`; network: `commands/_network.md`); Workflow unavailable → `subagent` (`/auto` only; else say so and run root), one `unit-runner` per unit via Agent, never silently `root`; `root` (explicit opt-in only) → run the steps below yourself. Both engines follow `agents/unit-runner.md` (ARCH-ENGINE-04):
 
 1. **Claim** — atomically claim plan/unit via `scripts/claim.mjs` (real session id, plan, unit); an existing claim is BLOCKED/duplicate, never overwrite. Transitions go through `scripts/tracker.mjs`. Release only after close-out or explicit PARKED.
 2. **Worktree + branch** — `repo-exec.mjs action:"prepare"` (project, unit, slug, session id, optional worktree path). Discovers the real base branch, fetches its own remote, creates/reattaches the worktree. ALL edits/gates/review/conflict-resolution run there; base branch untouched until step 9. **No worktree → no edits.**
