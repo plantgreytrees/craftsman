@@ -1,13 +1,13 @@
 ---
 slug: external-project-board
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
 isolation: NOT ISOLATED
 created: 2026-10-23
 updated: 2026-10-23
-related: [docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, docs/architecture/landing.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.md (same branch)]
+related: [docs/architecture/views.rules.md, docs/architecture/docs.rules.md, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, docs/architecture/landing.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.md (same branch)]
 touches: [scripts/digest.mjs, commands/digest.md, scripts/tracker.mjs, scripts/lib/plan-index.mjs, scripts/plan-graph.mjs, craftsman.config.json, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, CHANGELOG.md]
 ---
 

@@ -12,3 +12,4 @@ Human index (the loop never reads this file). Each area is a pair:
 - [plan](./plan.md): epic > story > feature > unit, plan-index, rollups, `--level`, waves and progress publishing
 - [docs](./docs.md): plan-doc retirement, `/sync-docs --archive` / `--prune`, and the commit-id archive index
 - [slim](./slim.md): byte caps per file and per invocation, the ratchet, and how a trim keeps gate strength
+- [views](./views.md): the local visual dashboard (`/digest --html`) and the `NEXT.md` session queue
