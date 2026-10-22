@@ -19,6 +19,8 @@ import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
 const T0 = Date.now();
+// Authority scripts this command invokes; their nonces are left only when the whole command is allowed (ARCH-SAFETY-05).
+const pendingNonces = [];
 // ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
 // top-level await would otherwise exit 1, which Claude Code treats as a non-blocking failure.
 const GUARD = "pre-guard";
@@ -1119,6 +1121,20 @@ const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|com
 // A config file git is told to read instead of (or besides) the usual ones can set core.hooksPath without the command
 // naming it. /dev/null (or nothing) reads as an empty file, which sets nothing.
 const HOME_ASSIGN = /^(?:HOME|XDG_CONFIG_HOME)=(?!\/dev\/null$)(?=.)/;
+// `read HOME`, `printf -v HOME x`, `mapfile HOME`, `getopts o HOME` set a variable without any `NAME=` word. The value is not known,
+// so it counts as set (a `read` of /dev/null is refused too).
+const HOME_SETTER = /^(?:read|mapfile|readarray|getopts|printf)$/;
+const setsHomeByName = (words) => HOME_SETTER.test(words[0]) && (words[0] !== "printf" || words.includes("-v")) && words.some((w) => w === "HOME" || w === "XDG_CONFIG_HOME");
+// The names the authority scripts and the state paths trust. A command sets one by assignment (`NAME=`, `${NAME:=}`), by a builtin
+// that takes the name (`read NAME`, `printf -v NAME`, `declare/export NAME`, `env NAME=`), or by naming it in a variable for a later
+// `"$X=value"`. A `$NAME` or `${NAME}` expansion, `printenv NAME` and a comparison set nothing.
+const SAFETY_VARS = "CLAUDE_CODE_SESSION_ID|CLAUDE_PROJECT_DIR|CRAFTSMAN_SAFETY";
+const SETS_SAFETY_VAR = [
+  new RegExp(`(?<![\\w$])(?:${SAFETY_VARS})\\+?=`),
+  new RegExp(`\\$\\{(?:${SAFETY_VARS}):?=`),
+  new RegExp(`(?:^|[\\s;&|(])\\w+\\+?=(?:${SAFETY_VARS})(?!\\w)`),
+  new RegExp(`\\b(?:read|mapfile|readarray|getopts|declare|typeset|export|readonly|local|env|printf\\s+-v)\\b[^;&|\\n]*(?<![\\w\${])(?:${SAFETY_VARS})\\b`),
+];
 const CONFIG_FILE_ENV = /\bGIT_CONFIG(?:_GLOBAL|_SYSTEM)?=(?!\/dev\/null(?:[\s"';&|)]|$))(?=\S)/;
 // `include.path` and `includeIf.<condition>.path` pull in another config file (key lowercased).
 const isIncludeKey = (key) => key === "include.path" || /^includeif\..*\.path$/.test(key);
@@ -1152,7 +1168,7 @@ function bypassesHooks(text, depth = 0) {
     if (words.includes(UNEXPANDED)) continue;
     const body = shellBody(words);
     if (body !== null && bypassesHooks(body, depth + 1)) return true;
-    if ((words.length && words.every((w) => ASSIGNMENT_WORD.test(w)) || ["export", "declare", "typeset", "readonly"].includes(words[0])) && words.some((w) => HOME_ASSIGN.test(w))) homeSet = true;
+    if ((words.length && words.every((w) => ASSIGNMENT_WORD.test(w)) || ["export", "declare", "typeset", "readonly"].includes(words[0])) && words.some((w) => HOME_ASSIGN.test(w)) || setsHomeByName(words)) homeSet = true;
     const at = gitWordIndex(words);
     if (at < 0) continue;
     const configs = [];
@@ -1323,8 +1339,10 @@ if (tool === "Bash" && command) {
     .map((m) => m[2] || "");
   // The authority scripts trust CLAUDE_CODE_SESSION_ID (and the state paths CLAUDE_PROJECT_DIR) from the environment, so a
   // command that sets either could borrow another session's record or point the state somewhere else.
-  if (/\b(?:CLAUDE_CODE_SESSION_ID|CLAUDE_PROJECT_DIR)\s*=/.test(unquoted)) {
-    denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID or CLAUDE_PROJECT_DIR, which the authority scripts and the state paths trust");
+  // CRAFTSMAN_SAFETY is read by SessionStart from the user's environment, so a command that sets it gains nothing there; it is
+  // refused anyway so no script ever sees a spoofed one. A plain mention (`"$NAME"`, `printenv NAME`, a comparison) sets nothing.
+  if (SETS_SAFETY_VAR.some((re) => re.test(unquoted))) {
+    denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
   }
   if (invocations("goal-token").length && !commandInvoked(sidOf(input), ["instruction", "auto"], { context: { stateDir: STATE_DIR } })) {
     denySelfDisable("goal-token.mjs outside /instruction or /auto");
@@ -1335,11 +1353,10 @@ if (tool === "Bash" && command) {
   if (invocations("toggle").some((arg) => arg !== "on") && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
     denySelfDisable("toggle.mjs off unless the user typed /craftsman:toggle");
   }
-  // Allowed so far: leave the one-shot nonce each of these scripts asks for, for the session this tool call belongs to.
-  const mint = (name) => mintNonce(sidOf(input), name, { context: { stateDir: STATE_DIR } });
-  if (invocations("goal-token").length) mint("goal-token");
-  if (invocations("doc-write").some((arg) => arg !== "off")) mint("doc-write");
-  if (invocations("toggle").some((arg) => arg !== "on")) mint("toggle");
+  // Allowed so far; each script the command runs gets its one-shot nonce, but only once every later check has passed.
+  if (invocations("goal-token").length) pendingNonces.push("goal-token");
+  if (invocations("doc-write").some((arg) => arg !== "off")) pendingNonces.push("doc-write");
+  if (invocations("toggle").some((arg) => arg !== "on")) pendingNonces.push("toggle");
 }
 
 // Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.
@@ -1366,6 +1383,8 @@ if (tool === "Bash" && command && docSide && cfg.docWriteGuard?.enabled !== fals
   }
 }
 
+// The permission prompt that can still follow is not covered; the nonce expires after 60 seconds.
+for (const name of pendingNonces) mintNonce(sidOf(input), name, { context: { stateDir: STATE_DIR } });
 if (!file) process.exit(0); // no file: nothing to time or log
 
 if (["Write", "Edit", "NotebookEdit"].includes(tool)) {

@@ -315,3 +315,68 @@ test("the safety-off marker cannot be written by a tool call, and each write for
     } finally { guarded2.clean(); }
   }
 });
+
+// Round 5 (35.x): the check that keeps a command from borrowing the session id, the state root or the safety switch reads
+// the names, not only the `NAME=` spelling, and refuses nothing that merely reads them.
+const VAR_SETTERS = [
+  [`read CLAUDE_CODE_SESSION_ID <<< sessA; export CLAUDE_CODE_SESSION_ID; printenv CLAUDE_CODE_SESSION_ID`, "sessA"],
+  [`printf -v CLAUDE_PROJECT_DIR %s /tmp/x; export CLAUDE_PROJECT_DIR; printenv CLAUDE_PROJECT_DIR`, "/tmp/x"],
+  [`X=CLAUDE_CODE_SESSION_ID; env "$X=sessA" printenv CLAUDE_CODE_SESSION_ID`, "sessA"],
+  [`declare -x CRAFTSMAN_SAFETY=off; printenv CRAFTSMAN_SAFETY`, "off"],
+  [`read CRAFTSMAN_SAFETY <<< off; export CRAFTSMAN_SAFETY; printenv CRAFTSMAN_SAFETY`, "off"],
+];
+
+test("setting the session id, project dir or safety switch by read, printf -v, declare or env is refused, and each form really sets it (35.1)", () => {
+  for (const [command, value] of VAR_SETTERS) {
+    const real = spawnSync("bash", ["-c", command], { env: { PATH: process.env.PATH }, encoding: "utf8" });
+    assert.equal(real.stdout.trim(), value, `the form is real: ${command}`);
+    const p = spoofProject();
+    try { assert.equal(guardAs(p, "sessB", command).status, 2, `denied: ${command}`); } finally { p.clean(); }
+  }
+  const spoofed = [
+    `read CLAUDE_CODE_SESSION_ID <<< sessA; export CLAUDE_CODE_SESSION_ID; S=doc-wri; node ${path.dirname(DOC_WRITE)}/\${S}te.mjs on`,
+    `X=CLAUDE_CODE_SESSION_ID; env "$X=sessA" CRAFTSMAN_SAFETY=off node ${DOC_WRITE} on`,
+    `CRAFTSMAN_SAFETY=off node ${DOC_WRITE} on`,
+  ];
+  for (const command of spoofed) {
+    const p = spoofProject();
+    try { assert.equal(guardAs(p, "sessB", command).status, 2, `denied: ${command}`); } finally { p.clean(); }
+  }
+});
+
+test("reading the session id, project dir or safety switch is still allowed (35.1)", () => {
+  const p = spoofProject();
+  try {
+    for (const ok of [
+      '[ "$CLAUDE_PROJECT_DIR" = /x ] && echo y', 'echo "$CLAUDE_CODE_SESSION_ID"', "printenv CLAUDE_CODE_SESSION_ID", 'test -n "$CRAFTSMAN_SAFETY"',
+      "env | grep CLAUDE_CODE_SESSION_ID", 'export PATH="$PATH:$CLAUDE_PROJECT_DIR/bin"', 'printf "%s" "${CLAUDE_CODE_SESSION_ID:-none}"',
+    ]) assert.equal(guardAs(p, "sessB", ok).status, 0, `allowed: ${ok}`);
+  } finally { p.clean(); }
+});
+
+test("read, printf -v and declare of HOME before a hook-running git command are refused (35.2)", () => {
+  const forms = ["read HOME <<< /tmp/fakehome; git commit -m a", "printf -v HOME %s /tmp/fakehome; export HOME; git commit -m a", "read XDG_CONFIG_HOME <<< /tmp/x; git push"];
+  for (const command of forms) {
+    const real = spawnSync("bash", ["-c", command.replace(/; git .*/, "; printenv HOME XDG_CONFIG_HOME")], { env: { PATH: process.env.PATH, HOME: "/home/orig", XDG_CONFIG_HOME: "/home/orig/.config" }, encoding: "utf8" });
+    assert.match(real.stdout, /\/tmp\/(?:fakehome|x)/, `the form really changes the variable: ${command}`);
+    const p = spoofProject();
+    try { assert.equal(guardAs(p, "sessB", command).status, 2, `denied: ${command}`); } finally { p.clean(); }
+  }
+  const p = spoofProject();
+  try {
+    for (const ok of ['echo "$HOME"; git commit -m a', "read x <<< y; git commit -m a", "git status"]) assert.equal(guardAs(p, "sessB", ok).status, 0, `allowed: ${ok}`);
+  } finally { p.clean(); }
+});
+
+test("the nonce is left only when the whole command is allowed, so a later denial leaves none (35.3)", () => {
+  const p = project();
+  try {
+    record(p, "sa-1", "prompt", "plan");
+    fs.mkdirSync(path.join(p.dir, "docs", "plans"), { recursive: true });
+    fs.writeFileSync(path.join(p.dir, "docs", "plans", "x.md"), "x\n");
+    assert.equal(guardAs(p, "sa-1", `node ${DOC_WRITE} on && rm docs/plans/x.md`).status, 2, "the doc removal is denied without a grant");
+    assert.ok(!fs.existsSync(nonceFile(p, "sa-1", "doc-write")), "so no nonce was left");
+    assert.equal(guardAs(p, "sa-1", `node ${DOC_WRITE} on`).status, 0);
+    assert.ok(fs.existsSync(nonceFile(p, "sa-1", "doc-write")), "an allowed command still leaves one");
+  } finally { p.clean(); }
+});
