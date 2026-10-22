@@ -66,6 +66,32 @@ function requireOnline(root, input, info, label) {
   throw new NeedsNetwork(`${label} talks to the host API and this process cannot reach origin`, retryAs(input));
 }
 
+// A superproject checks its submodules out detached. When HEAD is exactly origin/<base> and
+// local <base> is missing or an ancestor of HEAD, attaching is safe: the ref moves forward to
+// HEAD (compare-and-swap, never backwards) and HEAD is checked out on it, so no file changes.
+// Returns "" once attached, else the reason it was left detached. Off via repoExec.attachDetached: false.
+function attachDetached(context, base) {
+  const root = context.root;
+  if (loadConfig(context).repoExec?.attachDetached === false) return "repoExec.attachDetached is false";
+  if (!base) return "its base branch is unknown; pass base_branch";
+  const head = run(root, ["rev-parse", "HEAD"], { allowFailure: true });
+  const tip = run(root, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${base}`], { allowFailure: true });
+  if (!head || head !== tip) return `HEAD is not at origin/${base}; check out ${base} yourself`;
+  const local = run(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${base}`], { allowFailure: true });
+  try {
+    if (local && local !== head) {
+      run(root, ["merge-base", "--is-ancestor", local, head]);
+      run(root, ["update-ref", `refs/heads/${base}`, head, local]);
+    } else if (!local) run(root, ["branch", base, head]);
+    run(root, ["checkout", "--quiet", base]);
+  } catch {
+    return `local ${base} is not an ancestor of HEAD, or is checked out elsewhere; reconcile it by hand`;
+  }
+  run(root, ["branch", "--set-upstream-to", `origin/${base}`, base], { allowFailure: true });
+  logEvent({ ev: "attach_detached", project: context.id, branch: base, sha: head }, context);
+  return "";
+}
+
 function inspectRepo(context, input = {}) {
   const commonRaw = run(context.root, ["rev-parse", "--git-common-dir"]);
   const commonDir = path.resolve(context.root, commonRaw);
@@ -78,7 +104,10 @@ function inspectRepo(context, input = {}) {
   const base = input.base_branch || (remoteHead.startsWith("origin/")
     ? remoteHead.slice("origin/".length)
     : advertised || branch);
-  if (!branch) throw new Error(`selected repository is detached: ${context.id}`);
+  if (!branch) {
+    const why = attachDetached(context, base);
+    if (why) throw new Error(`selected repository is detached: ${context.id} (${why})`);
+  }
   if (!input.base_branch && /^((feat|feature|fix|chore|docs|refactor)\/|wip[/-])/.test(base)) {
     throw new Error(`cannot infer a safe base branch from ${base}; provide base_branch explicitly`);
   }

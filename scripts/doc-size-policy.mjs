@@ -43,6 +43,7 @@ export const FILE_CAPS = {
   "commands/_architect-maintain.md": 5810,
   "commands/_architecture.md": 3643,
   "commands/_features.md": 3496,
+  "commands/_network.md": 2573,
   "commands/_scrutinise-deep.md": 5473,
   "commands/_shared-analysis.md": 6365,
   "commands/_shared-execution.md": 12769,

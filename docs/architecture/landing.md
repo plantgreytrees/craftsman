@@ -57,5 +57,8 @@ dependants can land.
 ## Plan-hierarchy additions (2026-10-18)
 ARCH-LAND-13..17: one worktree per feature, `land-unit`, wave worktrees, the plan-lands-first gate and the publish push authority. See [plan](./plan.md) for the reasoning and rejected alternatives.
 
+## Network phase (2026-10-22)
+Unit runners run in Claude Code's sandbox, which denies the credential files git's helper reads (`~/.config/gh`) and must stay that way. **ARCH-LAND-19** therefore splits network from work: root fetches the base before a run and drains queued pushes after it (`repo-exec` action `network`, run outside the sandbox); runners only do local git, and `repo-exec` queues each push as a plain pinned-sha refspec instead of attempting it. Chosen over passing a short-lived token per call (a secret in a sandboxed process, and one more place to leak it) and over degrade-only (no way to ever push). A step that needs the host API (`pr` mode) or a fresh fetch exits 3 before any side effect with one message naming the fix; the workflow returns `needs_network` and root resumes. **ARCH-LAND-20** attaches a detached submodule checkout when that moves nothing. See `commands/_network.md`.
+
 ## Plan-hierarchy amendments (2026-10-18)
 ARCH-LAND-08 is superseded by ARCH-LAND-18 (units land by `land-unit` inside the feature worktree). See [plan](./plan.md).

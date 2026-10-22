@@ -170,7 +170,7 @@ export function projectContext(project = ".") {
 
 export function isGitRoot(root) {
   try {
-    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() === root;
+    return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() === root;
   } catch { return false; }
 }
 

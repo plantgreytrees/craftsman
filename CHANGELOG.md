@@ -6,6 +6,27 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sandboxed unit runners can build in repos whose remote needs auth** (ARCH-LAND-19).
+  Runners hold no credentials and the sandbox is unchanged. `repo-exec` now works
+  offline from the `origin/<base>` that root fetched (`{"action":"network","step":"fetch"}`),
+  queues every push as a plain, pinned, never-forced refspec, and root pushes them with
+  `{"action":"network","step":"drain"}` outside the sandbox. A step that cannot run offline
+  exits 3 with one message naming the fix and a `needs_network` action; `craftsman:run`
+  stops cleanly on it (`NEEDS_NETWORK`) and resumes via `landed`/`resume`/`featureWorktrees`/
+  `featuresDone`. Credentials are scrubbed from every message. See `commands/_network.md`.
+  New config: `repoExec.offlineMaxFetchAgeMinutes` (120), `repoExec.attachDetached` (true).
+- `scripts/run-args.mjs` builds `craftsman:run` args from a plan and `acceptance.md`, one run per
+  project in plan-graph order (a plan path is no longer passed as `args`).
+- `project:` and `bumps:` accept a project's root path as well as its manifest id.
+- A worktree whose submodules are not checked out no longer breaks `plan-graph`, `scope`,
+  `tracker` or `arch-check`; selecting such a project says to run `git submodule update --init`.
+- `scope.mjs` and `pre-guard` share the main checkout's session state when run from a linked worktree.
+- Reads of the plugin's own reference files pass under an active scope (never writes).
+- `repo-exec` attaches a detached submodule when HEAD is `origin/<base>` and local `<base>` is an ancestor.
+- `scripts/state-write.mjs` writes `acceptance.md` and goal files into the main checkout for background sessions.
+
 ## [2.2.0] - 2026-10-18
 
 ### Added
