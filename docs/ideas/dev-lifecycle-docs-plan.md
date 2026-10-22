@@ -1,90 +1,107 @@
 ---
 slug: dev-lifecycle-docs-plan
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
-confidence: medium
-depth: standard
+confidence: high
+depth: deep
 isolation: isolated
 created: 2026-10-22
-updated: 2026-10-22
-related: [docs/ideas/feature-branch-plans.md, docs/ideas/plan-hierarchy.md, docs/ideas/plugin-overhaul.md, docs/ideas/plugin-optimisation-recheck.md (branch worktree-idea-reinspect-oct18), docs/plans/fixes-and-safety.md (branch feat/fixes-and-safety), docs/architecture/docs.rules.md, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/slim.rules.md, docs/architecture/safety.rules.md (branch feat/fixes-and-safety)]
-touches: [scripts/doc-retire.mjs, scripts/repo-exec.mjs, scripts/tracker-publish.mjs, scripts/tracker.mjs, scripts/arch-check.mjs, scripts/doc-size-policy.mjs, scripts/pre-guard.mjs, commands/sync-docs.md, commands/merge.md, commands/scrutinise.md, craftsman.config.json, docs/architecture/docs.rules.md, docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/slim.rules.md, CHANGELOG.md, .gitignore in Loost]
+updated: 2026-10-23
+related: [docs/architecture/approval.rules.md, docs/architecture/landing.rules.md, docs/architecture/tracker.rules.md, docs/architecture/docs.rules.md, docs/architecture/state.rules.md, docs/architecture/slim.rules.md, docs/architecture/engine.rules.md, docs/architecture/mod.rules.md, docs/architecture/plan.rules.md, docs/ideas/feature-branch-plans.md, docs/ideas/plan-hierarchy.md, docs/ideas/plugin-overhaul.md, docs/ideas/plugin-optimisation-recheck.md (branch worktree-idea-reinspect-oct18), docs/plans/fixes-and-safety.md (branch feat/fixes-and-safety)]
+touches: [scripts/tracker-publish.mjs, scripts/tracker.mjs, scripts/repo-exec.mjs, scripts/doc-retire.mjs, scripts/pre-guard.mjs, scripts/lib/force-block.mjs, scripts/arch-check.mjs, scripts/stats.mjs, scripts/telemetry.mjs, scripts/session-context.mjs, scripts/init.mjs, scripts/lib/core.mjs, scripts/approval.mjs (new), scripts/lib/approval-page.mjs (new), commands/_approval.md (new), commands/auto.md, commands/merge.md, commands/scrutinise.md, commands/sync-docs.md, commands/*.md (frontmatter), agents/unit-runner.md, agents/*reviewer*.md, skills/ (vendored tdd, debugging, verification), workflows/run.js, craftsman.config.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, docs/architecture/*.rules.md, CHANGELOG.md]
 ---
 
-# Idea: A docs-curation and protection programme across the maintainer's repos
+# Idea: Slim Craftsman — a docs-curation, protection and run-to-approval workflow tool
 
-Source: the claude.ai doc "Dev Lifecycle & Docs Plan" (rev 13, 2026-10-20). Its full text was read; it was checked against this repo, `feat/fixes-and-safety`, the local Gleam and Loost clones, and the live sessions on 2026-10-22.
+Source: the claude.ai doc "Dev Lifecycle & Docs Plan" (rev 13, 2026-10-20), then widened by the owner on 2026-10-22. They want a tool that reuses the best existing tools and encodes their workflow. It must be easy to update, and secure while still running unattended across steps. Superpowers is the reference point. The ranked goals are token efficiency, simplicity, effectiveness, performance and adaptability.
 
 ## Proposal (neutral restatement)
-**Problem.** Docs outgrow curation across about nine repos. Gleam `docs/` is about 29 MB with 125 top-level plans and 610 archived files. Loost `CLAUDE.md` is 5,515 lines and `.claude/transcripts` holds 32 MB. Craftsman retires plan docs only by hand. Drift checks run inside Claude, not in CI. Unpushed work was lost on 18 Oct.
-**Proposal.** Seven phases over 7–9 evenings-weeks: protect work (btrfs snapshots, restic, transcript purge); release Craftsman with a `version` and a tag; add behind a flag auto-retire at land, ratcheting per-project budgets, rewritten scrutinise docs, generated views and `/init` scaffolds for `just`/pre-commit/CI; pilot on Podling; migrate Gleam, then Loost and Gallery; a portfolio view and a Podman spike. Eleven new tools.
-**Beneficiary.** One maintainer running several concurrent sessions.
-**Done.** Per-phase exit gates and a per-repo metrics table (one ledger, docs/ under 8 MB, CLAUDE.md under 400 lines, CI running one check).
+**Problem.** Docs outgrow curation: Gleam `docs/` is about 29 MB, Loost `CLAUDE.md` is 5,515 lines, and Craftsman never retires plans on its own. Runs stop on false-positive guard blocks: 29 harmless docguard blocks in Gleam in 1.5 days. The ledger can silently lose rows: Loost has 5 local rows against 50 committed. Nobody can say what drives token cost: two Gleam sessions peaked near 960k tokens. Updates reach every install at once.
+**Proposal.** Keep Craftsman as the engine but slim it:
+- Ask once, run unattended to a verification point, and land only after an owner approval page.
+- Never prompt mid-run. Block or park with a reason.
+- Reuse repo tools through config slots.
+- Borrow Superpowers' patterns without depending on it.
+- Measure tokens before cutting.
+- Cap docs.
+- Fix the ledger guard first.
+**Beneficiary.** One maintainer running Gleam, Loost, Loost-Gallery, Podling and Craftsman with several concurrent sessions.
+**Done.** The rules in the `related:` docs are implemented in the order in [approval.md](../architecture/approval.md#order-of-work), and Gleam runs a feature end to end through the approval page.
 
 ## Verdict
-**PURSUE-WITH-CHANGES** (medium). Do the reduced slice below, not the seven-phase programme. The diagnosis is right: nothing calls `doc-retire` automatically, so docs regrow. But two headline premises are stale, Phase 1 repeats work already in PR #1, and the ledger-only migration lacks a guard it needs. **Deciding fact:** no land path retires a plan, so auto-retire is the one real mechanism gap (`doc-retire` appears only in `scripts/tracker.mjs:471` and its own files). **Most likely to flip it:** a `doc-retire` dry run on Gleam's finished plans. If ARCH-DOCS-02 refuses most of them, auto-retire only produces PARKED noise and this becomes DEFER.
+**PURSUE-WITH-CHANGES** (high). The original seven-phase programme is replaced by the slim design. Confidence rose from medium to high for two reasons. Every premise was checked against code by an isolated analyst. And every open decision was answered by the owner, with the later answers checked against the earlier ones. **Deciding fact:** the idea's own kill test fired. A `doc-retire` dry run would refuse 22 of 23 finished Gleam plans and 12 of 15 here (ARCH-DOCS-02 referrers). So "auto-retire" became "log candidates", and the real gains are the approval-gated unattended run, the ledger guard and measured slimming. **Most likely to flip it:** PR #1 failing to land after rebase, which would delay every safety-dependent step.
 
 | criterion | score 1–5 | evidence |
 |---|---|---|
-| value | 4 | Loost 5,515-line CLAUDE.md and 32 MB transcripts, Gleam 29 MB docs (local clones); no automatic retirement exists |
-| system fit | 2 | `version` contradicts `CHANGELOG.md:56` and PR #1 step 19; `/init` scaffolds strain `README.md:286`; Phase 1 duplicates PR #1 |
-| cost (5 = cheap) | 2 | 7–9 weeks, 11 tools, three sessions already blocked on the owner |
-| risk (5 = low) | 2 | Loost force-push purge; ledger shrink guard covers only empty (`scripts/tracker-publish.mjs:57-60`) |
-| reversibility | 3 | Flag and tags help; history purge and archive removal are not reversible |
-| evidence strength | 2 | Written from shallow clones at `ffba86b`; two premises false; several metrics UNPROVEN |
+| value | 4 | Ledger loss is live (Loost 5 vs 50); 29 false blocks in 1.5 days; 960k-token sessions; docs bloat verified |
+| system fit | 4 | Every new rule extends an existing area; amendments are explicit (LAND-01/05/17/18, TRACKER-12) and owner-approved |
+| cost (5 = cheap) | 3 | About seven steps; the approval page is the only new subsystem; no scaffolding, no new dependency |
+| risk (5 = low) | 3 | Guard narrowing reverses an owner decision (weekly review mitigates); the approval page publishes summaries to claude.ai |
+| reversibility | 4 | Config defaults, the `stable` channel, superseded rules keep history; nothing deletes docs |
+| evidence strength | 4 | Isolated deep analysis with file:line; dry run measured; telemetry thin (1.5 days), Superpowers benchmarks secondary |
 
 ## Overlap & prior work
-Searched: `docs/ideas/*`, `docs/plans/TRACKER.md`, `docs/architecture/*.rules.md` (including `feat/fixes-and-safety`), `CHANGELOG.md`, `craftsman.config.json`, the Gleam and Loost clones, `~/.claude/jobs/*/state.json`.
-- **Extends** feature-branch-plans part B. Doc retirement exists as manual `doc-retire.mjs` and `/sync-docs --archive|--prune` (ARCH-DOCS-04/09, `docs/architecture/docs.rules.md:11-19`). Nothing calls it at land; auto-retire is novel.
-- **Extends** ARCH-TRACKER-11/12 and ARCH-LAND-17. `tracker.mjs publish` exists and `tracker.publish` already defaults to `push` (`craftsman.config.json:97`).
-- **Already in flight.** PR #1 (`feat/fixes-and-safety`, open, conflicting) holds the safety hardening, `scripts/lib/unpushed.mjs` (local-only unpushed report), sweep safety, and step 19 "release-identity": `metadata.release` follows the changelog, no `version` field. Main still says `2.1.0` (`.claude-plugin/plugin.json:17`).
-- **Conflicts.** Adding `version` contradicts `CHANGELOG.md:56` ("Installs track commits instead of a pinned version") and PR #1 step 19. Sibling idea `plugin-optimisation-recheck` reached the same conclusion.
-- **Premise false.** The doc says Gleam has no `TRACKER.jsonl`. `Gleam/docs/plans/TRACKER.jsonl` exists, 1,357 lines, tracked, rehydrated by commit `e728e29b`.
-- **Live sessions** (22 Oct): `e99eadd6` is running scrutinise round 6 on PR #1; `28b3ae5a` is blocked on whether PR #1's direction stands and whether the ledger fix goes first; `d493c67d` (Gleam) waits for approval to remove 16 worktrees.
-- **Verified true:** Loost `CLAUDE.md` 5,515 lines; Loost transcripts 32 MB in 20 files with no `transcripts` entry in Loost `.gitignore`; workstation is btrfs with `just` and `restic` already installed.
+- Extends feature-branch-plans B (retirement), plan-hierarchy (publish, rollups), autonomous-e2e-loop (/auto phases). It agrees with plugin-optimisation-recheck: ledger fix first, then PR #1, no `version` field, measure before trimming.
+- Already done elsewhere: PR #1 (`feat/fixes-and-safety`) holds fail-closed guards, the unpushed report and release identity. It stands, and lands after the ledger fix (owner, 2026-10-22).
+- Premises corrected: Gleam already has a committed `TRACKER.jsonl` (1,357 lines). Loost's transcripts are exported on purpose by `scripts/sync-claude-sessions.sh`.
 
 ## System fit (whole project)
-- **contract ripple:** `repo-exec.mjs` land-feature gains a retire call; `doc-retire` result shape must not fail the land (`scripts/repo-exec.mjs:278-310`). `/init` scaffolds touch `scripts/init.mjs`.
-- **data:** the ledger becomes the only status source, so a partial local ledger must not publish. Loost shows 5 local rows against 57 committed (sibling recheck); the guard refuses only shrink to empty (`scripts/tracker-publish.mjs:57-60`).
-- **config & flags:** `docs.standard` flag is reasonable; budgets need a key per cap.
-- **security:** history purge needs secret rotation regardless; a pre-guard block on generated files can trap legitimate repairs; `scripts/pre-guard.mjs` is a file PR #1 conflicts on.
-- **tests:** new rules need red-then-green tests in the `*.test.mjs` style; a 5-versus-57 ledger case is missing.
-- **observability:** ARCH-DOCS-08 already logs `doc_retired` and `doc_prune_refused`; refusal rate is the metric that decides the programme.
-- **UI:** N/A(no user-facing surface).
-- **docs:** ARCH-SLIM-02 caps are ratchets and doc budgets are full (`docs/architecture/slim.rules.md:12`); new command prose needs room.
-- **Second-order:** work on the same files as PR #1 before it lands builds on a moving base; `/init` scaffolding `just`/CI cuts against "Keep it stack-agnostic" (`README.md:286`).
+- **contract ripple:** `repo-exec` land-feature gains an approval check and retire log (`scripts/repo-exec.mjs:568-670`); publish gains a key-level guard (`scripts/tracker-publish.mjs:52-60`).
+- **data:** new `.craftsman/approvals/<run>.json`; Artifact db doc `approvals/<run>` (owner-write); ledger repair by `init --merge` / `--from-block`.
+- **config & flags:** `tracker.publish` off|on-approve, `docs.budgets`, `docs.checks`, `repoExec.approval.prLines`; four userConfig knobs.
+- **security:** three hard lines (ARCH-STATE-13); approval verified by owner and head SHA (ARCH-APPROVAL-04); force-with-lease on own branches only (ARCH-LAND-23).
+- **tests:** red-green fixtures for each rule's `check:`; 50-vs-5 ledger; guard parity rows; approval mismatch refusals.
+- **observability:** `approval_*`, `doc_retire_candidate`, `guard_unparsed`, `context{phase:"baseline"}`, `tracker_publish_refused`.
+- **UI:** the approval page (private Artifact); the AskUserQuestion fallback.
+- **docs:** nine rules docs amended or added; ARCH-SLIM-02 byte trades for new prose.
+- **Second-order:** main's tracker updates only at land; the approval page needs a live session to land; any new command prose must trade bytes under the full budgets.
 
 ## Research
-- Marketplace plugin entries take `ref` and `sha` on git sources; `sha` is reported to win, so installs can be pinned without a plugin `version` (https://code.claude.com/docs/en/plugin-marketplaces; precedence seen only in non-English copies, UNPROVEN). Omitting `version` makes each commit a version, which is the current design.
-- ADR practice keeps accepted decisions and marks them superseded rather than deleting (https://backstage.io/docs/architecture-decisions). Stale docs mislead, which supports retiring plans but not ARCH rules.
-- Bluefin/Aurora keep home in `/var/home`; community advice favours a home backup over snapshotting reproducible data (https://universal-blue.discourse.group/t/btrfs-and-snapshots/3899). Snapper keeps snapshots in-subvolume; btrbk needs manual config. This machine is btrfs.
-- `lychee --offline` is local-files-only; behaviour on relative Markdown links UNPROVEN. No source found that docs size drives per-session tokens; Gleam's always-loaded context is about 22 KB by the plan's own correction.
+- Superpowers 7.0.1: pinned `version`, one SessionStart hook injecting a ~3.2 KB bootstrap, 15 on-demand skills (~141 KB), no guards (https://github.com/obra/superpowers; verified by the analyst). Third-party cost data is thin: one 12-run test showed ~14% fewer tokens on complex tasks and overhead on simple ones (https://mcp.directory/blog/superpowers-skill-worth-it-2026; secondary).
+- Marketplace `ref`/`sha` pinning, with `sha` winning; commit-tracked versions when `version` is absent (https://code.claude.com/docs/en/plugins/marketplace-reference.md, https://code.claude.com/docs/en/plugins/loading.md).
+- A blocking hook takes precedence over allow rules, so guards, not permissions, decide mid-run (https://code.claude.com/docs/en/permissions). Hook `if` is best-effort; enforce with permissions or hooks, not filters (https://code.claude.com/docs/en/hooks).
+- Artifact runtime: db with an owner-only write rule, user identity, and a republish that notifies the watching session. This makes the two-button approval feasible without polling (artifact capabilities contract 0.2.89).
 
 ## Critique
-- **Steelman.** Every Craftsman step writes docs and none retires them; auto-retire plus ratcheting caps is the mechanism change that stops regrowth, and both fit existing rules. Protect-first ordering is sound after 18 Oct.
-- **Strongest case against.** It was written from stale clones, repeats PR #1, adds a decision the owner reversed last week, and asks a solo maintainer with three blocked sessions for 7–9 weeks and eleven tools.
-- **Hidden assumptions.** Auto-retire mostly succeeds (test: dry run on Gleam's finished plans, count ARCH-DOCS-02 refusals). Ledger migration preserves rows (test: compare local and committed row counts per repo). Smaller docs cut tokens (UNPROVEN; test: `stats.mjs` baseline). Transcripts hold secrets (test: `gitleaks detect` on Loost).
-- **Failure modes.** A retire step inside land-feature must never fail the merge. Retiring while another worktree holds a claim (ARCH-DOCS-04 skips claims only in prune). Tag pinning with no release cadence leaves repos behind main's fixes. A force-push does not remove secrets from other clones.
-- **Kill criteria.** More than half of finished plans refused by ARCH-DOCS-02; the Podling pilot shows no token or conflict gain; PR #1 unmerged after two weeks (defer all Craftsman phases); the three blocked sessions stay blocked (capacity, not docs, is the constraint).
-- **Cheaper alternatives.** Do nothing: regrowth continues and transcripts keep being committable. CI-only: wire `arch-check lint` into each repo's CI. Smallest slice: see Recommendations 1–5.
+- **Steelman.** It turns an assistant that stops often and loses state into one that runs to a single, evidence-rich decision point. It keeps the enforcement that Superpowers lacks and borrows Superpowers' leanness.
+- **Strongest case against.** A new approval subsystem and a guard relaxation in one programme, built on a 78-commit PR that has not yet landed.
+- **Hidden assumptions.** Start-up context is a meaningful share of cost (test: ARCH-SLIM-10 baseline for a week). The narrowed guard does not miss doc writes through variables (test: weekly `guard_unparsed` review). The owner reviews pages promptly (test: time-to-approve in stats).
+- **Failure modes.** Approval forged or stale (mitigated by owner-only db plus head SHA). Ledger guard refuses a legitimate shrink from another machine (mitigated by `archived:true` input and `init --merge`). Budgets fail a run mid-flight (caps start at today's size; ticks do not grow files).
+- **Kill criteria.** PR #1 cannot land within two weeks: pause steps 3–7. The weekly review finds a real doc write slipping through: revert ARCH-STATE-12. Median time-to-approve exceeds a day: reconsider "Merge now" defaults.
+- **Cheaper alternatives.** Steps 1–2 alone fix the live defect and land safety. The approval page could be the markdown fallback only, but the owner asked for a page with buttons.
 
 ## Disputed
-- Critic's PR #1 size (+8599/-1664, 135 files) differs from mine (+8444/-471, 121 files); the branch moved between reads. Neither changes the verdict.
-- Critic point 6 says Phase 0 sequences the purge before gitignoring transcripts. The doc does not mention gitignore either way; I kept the recommendation (gitignore first, purge optional) and drop the sequencing claim.
-- Critic says transcripts are not gitignored. Confirmed (no entry), but whether they are git-tracked in Loost is UNPROVEN here; the doc claims committed.
+- Analyst: ARCH-LAND-08/18 cite stale. Accepted and corrected in ARCH-LAND-25. Also found ARCH-LAND-05's cite (`pre-guard.mjs:178-194`) is stale; ARCH-LAND-23 cites `scripts/lib/force-block.mjs`.
+- Analyst: `stop-tests-skipped` and `stop-acceptance-deferred` interrupt runs → wrong, they only log (`scripts/stop-gate.mjs:152,299`). Accepted; the design targets real blocks.
+- Analyst: D2 sub-question offered git-history replay for Loost. The owner chose the lossy block rebuild (ARCH-TRACKER-14).
+- Analyst: D4 recommended advisory budgets. The owner chose enforced from day one; caps at today's sizes keep that safe.
+- Analyst: D8 recommended staying on main. The owner chose a `stable` branch for Gleam, which the analyst listed as option (c).
+- Analyst: dry-run counts may include slug over-matches. Kept, because `doc-retire.mjs` over-matches identically, so the count is what it would refuse.
+- Earlier critic (2026-10-22): "pilot on Podling". The owner chose Gleam directly, with `stable` as the rollback boundary.
 
 ## Recommendations
-1. **Rebase the plan on live state.** Drop "add `version`"; pin via marketplace `ref`/`sha` if pinning is wanted. Drop the "Gleam has no TRACKER.jsonl" premise. Replace Phase 1 safety work with "land PR #1".
-2. **Fix the partial-ledger shrink guard first** (`scripts/tracker-publish.mjs:57-60`) and test 5-versus-57, before any ledger-only migration. This matches the sibling recheck.
-3. **Protect now, cheaply:** restic plus hourly btrfs snapshots; add `.claude/transcripts` to Loost `.gitignore` today; make the history purge a separate, opt-in decision after `gitleaks detect`.
-4. **Spike auto-retire:** run `doc-retire` dry run on Gleam's finished plans and count refusals. If under half refuse, add a best-effort, non-failing retire call after land-feature behind a flag, with a PARKED record on refusal.
-5. **Wire existing `arch-check lint` into each repo's CI** instead of scaffolding `just`/pre-commit/Azure from `/init`; keep those in the maintainer's own workbench repo.
-6. **Cut or defer:** Phase 6, Renovate/OSV/git-cliff rollout, per-plan `acceptance.md`, single tracker-id format, and the Loost `CLAUDE.md` diet until the slice proves the mechanism.
+1. Land ARCH-TRACKER-13/14 on main now and repair Loost; it unblocks a live session and touches no PR #1 conflict file.
+2. Rebase and land PR #1; then build steps 3–7 in the order in [approval.md](../architecture/approval.md#order-of-work).
+3. Before step 2, set up hourly btrfs snapshots and restic (workstation, outside the plugin).
+4. Run the secrets scan over Loost `.claude/transcripts` before deciding their future.
+5. Re-measure guard blocks after `/craftsman:upgrade` everywhere; installs are on `792b8e4abf1b`.
 
 ## Open questions
-- Does PR #1's fail-closed direction stand, and does the ledger fix go on main ahead of it? (Both live sessions are waiting on this.)
-- Are Loost transcripts actually tracked in git, and do they hold secrets? Run `git ls-files .claude/transcripts` and `gitleaks detect` in Loost.
-- Is the 18 Oct loss attributable to missing snapshots or to worktree sweeps? PR #1's sweep-safety suggests at least part sweeps.
+All architecture questions were answered on 2026-10-22/23:
+- **Scope:** slim Craftsman.
+- **Autonomy:** run to an approval page with Merge now / Open PR.
+- **Hard stops:** secrets, outside-worktree deletes, base/PR/external publish. Feature-branch pushes stay automatic.
+- **Force:** `--force-with-lease` on own branches only.
+- **PR #1:** stands, and lands after the ledger fix.
+- **Guard:** narrowed, with a weekly review.
+- **Retirement:** measure first. **Budgets:** enforced. **Scrutinise:** rolling summary. **Loost ledger:** rebuilt from the tracker block.
+- **Tokens:** measure, plus safe cuts. **Updates:** `stable` branch for Gleam. **Profile:** three homes plus four knobs.
+- **Tool slots:** just, gitleaks, markdownlint, lychee, pre-commit once.
+- **Superpowers:** borrow four patterns, no dependency.
+- **Base moved:** auto-rebase, land if green. **Late approval:** the next session lands it. **Plan docs:** the Phase A answers authorise them.
+- **Slim level:** ten entry points. **Rollout:** Gleam first. **Transcripts:** scan, then decide.
+
+Still the owner's, outside this design: the Loost transcripts decision after the scan, and the future of `claude-context`.
 
 ## Next step
-`/architect dev-lifecycle-docs-plan` for the reduced slice (partial-shrink guard amendment to ARCH-TRACKER-12, a best-effort retire rule at land, a CI-lint wiring rule). Do the Gleam dry run first. Reopen the full programme if the dry run shows most finished plans retire cleanly and PR #1 has landed.
+`/craftsman:instruction dev-lifecycle-docs-plan`, or `/craftsman:plan` the first step (ARCH-TRACKER-13/14) on its own.

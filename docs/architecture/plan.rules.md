@@ -3,8 +3,8 @@ area: plan
 governs: ["scripts/lib/plan-index.mjs", "commands/plan.md", "commands/orchestrate.md", "commands/instruction.md", "skills/language-aware-planning/references/plan-template.md", "scripts/init.mjs"]
 human: docs/architecture/plan.md
 source: docs/ideas/plan-hierarchy.md
-verified_at: bc8c6e5f577f3f6e11f2b7ade0fa5ae4b7a8aee3
-updated: 2026-10-18
+verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
+updated: 2026-10-23
 ---
 # ARCH plan — enforced rules
 
@@ -14,3 +14,4 @@ updated: 2026-10-18
 - **ARCH-PLAN-04** [decided] No migration rewrites a plan: /init --update and /upgrade stamp `level: feature` into canonical docs only, never touch scope_id or the hand-written tracker rows of legacy plans, and an unstamped plan means feature — check: init.test.mjs — cite: scripts/init.mjs:281-317
 - **ARCH-PLAN-05** [decided] `priority: P0|P1|P2|P3` (default P2) is a plan property inherited from `parent:`; `execution.maxSessions` (default 1) is reserved for a future ready/queue script and is never read by the mod — check: plan-index.test.mjs — cite: scripts/lib/core.mjs:724
 - **ARCH-PLAN-06** [decided] Every command and hook that takes a slug (/plan, /orchestrate, /auto, /instruction, /digest, /focus, session-context, the auto stop rule and runner-grant sizing) resolves it through plan-index; /instruction's goal text names the level, the feature and the wave allowance (ARCH-ENGINE-16) — check: auto-command.test.mjs, core.test.mjs descendant rows — cite: commands/instruction.md:55-58
+- **ARCH-PLAN-07** [decided] The owner's workflow profile has three homes and no fourth: mechanism in craftsman.config.json keys, judgement in .claude/rules/craftsman-loop.md (scaffolded empty by /init --update, stack sections carry paths:), invariants in docs/architecture/*.rules.md; four machine-wide plugin userConfig settings (autonomyLevel, reviewDepth, modelTier, budgetsEnforce) set defaults a project config overrides, read only when the platform supports userConfig; learnedRules and plan-memory feed the profile and /architect --backfill promotes it — check: init.test.mjs scaffold, core.test.mjs userConfig precedence, wiring.test.mjs no profile file — cite: scripts/session-context.mjs:194-205

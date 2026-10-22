@@ -1,10 +1,10 @@
 ---
 area: docs
-governs: ["scripts/doc-retire.mjs", "scripts/doc-retire.test.mjs", "commands/sync-docs.md", "scripts/arch-check.mjs"]
+governs: ["scripts/doc-retire.mjs", "scripts/doc-retire.test.mjs", "commands/sync-docs.md", "scripts/arch-check.mjs", "commands/scrutinise.md", "commands/_scrutinise-deep.md"]
 human: docs/architecture/docs.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: 9c4f8f4658784069efa875aad4d010d2e92376a2
-updated: 2026-10-18
+verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
+updated: 2026-10-23
 ---
 # ARCH docs — enforced rules
 
@@ -17,3 +17,5 @@ updated: 2026-10-18
 - **ARCH-DOCS-07** [decided] Deleting a docWriteGuard path (Write tools, or a git/shell remove) needs the session's doc-write grant: doc-retire.mjs checks it and pre-guard blocks the raw command — check: pre-guard.test.mjs — cite: scripts/doc-retire.mjs:85-87
 - **ARCH-DOCS-08** [decided] Retirement logs doc_retired {plan, sha, siblings} and refusals log doc_prune_refused {path, cited_by}; no new stats section — check: doc-retire.test.mjs events — cite: scripts/doc-retire.mjs:117,159
 - **ARCH-DOCS-09** [decided] A plan doc is retired only by scripts/doc-retire.mjs after tracker.mjs archive accepts the plan (every row COMPLETE or CANCELLED); it removes the plan, each scrutinise-/investigate- sibling whose own rows are closed, and the plan's docs/plans/<slug>/TRACKER.md rollup from git, refuses a parent whose children are live, and writes `## <plan> (<date>) — goal · doc <sha> · landed <sha>` to docs/plans/TRACKER-archive.md — check: doc-retire.test.mjs — cite: scripts/tracker.mjs:423-448
+- **ARCH-DOCS-10** [decided] arch-check lint MUST enforce project doc budgets from craftsman.config.json docs.budgets {planBytes, scrutiniseBytes, claudeMdLines, openPlans, enforce}: an existing file's cap is its size when budgets are first set, a new plan defaults to 60 KB and a new scrutinise doc to 30 KB, every cap only ratchets down against the merge-base value, enforce defaults to the budgetsEnforce user setting (on), and /sync-docs reports budget state every pass — check: arch-check.test.mjs budgets ratchet, new-file default, enforce off reports only — cite: scripts/arch-check.mjs:290-294
+- **ARCH-DOCS-11** [decided] A scrutinise doc holds one rolling summary and the latest round only; a new round rewrites the summary and replaces the previous round, whose text lives in git history, and the byte trade for this prose is recorded under ARCH-SLIM-02 — check: scrutinise.md wording, doc-size-policy green — cite: commands/scrutinise.md:42

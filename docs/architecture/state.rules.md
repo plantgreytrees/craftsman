@@ -3,8 +3,8 @@ area: state
 governs: ["scripts/lib/core.mjs", "scripts/state-write.mjs", "scripts/scope.mjs", "scripts/pre-guard.mjs", "scripts/stop-gate.mjs", "scripts/orchestrate-scope-guard.mjs", "scripts/agent-mode-guard.mjs", "scripts/session-context.mjs", "scripts/doc-write.mjs", "scripts/quality-gate.mjs"]
 human: docs/architecture/state.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ac57d0e891bc7343dcb07f174e179ab8f1fd68c9
-updated: 2026-10-18
+verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
+updated: 2026-10-23
 ---
 # ARCH state — enforced rules
 
@@ -19,3 +19,5 @@ updated: 2026-10-18
 - **ARCH-STATE-09** [decided] In a shared feature worktree scope stays keyed by worktree (ARCH-STATE-03): activating the next unit replaces the previous unit's scope file, and land, park and block each release the worktree scope before the next unit's smoke gate; wave units each hold their own worktree and scope — check: scope.test.mjs two units in one worktree, two wave worktrees — cite: scripts/scope.mjs:124-136
 - **ARCH-STATE-10** [decided] scope.mjs resolves the session scope and scope-required markers through the git common dir (the main checkout's .craftsman/sessions), so a run from a linked worktree and pre-guard in the main checkout see one state; reads of ${CLAUDE_PLUGIN_ROOT} files are allowed under any scope and never writes, except when the plugin root encloses the project — check: followups.test.mjs linked-worktree and plugin-read cases — cite: scripts/scope.mjs:61-79
 - **ARCH-STATE-11** [decided] loadWorkspaceManifest lists a registered project whose directory is an empty uninitialised submodule as initialized:false and fails only when that project is selected, naming `git submodule update --init`; `project:`/`bumps:` accept a manifest id or the project's declared root path (projectIdOf); run state a background session cannot Write (acceptance.md, instructions/*.goal.txt) is written by state-write.mjs into the main checkout — check: followups.test.mjs manifest, path-form and state-write cases — cite: scripts/lib/core.mjs:129-151
+- **ARCH-STATE-12** [decided] A guard block inside a /goal run never prompts: it exits 2 naming the fix and logs a reason; pre-guard refuses a command its parser cannot read only when the command also names a guarded-path token or a git commit/push word outside a heredoc body, otherwise allows it and logs guard_unparsed {reason, command}; the hook-bypass flag check ignores heredoc bodies; stats.mjs lists the last 7 days of guard_unparsed for the owner's weekly review — check: pre-guard.test.mjs parity rows for env-prefix, for-loop, subshell and a bypass flag inside a heredoc body; stats.test.mjs weekly list — cite: scripts/pre-guard.mjs:838-905
+- **ARCH-STATE-13** [decided] Three lines are never crossed mid-run and never prompt: reading or writing secrets and credentials (protectedPaths env files, key files, anything the secrets scan flags) blocks and PARKs; deleting outside the run's worktree is refused by the sandbox and pre-guard; base, PR and external publication wait for approval (ARCH-LAND-22) — check: pre-guard.test.mjs secrets and outside-worktree refusals, stop-gate.test.mjs scan block — cite: craftsman.config.json:76-96
