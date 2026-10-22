@@ -65,6 +65,47 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 
 | plan | unit | module | status | evidence | updated |
 |---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| [fixes-and-safety](../../fixes-and-safety) | ask-via-prompt | ask-via-prompt | MERGED | commit b862187 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | bypass-flags | bypass-flags | MERGED | commit 62864b6 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | ci-home-test | ci-home-test | MERGED | commit 64b4718 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | descriptions | descriptions | MERGED | commit dcc8869 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | docs-final | docs-final | MERGED | commit c27533d on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | eslint-json | eslint-json | MERGED | commit 020e0d9 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | failclosed-guards | failclosed-guards | MERGED | commit 3c892cc on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | goal-token | goal-token | MERGED | commit dc35b09 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | guard-filter | guard-filter | MERGED | commit 2029061 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | instruction-consistency | instruction-consistency | MERGED | commit 728634c on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | invocable-partials | invocable-partials | MERGED | commit 91d51c8 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | launcher | launcher | MERGED | commit 13ebb57 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | loud-advisory | loud-advisory | MERGED | commit dc467ab on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | outside-git | outside-git | MERGED | commit 7f78bd0 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | platform | platform | MERGED | commit 3471575 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | pr | pr | MERGED | pr:https://github.com/plantgreytrees/craftsman/pull/1 (branch feat/fixes-and-sa… | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | reconcile-24-26 | reconcile-24-26 | MERGED | commit 96a029c on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | release-identity | release-identity | MERGED | commit 3c814c1 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | self-disable | self-disable | MERGED | commit cbbed66 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | stop-gate-gated | stop-gate-gated | MERGED | commit 9bca6c5 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | sweep-safety | sweep-safety | MERGED | commit 4b5648a on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | tool-names | tool-names | MERGED | commit 44cd3ed on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | unpushed-report | unpushed-report | MERGED | commit 2408b0e on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-2 | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 295ba6c on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-3 | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | config-keys-protected | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | core-isfile | scripts/lib/core.mjs | COMPLETE | all 1 acceptance criteria ticked; commit ce003c9 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | core-small-correctness | scripts/lib/core.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 1e78c9d on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | doc-drift-and-stop-report | scripts/lib/doc-snapshot.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 07cf953 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | followup-md-dirty-marker | scripts/quality-gate.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | followup-skill-record | scripts/lib/core.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | launcher-promptsubmit | hooks/run.sh | COMPLETE | all 1 acceptance criteria ticked; commit 86ad5ef on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | prompt-failclosed | hooks/run.sh | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | quality-dirty-marker | scripts/quality-gate.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 89c8b9e on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | script-authority-in-scripts | scripts/doc-write.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | self-scoped-shared | scripts/scope.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-markers | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 8c5064e on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-scripts | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5d447ba on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-settings-notebook | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5b70e57 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-shell-words | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | state-filter-dedupe | scripts/lib/unpushed.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5ef1ef9 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | stop-loopguard-reports | scripts/stop-gate.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
 
 <!-- craftsman:ledger:end -->
