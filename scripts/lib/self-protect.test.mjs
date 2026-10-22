@@ -7,7 +7,7 @@ import path from "node:path";
 import { globToRe } from "./core.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
-  assert.deepEqual([...SELF_SCOPED], ["hooks/hooks.json", "craftsman.config.json", ".claude/settings.json", ".claude/settings.local.json"]);
+  assert.deepEqual([...SELF_SCOPED], ["hooks/hooks.json", "craftsman.config.json", "craftsman.project.json", ".claude/settings.json", ".claude/settings.local.json"]);
 });
 
 test("self-protect: namesSelfScoped matches exact names, suffixes, directories and globs", () => {
@@ -20,7 +20,7 @@ test("self-protect: namesSelfScoped matches exact names, suffixes, directories a
   assert.deepEqual(hits([".claude/**"]), [".claude/settings.json", ".claude/settings.local.json"]);
   assert.deepEqual(hits([".claude/*"]), [".claude/settings.json", ".claude/settings.local.json"]);
   assert.deepEqual(hits([".claude"]), [".claude/settings.json", ".claude/settings.local.json"]);
-  assert.deepEqual(hits(["*.json"]), ["craftsman.config.json"]);
+  assert.deepEqual(hits(["*.json"]), ["craftsman.config.json", "craftsman.project.json"]);
   assert.deepEqual(hits(["hooks"]), ["hooks/hooks.json"]);
   assert.deepEqual(hits(["."]), [...SELF_SCOPED]);
 });

@@ -1901,6 +1901,30 @@ test("pre-guard: recursive copies, in-place edits, archives and find -delete tha
   for (const command of allowed) assertAllowed(command);
 });
 
+// Round 4 (32.2): craftsman.project.json can override every config key, so it is protected like craftsman.config.json.
+test("pre-guard: craftsman.project.json is self-protected like the config: only a unit scope that names it may change the safety keys (32.2)", () => {
+  const dir = selfDisableProject();
+  try {
+    const project = path.join(dir, "craftsman.project.json");
+    fs.writeFileSync(project, JSON.stringify({ stopGate: { markdownTests: ["README.md"] } }) + "\n");
+    const write = (sid, doc) => run(GUARD, dir, { session_id: sid, tool_name: "Write", tool_input: { file_path: project, content: JSON.stringify(doc) } }).status;
+    assert.equal(write("pc-1", { stopGate: { markdownTests: ["README.md"] }, protectedPaths: [] }), 2, "protectedPaths emptied through the override");
+    assert.equal(write("pc-1", { enabled: false }), 2, "enabled false through the override");
+    assert.equal(write("pc-1", { docWriteGuard: { enabled: false } }), 2, "doc guard off through the override");
+    assert.equal(write("pc-1", { stopGate: { markdownTests: ["README.md", "docs/*.md"] } }), 2, "stopGate is a safety key, so even the list it holds is");
+    assert.equal(write("pc-1", { timeoutMs: 5000, stopGate: { markdownTests: ["README.md"] } }), 0, "a key outside the safety list stays editable");
+    for (const command of ["echo '{}' > craftsman.project.json", "rm craftsman.project.json", "(echo '{\"enabled\":false}' > craftsman.project.json)", "cp x craftsman.project.json"]) {
+      assert.equal(run(GUARD, dir, { session_id: "pc-1", tool_name: "Bash", tool_input: { command } }).status, 2, `blocked: ${command}`);
+    }
+    assert.equal(typed(dir, "pc-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    const manifest = { session_id: "pc-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["craftsman.project.json"], docs: [], write: ["craftsman.project.json"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: "pc-2", tool_name: "Write", tool_input: { file_path: project, content: JSON.stringify({ protectedPaths: [] }) } }).status, 0, "a scope that names the file may change it");
+    const refused = run(SCOPE, dir, { ...manifest, session_id: "pc-3" });
+    assert.equal(refused.status, 2, "scope.mjs refuses a manifest that reaches it without /orchestrate or /auto");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 // Round 4 (29.x): the settings keys that make the sandbox, the permission mode and the process environment, and path comparisons that ignore case.
 test("pre-guard: sandbox, permission mode and preload settings are protected, and protected paths compare case-folded (29.1-29.2)", () => {
   const dir = selfDisableProject();

@@ -273,7 +273,7 @@ The Claude Code **sandbox** owns writes and deletes outside the project and read
 | Key | Default | Meaning |
 |---|---|---|
 | `stopGate.blockOnUnpushed` | `false` | block Stop on unpushed work |
-| `stopGate.markdownTests` | `[]` | markdown globs your tests read (README, `commands/*.md`); an edit of one marks the session dirty so Stop re-runs the suite. By default a docs-only turn runs no tests |
+| `stopGate.markdownTests` | `[]` | markdown globs your tests read (README, `commands/*.md`); an edit of one marks the session dirty so Stop re-runs the suite. By default a docs-only turn runs no tests. A repo whose `craftsman.config.json` is the shipped default (this plugin's own) sets it in an optional `craftsman.project.json`, merged after the config and protected the same way (see [EXTENDING.md](EXTENDING.md)) |
 | `worktrees.disposable` | build dirs and caches | ignored globs a sweep may delete |
 | `worktrees.sweepClaudeWorktrees` | `false` | let the sweep touch `.claude/worktrees/*` |
 

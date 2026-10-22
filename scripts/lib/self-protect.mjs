@@ -8,6 +8,7 @@ import { globToRe } from "./core.mjs";
 export const SELF_SCOPED = Object.freeze([
   "hooks/hooks.json",
   "craftsman.config.json",
+  "craftsman.project.json", // the project override (core.mjs loadConfig): it can set every key the config can
   ".claude/settings.json",
   ".claude/settings.local.json",
 ]);

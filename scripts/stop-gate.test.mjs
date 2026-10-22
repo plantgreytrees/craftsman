@@ -1025,6 +1025,24 @@ test("stop-gate: the loop-guard Stop prints nothing for a clean repo or with CRA
   } finally { cleanup(dir); }
 });
 
+// Round 4 (32.3): a project-only value from craftsman.project.json reaches the quality gate.
+test("stop-gate: stopGate.markdownTests set in craftsman.project.json marks the session dirty for that markdown, and without the file it does not (32.3)", () => {
+  const withFile = quietFixture();
+  const without = quietFixture();
+  try {
+    fs.writeFileSync(path.join(withFile, "craftsman.project.json"), JSON.stringify({ stopGate: { markdownTests: ["README.md", "commands/*.md"] } }));
+    const a = seedGreenStart(withFile, "pc-with");
+    editThroughQualityGate(withFile, "pc-with", "README.md", "# changed\n");
+    assert.equal(fs.existsSync(a.dirty), true, "README.md is listed in the override");
+    try { fs.unlinkSync(a.dirty); } catch {}
+    editThroughQualityGate(withFile, "pc-with", "notes/z.md", "# n\n");
+    assert.equal(fs.existsSync(a.dirty), false, "other markdown is still a docs-only edit");
+    const b = seedGreenStart(without, "pc-without");
+    editThroughQualityGate(without, "pc-without", "README.md", "# changed\n");
+    assert.equal(fs.existsSync(b.dirty), false, "without the file the default applies");
+  } finally { cleanup(withFile); cleanup(without); }
+});
+
 // Round 4 (30.2): SessionStart writes the doc snapshot under the ROOT state dir; Stop must read it there even while a
 // unit scope points the gate at another root (a unit's worktree).
 test("stop-gate: the doc-drift report reads the root snapshot while a unit scope names another root (30.2)", async () => {

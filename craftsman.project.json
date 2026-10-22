@@ -1,0 +1,5 @@
+{
+  "stopGate": {
+    "markdownTests": ["README.md", "CHANGELOG.md", "commands/*.md", "agents/*.md", "docs/architecture/*.md"]
+  }
+}

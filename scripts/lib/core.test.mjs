@@ -939,3 +939,41 @@ test("sharedStateDir is quiet outside a repository, so a pre-guard call there wr
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+// Round 4 (32.1): a repo whose craftsman.config.json is also the shipped default (this one) needs a place for project-only values.
+test("loadConfig merges an optional craftsman.project.json after craftsman.config.json; absent changes nothing, malformed is ignored (32.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-projcfg-")));
+  const write = process.stderr.write;
+  try {
+    assert.deepEqual(coreNs.loadConfig({ root: dir }).stopGate.markdownTests, [], "the shipped default");
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ timeoutMs: 111, stopGate: { requireAcceptanceCriteria: false } }));
+    assert.equal(coreNs.loadConfig({ root: dir }).timeoutMs, 111, "the base project file");
+    fs.writeFileSync(path.join(dir, "craftsman.project.json"), JSON.stringify({ timeoutMs: 222, stopGate: { markdownTests: ["README.md"] } }));
+    const merged = coreNs.loadConfig({ root: dir });
+    assert.equal(merged.timeoutMs, 222, "the override wins over the base project file");
+    assert.deepEqual(merged.stopGate.markdownTests, ["README.md"]);
+    assert.equal(merged.stopGate.requireAcceptanceCriteria, false, "keys the override does not name keep the base value");
+    assert.equal(merged.stopGate.enabled, true, "and the shipped default");
+    let warned = "";
+    process.stderr.write = (chunk) => { warned += chunk; return true; };
+    fs.writeFileSync(path.join(dir, "craftsman.project.json"), "{ not json");
+    const ignored = coreNs.loadConfig({ root: dir });
+    process.stderr.write = write;
+    assert.equal(ignored.timeoutMs, 111, "a malformed override is ignored, the base file still applies");
+    assert.match(warned, /craftsman\.project\.json/, "and it says so");
+    fs.rmSync(path.join(dir, "craftsman.project.json"));
+    assert.equal(coreNs.loadConfig({ root: dir }).timeoutMs, 111, "absent: today's behaviour");
+  } finally {
+    process.stderr.write = write;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("this repo's craftsman.project.json lists the markdown its own tests read, and the shipped default stays empty (32.3)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const project = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "craftsman.project.json"), "utf8"));
+  const shipped = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "craftsman.config.json"), "utf8"));
+  assert.deepEqual(shipped.stopGate.markdownTests, [], "the default other projects get");
+  for (const pattern of ["README.md", "CHANGELOG.md", "commands/*.md", "agents/*.md", "docs/architecture/*.md"]) assert.ok(project.stopGate.markdownTests.includes(pattern), pattern);
+  assert.deepEqual(Object.keys(project), ["stopGate"], "only project-only values live here");
+});

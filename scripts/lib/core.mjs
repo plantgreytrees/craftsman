@@ -546,14 +546,21 @@ export function loadConfig(context = null) {
   const defaults = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, "craftsman.config.json"), "utf8")
   );
-  const local = path.join(context?.root || PROJECT_ROOT, "craftsman.config.json");
-  if (!fs.existsSync(local)) return defaults;
-  try {
-    return deepMerge(defaults, JSON.parse(fs.readFileSync(local, "utf8")));
-  } catch (e) {
-    warn(`ignoring malformed ./craftsman.config.json: ${e.message}`);
-    return defaults;
+  // The project's own values: craftsman.config.json, then craftsman.project.json over it. The second file exists for a repo
+  // whose craftsman.config.json IS the shipped default (this plugin's own), which cannot hold project-only values.
+  // An absent file adds nothing; a malformed one is ignored with a warning.
+  const root = context?.root || PROJECT_ROOT;
+  let merged = defaults;
+  for (const name of ["craftsman.config.json", "craftsman.project.json"]) {
+    const file = path.join(root, name);
+    if (!fs.existsSync(file)) continue;
+    try {
+      merged = deepMerge(merged, JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch (e) {
+      warn(`ignoring malformed ./${name}: ${e.message}`);
+    }
   }
+  return merged;
 }
 
 export function deepMerge(a, b) {
