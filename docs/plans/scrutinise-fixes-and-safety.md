@@ -24,6 +24,7 @@ coverage:
   round5:        nonce-safety-marker | env-word-mentions | archive-and-awk-options | launcher-project-config | config-source-names | rules-cites-round5 # security/correctness/architecture; user chose to fix every finding
   round6:        drop-marker-skip | archive-clusters | limits-round6 | rules-cites-round6 # narrowed on the user go: remove the marker skip, make archive extraction an allowlist, document the for/brace/awk-path forms as limits
   round7:        archive-deny | safety-off-consumers | rules-cites-round7 # the smallest fix; per the user's agreement after round 6, NO further guard-form rounds are planned after this one
+  round8:        doc-retire-revert | archive-nits | rules-cites-round8 # the smallest fix of one regression of my own (step 45.1); no new guard parsing; the plan again recommends no further rounds
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -624,6 +625,45 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/plan.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05, ARCH-PLAN-05]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: doc-retire-revert
+    scope_id: doc-retire-revert
+    project: .
+    depends_on: [rules-cites-round7]
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/script-authority.test.mjs, commands/_sync-docs-prune.md]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/script-authority.test.mjs, commands/_sync-docs-prune.md, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-05, ARCH-DOCS-09, ARCH-SLIM-01]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: archive-nits
+    scope_id: archive-nits
+    project: .
+    depends_on: [rules-cites-round7]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-cites-round8
+    scope_id: rules-cites-round8
+    project: .
+    depends_on: [doc-retire-revert, archive-nits]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: [scripts/doc-retire.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/docs.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-DOCS-09]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -796,6 +836,16 @@ Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tra
 | 6 | the CLAIMS rows cover only separated-value spellings (`safety-claims.test.mjs:264-265`) | Test-coverage / Warning | archive-deny |
 | 7 | `toggle.mjs`/`goal-token.mjs` refuse under safety off without saying that is the cause | Correctness / Suggestion | safety-off-consumers |
 | 8 | ARCH-PLAN-05's cite (`core.mjs:753`) points at the `markerPresent` comment, not at `priority` parsing | Architecture / Suggestion | rules-cites-round7 |
+
+### Round 8 findings (isolated review of 5992c29..25facc9: 0 Critical, 3 Warning, 3 Suggestion; the root re-ran finding 1 at the guard)
+| # | Finding | Class / severity | Unit |
+|---|---|---|---|
+| 1 | step 45.1 made `doc-retire.mjs` skip its grant check when `safetyEnabled()` is false, which reads the script's own environment: `set -a; for CRAFTSMAN_SAFETY in off; do node scripts/doc-retire.mjs < req.json; done` is allowed by the guard (exit 0) and the child really receives `off`, so with safety ON doc-retire deletes and commits without a grant. The same mistake step 42 removed from the nonce (`doc-retire.mjs:72-73`) | Security / Warning (regression of my step 45) | doc-retire-revert |
+| 2 | `denyArchive` also fires for `unzip -v/-c/-z/-hh`, which extract nothing and were allowed at 5992c29 (`pre-guard.mjs:670-683`) | Correctness / Warning | archive-nits |
+| 3 | removing the per-word fallback refuses harmless extractions that already use `-C`/`-d` (`--exclude=`, `--zstd`, `--strip-components N`, `--one-top-level`, `--to-stdout`, `--`, `unzip -x`) | Correctness / Suggestion | archive-nits (documented cost) |
+| 4 | `denyArchive` repeats `denySelfDisable` (`pre-guard.mjs:615-621` vs `1340-1347`) | Cross-unit / Suggestion | archive-nits |
+| 5 | ARCH-DOCS-07's cite points at a sibling loop (`doc-retire.mjs:85-87`), not the grant check | Architecture / Warning | rules-cites-round8 |
+| 6 | no test shows a session with safety on cannot reach the skip through the guard | Test-coverage / Suggestion | doc-retire-revert |
 
 ## Scope Steps (executable core)
 
@@ -1173,6 +1223,31 @@ Depends on: archive-deny, safety-off-consumers
 - [x] 46.4 The accepted limit is recorded: after this round no further guard-form rounds are planned (the user's agreement); anything else a review finds in archive, awk, loop or option spellings is documented as a limit and left to the sandbox → accept: the plan's Risk section says so
 - [x] 46.5 Full CI set, tick, commit `docs(arch): safety rules, cites and the plan's record follow round 7`
 
+### Step 47 — doc-retire-revert (., javascript, high) — round 8
+Depends on: rules-cites-round7
+Closes findings 1 and 6. **The smallest fix: revert step 45.1; do not patch a spelling.** The bug is that `doc-retire.mjs` trusted the variable in its own environment; adding `for|select` to the setter list would be one more form. After this step nothing grants through `CRAFTSMAN_SAFETY`, in any script.
+- [ ] 47.0 Failing tests first → accept: red on 25facc9: `retire()` with `process.env.CRAFTSMAN_SAFETY=off` and no grant retires the plan (the test 45.1 asserted that); through pre-guard, `set -a; for CRAFTSMAN_SAFETY in off; do node …/doc-retire.mjs < req.json; done` is allowed (exit 0) and the child sees `off`
+- [ ] 47.1 `doc-retire.mjs` always requires the grant (the `safetyEnabled() &&` is removed). When the grant is missing and `CRAFTSMAN_SAFETY` is off in its environment, the refusal says so: "no doc-write grant; under CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on" (it must not tell the user to run doc-write.mjs, a no-op there) → accept: `doc-retire.test`: refused without a grant whatever the variable says, with the safety-off wording when it is `off` and the old wording otherwise; the grant (the pending file or a session marker) still lets it through
+- [ ] 47.2 A row in `script-authority.test` runs the loop form above for real in a throwaway project: pre-guard may allow it, but `doc-retire.mjs` still refuses and nothing is deleted or committed → accept: the plan doc, ledger and git history are unchanged after the command
+- [ ] 47.3 `commands/_sync-docs-prune.md` (`--archive`) says it needs a session with safety on → accept: the sentence is there; `descriptions.test` and `wiring.test` green
+- [ ] 47.4 Full CI set (`arch-check lint --root <worktree>`), tick, commit `fix(scripts): doc-retire never skips its grant on the strength of an environment variable`
+
+### Step 48 — archive-nits (., javascript, normal) — round 8
+Depends on: rules-cites-round7
+Closes findings 2, 3 (as a documented cost) and 4. No new parsing.
+- [ ] 48.0 Failing tests first → accept: red on 25facc9: `unzip -v stage/x.zip`, `unzip -c stage/x.zip`, `unzip -z stage/x.zip` and `unzip -hh` are refused with an extraction message although they write nothing
+- [ ] 48.1 The existing "writes nothing" skip for `unzip` covers the letters `l t p Z v c z h` (`-v` with no archive is a version banner and harmless) → accept: the four are allowed and in the allowed-spellings list of `safety-claims.test`; `unzip -od DIR a.zip` and the other round-7 forms stay refused
+- [ ] 48.2 `denyArchive` goes through `denySelfDisable` with an optional advice argument instead of repeating its logging and exit, and the message names the word it could not read → accept: the 44.1 message test still passes and also matches the unreadable word
+- [ ] 48.3 The harmless extractions that the deny now refuses (`--exclude=`, `--zstd`, `--strip-components N`, `--one-top-level`, `--to-stdout`, `--`, `unzip -x`) are listed in `safety.md` as the stated cost, not fixed → accept: `safety.md` names them and says how to proceed (drop the option or ask the user to run it)
+- [ ] 48.4 Full CI set, tick, commit `fix(guard): unzip commands that extract nothing are not refused; one denial path`
+
+### Step 49 — rules-cites-round8 (., markdown, normal) — round 8
+Depends on: doc-retire-revert, archive-nits
+- [ ] 49.0 Failing tests first: needles in `safety-claims.test.mjs` for the round-8 text (`/sync-docs --archive` needs safety on; `select NAME in` beside the `for NAME in` limit) → accept: red until the text is updated
+- [ ] 49.1 ARCH-SAFETY-05, `safety.md` and ARCH-DOCS-07 say doc-retire always requires the grant and `--archive` needs a session with safety on; the safety.md paragraph from round 7 that says doc-retire asks for no grant under safety off is replaced; `select NAME in` joins the stated loop limit; ARCH-DOCS-07's cite is re-pointed to the grant check (`doc-retire.mjs`) → accept: `safety-cites.test`, `safety-docs.test`, `arch-check lint --root <worktree>` green; `verified_at` bumped
+- [ ] 49.2 The round 7 status note and its CONSUMERS block are corrected (45.1 was wrong: a spoofed variable only matters for a script no guard protects is false for doc-retire) → accept: the note says what was wrong and that step 47 reverts it
+- [ ] 49.3 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 8`
+
 ## Status 2026-10-23 (round 7)
 Round 7 (steps 44-46) was built as planned, in the order 44, 45, 46: efd4cdf (44, an extraction with an option the guard cannot read is refused outright), 4f43fb7 (45, `doc-retire` works under safety off; `toggle` and `goal-token` say why they refuse there) and this step 46 (rules text, the ARCH-PLAN-05 cite, the plan's record). Each step's tests were seen red on the previous code (44: the eight reviewed forms, each really writing `.craftsman/off` unguarded and allowed by the guard, plus a message test; 45: two tests; 46: the needle test), then green with the full CI set: 800 node tests, model-policy, doc-size-policy, `arch-check lint --root <worktree>` (10 docs, 106 rules), `claude plugin validate .`, `claude plugin test .` (12), `git diff --check`.
 
@@ -1255,6 +1330,10 @@ Round 5: steps 34 → 35 → 36 share the guard's code (34: `core.mjs`, `session
 Round 6 runs 42 → 40 → 41 → 43: step 42 (`core.mjs`, `session-context.mjs`, the authority scripts, `lib/self-protect.mjs`) first because it removes code; step 40 (`pre-guard.mjs`) next; step 41 is documentation and tests only; step 43 is last.
 
 ## Verification background
+- Round 8 evidence: the isolated review's report (range 5992c29..25facc9: 0 Critical, 3 Warning, 3 Suggestion) and the root's re-run of finding 1 at the guard in a temp repo with a temp HOME: `set -a; for CRAFTSMAN_SAFETY in off; do node scripts/doc-retire.mjs < req.json; done` returned guard exit 0 and bash passed `off` to the child. The reviewer showed from the repo's own test (`doc-retire.test.mjs:78-88`) that `retire()` then deletes, archives and commits without a grant, and did not run doc-retire end to end on a real ledger.
+- Round 8 CONSUMERS: `retire()`'s grant check is read by `doc-retire.mjs` only (`hasGrant` → `hasDocWriteGrant`, `lib/core.mjs`); `commands/_sync-docs-prune.md:12` is the only command that runs it; `denySelfDisable` and `denyArchive` are private to `pre-guard.mjs`.
+- Blind re-derivation for round 8: skipped, the review supplied file-level fixes and the root re-ran the one security finding; plan-strategist and plan-reviewer were not run.
+- Acceptance lines for steps 47-49 are NOT yet in `.craftsman/acceptance.md` (`/orchestrate` adds them).
 - Round 7 evidence: the isolated review's report (range 38a8b68..5992c29: 3 Critical, 3 Warning, 2 Suggestion) and the root's re-run of four forms in temp repos with a temp HOME: `tar -xf a.tar --warning=none -C src -C ../.craftsman`, `tar -xvC.craftsman -f a.tar`, `unzip -od.craftsman a.zip` and `tar -xf a.tar --transform=s,^,.craftsman/,` each returned guard exit 0 and created `.craftsman/off` unguarded. The reviewer also ran each form against the 38a8b68 guard: the first was denied there (a regression of step 40).
 - Round 7 CONSUMERS: `otherWriters` and its allowlist are private to `pre-guard.mjs`; `hasDocWriteGrant` (`lib/core.mjs`) is read by `pre-guard.mjs`, `doc-write.mjs` and `doc-retire.mjs:72` (missed in round 6); `safetyEnabled` is already imported by `doc-write.mjs`; `toggle.mjs` and `goal-token.mjs` import from `lib/core.mjs` only.
 - Blind re-derivation for round 7: skipped, the review supplied file-level fixes and the root re-ran the Criticals; plan-strategist and plan-reviewer were not run.
@@ -1314,6 +1393,10 @@ Round 6 runs 42 → 40 → 41 → 43: step 42 (`core.mjs`, `session-context.mjs`
 - **Accepted limit (the user's agreement after round 6, applied here):** round 7 is the last round of guard-form fixes. It makes the allowlist deny what it cannot read and fixes the two non-guard findings. Further bypasses a review finds in archive, awk, loop or option spellings are recorded as limits and left to the sandbox (ARCH-SAFETY-01), unless the user decides otherwise. Seven reviews of the same class is the evidence; step 44's deny is the one change that removes a class (unknown spelling → refuse) instead of adding a form.
 - Step 44's cost: a legitimate `tar -xvC DIR -f a.tar` or `unzip -od DIR a.zip` is refused; the message says how to spell it.
 - Round 7 residual risk: the reviewer did not enumerate every GNU tar / unzip option, and tested only GNU tar and Info-ZIP on Fedora (bsdtar differs); doc-retire under safety off was shown through the grant check only; `doc-write-pending` is project-global for its 30-minute TTL, so any session can claim another's grant (pre-existing, not touched here).
+
+- **Round 8 came from my own step 45**, not from a new bypass of the guard: the regression was reading `CRAFTSMAN_SAFETY` in a script's own environment, the mistake step 42 had just removed from the nonce. The lesson is recorded so it is not repeated: no script grants, skips or relaxes anything on the strength of a variable a child process can set. After round 8 the plan again recommends no further rounds: the sandbox, not the guard, is the boundary the user designed around.
+- Step 47's cost: `/sync-docs --archive` needs a session with `CRAFTSMAN_SAFETY` on (nothing may grant through the variable). Step 48's cost: harmless extractions with an option off the allowlist are refused (listed in `safety.md`).
+- Round 8 residual risk: `doc-retire` was not run end to end on a real repo with a ledger by the reviewer; unzip builds other than Info-ZIP on Fedora are untested; `select NAME in` is recorded with the loop limit.
 
 ## Out of scope (flagged, not driven)
 - Round 4 follow-ups, PENDING: `followup-authority-session-binding` (finding 2's stronger fix: a one-shot nonce minted by pre-guard that the scripts consume; step 25 closes the inline-assignment route only), `followup-writer-operand` (the writer-verb-anywhere false positive, finding 13 of round 3), `followup-skill-record` (a model Skill call counts as a typed command).
