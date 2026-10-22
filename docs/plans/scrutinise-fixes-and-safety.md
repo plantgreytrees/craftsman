@@ -23,6 +23,7 @@ coverage:
   round4:        selfprotect-subshell | authority-session-spoof | writers-recursive-inplace | dangling-links | hookskip-env-routes | settings-keys-and-case | state-root-reports | goal-token-hash | project-config-override | rules-claims-and-limits # security/correctness; user chose to fix every finding
   round5:        nonce-safety-marker | env-word-mentions | archive-and-awk-options | launcher-project-config | config-source-names | rules-cites-round5 # security/correctness/architecture; user chose to fix every finding
   round6:        drop-marker-skip | archive-clusters | limits-round6 | rules-cites-round6 # narrowed on the user go: remove the marker skip, make archive extraction an allowlist, document the for/brace/awk-path forms as limits
+  round7:        archive-deny | safety-off-consumers | rules-cites-round7 # the smallest fix; per the user's agreement after round 6, NO further guard-form rounds are planned after this one
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -584,6 +585,45 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/plan.rules.md, docs/architecture/safety.md, scripts/safety-cites.test.mjs, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05, ARCH-SAFETY-11]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: archive-deny
+    scope_id: archive-deny
+    project: .
+    depends_on: [rules-cites-round6]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/safety-claims.test.mjs, docs/architecture/safety.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: safety-off-consumers
+    scope_id: safety-off-consumers
+    project: .
+    depends_on: [rules-cites-round6]
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/doc-write.mjs, scripts/toggle.mjs, scripts/goal-token.mjs, scripts/doc-retire.test.mjs, scripts/script-authority.test.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/mod.rules.md, docs/architecture/docs.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/doc-retire.test.mjs, scripts/toggle.mjs, scripts/goal-token.mjs, scripts/script-authority.test.mjs, .craftsman/acceptance.md]
+    arch: [ARCH-STATE-06, ARCH-SAFETY-05, ARCH-MOD-02, ARCH-DOCS-09]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-cites-round7
+    scope_id: rules-cites-round7
+    project: .
+    depends_on: [archive-deny, safety-off-consumers]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: [scripts/lib/plan-index.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/plan.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/plan.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-PLAN-05]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -744,6 +784,18 @@ Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tra
 | 6 | the fourth setter regex refuses prose such as `echo 'hooks read CLAUDE_PROJECT_DIR first'` (`pre-guard.mjs:1156`) | Correctness / Suggestion | limits-round6 (stated limit) |
 | 7 | `mintGoalToken`'s `env` parameter is unused (`goal-token.mjs:17`) | Style / Suggestion | drop-marker-skip |
 | 8 | plan 34.1 names `session-context.test` and `core.test` cases that are not there; 38.1's "the project config" wording differs from the code's "a and b" | Test-coverage / Suggestion | drop-marker-skip, rules-cites-round6 |
+
+### Round 7 findings (isolated review of 38a8b68..5992c29: 3 Critical, 3 Warning, 2 Suggestion; the root re-ran four forms in temp dirs)
+| # | Finding | Class / severity | Unit |
+|---|---|---|---|
+| 1 | the unknown-option fallback judges each word relative to the cwd and loses the `-C` chain: `tar -xf a.tar --warning=none -C src -C ../.craftsman` creates `.craftsman/off`; denied at 38a8b68, allowed now (regression) (`pre-guard.mjs:227-230`) | Security / Critical | archive-deny |
+| 2 | the fallback ignores a value attached inside a cluster: `tar -xvC.craftsman -f a.tar` (`pre-guard.mjs:228`) | Security / Critical | archive-deny |
+| 3 | the unzip fallback reads only `-d…` prefixes: `unzip -od.craftsman a.zip` (`pre-guard.mjs:249`) | Security / Critical | archive-deny |
+| 4 | `--transform`/`--xform` values are judged as a directory: `tar -xf a.tar --transform=s,^,.craftsman/,` (also allowed at 38a8b68) | Security / Warning | archive-deny |
+| 5 | under `CRAFTSMAN_SAFETY=off` `doc-write.mjs on` writes no grant but `doc-retire.mjs:72` still requires one, so `/sync-docs --archive` always refuses | Correctness / Warning | safety-off-consumers |
+| 6 | the CLAIMS rows cover only separated-value spellings (`safety-claims.test.mjs:264-265`) | Test-coverage / Warning | archive-deny |
+| 7 | `toggle.mjs`/`goal-token.mjs` refuse under safety off without saying that is the cause | Correctness / Suggestion | safety-off-consumers |
+| 8 | ARCH-PLAN-05's cite (`core.mjs:753`) points at the `markerPresent` comment, not at `priority` parsing | Architecture / Suggestion | rules-cites-round7 |
 
 ## Scope Steps (executable core)
 
@@ -1095,6 +1147,32 @@ Last, so the text and cites are final; also corrects the plan's own record.
 - [x] 43.3 Residual risk recorded (below) → accept: the plan lists it
 - [x] 43.4 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 6`
 
+### Step 44 — archive-deny (., javascript, high) — round 7
+Depends on: rules-cites-round6
+Closes findings 1-4 and 6. **The smallest fix, and no new parsing** (the user's agreement after round 6): step 40's allowlist stays exactly as it is; what changes is what an unknown spelling does. Step 40.1/40.2 said "judged as unpacked into a protected directory (denied)"; the code instead judged each word as a directory relative to the cwd, which loses the `-C` chain, ignores values attached inside a cluster and reads `--transform` values as directories. Every row below is run unguarded first in a throwaway project (HOME and USERPROFILE temp, asserted).
+- [ ] 44.0 Failing tests first → accept: red on 5992c29: `tar -xf a.tar --warning=none -C src -C ../.craftsman`, `tar -xf a.tar --no-overwrite-dir -C src -C ../.craftsman`, `tar -xf a.tar -C src --dir=../.craftsman`, `tar -xvC.craftsman -f a.tar`, `tar -xC.craftsman -f a.tar`, `unzip -od.craftsman a.zip`, `unzip -qod.craftsman a.zip` and `tar -xf a.tar --transform=s,^,.craftsman/,` each change protected state unguarded and are allowed by the guard
+- [ ] 44.1 In `otherWriters`, when a tar or unzip extraction has any option word off the allowlist, the command is DENIED outright with a message that names the cause ("archive extraction with an option the guard cannot read; spell the destination as -C DIR / -d DIR, or run it outside the model"); the per-word judging of the unknown branch is deleted, not extended → accept: the eight rows above are blocked and nothing changes; the allowed spellings of step 40 stay allowed (`tar -xf a.tar -C src -C ..`, `tar -xvf a.tar -C src`, `tar -xzf a.tar --directory=out`, `unzip -o a.zip -d out`, `unzip -qo a.zip`); `tar -tf`, `unzip -l` and `tar -xvC src -f a.tar` (a cluster holding `C`) now follow the rule: the last is denied as unknown, documented in `safety.md`
+- [ ] 44.2 The deny needs a way to carry its message: the self-protection scan reports the reason through the existing `denySelfDisable` path, no new mechanism → accept: stderr-match test for the cause
+- [ ] 44.3 The eight forms are CLAIMS rows (finding 6) and `safety-claims.test.mjs`' allowed-spellings list is updated for the `tar -xvC src -f a.tar` change; the ARCH-SAFETY-05 text and cites are re-pointed in this commit → accept: `safety-cites.test` green
+- [ ] 44.4 Full CI set (`arch-check lint --root <worktree>`), tick, commit `fix(guard): an extraction with an option the guard cannot read is refused`
+
+### Step 45 — safety-off-consumers (., javascript, normal) — round 7
+Depends on: rules-cites-round6
+Closes findings 5 and 7. Independent of step 44 (different files).
+- [ ] 45.0 Failing tests first → accept: red on 5992c29: with `CRAFTSMAN_SAFETY=off`, `doc-write.mjs on` exits 0 and writes nothing, then `doc-retire.mjs` refuses with "no doc-write grant (run doc-write.mjs first)"; `toggle.mjs off` and `goal-token.mjs` refuse with texts that do not mention safety off
+- [ ] 45.1 `doc-retire.mjs` skips its grant check when `!safetyEnabled()` (it deletes and commits on its own checks; nothing is granted through the variable), and with safety on keeps requiring the grant → accept: `doc-retire.test`: safety off retires without a grant, safety on without a grant still refuses; a spoofed `CRAFTSMAN_SAFETY=off` only matters for a script that no guard is protecting anyway
+- [ ] 45.2 `toggle.mjs off` and `goal-token.mjs` check `!safetyEnabled()` first and refuse with "CRAFTSMAN_SAFETY=off: no guard is running, so this needs a session with safety on" → accept: stderr-match tests in `script-authority.test`
+- [ ] 45.3 Full CI set, tick, commit `fix(scripts): doc-retire works under safety off; toggle and goal-token say why they refuse there`
+
+### Step 46 — rules-cites-round7 (., markdown, normal) — round 7
+Depends on: archive-deny, safety-off-consumers
+- [ ] 46.0 Failing tests first: needles in `safety-claims.test.mjs` for the round-7 text (an unknown extraction option is refused outright; doc-retire under safety off) → accept: red until the text is updated
+- [ ] 46.1 ARCH-SAFETY-05 and `safety.md` say the unknown branch denies, name the cost (a legitimate unusual `tar`/`unzip` spelling is refused; spell it `-C DIR` / `-d DIR`), and name doc-retire as a consumer of `hasDocWriteGrant` under safety off; `verified_at` is bumped → accept: `safety-cites.test`, `safety-docs.test`, `arch-check lint --root <worktree>` green
+- [ ] 46.2 ARCH-PLAN-05's cite is re-pointed to the code that parses `priority` (`lib/plan-index.mjs`), or dropped with the rule text corrected → accept: `arch-check lint` green and the cited range holds `priority`
+- [ ] 46.3 The round 6 status note is corrected: steps 40.1 and 40.2 were ticked but not met (the fallback judged words instead of denying); the CONSUMERS block adds `doc-retire.mjs` (reads `hasDocWriteGrant`) → accept: the notes say so
+- [ ] 46.4 The accepted limit is recorded: after this round no further guard-form rounds are planned (the user's agreement); anything else a review finds in archive, awk, loop or option spellings is documented as a limit and left to the sandbox → accept: the plan's Risk section says so
+- [ ] 46.5 Full CI set, tick, commit `docs(arch): safety rules, cites and the plan's record follow round 7`
+
 ## Status 2026-10-22 (round 6)
 Round 6 was narrowed on the user's "go" and built in the order 42, 40, 41, 43: 513dbe5 (42, the marker skip removed), 529622b (40, archive extraction as an allowlist), f7afdcc (41, the loop, brace and awk-path forms as stated limits) and this step 43 (rules text, cites, the plan's record). Each step's tests were seen red on the previous code (42: three tests, the real safety-off hook sequence included; 40: five claims rows that changed protected state unguarded and were allowed, `tar -xvC .craftsman -f a.tar`, `tar -x --file=a.tar --dir=.craftsman`, `tar xfC a.tar .craftsman`, `unzip -od .craftsman a.zip`, `tar -xvC .claude -f a.tar`; 41: the needle check, the limits themselves already held), then green with the full CI set: 797 node tests, model-policy, doc-size-policy, `arch-check lint --root <worktree>` (10 docs, 106 rules), `claude plugin validate .`, `claude plugin test .` (12), `git diff --check`.
 
@@ -1166,6 +1244,10 @@ Round 5: steps 34 → 35 → 36 share the guard's code (34: `core.mjs`, `session
 Round 6 runs 42 → 40 → 41 → 43: step 42 (`core.mjs`, `session-context.mjs`, the authority scripts, `lib/self-protect.mjs`) first because it removes code; step 40 (`pre-guard.mjs`) next; step 41 is documentation and tests only; step 43 is last.
 
 ## Verification background
+- Round 7 evidence: the isolated review's report (range 38a8b68..5992c29: 3 Critical, 3 Warning, 2 Suggestion) and the root's re-run of four forms in temp repos with a temp HOME: `tar -xf a.tar --warning=none -C src -C ../.craftsman`, `tar -xvC.craftsman -f a.tar`, `unzip -od.craftsman a.zip` and `tar -xf a.tar --transform=s,^,.craftsman/,` each returned guard exit 0 and created `.craftsman/off` unguarded. The reviewer also ran each form against the 38a8b68 guard: the first was denied there (a regression of step 40).
+- Round 7 CONSUMERS: `otherWriters` and its allowlist are private to `pre-guard.mjs`; `hasDocWriteGrant` (`lib/core.mjs`) is read by `pre-guard.mjs`, `doc-write.mjs` and `doc-retire.mjs:72` (missed in round 6); `safetyEnabled` is already imported by `doc-write.mjs`; `toggle.mjs` and `goal-token.mjs` import from `lib/core.mjs` only.
+- Blind re-derivation for round 7: skipped, the review supplied file-level fixes and the root re-ran the Criticals; plan-strategist and plan-reviewer were not run.
+- Acceptance lines for steps 44-46 are NOT yet in `.craftsman/acceptance.md` (`/orchestrate` adds them).
 - Round 6 evidence: the isolated review's report (range 1e8c40b..38a8b68: 1 Critical, 4 Warning, 3 Suggestion) and the root's own re-run of finding 1 in a throwaway repo with a temp HOME: for each of `tar -xvC .craftsman -f stage/off.tar`, `tar -x --file=stage/off.tar --dir=.craftsman`, `tar xfC stage/off.tar .craftsman` and `unzip -od .craftsman stage/off.zip` the guard returned 0 and the unguarded command created `.craftsman/off`. The reviewer reproduced the `for CLAUDE_CODE_SESSION_ID in sessA` grant and verified finding 3 (rc=2 "none of /plan … ran" under safety off) by running the sequence. Not observed for effect: the `gawk -i …/inplace.awk` form and git under a fake HOME (the reviewer's harness refused to set HOME and to run `gawk -i`), and the brace-name form.
 - Round 6 CONSUMERS: `consumeNonce`, `mintNonce` and `safetyOffMarker` (`lib/core.mjs`) are consumed by `doc-write.mjs`, `toggle.mjs`, `goal-token.mjs`, `pre-guard.mjs` and `session-context.mjs`; removing `safetyOffMarker` removes its export from `session-context.mjs` only (grep: no other importer); `SELF_NEVER`/`PROTECTED_WORDS` rows for `safety-off` are used by `pre-guard.mjs` and `lib/self-protect.mjs`; `otherWriters`, `optionValues`, `SETS_SAFETY_VAR`, `HOME_SETTER` are private to `pre-guard.mjs`.
 - Narrowed on the user's "go" (2026-10-22): step 41 per-form patches became stated limits, step 40 became an allowlist, step 42 goes first. Blind re-derivation for round 6: skipped, the decomposition was supplied by an isolated `/scrutinise` with file-level fixes and the Critical was re-run by the root. The plan-strategist and plan-reviewer agents were not run.
@@ -1217,6 +1299,10 @@ Round 6 runs 42 → 40 → 41 → 43: step 42 (`core.mjs`, `session-context.mjs`
 - **The sixth review in a row, and the third in a row with a Warning-or-worse bypass of the shell guard (round 4: Critical; round 5: Warnings; round 6: Critical).** Each round adds forms the previous round's tests did not think of, and round 5 itself introduced finding 2 (the marker). Before building steps 40-43 the user should decide whether to continue patching forms or to stop: the alternative is to keep the nonce and the documented limits, remove per-form option parsing that cannot be complete, and rely on the sandbox (ARCH-SAFETY-01) for archive, awk and loop forms. Step 42's design decision (no marker skip, doc-write no-op under safety off) also needs a yes.
 - Step 40's fallback (deny when the destination cannot be determined) can refuse a legitimate `tar -x` with an option the parser does not know; the refusal names the cause.
 - Round 6 residual risk: the awk path-include and git-under-fake-HOME effects were proved at the guard verdict only; whether Claude Code keeps `session_id` on `--resume` decides how reachable the id borrowing was; the reviewer's probes ran without a HOME override because the harness refuses one.
+
+- **Accepted limit (the user's agreement after round 6, applied here):** round 7 is the last round of guard-form fixes. It makes the allowlist deny what it cannot read and fixes the two non-guard findings. Further bypasses a review finds in archive, awk, loop or option spellings are recorded as limits and left to the sandbox (ARCH-SAFETY-01), unless the user decides otherwise. Seven reviews of the same class is the evidence; step 44's deny is the one change that removes a class (unknown spelling → refuse) instead of adding a form.
+- Step 44's cost: a legitimate `tar -xvC DIR -f a.tar` or `unzip -od DIR a.zip` is refused; the message says how to spell it.
+- Round 7 residual risk: the reviewer did not enumerate every GNU tar / unzip option, and tested only GNU tar and Info-ZIP on Fedora (bsdtar differs); doc-retire under safety off was shown through the grant check only; `doc-write-pending` is project-global for its 30-minute TTL, so any session can claim another's grant (pre-existing, not touched here).
 
 ## Out of scope (flagged, not driven)
 - Round 4 follow-ups, PENDING: `followup-authority-session-binding` (finding 2's stronger fix: a one-shot nonce minted by pre-guard that the scripts consume; step 25 closes the inline-assignment route only), `followup-writer-operand` (the writer-verb-anywhere false positive, finding 13 of round 3), `followup-skill-record` (a model Skill call counts as a typed command).
