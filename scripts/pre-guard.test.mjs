@@ -1661,3 +1661,40 @@ test("pre-guard: git config set, -c alias.X, merge/rebase/am/cherry-pick skip fl
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Round 3 (18.x): a directory destination, or removing/moving an ancestor, cannot reach a protected path.
+test("pre-guard: a directory destination and the removal of an ancestor cannot reach a protected path (18.1-18.2)", () => {
+  const dir = selfDisableProject();
+  try {
+    for (const d of [".claude", ".craftsman/sessions/s1", "src", "build", "node_modules/pkg"]) fs.mkdirSync(path.join(dir, d), { recursive: true });
+    const blocked = [
+      "cp /tmp/settings.json .claude/", "cp /tmp/settings.json .claude", "mv /tmp/settings.json .claude/", "mv /tmp/settings.json .claude", "cp /tmp/off .craftsman", "cp /tmp/hooks.json hooks",
+      "install -t .claude settings.json", "cp -t .craftsman/sessions/s1 commands.json", "cp /tmp/commands.json .craftsman/sessions/s1/", "ln -s /tmp/settings.json .claude/",
+      "mv /tmp/commands.json .craftsman/sessions/s1/", "cp --target-directory=.claude settings.json", "cp /tmp/x.json /tmp/settings.json .claude/",
+      "rm -rf .craftsman/sessions/s1", "rm -rf .craftsman", "mv .craftsman/sessions /tmp/x", "rm -rf hooks", "rm -rf .claude", "rm -r .craftsman/sessions",
+      "rmdir .claude", "cd .craftsman && rm -rf sessions", "rm -rf ./.craftsman/", "git rm -r hooks", "mv hooks /tmp/h",
+    ];
+    for (const command of blocked) {
+      const r = bashIn(dir, "sd-18", command);
+      assert.equal(r.status, 2, `blocked: ${command} (${r.stderr})`);
+    }
+    const allowed = [
+      "cp x src/", "cp x build", "cp x src/deep/", "cp x .claude/commands/", "cp /tmp/x .claude/", "cp /tmp/x .claude", "mv /tmp/x .claude/", "cp /tmp/h hooks", "mv a.txt b.txt", "mv a.txt src/", "rm -rf build", "rm -rf node_modules", "rm src/a.txt",
+      "rm -rf .craftsman/tmp-notes", "cd .claude && cp /tmp/x notes.md", "install -t src x", "ln -s ../a src/b", "rm -f *.log", "rm -rf src/*", "cp /tmp/x .claude/notes.md",
+      "mv .craftsman/notes.txt notes.txt",
+    ];
+    for (const command of allowed) {
+      const r = bashIn(dir, "sd-18", command);
+      assert.equal(r.status, 0, `allowed: ${command} (${r.stderr})`);
+    }
+    // A unit scope that names hooks/hooks.json (made by /orchestrate) may remove it with its directory; the state dir stays protected.
+    assert.equal(typed(dir, "sd-18b", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    const manifest = { session_id: "sd-18b", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: [], docs: [], write: ["hooks/hooks.json"] } };
+    assert.equal(run(SCOPE, dir, manifest).status, 0);
+    assert.equal(bashIn(dir, "sd-18b", "rm -rf hooks").status, 0, "the scope names the file hooks holds");
+    assert.equal(bashIn(dir, "sd-18b", "rm -rf .craftsman").status, 2, "the state dir is never scoped");
+    assert.equal(bashIn(dir, "sd-18b", "rm -rf .claude").status, 2, "a scope that does not name settings does not cover it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

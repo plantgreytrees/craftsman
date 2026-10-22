@@ -58,3 +58,43 @@ export function namesSelfScoped(writeEntries) {
   const entries = Array.isArray(writeEntries) ? writeEntries : [];
   return SELF_SCOPED.filter((name) => entries.some((entry) => reaches(entry, name)));
 }
+
+// The one list of commands that write or move a file. pre-guard builds its text gates and its dispatch from it.
+export const WRITER_VERBS = Object.freeze(["touch", "tee", "cp", "mv", "ln", "install", "dd", "truncate", "mkdir", "sed", "perl"]);
+
+// A glob as free text: how a command line would spell it before any quote is removed. `**/` may be empty.
+function globToText(glob) {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*" && glob[i + 1] === "*") {
+      i++;
+      if (glob[i + 1] === "/") { i++; re += "(?:\\S*/)?"; } else re += "\\S*";
+    } else if (c === "*") re += "[\\w.-]*";
+    else re += c.replace(/[.+?^${}()|[\]\\/]/g, "\\$&");
+  }
+  return re + "(?![\\w.-])";
+}
+// The raw-text gate: does a command line name a never-written path? Derived from SELF_NEVER, so it cannot drift.
+export const NEVER_TEXT = new RegExp(SELF_NEVER.map(globToText).join("|"));
+
+const lastSegment = (glob) => glob.split("/").pop().replace(/\*+/g, "x");
+const literalBase = (glob) => {
+  const parts = [];
+  for (const part of glob.split("/")) { if (/[*?[{]/.test(part)) break; parts.push(part); }
+  return parts.join("/");
+};
+// Does removing or moving `rel` (relative to the project root) take `pattern`'s files with it: is it one, inside one,
+// or a directory that holds one? The project root itself is not counted (that is destroying the project, which the
+// sandbox and the ask rules own).
+function holds(rel, pattern) {
+  const r = clean(rel);
+  if (r === "" || r === "." || r.startsWith("..")) return false;
+  const re = globToRe(pattern);
+  if (re.test(r) || re.test(r + "/" + lastSegment(pattern))) return true;
+  const base = literalBase(pattern);
+  return base !== "" && (base === r || base.startsWith(r + "/"));
+}
+export const heldNever = (rel) => SELF_NEVER.some((pattern) => holds(rel, pattern));
+// Only the project-root names: a directory that merely might hold a nested copy of one is not what this guards.
+export const heldScoped = (rel) => SELF_SCOPED.filter((name) => holds(rel, name));

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, namesSelfScoped, safetyProjection } from "./self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesSelfScoped, safetyProjection } from "./self-protect.mjs";
 import { globToRe } from "./core.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
@@ -30,6 +30,34 @@ test("self-protect: SELF_NEVER holds the craftsman markers, the scope files and 
   const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
   for (const rel of [".git/config", "a/b/.git/config", ".git/hooks/pre-commit", ".git/config.worktree"]) assert.ok(hit(rel), rel);
   for (const rel of [".gitignore", ".git/HEAD", "src/git/config", ".github/hooks/x"]) assert.ok(!hit(rel), rel);
+});
+
+test("self-protect: NEVER_TEXT is derived from SELF_NEVER and catches every spelling of a never-written path (18.3)", () => {
+  for (const text of [".craftsman/off", "x > .craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/s1/doc-write", ".craftsman/sessions/s1/commands.json",
+    ".craftsman/sessions/a/b/goal-tokens.json", ".craftsman/sessions/s1/scope-abc.json", ".craftsman/sessions/s1/x-worktree-binding.json", ".git/config", "a/b/.git/config",
+    ".git/hooks/pre-commit", ".git/config.worktree"]) assert.match(text, NEVER_TEXT, text);
+  for (const text of [".craftsman/offline", ".craftsman/off.bak", ".craftsman/sessions/s1/notes.md", "git config user.name x", ".gitignore", ".git/HEAD", "src/git/config"]) {
+    assert.doesNotMatch(text, NEVER_TEXT, text);
+  }
+});
+
+test("self-protect: heldNever and heldScoped say which directories hold a protected path (18.2)", () => {
+  for (const rel of [".craftsman", ".craftsman/sessions", ".craftsman/sessions/s1", ".craftsman/off", ".git", ".git/hooks", "./.craftsman/"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of ["build", "src", "src/deep", ".craftsman/tmp-notes", ".gitignore", "node_modules", ".", "", "..", "../x"]) assert.equal(heldNever(rel), false, rel);
+  assert.deepEqual(heldScoped("hooks"), ["hooks/hooks.json"]);
+  assert.deepEqual(heldScoped(".claude"), [".claude/settings.json", ".claude/settings.local.json"]);
+  assert.deepEqual(heldScoped("craftsman.config.json"), ["craftsman.config.json"]);
+  assert.deepEqual(heldScoped("hooks/hooks.json"), ["hooks/hooks.json"]);
+  for (const rel of ["src", "a.txt", "pkg", ".claude/commands", "docs", "."]) assert.deepEqual(heldScoped(rel), [], rel);
+});
+
+test("self-protect: pre-guard keeps one writer-verb list and no hand-copied path regex (18.3)", () => {
+  const source = fs.readFileSync(new URL("../pre-guard.mjs", import.meta.url), "utf8");
+  assert.deepEqual([...WRITER_VERBS].sort(), ["cp", "dd", "install", "ln", "mkdir", "mv", "perl", "sed", "tee", "touch", "truncate"]);
+  assert.doesNotMatch(source, /new Set\(\["touch"/, "no second verb list");
+  assert.doesNotMatch(source, /\(\?:touch\|tee\|/, "no verb alternation typed out");
+  assert.doesNotMatch(source, /\\\.craftsman\\\/\(\?:off\|doc-write-pending\)/, "the path regex is not hand-copied");
+  assert.match(source, /NEVER_TEXT\.test\(command\)/);
 });
 
 test("self-protect: ordinary write entries name nothing", () => {

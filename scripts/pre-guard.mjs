@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
-import { SELF_SCOPED, SELF_NEVER, safetyProjection } from "./lib/self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, safetyProjection } from "./lib/self-protect.mjs";
 import { readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -339,8 +339,12 @@ const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh 
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
 // Writers beyond the removal words; only the self-protection scan (removedDocs `writes`) reads them as write targets.
-const WRITE_VERBS = new Set(["touch", "tee", "cp", "ln", "install", "mkdir", "dd", "sed", "perl"]);
-const WRITE_TEXT = /\b(?:touch|tee|cp|ln|install|mkdir|dd|sed|perl|mv|truncate)\b/;
+// Both lists come from the one WRITER_VERBS in lib/self-protect.mjs.
+const WRITE_VERBS = new Set(WRITER_VERBS.filter((verb) => !RM_LIKE.has(verb)));
+const WRITE_TEXT = new RegExp(`\\b(?:${WRITER_VERBS.join("|")})\\b`);
+const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
+// The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
+const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean)$/;
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const SAFE_HEADS = new Set(["echo", "printf", "grep", "egrep", "fgrep"]);
 const DECLARERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
@@ -500,6 +504,14 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     if (!st.cwds) return hits.push("(" + label + " in a directory the parser cannot resolve)");
     if (env.execdir && /(?:^|\/)\.\.(?:\/|$)/.test(arg)) return hits.push("(" + label + " target above a find -execdir directory: " + arg + ")");
     for (const cwd of st.cwds) { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(label === "redirect" ? "redirect:" + h : h); }
+    // Self-protection only: a path that is removed or moved takes everything under it along, so a directory that
+    // HOLDS a protected path counts too (touchesGuarded sees only ancestors of a literal base, not of a wildcard one).
+    if (writes && REMOVER_LABELS.test(label) && !/[*?[{]/.test(arg)) {
+      for (const cwd of st.cwds) {
+        const rel = path.relative(realRoot(), realResolve(cwd, arg)).split(path.sep).join("/");
+        if (rel !== "" && !rel.startsWith("..")) hits.push("remove:" + rel);
+      }
+    }
   }
   const targetsOf = (rest) => {
     const out = []; let dashes = false;
@@ -511,6 +523,28 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     }
     return out;
   };
+  // Where `cp|install|ln|mv SOURCE... DEST` leaves its files. A DEST that is a directory (an existing one, a trailing
+  // slash, `.`/`..`, or the `-t` directory) receives DEST/basename(SOURCE) for every source, so the path to judge is
+  // the joined one: `cp x .claude/` writes `.claude/x`, which is `.claude/settings.json` when x is named that.
+  const destIsDir = (dest, st) => /\/$/.test(dest) || dest === "." || dest === ".."
+    || (st.cwds || []).some((cwd) => { try { return fs.statSync(realResolve(cwd, expandHome(dest))).isDirectory(); } catch { return false; } });
+  function placements(rest, st) {
+    const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
+    const dirOpt = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
+    const operands = targetsOf(t < 0 ? rest : rest.filter((_, i) => i !== t && !(i === t + 1 && !rest[t].includes("="))));
+    const sources = dirOpt !== undefined ? operands : operands.slice(0, -1);
+    const dest = dirOpt !== undefined ? dirOpt : operands[operands.length - 1];
+    if (dest === undefined) return { sources: [], placed: [], dest: undefined };
+    const asDir = dirOpt !== undefined || destIsDir(dest, st);
+    const join = (s) => dest.replace(/\/+$/, "") + "/" + path.basename(s.replace(/\/+$/, ""));
+    return { sources, dest, placed: !sources.length ? [dest] : asDir ? sources.map(join) : [dest] };
+  }
+  // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
+  function moveTargets(rest, st, env) {
+    const { sources, placed } = placements(rest, st);
+    for (const source of sources) target(source, st, "mv", env);
+    for (const p of placed) target(p, st, "write", env);
+  }
   // The files a writer other than a removal word writes (self-protection scan only): the words are already
   // de-quoted, so `o""ff` is `off`, and the working directories come from the `cd` tracking above.
   function writeTargets(verb, rest, st, env) {
@@ -518,17 +552,14 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     let files = [];
     if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
     else if (verb === "ln") {
-      files = args;
+      files = placements(rest, st).placed;
       // A link into the state directory would let a later Write reach it under another name.
       for (const a of args) for (const cwd of st.cwds || []) {
         const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
         if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
       }
-    } else if (verb === "cp" || verb === "install") {
-      const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
-      const dir = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
-      files = dir !== undefined ? [dir] : args.slice(-1);
-    } else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
+    } else if (verb === "cp" || verb === "install") files = placements(rest, st).placed;
+    else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
     else if (verb === "sed" || verb === "perl") {
       if (!rest.some((a) => /^-[A-Za-z]*i/.test(a))) return; // without -i neither writes a named file
       let script = false;
@@ -653,6 +684,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     if (RM_LIKE.has(verb)) {
       noteRemoval(verb, rest, env);
       if (env.unseen) return unsafe(verb + " with input the parser cannot see");
+      if (writes && verb === "mv") return moveTargets(rest, st, env);
       for (const t of targetsOf(rest)) target(t, st, verb, env);
     } else if (writes && WRITE_VERBS.has(verb)) writeTargets(verb, rest, st, env);
     else if (verb === "git") git(rest, st, env);
@@ -1095,8 +1127,9 @@ function denySelfDisable(what) {
   process.exit(2);
 }
 if (tool === "Bash" && command) {
-  const verb = /(?:^|[\s;&|(])(?:touch|tee|cp|mv|ln|install|dd|truncate|mkdir)(?=\s)|\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
-  const never = /\.craftsman\/(?:off|doc-write-pending)(?![\w.-])|\.craftsman\/sessions\/\S*(?:\/doc-write(?![\w.-])|commands\.json|goal-tokens\.json|\/scope[\w.-]*|[\w.-]*worktree-binding)/.test(command);
+  // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
+  const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
+  const never = NEVER_TEXT.test(command);
   const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(command));
   const concrete = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true })
     .filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
@@ -1105,6 +1138,15 @@ if (tool === "Bash" && command) {
   if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
+    if (hit.startsWith("remove:")) {
+      // A removed or moved path takes everything under it along: a directory that holds craftsman state is as
+      // protected as the state. Scoped files (hooks.json, the config, the settings) may go when a unit scope names them.
+      const gone = hit.slice(7);
+      if (heldNever(gone)) denySelfDisable(`a command that removes or moves ${gone}, which holds craftsman state`);
+      const unscoped = heldScoped(gone).filter((name) => !scopeNames(name));
+      if (unscoped.length) denySelfDisable(`a command that removes or moves ${gone}, which holds ${unscoped.join(", ")}`);
+      continue;
+    }
     const kind = selfKind(hit);
     if (kind === "never") denySelfDisable(`a command that writes ${hit}`);
     if (kind === "scoped" && !scopeNames(hit)) denySelfDisable(`a command that writes ${hit}`);
