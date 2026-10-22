@@ -37,6 +37,7 @@ function reaches(entry, name) {
 // naming the file. Dotted names reach into a nested object. Every key here exists in the shipped config.
 export const SAFETY_CONFIG_KEYS = Object.freeze([
   "enabled", "protectedPaths", "docWriteGuard", "execution.agentMode", "execution.engine", "stopGate",
+  "worktrees", // what the Stop and SessionStart sweep may remove (ARCH-SAFETY-07)
 ]);
 
 // Environment keys in the harness settings that decide whether node runs craftsman's hooks, or which code it loads.

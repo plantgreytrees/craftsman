@@ -1730,6 +1730,32 @@ test("pre-guard: hooks.json and the scope exemption are judged by real path thro
   }
 });
 
+// Round 3 (21.x): the worktree sweep controls decide what the sweep may remove, so they are safety keys.
+test("pre-guard: the worktree sweep config keys cannot be loosened by a tool call (21.1)", () => {
+  const dir = selfDisableProject();
+  try {
+    const base = { maxFeedbackLines: 40, timeoutMs: 20000, stopGate: { enabled: true }, worktrees: { disposable: ["**/node_modules/**", "**/dist/**"], sweepClaudeWorktrees: false } };
+    const cfg = path.join(dir, "craftsman.config.json");
+    fs.writeFileSync(cfg, JSON.stringify(base, null, 2) + "\n");
+    const write = (sid, mutate) => {
+      const next = JSON.parse(JSON.stringify(base)); mutate(next);
+      return run(GUARD, dir, { session_id: sid, tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify(next) } });
+    };
+    assert.equal(write("wk-1", (c) => { c.worktrees.disposable = ["**"]; }).status, 2, "disposable widened to everything");
+    assert.equal(write("wk-1", (c) => { c.worktrees.disposable.push("**/data/**"); }).status, 2, "disposable extended");
+    assert.equal(write("wk-1", (c) => { c.worktrees.sweepClaudeWorktrees = true; }).status, 2, "Claude Code's own worktrees opted in");
+    assert.equal(write("wk-1", (c) => { delete c.worktrees; }).status, 2, "the block removed");
+    assert.equal(run(GUARD, dir, { session_id: "wk-1", tool_name: "Edit", tool_input: { file_path: cfg, old_string: '"sweepClaudeWorktrees": false', new_string: '"sweepClaudeWorktrees": true' } }).status, 2, "Edit form");
+    assert.equal(write("wk-1", (c) => { c.maxFeedbackLines = 10; }).status, 0, "other keys stay editable");
+    // A unit scope that names the config (made by /orchestrate) may still change them.
+    assert.equal(typed(dir, "wk-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    assert.equal(run(SCOPE, dir, { session_id: "wk-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["craftsman.config.json"], docs: [], write: ["craftsman.config.json"] } }).status, 0);
+    assert.equal(write("wk-2", (c) => { c.worktrees.sweepClaudeWorktrees = true; }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Round 3 (20.x): a config include or an alternative config file reaches core.hooksPath without naming it.
 const INC = "include" + ".path";
 const INCIF = "includeIf.gitdir:/x/" + ".path";
