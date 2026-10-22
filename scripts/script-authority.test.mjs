@@ -257,63 +257,57 @@ test("goal-token.mjs run from the command line also needs the nonce (26.4)", () 
   } finally { p.clean(); }
 });
 
-// Round 5 (34.x): whether safety is off is the USER's environment, which only a hook sees. SessionStart records it as a marker the
-// scripts read; the script's own environment, which any child can set, no longer decides.
+// Round 6 (42.x): there is no marker and no skip. A session that started with CRAFTSMAN_SAFETY=off leaves nothing a child process or
+// another session can use, and under safety off doc-write.mjs is a no-op (pre-guard enforces nothing, so no grant is needed).
 const SESSION_CONTEXT = at("session-context.mjs");
+const OSG_HOOK = at("orchestrate-scope-guard.mjs");
 const safetyMarker = (p, sid = "sa-1") => path.join(p.dir, ".craftsman", "sessions", sid, "safety-off");
 const startSession = (p, env = p.env, sid = "sa-1") => spawnSync(process.execPath, [SESSION_CONTEXT], { cwd: p.dir, env, encoding: "utf8", input: JSON.stringify({ session_id: sid }) });
+const promptHook = (p, env, sid, name) => spawnSync(process.execPath, [OSG_HOOK], { cwd: p.dir, env, encoding: "utf8", input: JSON.stringify({ session_id: sid, prompt: `/craftsman:${name} x` }) });
 
-test("a child process that sets CRAFTSMAN_SAFETY=off cannot skip the nonce (34.1)", () => {
+test("a session started with CRAFTSMAN_SAFETY=off leaves no marker, and its id cannot be lent to another session (42.1)", () => {
   const p = project();
   try {
-    record(p, "sa-1", "prompt", "plan");
-    record(p, "sa-1", "prompt", "toggle");
-    const env = { ...p.env, CRAFTSMAN_SAFETY: "off" };
-    assert.equal(node(p, DOC_WRITE, ["on"], env).status, 2, "env off in the script, no marker: refused");
-    assert.ok(!fs.existsSync(p.pending));
-    assert.equal(node(p, TOGGLE, ["off"], env).status, 2);
-    assert.ok(!fs.existsSync(p.off));
-    // 34.3: off set after the session started was never seen by SessionStart, so it stays refused
-    startSession(p);
-    assert.ok(!fs.existsSync(safetyMarker(p)));
-    assert.equal(node(p, DOC_WRITE, ["on"], env).status, 2);
+    record(p, "sessA", "prompt", "plan"); // sessA typed /plan while safety was on
+    const off = { ...p.env, CRAFTSMAN_SAFETY: "off" };
+    assert.equal(startSession(p, off, "sessA").status, 0);
+    assert.ok(!fs.existsSync(safetyMarker(p, "sessA")), "SessionStart writes no safety-off file");
+    // sessB borrows sessA's id; the nonce belongs to the real session, so the script refuses
+    const r = node(p, DOC_WRITE, ["on"], { ...p.env, CLAUDE_CODE_SESSION_ID: "sessA" });
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(!fs.existsSync(p.pending), "no grant was written");
   } finally { p.clean(); }
 });
 
-test("SessionStart records CRAFTSMAN_SAFETY=off as a marker, and the scripts then ask for no nonce (34.1)", () => {
+test("under CRAFTSMAN_SAFETY=off doc-write.mjs on is a no-op that grants nothing, in the real hook sequence and in a spoofed one (42.2)", () => {
   const p = project();
   try {
-    record(p, "sa-1", "prompt", "plan");
     const off = { ...p.env, CRAFTSMAN_SAFETY: "off" };
     assert.equal(startSession(p, off).status, 0);
-    assert.ok(fs.statSync(safetyMarker(p)).isFile(), "the marker is a regular file");
-    assert.equal(node(p, DOC_WRITE, ["on"]).status, 0, "no nonce is asked for while the user has safety off for this session");
-    // a stale marker does not outlive an environment that no longer says off
-    assert.equal(startSession(p).status, 0);
-    assert.ok(!fs.existsSync(safetyMarker(p)), "removed when the next start does not see off");
-    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "and the nonce is asked for again");
+    assert.equal(promptHook(p, off, "sa-1", "plan").status, 0);
+    const real = node(p, DOC_WRITE, ["on"], off);
+    assert.equal(real.status, 0, real.stderr);
+    assert.match(real.stdout, /not needed/i);
+    assert.ok(!fs.existsSync(p.pending), "nothing was written");
+    // a child that sets the variable itself gains nothing either: no record, no grant, and exit 0 with no effect
+    const spoof = node(p, DOC_WRITE, ["on"], { ...p.env, CRAFTSMAN_SAFETY: "off", CLAUDE_CODE_SESSION_ID: "other" });
+    assert.equal(spoof.status, 0);
+    assert.ok(!fs.existsSync(p.pending));
+    // toggle off and goal-token keep their record and nonce checks under safety off
+    assert.equal(node(p, TOGGLE, ["off"], off).status, 2);
+    assert.ok(!fs.existsSync(p.off));
   } finally { p.clean(); }
 });
 
-test("the safety-off marker cannot be written by a tool call, and each write form really would (34.2)", () => {
-  const forms = ["echo x > .craftsman/sessions/sa-1/safety-off", "touch .craftsman/sessions/sa-1/safety-off", "cp stage-file .craftsman/sessions/sa-1/safety-off", "printf x | tee .craftsman/sessions/sa-1/safety-off"];
-  for (const form of forms) {
-    const real = project();
-    try {
-      fs.mkdirSync(path.join(real.dir, ".craftsman", "sessions", "sa-1"), { recursive: true });
-      fs.writeFileSync(path.join(real.dir, "stage-file"), "x\n");
-      spawnSync("bash", ["-c", form], { cwd: real.dir, env: real.env, encoding: "utf8" });
-      assert.ok(fs.existsSync(safetyMarker(real)), `the form is real: ${form} creates the marker unguarded`);
-    } finally { real.clean(); }
-    const guarded2 = project();
-    try {
-      fs.mkdirSync(path.join(guarded2.dir, ".craftsman", "sessions", "sa-1"), { recursive: true });
-      assert.equal(guardAs(guarded2, "sa-1", form).status, 2, `denied: ${form}`);
-      const write = spawnSync(process.execPath, [GUARD], { cwd: guarded2.dir, env: guarded2.env, encoding: "utf8",
-        input: JSON.stringify({ session_id: "sa-1", tool_name: "Write", tool_input: { file_path: safetyMarker(guarded2), content: "x" } }) });
-      assert.equal(write.status, 2, "a Write of the marker is denied too");
-    } finally { guarded2.clean(); }
-  }
+test("with safety on, doc-write.mjs on still needs the record and the nonce (42.2)", () => {
+  const p = project();
+  try {
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2);
+    record(p, "sa-1", "prompt", "plan");
+    assert.equal(node(p, DOC_WRITE, ["on"]).status, 2, "a record alone is not enough");
+    assert.equal(guarded(p, DOC_WRITE, ["on"]).status, 0);
+    assert.ok(fs.existsSync(p.pending));
+  } finally { p.clean(); }
 });
 
 // Round 5 (35.x): the check that keeps a command from borrowing the session id, the state root or the safety switch reads

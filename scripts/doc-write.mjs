@@ -14,7 +14,7 @@
 // of the command line that pre-guard's text check misses can reach the grant. `off` stays open.
 import fs from "node:fs";
 import path from "node:path";
-import { STATE_DIR, DOC_WRITER_COMMANDS, commandInvoked, consumeNonce, sidOf } from "./lib/core.mjs";
+import { STATE_DIR, DOC_WRITER_COMMANDS, commandInvoked, consumeNonce, safetyEnabled, sidOf } from "./lib/core.mjs";
 
 const arg = (process.argv[2] || "on").toLowerCase();
 const pending = path.join(STATE_DIR, "doc-write-pending");
@@ -24,6 +24,12 @@ if (arg === "off") {
   try { fs.unlinkSync(pending); } catch {}
   console.log("doc-write grant cleared.");
 } else {
+  // Under CRAFTSMAN_SAFETY=off pre-guard (the doc-write guard with it) enforces nothing, so no grant is needed: say so and write
+  // nothing. The variable is the script's own environment, which any child can set, so it must never BE the grant.
+  if (!safetyEnabled()) {
+    console.log("doc-write authority is not needed: CRAFTSMAN_SAFETY=off, so no guard is running (nothing was granted).");
+    process.exit(0);
+  }
   const refuse = (why) => { process.stderr.write(`craftsman: doc-write.mjs on refused: ${why}\n`); process.exit(2); };
   const sid = process.env.CLAUDE_CODE_SESSION_ID;
   if (!sid) refuse("no session id (CLAUDE_CODE_SESSION_ID is not set), so no command record can be tied to this session");

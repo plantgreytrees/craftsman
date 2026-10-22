@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
   sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
-  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState, atomicWrite, safetyEnabled, safetyOffMarker,
+  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState, atomicWrite,
 } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
@@ -36,13 +36,6 @@ const cfg = loadConfig(context);
 // ARCH-SAFETY-04: say whether the guards are on, and if not, why. Off for a reason the user may not
 // know about is the dangerous case, so it reaches the user as well as the model.
 const state = guardState({ cfg, context, sid: input.session_id });
-// ARCH-SAFETY-05: the user's CRAFTSMAN_SAFETY=off is visible here and nowhere a child process can reach, so record it for the authority
-// scripts (they skip pre-guard's nonce only when this marker exists). A start that does not see off removes a stale one.
-try {
-  const marker = safetyOffMarker(sid, context);
-  if (safetyEnabled()) fs.rmSync(marker, { force: true });
-  else atomicWrite(marker, `off since ${new Date().toISOString()}\n`);
-} catch { /* no state dir: the scripts ask for a nonce, which is the safe side */ }
 const guardsOffLine = `craftsman guards off: ${state.safety.join("; ")}.`;
 const qualityOffLine = `craftsman quality, doc and tracker gates off: ${state.quality.join("; ")}; the safety guards stay on.`;
 const stateLines = [state.safety.length ? guardsOffLine : "", state.quality.length ? qualityOffLine : ""].filter(Boolean);

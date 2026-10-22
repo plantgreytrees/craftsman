@@ -14,7 +14,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, consumeNonce, sessionDir, sidOf } from "./lib/core.mjs";
 
-export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, env = process.env, nonce = false }) {
+export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, nonce = false }) {
   if (!sid) throw new Error("no session id (CLAUDE_CODE_SESSION_ID is not set), so no token can be tied to this session");
   if (!commandInvoked(sid, ["instruction", "auto"], { context: { stateDir } })) {
     throw new Error("goal tokens are minted only inside /instruction or /auto, and neither ran in this session");

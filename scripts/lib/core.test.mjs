@@ -977,3 +977,19 @@ test("this repo's craftsman.project.json lists the markdown its own tests read, 
   for (const pattern of ["README.md", "CHANGELOG.md", "commands/*.md", "agents/*.md", "docs/architecture/*.md"]) assert.ok(project.stopGate.markdownTests.includes(pattern), pattern);
   assert.deepEqual(Object.keys(project), ["stopGate"], "only project-only values live here");
 });
+
+// Round 6 (42.1): the nonce is required whatever files exist; no marker can stand in for it.
+test("consumeNonce: a leftover safety-off file does not stand in for the nonce, and a nonce is per script and one-shot (42.1)", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-nonce-"));
+  try {
+    const context = { stateDir };
+    const dir = path.join(stateDir, "sessions", "s1");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "safety-off"), "off\n");
+    assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), false);
+    coreNs.mintNonce("s1", "doc-write", { context });
+    assert.equal(coreNs.consumeNonce("s1", "toggle", { context }), false, "a nonce is per script");
+    assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), true);
+    assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), false, "and one-shot");
+  } finally { fs.rmSync(stateDir, { recursive: true, force: true }); }
+});

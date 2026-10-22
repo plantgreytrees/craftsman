@@ -640,18 +640,15 @@ export function commandInvoked(sid, names, { context = null, via = null, ttlMs =
 // ARCH-SAFETY-05: the authority scripts (doc-write.mjs on, toggle.mjs off, goal-token.mjs) trust the session id from their
 // environment, which any process can set. pre-guard alone knows the real session of the tool call, so when it lets such a
 // command through it leaves a one-shot nonce for that session and script, and the script consumes it. A script started any
-// other way (an interpreter, a spawned child, a borrowed id) finds none and refuses. With the safety hooks off by the user
-// there is no pre-guard to mint, so nothing is asked for; SessionStart records that choice (safetyOffMarker).
+// other way (an interpreter, a spawned child, a borrowed id) finds none and refuses. Nothing skips it: not the script's own
+// environment and not a file, because anything a child process or another session can set or lend would be a way round. Under
+// CRAFTSMAN_SAFETY=off pre-guard enforces nothing, so doc-write.mjs is a no-op there rather than a bypass (see that script).
 const NONCE_TTL_MS = 60000;
 const nonceFile = (sid, name, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), `nonce-${name}`);
 export function mintNonce(sid, name, { context = null, now = Date.now() } = {}) {
   try { atomicWrite(nonceFile(sid, name, context), `${now}\n`); } catch { /* no state dir: the script will refuse, which is the safe side */ }
 }
-// CRAFTSMAN_SAFETY=off is the user's environment, which only a hook sees: SessionStart records it as this marker. The script's own
-// environment is not asked, because any child process can set it.
-export const safetyOffMarker = (sid, context = null) => path.join(sessionDir(sidOf({ session_id: sid }), context), "safety-off");
 export function consumeNonce(sid, name, { context = null, now = Date.now(), ttlMs = NONCE_TTL_MS } = {}) {
-  if (isFlagFile(safetyOffMarker(sid, context))) return true;
   const file = nonceFile(sid, name, context);
   let minted;
   try { minted = Number(fs.readFileSync(file, "utf8")); fs.unlinkSync(file); } catch { return false; }
