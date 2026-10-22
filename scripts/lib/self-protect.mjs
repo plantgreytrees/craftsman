@@ -1,6 +1,8 @@
 // The one list of files only a unit run by /orchestrate or /auto may rewrite (ARCH-SAFETY-05).
 // scope.mjs refuses to activate a manifest whose write list can reach one of them without such a
 // run; pre-guard.mjs gives the exemption only to a scope that names one. Both import it from here.
+import fs from "node:fs";
+import path from "node:path";
 import { globToRe } from "./core.mjs";
 
 export const SELF_SCOPED = Object.freeze([
@@ -51,6 +53,31 @@ export function safetyProjection(rel, doc) {
     return { disableAllHooks: doc.disableAllHooks ?? null, hooks: doc.hooks ?? null, plugins: pick(doc.enabledPlugins, /^craftsman(?:@|$)/i), env: pick(doc.env, SAFETY_ENV) };
   }
   return Object.fromEntries(SAFETY_CONFIG_KEYS.map((key) => [key, dig(doc, key)]));
+}
+
+// Each write entry again with the symlinks in its literal directory prefix followed: `c/**` with `c -> .claude` is also
+// `.claude/**`. Only the entries that change are returned; a link that leaves the project is skipped. scope.mjs judges
+// the entries and these together, so a manifest cannot reach a self-scoped file through a link it made itself.
+export function realEntries(writeEntries, root) {
+  let realRoot;
+  try { realRoot = fs.realpathSync(root); } catch { return []; }
+  const out = [];
+  for (const entry of Array.isArray(writeEntries) ? writeEntries : []) {
+    const e = clean(entry);
+    const cut = e.search(/[*?{[]/);
+    const dir = cut < 0 ? e : e.slice(0, cut).replace(/[^/]*$/, "");
+    const tail = cut < 0 ? "" : e.slice(dir.length);
+    let probe = path.resolve(realRoot, dir);
+    const missing = [];
+    while (!fs.existsSync(probe) && path.dirname(probe) !== probe) { missing.unshift(path.basename(probe)); probe = path.dirname(probe); }
+    let real;
+    try { real = path.join(fs.realpathSync(probe), ...missing); } catch { continue; }
+    const rel = path.relative(realRoot, real).split(path.sep).join("/");
+    if (rel.startsWith("..")) continue;
+    const resolved = [rel, tail].filter(Boolean).join("/");
+    if (resolved !== e) out.push(resolved === "" ? "." : resolved);
+  }
+  return out;
 }
 
 // The self-scoped files any of `writeEntries` can reach, in list order.

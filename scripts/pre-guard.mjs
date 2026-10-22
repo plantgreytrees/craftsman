@@ -1196,8 +1196,10 @@ if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
   const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
   const kinds = [selfKind(rel), selfKind(realTarget)];
   if (kinds.includes("never")) denySelfDisable(`writing ${rel}`);
-  if (kinds.includes("scoped") && !(scopeNames(rel) || scopeNames(realTarget))) {
-    if (rel.endsWith("hooks/hooks.json")) denySelfDisable(`editing ${rel}`);
+  // The exemption is for a scope that names the file itself (by its real path); a name that only reaches it through a
+  // symlink the session made does not count. hooks.json is judged by both spellings of its path.
+  if (kinds.includes("scoped") && !scopeNames(realTarget)) {
+    if ([rel, realTarget].some((p) => p.endsWith("hooks/hooks.json"))) denySelfDisable(`editing ${rel}`);
     let current = "";
     try { current = fs.readFileSync(path.resolve(activeRoot, file), "utf8"); } catch {}
     if (safetyKeysChanged(current, afterEdit(current), realTarget)) denySelfDisable(`editing the safety settings of ${rel}`);

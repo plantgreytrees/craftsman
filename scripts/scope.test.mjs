@@ -187,3 +187,31 @@ test("scope.mjs: a manifest that names hooks.json or craftsman.config.json needs
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Round 3 (19.2): a write entry that reaches a self-scoped file only through a symlink the session made is judged by where it leads.
+test("scope.mjs: a write entry that reaches a self-scoped file through a symlinked directory needs /orchestrate or /auto first (19.2)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-link-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    fs.mkdirSync(path.join(dir, ".claude"));
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.symlinkSync(".claude", path.join(dir, "c"));
+    fs.symlinkSync("src", path.join(dir, "s"));
+    const scopeScript = fileURLToPath(new URL("./scope.mjs", import.meta.url));
+    const guardScript = fileURLToPath(new URL("./orchestrate-scope-guard.mjs", import.meta.url));
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+    delete env.CRAFTSMAN; delete env.CRAFTSMAN_SAFETY;
+    const activate = (write) => spawnSync(process.execPath, [scopeScript], { cwd: dir, encoding: "utf8", env,
+      input: JSON.stringify({ session_id: "scope-link", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: [], docs: [], write } }) });
+    for (const write of [["c/**"], ["c/settings.json"], ["c/*"], ["c"]]) {
+      const refused = activate(write);
+      assert.equal(refused.status, 2, JSON.stringify(write));
+      assert.match(refused.stderr, /only a unit run by \/orchestrate or \/auto/);
+    }
+    assert.match(activate(["s/**"]).stdout, /scope active/, "a link to an ordinary directory needs nothing");
+    spawnSync(process.execPath, [guardScript], { cwd: dir, input: JSON.stringify({ session_id: "scope-link", prompt: "/craftsman:orchestrate docs/plans/p.md" }), encoding: "utf8", env });
+    assert.match(activate(["c/**"]).stdout, /scope active/, "after /orchestrate it may activate");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

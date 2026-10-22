@@ -1698,3 +1698,34 @@ test("pre-guard: a directory destination and the removal of an ancestor cannot r
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Round 3 (19.x): a symlinked directory is the same file for the hooks.json deny and for the scope exemption.
+test("pre-guard: hooks.json and the scope exemption are judged by real path through a symlinked directory (19.1-19.2)", () => {
+  const dir = selfDisableProject();
+  try {
+    fs.mkdirSync(path.join(dir, ".claude"));
+    fs.mkdirSync(path.join(dir, "src"));
+    fs.writeFileSync(path.join(dir, ".claude", "settings.json"), '{"theme":"dark"}\n');
+    for (const [link, target] of [["h", "hooks"], ["c", ".claude"], ["s", "src"]]) fs.symlinkSync(target, path.join(dir, link));
+    const call = (sid, tool, input) => run(GUARD, dir, { session_id: sid, tool_name: tool, tool_input: input });
+    const at = (rel) => path.join(dir, rel);
+    // 19.1: hooks.json through a symlinked directory.
+    assert.equal(call("sl-1", "Edit", { file_path: at("h/hooks.json"), old_string: "{}", new_string: '{"hooks":{}}' }).status, 2, "Edit via h/");
+    assert.equal(call("sl-1", "Write", { file_path: at("h/hooks.json"), content: "{}\n" }).status, 2, "Write via h/");
+    assert.equal(call("sl-1", "Edit", { file_path: at("hooks/hooks.json"), old_string: "{}", new_string: '{"hooks":{}}' }).status, 2, "the direct path (control)");
+    assert.equal(call("sl-1", "Write", { file_path: at("s/a.txt"), content: "x\n" }).status, 0, "an unrelated file through a symlink stays writable");
+    // 19.2: a session scope that names the file only through the link does not give the exemption.
+    const manifest = (sid, write) => ({ session_id: sid, plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: [], docs: [], write } });
+    assert.equal(run(SCOPE, dir, manifest("sl-2", ["c/**"])).status, 2, "scope activation judges the real path: c/** reaches the settings file");
+    assert.equal(typed(dir, "sl-3", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    assert.equal(run(SCOPE, dir, manifest("sl-3", ["c/**"])).status, 0, "after /orchestrate the manifest may activate");
+    const addHooksOff = { file_path: at("c/settings.json"), old_string: '"theme":"dark"', new_string: '"theme":"dark","disableAllHooks":true' };
+    assert.equal(call("sl-3", "Edit", addHooksOff).status, 2, "a scope that names c/** does not skip the safety-key check on .claude/settings.json");
+    assert.equal(typed(dir, "sl-4", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    assert.equal(run(SCOPE, dir, manifest("sl-4", [".claude/settings.json"])).status, 0);
+    assert.equal(call("sl-4", "Edit", { ...addHooksOff, file_path: at(".claude/settings.json") }).status, 0, "a scope that names the real file allows the edit by that path");
+    assert.equal(call("sl-4", "Edit", addHooksOff).status, 2, "the same edit through the link is outside that scope, which names only the real path");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

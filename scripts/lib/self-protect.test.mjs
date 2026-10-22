@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesSelfScoped, safetyProjection } from "./self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesSelfScoped, realEntries, safetyProjection } from "./self-protect.mjs";
+import os from "node:os";
+import path from "node:path";
 import { globToRe } from "./core.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
@@ -58,6 +60,22 @@ test("self-protect: pre-guard keeps one writer-verb list and no hand-copied path
   assert.doesNotMatch(source, /\(\?:touch\|tee\|/, "no verb alternation typed out");
   assert.doesNotMatch(source, /\\\.craftsman\\\/\(\?:off\|doc-write-pending\)/, "the path regex is not hand-copied");
   assert.match(source, /NEVER_TEXT\.test\(command\)/);
+});
+
+test("self-protect: realEntries follows the symlinks in a write entry's literal directory prefix (19.2)", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-real-")));
+  try {
+    fs.mkdirSync(path.join(root, ".claude"));
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync(".claude", path.join(root, "c"));
+    fs.symlinkSync("src", path.join(root, "s"));
+    fs.symlinkSync("/tmp", path.join(root, "out"));
+    assert.deepEqual(realEntries(["c/**", "c/settings.json", "c/*", "c", "s/a.txt", "src/a.txt", "out/x", "plain.txt", "gone/x/**"], root),
+      [".claude/**", ".claude/settings.json", ".claude/*", ".claude", "src/a.txt"], "a link that leaves the project and unchanged entries are not returned");
+    assert.deepEqual(namesSelfScoped(["c/**", ...realEntries(["c/**"], root)]), [".claude/settings.json", ".claude/settings.local.json"]);
+    assert.deepEqual(realEntries("not an array", root), []);
+    assert.deepEqual(realEntries(["c/**"], path.join(root, "missing")), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test("self-protect: ordinary write entries name nothing", () => {
