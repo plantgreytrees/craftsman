@@ -72,12 +72,13 @@ const effectOf = (command) => {
     return changed(before, treeOf(p.dir));
   } finally { p.clean(); }
 };
-const verdictOf = (command) => {
+const resultOf = (command) => {
   const p = project();
   try {
-    return spawnSync(process.execPath, [GUARD], { cwd: p.dir, env: p.env, encoding: "utf8", input: JSON.stringify({ session_id: "claims", tool_name: "Bash", tool_input: { command } }) }).status;
+    return spawnSync(process.execPath, [GUARD], { cwd: p.dir, env: p.env, encoding: "utf8", input: JSON.stringify({ session_id: "claims", tool_name: "Bash", tool_input: { command } }) });
   } finally { p.clean(); }
 };
+const verdictOf = (command) => resultOf(command).status;
 
 // What ARCH-SAFETY-05 claims: each form changes protected state when run unguarded and is refused by the guard.
 const CLAIMS = [
@@ -101,6 +102,10 @@ const CLAIMS = [
   // the same writers in every spelling of their destination and in-place options (round 5)
   ...(have("tar") ? ["tar -xf stage/off.tar --directory=.craftsman", "tar -x -f stage/off.tar -C.craftsman", "tar -xf stage/off.tar -C src -C ../.craftsman",
 "tar xf stage/off.tar --directory .craftsman"] : []),
+  // round 7: an option the allowlist cannot read leaves the destination unknown, and the command is refused outright
+  ...(have("tar") ? ["tar -xf stage/off.tar --warning=none -C src -C ../.craftsman", "tar -xf stage/off.tar --no-overwrite-dir -C src -C ../.craftsman", "tar -xf stage/off.tar -C src --dir=../.craftsman",
+    "tar -xvC.craftsman -f stage/off.tar", "tar -xC.craftsman -f stage/off.tar", "tar -xf stage/off.tar --transform=s,^,.craftsman/,"] : []),
+  ...(have("unzip") && have("zip") ? ["unzip -od.craftsman stage/off.zip", "unzip -qod.craftsman stage/off.zip"] : []),
   ...(have("tar") ? ["tar -xvC .craftsman -f stage/off.tar", "tar -x --file=stage/off.tar --dir=.craftsman", "tar xfC stage/off.tar .craftsman", "tar -xvC .claude -f stage/x.tar"] : []),
   ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip -d.craftsman", "unzip -qo stage/off.zip -d .craftsman", "unzip -od .craftsman stage/off.zip"] : []),
   ...(have("gawk") ? [`gawk -iinplace '{sub("dark","LIGHT");print}' .claude/settings.json`, `gawk --include inplace '{sub("dark","LIGHT");print}' .claude/settings.json`] : []),
@@ -123,7 +128,7 @@ test("ARCH-SAFETY-05 claims: every form changes protected state when run unguard
 // The spellings above must not make every use of those tools a denial.
 test("the archive and awk spellings that write nothing protected are allowed (36.x)", { skip }, () => {
   const allowed = [
-    "tar -xf stage/x.tar -C src", "tar -xvf stage/x.tar -C src", "tar -xzf stage/x.tar --directory=src", "tar -xvC src -f stage/x.tar", "tar xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
+    "tar -xf stage/x.tar -C src", "tar -xvf stage/x.tar -C src", "tar -xzf stage/x.tar --directory=src", "tar xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
     ...(have("unzip") ? ["unzip -l stage/off.zip", "unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
     ...(have("gawk") ? ["gawk -i ordchr 1 src/a.txt", "awk 1 .claude/settings.json", "gawk -v x=1 '{print}' src/a.txt"] : []),
   ];
@@ -166,6 +171,16 @@ test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
   }
   for (const needle of ["craftsman.project.json", "PROJECT_CONFIG_FILES"]) assert.ok(rule("ARCH-SAFETY-11").includes(needle), `ARCH-SAFETY-11 names: ${needle}`);
   for (const needle of ["no-op", "permission prompt", "allowlist"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
+});
+
+// Round 7 (44.x): an extraction with an option the allowlist cannot read is refused outright, whatever it names, and says why.
+test("an extraction with an unreadable option is refused outright with a message naming the cause (44.1)", { skip }, () => {
+  for (const command of ["tar -xvC src -f stage/x.tar", "tar -xf stage/x.tar --warning=none -C src", "unzip -od out stage/off.zip"]) {
+    const r = resultOf(command);
+    assert.equal(r.status, 2, `denied: ${command}`);
+    assert.match(r.stderr, /archive extraction with an option the guard cannot read/, command);
+    assert.match(r.stderr, /-C DIR \/ -d DIR/, "and how to spell it");
+  }
 });
 
 // Round 6 (41.x): variable setters the guard does not read stay with the sandbox. A loop variable or a brace-built name sets the

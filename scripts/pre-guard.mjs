@@ -610,6 +610,15 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   }
   // Writers that edit in place, patch or unpack (`awk -i inplace`, `ed`, `patch`, `tar -x`, `unzip`): the files they name, and
   // for an archive the directory it is unpacked into. What an archive or a patch on stdin contains is not read.
+  // The destination of an extraction cannot be read, so the command is refused whatever it names (the cost is a legitimate unusual
+  // spelling; the message says how to write it so the guard can read it).
+  function denyArchive(verb) {
+    const what = `${verb} extraction with an option the guard cannot read`;
+    logEvent({ ms: Date.now() - T0, ev: "selfguard", sid: sidOf(input), what, result: "blocked" });
+    process.stderr.write(`craftsman: archive extraction with an option the guard cannot read (${verb}) is blocked: spell the destination as -C DIR / -d DIR, ` +
+      `or ask the user to run it. The guard reads only plain spellings because a clustered or abbreviated one can hide where the archive is unpacked.\n`);
+    process.exit(2);
+  }
   function otherWriters(verb, rest, st, env) {
     const operands = (valued = []) => {
       const out = [];
@@ -631,8 +640,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       const extracts = rest.some((a) => /^-[A-Za-z]*x/.test(a) || a === "--extract" || a === "--get") || (!first.startsWith("-") && /^[A-Za-z]*x[A-Za-z]*$/.test(first));
       if (!extracts) return;
       // An allowlist, not a parser of every spelling: only the option words below are read exactly. Any other word (a cluster that
-      // holds C, an abbreviated or unknown long option) leaves the destination unknown, so every word of the command that can name
-      // a directory is judged as one (unreadable → treated as unpacked into whatever it names).
+      // holds C, an abbreviated or unknown long option, --transform) leaves the destination unknown, and the command is refused.
       const flags = /^-?[xvzjJpkoOmPSwa]+f?$/, longFlags = /^--(?:extract|get|verbose|gzip|gunzip|xz|bzip2|keep-old-files|overwrite|no-same-owner|same-owner|preserve-permissions|keep-newer-files|skip-old-files|totals|wildcards|no-same-permissions|strip-components=\d+)$/;
       const dirs = [];
       let known = true;
@@ -657,15 +665,11 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         }
         return;
       }
-      for (const word of rest) {
-        const candidate = word.startsWith("-") ? (word.includes("=") ? word.slice(word.indexOf("=") + 1) : /^-[A-Za-z]./.test(word) && !/^-[A-Za-z]+$/.test(word) ? word.slice(2) : "") : word;
-        if (candidate) target(candidate, st, "holds", env);
-      }
-      return;
+      denyArchive(verb);
     } else if (verb === "unzip") {
       if (rest.some((a) => /^-(?!\w*d)[A-Za-z]*[ltpZ][A-Za-z]*$/.test(a))) return; // list, test, pipe, zipinfo: nothing is written
       // The same allowlist: clusters of argument-free letters, `-d DIR` / `-dDIR`, and operands. Anything else leaves the destination
-      // unknown, and every word that can name a directory is judged as one.
+      // unknown, and the command is refused.
       const dirs = [];
       let known = true;
       for (let i = 0; i < rest.length; i++) {
@@ -676,11 +680,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         if (a.startsWith("-")) known = false;
       }
       if (known) { for (const dir of dirs.length ? dirs : ["."]) target(dir, st, "holds", env); return; }
-      for (const word of rest) {
-        const candidate = word.startsWith("-") ? (/^-d./.test(word) ? word.slice(2) : "") : word;
-        if (candidate) target(candidate, st, "holds", env);
-      }
-      return;
+      denyArchive(verb);
     }
     for (const f of files) if (f && f !== "-") target(f, st, verb, env);
   }
