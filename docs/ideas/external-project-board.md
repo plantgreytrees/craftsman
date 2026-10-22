@@ -7,8 +7,8 @@ depth: standard
 isolation: NOT ISOLATED
 created: 2026-10-23
 updated: 2026-10-23
-related: [docs/architecture/views.rules.md, docs/architecture/docs.rules.md, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, docs/architecture/landing.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.md (same branch)]
-touches: [scripts/digest.mjs, commands/digest.md, scripts/tracker.mjs, scripts/lib/plan-index.mjs, scripts/plan-graph.mjs, craftsman.config.json, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, CHANGELOG.md]
+related: [docs/architecture/views.rules.md, docs/architecture/archive.rules.md, docs/architecture/docs.rules.md, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, docs/architecture/landing.rules.md, docs/architecture/slim.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.md (same branch)]
+touches: [scripts/digest.mjs, commands/digest.md, commands/idea.md, commands/sync-docs.md, scripts/doc-retire.mjs, scripts/lib/dashboard.mjs, scripts/lib/export-notes.mjs, scripts/lib/next-queue.mjs, scripts/lib/archive.mjs, docs/plans/NEXT.md, scripts/tracker.mjs, scripts/lib/plan-index.mjs, scripts/plan-graph.mjs, craftsman.config.json, docs/architecture/tracker.rules.md, docs/architecture/plan.rules.md, CHANGELOG.md]
 ---
 
 # Idea: A visual, multi-view layer over Craftsman's docs, with session planning
@@ -82,19 +82,25 @@ Searched: `docs/ideas/*.md`, `docs/plans/TRACKER.md` and `TRACKER-archive.md`, `
 - Round 1's critic recommended "read-only generated cross-repo board from TRACKER.jsonl" as the whole answer. Kept as the base, but widened to ideas, architecture and the session queue because the problem is browsing, not status. Round 1 also assumed "no non-Claude reader"; the owner has clarified they are the reader.
 - Round 1 listed `docs/plans/TRACKER.jsonl` as "already derived and committed". On main it does not exist in this repo (`ls docs/plans/TRACKER.jsonl` fails; only `.craftsman/events.jsonl` is present), because `tracker.publish` is the sibling design's subject (`tracker.rules.md:21-22`). A cross-repo view must read each repo's local ledger or committed `TRACKER.jsonl` where present.
 
+## Architecture outcome (2026-10-23)
+The first architecture pass built only the dashboard and dropped two things the owner had asked for: **other open-source tools should see this**, and **plan docs should stop cluttering the repo**. The owner caught it, and a second pass added both. Final shape, all decided with the owner:
+- **Views** ([views.rules.md](../architecture/views.rules.md)): per repo, `.craftsman/export/` (gitignored) holds the HTML dashboard (seven sections including Archive), a `notes/` folder with one frontmatter note per plan, idea, area and archived plan (so Obsidian Bases, Foam and Quartz can board and graph them), and a user-owned `inbox/` whose notes seed `/idea`. Nothing else flows back from a tool. `docs/plans/NEXT.md` holds your session order.
+- **Archive** ([archive.rules.md](../architecture/archive.rules.md)): a dedicated archive repo registered as a workspace project holds finished plans and rejected or deferred ideas for every project. Archiving copies, verifies and commits there before anything is removed. Prose links to an archived plan are rewritten to archive pointers after a confirmed dry run; rules, tests and top-level docs still refuse. A plan with no referrers is archived automatically at landing; the rest wait for `/sync-docs --archive`. The archive repo is pushed only owner-run or in an approved landing.
+- **Amendments:** ARCH-DOCS-02 to 12 to 13 (referrers), ARCH-DOCS-04 to 14 (automatic archive only for a lossless move).
+- **Kanban for in-progress work** is the dashboard's plans board and, in Obsidian, a Bases board over the plan notes.
+
+**Not chosen:** replacing docs with GitHub issues (round 1 evidence stands), a GitHub Projects or Backlog.md export (deferred; Backlog.md's file schema is undocumented), a shared export folder across repos, writing status or order back from tools.
+
 ## Recommendations
-1. **Spike Obsidian for a day**, before any code. Open the repo folder as a vault, gitignore `.obsidian/`, build one Base for ideas (by `verdict`) and one for plans (by `priority`, `parent`). Write down which views you used and what is missing, especially a ledger kanban for plans.
-2. **Extend `/digest` with `--html`**: one self-contained file with (a) plans by ledger state as a board, (b) ideas by verdict, (c) the epic > story > feature tree from `plan-index.mjs`, (d) architecture areas with their `governs:` paths and their existing Mermaid, (e) a size bar per doc so the chunky files are obvious, (f) the session queue. Titles, goals and links only, never doc bodies.
-3. **Add the session queue in two halves.** A computed ready list from `plan-graph.mjs` and priority (fulfilling ARCH-PLAN-05), and a hand-written `docs/plans/NEXT.md` of ordered slugs plus one-line intent. Lint that every slug resolves and none is COMPLETE.
-4. **Keep it local.** No Artifact publish by default; opt-in only, under the sibling's approval rule.
-5. **Sequence** after the sibling's ledger-guard step, so the views are not built over a ledger that can lose rows. The Obsidian spike needs no sequencing and can start now.
-6. **Revisit GitHub Projects (mirror, one-way)** only if you want to share the roadmap with others; unchanged from round 1.
+1. **Build in this order:** (1) `next-queue.mjs` and `NEXT.md`; (2) `export-notes.mjs` (the notes tree) and the dashboard; (3) the archive-repo copy, verify and commit step in `doc-retire`, plus the `archive <sha>` index field; (4) the prose-link rewrite with its dry-run confirmation; (5) automatic archive at landing; (6) the `/idea` inbox.
+2. **Spike two unknowns early:** that Obsidian Bases reads the generated frontmatter and its graph follows plain markdown links (half a day), and whether Quartz renders the Mermaid blocks. Neither is proven from the sources read.
+3. **Sequence** after the sibling design's ledger-guard step, and note that this depends on the sibling's `ARCH-LAND-22/24` landing rules, which are not on main.
+4. **Dry-run on a copy of Gleam first** before the first real sweep: the Archive tab will show how many plans are blocked by rules, tests or top-level docs, which are an `/architect` job, not a force.
+5. **GitHub Projects mirror** stays deferred until you want to share the roadmap with other people.
 
 ## Open questions
-- Which view do you want first: plans by state (kanban), the architecture map, ideas by verdict, or the session queue?
-- Is Obsidian acceptable (free but not open source), or must the viewer be open source? The open-source routes are Foam (alpha, VS Code, wikilink-centric) or the generated HTML.
-- Do you need to open the view on your phone or share it, or is local enough?
-- Should the session queue live in the repo (`docs/plans/NEXT.md`, travels with git) or stay local to the machine?
+- Name and location of the archive repo in your workspace (the architecture only requires a Git root registered as a project, id `archive` by default).
+- Whether to keep Obsidian as the suggested viewer, given it is free but not open source; Foam and Quartz are MIT.
 
 ## Next step
-Run the Obsidian spike (no code). If a gap remains, `/architect external-project-board` for the `/digest --html` and queue amendment, after the sibling design's ledger-guard step.
+`/craftsman:instruction external-project-board` to generate the build prompt.

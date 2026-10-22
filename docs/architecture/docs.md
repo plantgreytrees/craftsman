@@ -48,5 +48,6 @@ them. A README cite pins a plan doc until someone removes the cite.
 ## Plan-hierarchy amendments (2026-10-18)
 ARCH-DOCS-01 is superseded by ARCH-DOCS-09 (rollups removed with the plan; parents with live children refused). See [plan](./plan.md).
 
-## Views amendment (2026-10-23)
-ARCH-DOCS-02 is superseded by ARCH-DOCS-12: `docs/plans/NEXT.md` is not a retirement referrer, and retiring a plan removes its line there. Without it, any plan you queue would block its own retirement. See [views](./views.md).
+
+## Archive amendments (2026-10-23)
+ARCH-DOCS-12 is superseded by ARCH-DOCS-13: prose mentions of an archived plan are rewritten to archive pointers after a confirmed dry run, `docs/plans/NEXT.md` is never a referrer, and rules, tests and top-level docs still refuse. ARCH-DOCS-04 is superseded by ARCH-DOCS-14: a plan with no referrer and a verified archive copy is archived automatically at landing; prune and every other archive stay owner-run. See [archive](./archive.md).
