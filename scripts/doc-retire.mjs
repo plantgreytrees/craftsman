@@ -69,9 +69,12 @@ export function retire(input, context = projectContext(".")) {
   if (fs.realpathSync(trackerRoot(context)) !== fs.realpathSync(context.root)) {
     return refuse("retire refused: run doc-retire from the main checkout");
   }
-  // Under CRAFTSMAN_SAFETY=off no guard runs, so there is nothing to be granted; nothing is granted through the variable either.
-  if (safetyEnabled() && !hasGrant(input.sid, context)) {
-    return refuse("retire refused: no doc-write grant (run doc-write.mjs first)");
+  // The grant is always required. CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which
+  // any child process can set, so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
+  if (!hasGrant(input.sid, context)) {
+    return refuse(safetyEnabled()
+      ? "retire refused: no doc-write grant (run doc-write.mjs first)"
+      : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
   }
   const dir = path.posix.dirname(plan);
   const slug = path.posix.basename(plan, ".md");
