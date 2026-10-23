@@ -3,6 +3,7 @@
 // doc-write grant, refuses while anything still references the doc, then removes
 // the plan + its closed scrutinise-/investigate- siblings, archives the ledger
 // rows and commits removal + archive together. There is no force option.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -200,6 +201,7 @@ export function retire(input, context = projectContext(".")) {
     } catch { /* unreadable parent: the post-edit index check decides */ }
   }
   const found = new Set();
+  const rewriteFiles = new Set();
   for (const doc of [{ plan, slug }, ...descendants]) {
     const scan = findReferrers(context, doc.plan ?? plan, doc.slug ?? slug);
     if (scan === null) return refuse("retire refused: referrer scan failed");
@@ -211,13 +213,51 @@ export function retire(input, context = projectContext(".")) {
         if (file === parentRollup) continue;
         if (file === parentDoc && onlyChildrenList(file, targets)) continue;
       }
-      found.add(file);
+      if (scan.rewritable.includes(file)) rewriteFiles.add(file); else found.add(file);
     }
   }
+  // Rewritable prose files must be clean so the rewrite lands alone in the retire commit.
+  for (const file of rewriteFiles) {
+    if (git(context, ["status", "--porcelain", "--", file]).trim()) return refuse(`retire refused: uncommitted changes in ${file}`, [file]);
+  }
+  // ARCH-DOCS-13: prose mentions become archive pointers (sha pending in the dry run).
+  let productId = path.basename(fs.realpathSync(trackerRoot(context)));
+  try {
+    const projects = loadWorkspaceManifest()?.projects ?? {};
+    productId = Object.entries(projects).find(([, p]) => p.root === fs.realpathSync(trackerRoot(context)))?.[0] ?? productId;
+  } catch { /* directory name */ }
+  const rewriteDocs = [{ plan, slug }, ...descendants.map((d) => ({ plan: d.plan, slug: d.slug }))];
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rewriteLine = (line, shaOf) => {
+    let out = line;
+    for (const d of rewriteDocs) {
+      const pointer = `archive:${productId}/plans/${d.slug}@${shaOf(d.plan)}`;
+      for (const t of [d.plan, d.slug]) out = out.replace(new RegExp(`(?<![\\w/.-])${esc(t)}(?![\\w-])`, "g"), () => pointer);
+    }
+    return out;
+  };
+  const rewriteBase = (file) => (parentEdit?.file === file ? parentEdit.next : fs.readFileSync(path.join(context.root, file), "utf8"));
+  const rewriteText = (file, shaOf) => rewriteBase(file).split("\n").map((l) => rewriteLine(l, shaOf)).join("\n");
+  const rewrites = [];
+  for (const file of [...rewriteFiles].sort()) {
+    const before = rewriteBase(file).split("\n");
+    const after = rewriteText(file, () => "pending").split("\n");
+    before.forEach((line, i) => { if (line !== after[i]) rewrites.push({ file, line: i + 1, before: line, after: after[i] }); });
+    if (!rewrites.some((r) => r.file === file)) found.add(file); // a hit with nothing to rewrite stays a referrer
+  }
+  const digest = crypto.createHash("sha256").update(JSON.stringify(rewrites)).digest("hex");
   const referrers = [...found].sort();
   if (referrers.length) {
     logEvent({ ev: "doc_prune_refused", path: plan, cited_by: referrers }, context);
     return refuse(`retire refused: ${plan} is referenced by ${referrers.join(", ")}`, referrers);
+  }
+
+  if (input.dry_run) return { dry_run: true, rewrites, digest };
+  if (rewrites.length && input.confirm_rewrites !== digest) {
+    const files = [...new Set(rewrites.map((r) => r.file))];
+    return refuse(input.confirm_rewrites
+      ? `retire refused: confirm_rewrites is stale; re-run the dry run (referenced by ${files.join(", ")})`
+      : `retire refused: ${plan} is referenced by ${files.join(", ")}; run a dry run and confirm its digest as confirm_rewrites`, files);
   }
 
   // The retired plans' lines leave NEXT.md in the same commit (ARCH-DOCS-13).
@@ -245,13 +285,7 @@ export function retire(input, context = projectContext(".")) {
   try {
     const archive = resolveArchive(context);
     if (archive.root) {
-      const root = fs.realpathSync(trackerRoot(context));
-      let productId = path.basename(root);
-      try {
-        const projects = loadWorkspaceManifest()?.projects ?? {};
-        productId = Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? productId;
-      } catch { /* directory name */ }
-      const seams = { context };
+        const seams = { context };
       archiveShas = new Map();
       const copied = copyAndCommit({ archive, productId, kind: "plans", slug, files: [plan, ...siblings], sourceRoot: context.root, plan }, seams);
       archiveSha = copied.sha;
@@ -300,6 +334,16 @@ export function retire(input, context = projectContext(".")) {
       fs.writeFileSync(path.join(context.root, NEXT_DOC), nextEdit);
       git(context, ["add", "--", NEXT_DOC]);
     }
+    if (rewrites.length) {
+      const shaOf = (p) => { const v = archiveOf(p); if (!v) throw new Error(`no archive sha for ${p}`); return v; };
+      for (const file of rewriteFiles) {
+        if (!rewrites.some((r) => r.file === file)) continue;
+        const next = rewriteText(file, shaOf);
+        if (!removing.includes(file)) removing.push(file); // on the rollback set before it is written
+        fs.writeFileSync(path.join(context.root, file), next);
+        git(context, ["add", "--", file]);
+      }
+    }
     archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, archive: archiveOf(plan), hierarchy: hierarchy.has(plan) }, context);
     for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, archive: archiveOf(d.plan), hierarchy: hierarchy.has(d.plan) }, context);
     for (const sibling of siblings) archivePlan({ plan: sibling, goal: siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, archive: archiveOf(sibling), hierarchy: !rowsOf(sibling).length }, context);
@@ -325,6 +369,7 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: ${error.message}${restoreFailure}`);
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
+  for (const file of new Set(rewrites.map((r) => r.file))) logEvent({ ev: "archive_rewrite", file, plan }, context);
   logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha }, context);
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
