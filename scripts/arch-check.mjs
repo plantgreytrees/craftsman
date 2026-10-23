@@ -254,9 +254,10 @@ export function lintPlans(root) {
   return errors;
 }
 
-// ARCH-DOCS-10: project doc budgets (config docs.budgets). A file already in the
-// merge-base caps at its merge-base size, a new plan/scrutinise doc at the
-// default, and every limit only ratchets down against the merge-base config.
+// ARCH-DOCS-10: project doc budgets (config docs.budgets). A file may grow up to
+// the default; one already over the default caps at its merge-base size,
+// so it can only shrink. A new doc takes the default; every limit only
+// ratchets down against the merge-base config.
 function gitOut(root, args) {
   try { return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return null; }
 }
@@ -288,7 +289,9 @@ export function lintBudgets(root, cfg, base = mergeBase(root)) {
     const size = fs.statSync(path.join(root, rel)).size;
     const old = baseSize(rel);
     const own = b.caps?.[rel];
-    const cap = Math.min(own ?? Infinity, old ?? (base ? lim(kind) : size) ?? Infinity);
+    const def = lim(kind);
+    const floor = old !== null && def !== null && old > def ? old : def;
+    const cap = Math.min(own ?? Infinity, (base ? floor : size) ?? Infinity);
     check(rel, size, Number.isFinite(cap) ? cap : null, "bytes");
   }
   check("openPlans", names.filter((n) => !n.startsWith("scrutinise-")).length, lim("openPlans"), "plans");
