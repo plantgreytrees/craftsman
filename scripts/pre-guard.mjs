@@ -96,7 +96,7 @@ function heredocSubstitutions(body) {
 // parsed as shell. Quote-aware: a `<<` inside single quotes is not a heredoc,
 // while one inside `"$( ... )"` is. Unterminated bodies run to the end, as in sh.
 function arithmeticEnd(text, i) { // index of the `)` / `]` closing arithmetic opened at i, else text.length
-  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
+  if (text[i + 1] === "{") return braceEnd(text, i);  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
   let j = i + 1, depth = 0;
   for (; j < text.length; j++) { if (text[j] === "(") depth++; else if (text[j] === ")" && --depth === 0) break; }
   return j;
@@ -131,7 +131,7 @@ function stripHeredocs(text) {
     if (sq) { out += c; if (c === "'") sq = false; continue; }
     if (c === "\\" && i + 1 < text.length) { out += c + text[++i]; continue; }
     if (top === "dq") {
-      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { // arithmetic: a shift, never a heredoc
+      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[" || text[i + 1] === "{")) { // arithmetic: a shift, never a heredoc
         const j = arithmeticEnd(text, i); out += text.slice(i, j + 1); i = j; continue;
       }
       if (c === '"') stack.pop();
@@ -141,7 +141,7 @@ function stripHeredocs(text) {
     if (c === "'") { sq = true; out += c; continue; }
     if (c === '"') { stack.push("dq"); out += c; continue; }
     // Arithmetic `$(( ))` / `(( ))`: its `<<` is a shift, never a heredoc.
-    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[" || text[i + 1] === "{")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
       const j = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1);
       out += text.slice(i, j + 1); i = j; continue;
     }
@@ -1570,4 +1570,9 @@ function bypassView(command) {
   if (!command.includes("<<") || command.length > 16384) return command;
   const stripped = stripHeredocs(command);
   return proseOnly(stripped) ? stripped : command;
+}
+
+function braceEnd(text, i) { // index of the `}` closing `${` at i (nesting-aware), else text.length: unterminated stays in view
+  for (let j = i + 2, d = 1; j < text.length; j++) { if (text[j] === "{") d++; else if (text[j] === "}" && --d === 0) return j; }
+  return text.length;
 }
