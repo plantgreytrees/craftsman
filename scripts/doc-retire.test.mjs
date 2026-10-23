@@ -712,7 +712,7 @@ test("findReferrers: classifies by referrer kind, with and without an archive pr
   for (const f of [...blockingKinds, "docs/plans/other.md", "docs/ideas/idea.md"]) assert.ok(withoutArchive.blocking.includes(f), f);
   const before = run(context.root, "status", "--porcelain");
   const withArchiveOut = withArchive(() => findReferrers(context, PLAN, "alpha"));
-  assert.deepEqual(withArchiveOut.rewritable.filter((f) => !f.endsWith("alpha.md") && !f.includes("scrutinise")), ["docs/ideas/idea.md", "docs/plans/other.md"]);
+  assert.deepEqual(withArchiveOut.rewritable.slice().sort(), ["docs/ideas/idea.md", "docs/plans/alpha.md", "docs/plans/other.md", "docs/plans/scrutinise-alpha.md"]);
   assert.deepEqual(withArchiveOut.blocking.sort(), blockingKinds);
   assert.equal(run(context.root, "status", "--porcelain"), before);
 });
@@ -723,6 +723,13 @@ test("doc-retire: NEXT.md is never a referrer and the retired plan line leaves i
   assert.equal(out.retired, PLAN, out.reason);
   assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n- docs/plans/beta.md second\n");
   assert.ok(run(context.root, "show", "--name-only", "--format=", "HEAD").includes("docs/plans/NEXT.md"));
+});
+
+test("doc-retire: a NEXT.md line that only mentions the slug as a word is kept", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n- docs/plans/alpha.md first\n- docs/plans/beta.md after alpha\n" } }));
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n- docs/plans/beta.md after alpha\n");
 });
 
 test("doc-retire: with an archive project the docs are copied first, the heading carries archive <sha>, the event too", () => {

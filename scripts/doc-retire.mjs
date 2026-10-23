@@ -227,7 +227,6 @@ export function retire(input, context = projectContext(".")) {
       const old = fs.readFileSync(path.join(context.root, NEXT_DOC), "utf8");
       const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const res = [plan, ...siblings, ...descendants.map((d) => d.plan)].map((p) => new RegExp(`(?<![\\w/.-])${esc(p)}(?![\\w-])`));
-      for (const d of [slug, ...descendants.map((x) => x.slug)]) res.push(new RegExp(`(?<![\\w/.-])${esc(d)}(?![\\w/.-])`));
       const kept = old.split("\n").filter((line) => !res.some((re) => re.test(line)));
       if (kept.length !== old.split("\n").length) {
         if (git(context, ["status", "--porcelain", "--", NEXT_DOC]).trim()) return refuse(`retire refused: uncommitted changes in ${NEXT_DOC}`);
