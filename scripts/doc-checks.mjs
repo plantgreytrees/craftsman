@@ -11,14 +11,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadConfig, projectContext, splitCmd } from "./lib/core.mjs";
 
-export function onPath(bin, env = process.env) {
-  if (bin.includes("/")) return fs.existsSync(bin);
+export function onPath(bin, env = process.env, cwd = process.cwd()) {
+  if (bin.includes("/")) return fs.existsSync(path.resolve(cwd, bin));
   return (env.PATH || "").split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, bin)));
 }
 
 function runOne(cmd, cwd, timeoutMs) {
   const [bin, ...args] = splitCmd(cmd);
-  if (!bin || !onPath(bin)) return { cmd, status: "skipped" };
+  if (!bin || !onPath(bin, process.env, cwd)) return { cmd, status: "skipped" };
   const r = spawnSync(bin, args, { cwd, encoding: "utf8", timeout: timeoutMs });
   if (r.error?.code === "ENOENT") return { cmd, status: "skipped" };
   if (r.status === 0) return { cmd, status: "pass" };
