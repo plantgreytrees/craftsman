@@ -34,7 +34,7 @@ export function hookTimeouts(file = fileURLToPath(new URL("../hooks/hooks.json",
 export function latencySection(events, timeouts = hookTimeouts()) {
   const byEv = new Map();
   for (const e of events) {
-    if (typeof e.ms !== "number") continue;
+    if (typeof e.ms !== "number" || e.ev === "dashboard_render") continue;
     if (!byEv.has(e.ev)) byEv.set(e.ev, []);
     byEv.get(e.ev).push(e.ms);
   }
@@ -48,6 +48,16 @@ export function latencySection(events, timeouts = hookTimeouts()) {
     lines.push(`  ${String(ev).padEnd(12)} n=${arr.length} · p50 ${pct(arr, 50)}ms · p95 ${p95}ms${small}${flag}`);
   }
   return lines.join("\n");
+}
+
+// dashboard_render p50/p95, beside the hook latency section (ARCH-VIEWS-10); skipped renders are counted apart.
+export function renderSection(events) {
+  const all = events.filter((e) => e.ev === "dashboard_render" && typeof e.ms === "number");
+  const done = all.filter((e) => !e.skipped).map((e) => e.ms);
+  const skipped = all.length - done.length;
+  if (!all.length) return "Dashboard render: no samples yet";
+  const stat = done.length ? ` · p50 ${pct(done, 50)}ms · p95 ${pct(done, 95)}ms` : "";
+  return `Dashboard render: ${done.length} rendered${stat} · ${skipped} skipped`;
 }
 
 // Protected-path blocks: only preguard events whose result is "blocked";
@@ -159,7 +169,7 @@ function main() {
   const cacheRate = gate.length ? Math.round((100 * (gr.cached || 0)) / gate.length) : 0;
   console.log(`  cache hit rate: ${cacheRate}%\n`);
 
-  console.log(`${latencySection(events)}\n`);
+  console.log(`${latencySection(events)}\n${renderSection(events)}\n`);
 
   console.log(`PreToolUse protected-path blocks: ${pre.length}`);
   console.log(guardReasonsSection(events));

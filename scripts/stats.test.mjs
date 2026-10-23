@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { rootContextRows, rootContextSection, latencySection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection, approvalSection } from "./stats.mjs";
+import { rootContextRows, rootContextSection, latencySection, renderSection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection, approvalSection } from "./stats.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = (sid, tokens, percent, unit = null) => ({ ts: 1, ev: "context", sid, phase: "orchestrate", unit, tokens, percent, cost: null });
@@ -125,4 +125,12 @@ test("stats: approval section pairs requested with decided by run (ARCH-APPROVAL
   const out = approvalSection(ev);
   assert.match(out, /^  approvals: 2 decided · p50 30s · p95 30s$/);
   assert.match(approvalSection([]), /^  approvals: none decided yet$/);
+});
+
+test("stats: dashboard_render p50/p95 over rendered runs, skipped counted apart, not in hook latency", () => {
+  const ev = (ms, skipped = false) => ({ ts: 1, ev: "dashboard_render", ms, skipped, sections: 7 });
+  const events = [ev(10), ev(20), ev(30), ev(0, true), ev(0, true)];
+  assert.equal(renderSection(events), "Dashboard render: 3 rendered · p50 20ms · p95 30ms · 2 skipped");
+  assert.match(renderSection([]), /no samples yet/);
+  assert.doesNotMatch(latencySection(events, TIMEOUTS), /dashboard_render/);
 });
