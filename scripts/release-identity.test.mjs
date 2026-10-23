@@ -19,3 +19,16 @@ test("metadata.release names the newest released CHANGELOG heading (ARCH-MOD-06)
   assert.ok(newest, "CHANGELOG has a released heading");
   assert.equal(read("plugin.json").metadata.release, newest);
 });
+
+test("userConfig declares exactly the four knobs with only allowed fields (ARCH-MOD-06)", () => {
+  const plugin = read("plugin.json");
+  assert.deepEqual(Object.keys(plugin.userConfig).sort(), ["autonomyLevel", "budgetsEnforce", "modelTier", "reviewDepth"]);
+  for (const [key, opt] of Object.entries(plugin.userConfig)) {
+    assert.deepEqual(Object.keys(opt).sort(), ["default", "description", "title", "type"], key);
+    assert.equal("options" in opt, false);
+  }
+  assert.equal(plugin.userConfig.budgetsEnforce.type, "boolean");
+  assert.equal(plugin.userConfig.budgetsEnforce.default, true);
+  for (const k of ["autonomyLevel", "reviewDepth", "modelTier"]) assert.equal(plugin.userConfig[k].type, "string");
+  assert.equal("version" in plugin, false);
+});

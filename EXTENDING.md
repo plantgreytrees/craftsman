@@ -396,6 +396,19 @@ the markdown its own tests read:
 
 An ordinary project does not need it: put the same keys in `craftsman.config.json`.
 
+## Machine-wide settings (`userConfig`)
+
+The plugin asks for four settings at install, exported to hooks as `CLAUDE_PLUGIN_OPTION_<KEY>`:
+
+| Setting | Values | Effect |
+|---|---|---|
+| `autonomyLevel` | attended / standard / unattended | `repoExec.approval.prLines` 100 / 400 / 1000 |
+| `reviewDepth` | light / standard / deep | `planning.blindRederivation` never / auto / always |
+| `budgetsEnforce` | true / false | `docs.budgets.enforce` |
+| `modelTier` | any | reserved, changes nothing |
+
+They sit between the plugin defaults and the project files, so a key set in `craftsman.config.json` or `craftsman.project.json` wins. An unset or unknown value changes nothing.
+
 ## Update channel and CI lint
 
 Installs track commits: the manifests carry no `version` key (CHANGELOG 2.2.0), so every push to the default branch is an update. To hold a project on tested code, add the marketplace as `plantgreytrees/craftsman#stable`, a branch the owner fast-forwards after the plugin's own loop passes. Rollback is moving `stable` back. `/craftsman:upgrade` is the update path.
