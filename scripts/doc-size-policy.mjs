@@ -67,7 +67,7 @@ export const FILE_CAPS = {
   "commands/plan.md": 8988,
   "commands/scrutinise.md": 8169,
   "commands/stats.md": 348,
-  "commands/sync-docs.md": 9196,
+  "commands/sync-docs.md": 8604,
   "commands/toggle.md": 397,
   "commands/understand.md": 6707,
   "commands/upgrade.md": 2145,
