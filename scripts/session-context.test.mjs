@@ -98,3 +98,21 @@ test("ARCH-SLIM-10: the SessionStart additionalContext stays under its byte cap"
     assert.ok(bytes <= CAP_BYTES, `additionalContext is ${bytes} bytes, cap ${CAP_BYTES}`);
   });
 });
+
+test("ARCH-APPROVAL-05: SessionStart names approved-but-unlanded runs in one line, and only then", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const ctx = () => JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "appr" }).stdout).hookSpecificOutput.additionalContext;
+    assert.doesNotMatch(ctx(), /APPROVED, NOT LANDED/);
+    const d = path.join(dir, ".craftsman", "approvals");
+    fs.mkdirSync(d, { recursive: true });
+    const rec = (run, status) => fs.writeFileSync(path.join(d, `${run}.json`), JSON.stringify({ run, plan: "p", status, choice: "merge", url: "u" }));
+    rec("p-a", "decided");
+    rec("p-b", "landed");
+    rec("p-c", "requested");
+    const lines = ctx().split("\n").filter((l) => l.includes("APPROVED, NOT LANDED"));
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /p-a/);
+    assert.doesNotMatch(lines[0], /p-b|p-c/);
+  });
+});
