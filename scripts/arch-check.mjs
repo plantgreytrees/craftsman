@@ -23,6 +23,7 @@
 // `--root <dir>` overrides the project root (defaults to the current project).
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { buildIndex, parseFrontmatter as parsePlanFrontmatter } from "./lib/plan-index.mjs";
 import { PROJECT_ROOT, globToRe, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
 
@@ -253,6 +254,48 @@ export function lintPlans(root) {
   return errors;
 }
 
+// ARCH-DOCS-10: project doc budgets (config docs.budgets). A file already in the
+// merge-base caps at its merge-base size, a new plan/scrutinise doc at the
+// default, and every limit only ratchets down against the merge-base config.
+function gitOut(root, args) {
+  try { return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return null; }
+}
+export function mergeBase(root) {
+  for (const ref of ["origin/main", "main", "origin/master", "master"]) {
+    const base = gitOut(root, ["merge-base", "HEAD", ref]);
+    if (base) return base;
+  }
+  return null;
+}
+export function lintBudgets(root, cfg, base = mergeBase(root)) {
+  const b = cfg?.docs?.budgets || {};
+  let prev = {};
+  try { prev = JSON.parse(gitOut(root, ["show", `${base}:craftsman.config.json`]))?.docs?.budgets || {}; } catch { /* no base config */ }
+  const lim = (k) => (Number.isFinite(b[k]) ? Math.min(b[k], Number.isFinite(prev[k]) ? prev[k] : Infinity) : null);
+  const baseSize = (rel) => { const n = base && gitOut(root, ["cat-file", "-s", `${base}:${rel}`]); return n ? Number(n) : null; };
+  let names = [];
+  try { names = fs.readdirSync(path.join(root, "docs", "plans")).filter((n) => n.endsWith(".md") && !/^(TRACKER|investigate-)/.test(n)).sort(); } catch { /* no plans */ }
+  const report = [];
+  const fails = [];
+  const check = (what, used, cap, unit) => {
+    if (cap === null || cap === undefined) return;
+    report.push(`budget ${what}: ${used}/${cap} ${unit}`);
+    if (used > cap) fails.push(`${what}: ${used} ${unit} exceeds its ${cap}-${unit} budget (over by ${used - cap}) — trim it (ARCH-DOCS-10)`);
+  };
+  for (const n of names) {
+    const rel = `docs/plans/${n}`;
+    const kind = n.startsWith("scrutinise-") ? "scrutiniseBytes" : "planBytes";
+    const size = fs.statSync(path.join(root, rel)).size;
+    const old = baseSize(rel);
+    const own = b.caps?.[rel];
+    const cap = Math.min(own ?? Infinity, old ?? (base ? lim(kind) : size) ?? Infinity);
+    check(rel, size, Number.isFinite(cap) ? cap : null, "bytes");
+  }
+  check("openPlans", names.filter((n) => !n.startsWith("scrutinise-")).length, lim("openPlans"), "plans");
+  try { check("CLAUDE.md", fs.readFileSync(path.join(root, "CLAUDE.md"), "utf8").split(/\r?\n/).length, lim("claudeMdLines"), "lines"); } catch { /* none */ }
+  return { enforce: b.enforce !== false, report, errors: fails };
+}
+
 // The opening line of every human doc /architect writes.
 export const HUMAN_BANNER = "> **Human reference.**";
 
@@ -288,7 +331,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const [mode, ...rest] = args;
   let problems = [];
   if (mode === "lint") {
-    problems = [...lintRules(root, docs, dir), ...lintPlans(root)];
+    const budgets = lintBudgets(root, cfg);
+    problems = [...lintRules(root, docs, dir), ...lintPlans(root), ...(budgets.enforce ? budgets.errors : [])];
+    for (const line of budgets.report) console.log(`arch-check: ${line}`);
+    if (!budgets.enforce) for (const e of budgets.errors) console.log(`arch-check: (report only) ${e}`);
     if (!problems.length) console.log(`arch-check: ${docs.length} rules doc(s), ${docs.reduce((n, d) => n + d.rules.length, 0)} rule(s) — PASS`);
     const unmanaged = unmanagedDocs(root, docs, dir).length;
     if (unmanaged) console.log(`arch-check: ${unmanaged} unmanaged doc(s) under ${dir} (no rules pair; /sync-docs maintains them, /architect --backfill pairs them)`);

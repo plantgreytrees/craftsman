@@ -128,7 +128,12 @@
     "extraChecks": []
   },
   "docs": {
-    "checks": []
+    "checks": [],
+    "budgets": {
+      "planBytes": 61440,
+      "scrutiniseBytes": 30720,
+      "enforce": true
+    }
   },
   "security": {
     "enabled": true,
