@@ -17,6 +17,7 @@ import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScope
 import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
+import { proseOnly } from "./lib/heredoc-allow.mjs";
 
 const T0 = Date.now();
 // Authority scripts this command invokes; their nonces are left only when the whole command is allowed (ARCH-SAFETY-05).
@@ -1564,10 +1565,9 @@ if (g.enabled !== false && writeTool && docSide) {
 logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);
 
-// Heredoc bodies are prose, not flags (ARCH-STATE-12).
+// Heredoc bodies are prose, not flags (ARCH-STATE-14), only when every remaining head is a listed prose consumer.
 function bypassView(command) {
   if (!command.includes("<<") || command.length > 16384) return command;
-  // A heredoc fed to a shell or interpreter runs its body: keep it in view.
-  if (/\b(?:ba|z|da|k|c|fi)?sh\b|\b(?:eval|source|python[\d.]*|node|perl|ruby|php|awk|env|xargs|exec)\b/.test(command)) return command;
-  return stripHeredocs(command);
+  const stripped = stripHeredocs(command);
+  return proseOnly(stripped) ? stripped : command;
 }
