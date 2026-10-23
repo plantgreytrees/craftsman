@@ -25,6 +25,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { buildIndex, parseFrontmatter as parsePlanFrontmatter } from "./lib/plan-index.mjs";
+import { lintNext } from "./lib/next-queue.mjs";
+import { currentState } from "./tracker.mjs";
 import { PROJECT_ROOT, globToRe, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
 
 export const DEFAULT_DIR = "docs/architecture";
@@ -339,6 +341,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     for (const line of budgets.report) console.log(`arch-check: ${line}`);
     if (!budgets.enforce) for (const e of budgets.errors) console.log(`arch-check: (report only) ${e}`);
     if (!problems.length) console.log(`arch-check: ${docs.length} rules doc(s), ${docs.reduce((n, d) => n + d.rules.length, 0)} rule(s) — PASS`);
+    // ARCH-VIEWS-06: NEXT.md problems are warnings; they never change the exit status.
+    try {
+      const rows = (() => { try { return currentState({ ...projectContext("."), root }); } catch { return []; } })();
+      for (const p of lintNext({ root, rows })) console.log(`arch-check: warning: NEXT.md ${p.slug}: ${p.problem}`);
+    } catch { /* a lint warning must never fail lint */ }
     const unmanaged = unmanagedDocs(root, docs, dir).length;
     if (unmanaged) console.log(`arch-check: ${unmanaged} unmanaged doc(s) under ${dir} (no rules pair; /sync-docs maintains them, /architect --backfill pairs them)`);
   } else if (mode === "unmanaged") {
