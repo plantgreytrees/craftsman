@@ -67,3 +67,7 @@ ARCH-STATE-09: scope stays keyed by worktree; the next unit replaces and every e
 
 ## Flow amendments (2026-10-23)
 ARCH-STATE-12 narrows the 18 Oct fail-closed choice, with the owner's approval. A command the parser cannot read is refused only if it also names a guarded path, or a git commit or push outside a heredoc. Everything else is allowed, logged, and listed weekly for review. Evidence: 29 harmless Gleam blocks in 1.5 days. The architect session writing these rules was itself blocked because a heredoc body mentioned a hook-bypass flag. ARCH-STATE-13 names the three lines never crossed mid-run: secrets, deletes outside the worktree, and publication. See [approval](./approval.md).
+
+## Amendments (2026-10-23, owner-approved)
+
+- **ARCH-STATE-14** replaces 12: the guard's removal-word refusal stays fail-closed as PR #1 built it. Only two things change: heredoc prose is not a hook-bypass flag unless the heredoc feeds a shell or interpreter, and a lease push to the run's own branches is allowed. `guard_unparsed` is not emitted.
