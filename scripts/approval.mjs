@@ -31,7 +31,7 @@ const log = (root, ev) => logEvent(ev, { stateDir: dirs(root).state });
 const refuse = (reason) => ({ ok: false, refused: true, reason });
 
 // Read-modify-write under a per-run mkdir lock; waits briefly, breaks a lock left by a crash.
-function withLock(root, run, action) {
+function withLock(root, run, action, tries = 2000) {
   const lock = `${fileFor(root, run)}.lock`;
   fs.mkdirSync(path.dirname(lock), { recursive: true });
   for (let i = 0; ; i++) {
@@ -40,7 +40,7 @@ function withLock(root, run, action) {
       let age = 0;
       try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
       if (age > 30000) { fs.rmSync(lock, { recursive: true, force: true }); continue; }
-      if (i > 2000) throw new Error(`approval record is busy: ${run}`);
+      if (i > tries) throw new Error(`approval record is busy: ${run}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }
@@ -89,8 +89,12 @@ function inDetachedTree(root, sha, fn) {
   }
 }
 
-export function prepare(input, { root = ".", runners, now = () => new Date().toISOString() } = {}) {
+export function prepare(input, { root = ".", runners, now = () => new Date().toISOString(), lockTries } = {}) {
   if (!input.plan || !input.feature) return refuse("plan and feature are required");
+  if (!/^[0-9a-f]{40}$/.test(String(input.head_sha ?? ""))) return refuse("head_sha must be a 40-hex commit sha");
+  try {
+    execFileSync("git", ["-C", mainCheckoutRoot(root), "rev-parse", "--verify", "--quiet", `${input.head_sha}^{commit}`], { stdio: "pipe" });
+  } catch { return refuse(`head_sha ${input.head_sha} is not a commit in this repository`); }
   const runId = runIdFor(input.plan, input.feature);
   if (input.run !== undefined && input.run !== runId) return refuse(`run must be ${runId}`);
   let file;
@@ -123,23 +127,28 @@ export function prepare(input, { root = ".", runners, now = () => new Date().toI
   const leaks = [["approval.md", markdown], ["approval.html", html]]
     .flatMap(([file, text]) => scanContent(String(text)).map((f) => ({ file, line: f.line, rule: f.rule })));
   if (leaks.length) return { ok: false, refused: true, reason: "rendered approval page contains secret-shaped text; no approval page", findings: leaks };
-  const refused = withLock(root, runId, () => {
+  let refused;
+  try { refused = withLock(root, runId, () => {
     const prev = load(root, runId);
     if (prev?.status === "landed") return refuse("record is already landed; start a new run");
     const history = [...(prev?.history || [])];
     if (prev) history.push({ status: prev.status, head_sha: prev.head_sha, choice: prev.choice ?? null, requested_at: prev.requested_at, decided_at: prev.decided_at ?? null, superseded_at: now() });
     save(root, {
       run: runId, plan: input.plan, feature: input.feature, base: input.base, head_sha: input.head_sha, feature_heads: input.feature_heads || [],
-      recommendation, requested_at: now(), url: null, status: "requested", history,
+      recommendation, requested_at: now(), url: null, status: "requested", history, markdown,
     });
     log(root, { ev: "approval_requested", run: runId, recommendation });
     return null;
-  });
+  }, lockTries); } catch (e) { return refuse(e.message); }
   if (refused) return refused;
   return { ok: true, html, markdown, recommendation, docs_ok: docs.ok, record: `${file}.json` };
 }
 
-export function attachUrl({ run, url }, { root = "." } = {}) {
+export function attachUrl(input, { root = ".", lockTries } = {}) {
+  try { return withLock(root, input.run, () => attachUrlLocked(input, { root }), lockTries); } catch (e) { return refuse(e.message); }
+}
+
+function attachUrlLocked({ run, url }, { root }) {
   const rec = load(root, run);
   if (!rec) return refuse("no approval record");
   if (typeof url !== "string" || !/^https:\/\//.test(url)) return refuse("url must be https");
@@ -165,7 +174,11 @@ function checkLocked({ run, row, writer_is_owner }, { root }) {
   return { ok: true, choice: row.choice };
 }
 
-export function landed({ run, sha, mode }, { root = "." } = {}) {
+export function landed(input, { root = ".", lockTries } = {}) {
+  try { return withLock(root, input.run, () => landedLocked(input, { root }), lockTries); } catch (e) { return refuse(e.message); }
+}
+
+function landedLocked({ run, sha, mode }, { root }) {
   const rec = load(root, run);
   if (!rec) return refuse("no approval record");
   if (rec.status !== "decided") return refuse(`record status is ${rec.status}, not decided`);
@@ -183,11 +196,11 @@ export function pending(_input, { root = "." } = {}) {
   return { ok: true, runs };
 }
 
-export function fallback({ run, markdown }, { root = "." } = {}) {
+export function fallback({ run }, { root = "." } = {}) {
   const rec = load(root, run);
   if (!rec) return refuse("no approval record");
   const file = `${fileFor(root, run)}.md`;
-  atomicWrite(file, String(markdown ?? ""));
+  atomicWrite(file, String(rec.markdown ?? ""));
   return { ok: true, file, ...QUESTION };
 }
 
