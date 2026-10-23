@@ -182,7 +182,9 @@ test("land-feature: an approved open-pr choice routes to the PR path and records
     assert.equal(t.baseHead(), before);
     assert.equal(git(path.join(t.ws, "origin.git"), "rev-parse", "feature/p-f1"), t.head());
     const rec = JSON.parse(fs.readFileSync(path.join(t.root, ".craftsman", "approvals", "p-f1.json"), "utf8"));
-    if (!r.parked) { assert.equal(rec.status, "landed"); assert.equal(rec.landed_mode, "open-pr"); }
+    assert.notEqual(r.parked, true);
+    assert.equal(rec.status, "landed");
+    assert.equal(rec.landed_mode, "open-pr");
   } finally { done(t); }
 });
 

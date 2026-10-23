@@ -8,7 +8,7 @@ import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
-import { afterLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
+import { afterLand, afterUnitLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
@@ -68,10 +68,9 @@ function requireOnline(root, input, info, label) {
   throw new NeedsNetwork(`${label} talks to the host API and this process cannot reach origin`, retryAs(input));
 }
 
-// A superproject checks its submodules out detached. When HEAD is exactly origin/<base> and
-// local <base> is missing or an ancestor of HEAD, attaching is safe: the ref moves forward to
-// HEAD (compare-and-swap, never backwards) and HEAD is checked out on it, so no file changes.
-// Returns "" once attached, else the reason it was left detached. Off via repoExec.attachDetached: false.
+// Submodules are checked out detached. When HEAD is origin/<base> and local <base> is missing or
+// an ancestor of HEAD, attach: the ref moves forward only (compare-and-swap), no file changes.
+// Returns "" once attached, else why it stayed detached. Off via repoExec.attachDetached: false.
 function attachDetached(context, base) {
   const root = context.root;
   if (loadConfig(context).repoExec?.attachDetached === false) return "repoExec.attachDetached is false";
@@ -202,7 +201,7 @@ function heartbeat(lock) {
 
 // Plan files the feature must find on origin/<base> before its worktree exists:
 // the plan doc and each parent ancestor (from the plan index). Generated rollups
-// (docs/plans/<slug>/TRACKER.md) are excluded: every tracker transition rewrites them locally.
+// (docs/plans/<slug>/TRACKER.md) are excluded: transitions rewrite them locally.
 function planGateFiles(root, planSlug) {
   let index;
   try { index = loadIndex(root); } catch (error) { throw new Error(`plan gate: plan index failed: ${error.message}`); }
@@ -338,9 +337,13 @@ function landMode(cfg) {
   return land;
 }
 
-// `deps.runner` replaces the host CLI runner in tests; the stdin entry point
-// never passes it.
+// `deps.runner` replaces the host CLI runner in tests only.
+// ARCH-LAND-26: a unit landing also logs retire candidates.
 function merge(context, input, info, deps = {}) {
+  return afterUnitLand(mergeOnly(context, input, info, deps), input, context, deps.retireCheck);
+}
+
+function mergeOnly(context, input, info, deps = {}) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
   const cfg = loadConfig(context);
@@ -358,8 +361,7 @@ function merge(context, input, info, deps = {}) {
   if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
   if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
-  // Otherwise the merge lands in the checkout that has base: this root, or
-  // the other worktree holding it — never a dirty or mid-merge one.
+  // Else merge where base is checked out (this root or another worktree), never dirty.
   const at = holder || context.root;
   if (holder && (run(holder, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })
     || run(holder, ["status", "--porcelain", "--untracked-files=no"]))) {
@@ -562,7 +564,7 @@ function landFeature(context, input, info, deps = {}) {
   if (!rows.length) throw new Error(`land-feature: no tracker rows for feature ${input.feature} of ${input.plan}`);
   const open = rows.filter((row) => row.status !== "FEATURE_MERGED");
   if (open.length) throw new Error(`land-feature refused: ${open.map((row) => `${row.unit} is ${row.status}`).join(", ")}; every unit must be FEATURE_MERGED`);
-  // ARCH-TRACKER-08: open [feature:<id>] criteria (and, for the plan's last feature, untagged ones) refuse the landing.
+  // ARCH-TRACKER-08: open [feature:<id>] criteria (plus untagged ones on the last feature) refuse landing.
   const main = mainCheckoutRoot(context.root);
   const acceptanceFile = path.join(main, ".craftsman", "acceptance.md");
   if (fs.existsSync(acceptanceFile)) {
