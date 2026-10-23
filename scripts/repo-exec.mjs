@@ -8,7 +8,7 @@ import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
-import { afterLand, gateFeature } from "./lib/approval-gate.mjs";
+import { afterLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
@@ -345,6 +345,7 @@ function merge(context, input, info, deps = {}) {
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
   const cfg = loadConfig(context);
   const land = landMode(cfg);
+  noteUnenforced(cfg, context);
   if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
@@ -547,9 +548,9 @@ function isLastFeature(slug, feature, root) {
   }
 }
 
-// ARCH-LAND-18: a finished feature lands on base (needs planning.featureBranches, every row
-// FEATURE_MERGED). Detached temp worktree: base merged in, gate re-run, --no-ff, push; locks
-// feature then base. Conflict / ff-only / rejected push PARK (ARCH-LAND-06); never forced.
+// ARCH-LAND-18: a finished feature (every row FEATURE_MERGED) lands on base: detached temp
+// worktree at the approved head, base merged in, gate re-run, --no-ff, push; feature lock
+// then base. Conflict, ff-only, red gate, rejected push PARK; never forced.
 function landFeature(context, input, info, deps = {}) {
   if (input.feature !== undefined && input.feature !== null) assertFeatureId(input.feature);
   const config = loadConfig(context);
@@ -583,26 +584,32 @@ function landFeature(context, input, info, deps = {}) {
   const lastUnit = rows[rows.length - 1].unit;
   requireOnline(context.root, input, info, "land-feature");
   const units = rows.map((row) => row.unit);
-  const gate = gateFeature({ config, context, input, branch: feature });
-  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units };
-  if (gate.park) return { ...result, ...gate.park };
-  if ((gate.mode || landMode(config)) === "pr") return afterLand({ gate, mode: "open-pr", context }, landFeaturePullRequest(context, input, info, { feature, config, runner: deps.runner, units, lastUnit }));
+  // lock first, then gate
   const featureLock = acquireLock(featureLockInfo(info, feature), input);
   let baseLock = null;
   let added = false;
   let step = null;
   const temp = path.join(info.common_git_dir, ".craftsman", "land", `feature-${slug}-${process.pid}`);
+  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units };
+  const tip = () => run(context.root, ["rev-parse", `refs/heads/${feature}`]);
+  let gate, head;
   try {
+    gate = gateFeature({ config, context, input, branch: feature });
+    if (gate.park) return { ...result, ...gate.park };
+    head = gate.head || tip();
+    deps.afterGate?.();
+    if ((gate.mode || landMode(config)) === "pr") return afterLand({ gate, mode: "open-pr", context }, landFeaturePullRequest(context, input, info, { feature, head, config, runner: deps.runner, units, lastUnit }));
     fetchBase(context, context.root, { ...input, fetch: undefined }, info);
     baseLock = acquireLock(info, input);
     fs.mkdirSync(path.dirname(temp), { recursive: true });
-    run(context.root, ["worktree", "add", "--detach", temp, `refs/heads/${feature}`]);
+    run(context.root, ["worktree", "add", "--detach", temp, head]);
     added = true;
     heartbeat(baseLock);
     step = "conflict";
     run(temp, ["merge", "--no-edit", `origin/${info.base_branch}`]);
-    step = null;
+    step = "gate";
     verifyGateBeforeMerge(context, temp);
+    step = null;
     const ready = run(temp, ["rev-parse", "HEAD"]);
     step = "ff-only";
     run(temp, ["merge-base", "--is-ancestor", `origin/${info.base_branch}`, ready]);
@@ -637,7 +644,7 @@ function landFeature(context, input, info, deps = {}) {
   }
   let cleaned = false;
   let remoteDeleted = false;
-  if (input.cleanup !== false) {
+  if (input.cleanup !== false && tip() === head) {
     const worktree = path.join(mainCheckoutRoot(context.root), ".worktrees", slug);
     try {
       if (fs.existsSync(worktree)) {
@@ -656,7 +663,7 @@ function landFeature(context, input, info, deps = {}) {
 }
 
 // ARCH-LAND-12: "pr" mode pushes the feature, opens or reuses its PR; nothing merges.
-function landFeaturePullRequest(context, input, info, { feature, config, runner, units, lastUnit }) {
+function landFeaturePullRequest(context, input, info, { feature, head, config, runner, units, lastUnit }) {
   const host = detectHost(info.origin, config.repoExec?.host);
   if (!host) throw new Error(`cannot tell which host ${info.origin} is on; set repoExec.host to github, gitlab or azure`);
   const options = {
@@ -666,7 +673,7 @@ function landFeaturePullRequest(context, input, info, { feature, config, runner,
   };
   preflightHost(options, runner);
   const result = { ...info, branch: feature, feature_branch: feature, land: "pr", merged: false, merged_locally: false, park_unit: lastUnit, units };
-  try { remote(context.root, ["push", "-u", "origin", feature]); }
+  try { remote(context.root, ["push", "-u", "origin", `${head}:refs/heads/${feature}`]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
     return landingPark("rejected-push", { ...result, pushed: false }, error);
@@ -700,6 +707,7 @@ const PARK_DECISIONS = {
     options: ["Fix the remote's refusal (permissions, hooks, protection) and push again", "Land through a pull request instead (repoExec.land: \"pr\")", "Leave it unpushed for the user"],
     recommended: "Land through a pull request instead (repoExec.land: \"pr\")",
   }),
+  gate: gatePark,
   "auto-merge": (r) => ({
     question: `${r.pr?.url || "The pull request"} for ${r.branch} is open, but the host refused auto-merge. How should it be merged?`,
     options: ["Merge the pull request by hand on the host", "Enable auto-merge for the repository and retry", "Leave the pull request open for review"],
