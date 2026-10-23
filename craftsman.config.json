@@ -113,6 +113,7 @@
     "testTimeoutMs": 250000,
     "totalBudgetMs": 280000,
     "commands": {
+      "justfile": "just check",
       "package.json": "npm test --silent",
       "Cargo.toml": "cargo test --quiet",
       "pyproject.toml": "pytest -q",
@@ -125,6 +126,9 @@
       "composer.json": "composer test"
     },
     "extraChecks": []
+  },
+  "docs": {
+    "checks": []
   },
   "security": {
     "enabled": true,
