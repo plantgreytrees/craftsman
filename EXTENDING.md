@@ -390,4 +390,4 @@ CI lint one-liner:
 git clone --depth 1 https://github.com/plantgreytrees/craftsman /tmp/craftsman && node /tmp/craftsman/scripts/arch-check.mjs lint --root .
 ```
 
-A repo with a justfile but no `check` recipe must drop the `justfile` marker from `stopGate.commands` in its project config.
+A justfile without a `check` recipe (or no `just` binary) is skipped and the next marker wins. To drop any marker, set it to `null` in the project config's `stopGate.commands`.

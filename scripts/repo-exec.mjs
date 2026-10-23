@@ -9,6 +9,7 @@ import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
 import { afterLand, gateFeature } from "./lib/approval-gate.mjs";
+import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
 function run(root, args, options = {}) {
@@ -310,21 +311,7 @@ function sync(context, input, info) {
   return { ...info, worktree_path: worktree, base_ref: baseRef };
 }
 
-// The project's test command, by stop-gate's cfg.stopGate.commands (marker
-// file → command); null when nothing is detected.
-export function findGateCommand(worktree, cfg) {
-  for (const [marker, command] of Object.entries(cfg.stopGate?.commands || {})) {
-    if (marker.includes("*")) {
-      let entries = [];
-      try { entries = fs.readdirSync(worktree); } catch { continue; }
-      const re = new RegExp(`^${marker.replaceAll(".", "\\.").replaceAll("*", ".*")}$`);
-      if (entries.some((entry) => re.test(entry))) return command;
-    } else if (fs.existsSync(path.join(worktree, marker))) {
-      return command;
-    }
-  }
-  return null;
-}
+export { findGateCommand };
 
 // Re-runs the tests in the worktree before merging; only config
 // (`repoExec.verifyTestsBeforeMerge` / `stopGate.enabled` false) skips it.
