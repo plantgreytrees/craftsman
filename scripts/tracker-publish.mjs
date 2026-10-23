@@ -61,10 +61,17 @@ function runLanded(context, run) {
   try { const rec = JSON.parse(fs.readFileSync(file, "utf8")); return rec.status === "landed" && !rec.published_at; } catch { return false; }
 }
 
-// `deps.beforePush(attempt)` is a test seam for a competing push.
+// Consume the approval token; a refusal after the push is logged, never thrown.
+function consume(mode, input, context, base) {
+  if (mode !== "on-approve" || input.manual === true) return;
+  const marked = markPublished(input.run, { root: context.root });
+  if (!marked?.ok) logEvent({ ev: "tracker_publish_mark_failed", run: input.run, base, reason: marked?.error || marked?.reason || "refused" }, context);
+}
+
+// `deps.beforePush(attempt)` is a test seam for a competing push; `deps.afterLock()` runs once the base lock is held.
 export function publishTracker(input = {}, context = projectContext(input.project || "."), deps = {}) {
   const cfg = loadConfig(context);
-  let mode = cfg.tracker?.publish ?? "push";
+  let mode = cfg.tracker?.publish ?? "on-approve";
   if (mode === "push" && approvalRequired(cfg)) mode = "on-approve";
   if (mode === "on-approve" ? !(input.manual === true || (input.approved === true && runLanded(context, input.run))) : mode !== "push") return { published: false, mode };
   if (mode === "push") logEvent({ ev: "tracker_publish_unapproved", mode }, context);
@@ -79,6 +86,9 @@ export function publishTracker(input = {}, context = projectContext(input.projec
     const base = info.base_branch;
     const rows = renderState(context);
     lock = acquireLock(info, { ...input, unit: input.unit || "tracker-publish" });
+    deps.afterLock?.();
+    // The token may have been spent while this publish waited for the lock.
+    if (mode === "on-approve" && input.manual !== true && !runLanded(context, input.run)) return { published: false, mode };
     temp = path.join(info.common_git_dir, ".craftsman", "publish", `${base.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
     let reason = "";
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -91,14 +101,14 @@ export function publishTracker(input = {}, context = projectContext(input.projec
       const rendered = render(temp, rows, context);
       if (rendered.refused) return { published: false, mode, refused: rendered.refused };
       if (rendered.paths.length) run(temp, ["add", "--", ...rendered.paths]);
-      if (!rendered.paths.length || !run(temp, ["diff", "--cached", "--name-only"])) return { published: false, mode, unchanged: true };
+      if (!rendered.paths.length || !run(temp, ["diff", "--cached", "--name-only"])) { consume(mode, input, context, base); return { published: false, mode, unchanged: true }; }
       run(temp, ["commit", "-m", `docs(tracker): publish ledger (${rows.length} rows)`, "--", ...rendered.paths]);
       deps.beforePush?.(attempt);
       try {
         run(temp, ["push", "origin", `HEAD:${base}`]);
         const sha = run(temp, ["rev-parse", "HEAD"]);
         logEvent({ ev: "tracker_published", base, rows: rows.length, sha, attempt }, context);
-        if (mode === "on-approve" && input.manual !== true) markPublished(input.run, { root: context.root });
+        consume(mode, input, context, base);
         return { published: true, mode, base, sha, attempt };
       } catch (error) {
         reason = String(error.stderr || error.message).trim().split("\n")[0];
