@@ -9,6 +9,7 @@ import {
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
+import { droppedKeys } from "./lib/ledger-keys.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 
@@ -184,15 +185,17 @@ export function spliceBlock(text, block) {
   return `${base ? `${base}\n\n` : "# Execution tracker\n\n"}## Live ledger\n\n${block}\n`;
 }
 
-// Re-render the root TRACKER.md's generated block from the ledger. Writes
-// only on a real change; an empty ledger with no block yet is a no-op, so a
-// repo that never used the ledger never grows the section.
+// Re-render TRACKER.md's block from the ledger; writes only on change, refuses to drop committed keys.
 export function syncTrackerDoc(context = projectContext(".")) {
   const rows = renderState(context);
   const file = trackerDocPath(context);
   let text = "";
   try { text = fs.readFileSync(file, "utf8"); } catch { /* not created yet */ }
   if (!rows.length && generatedBlock(text) === null) return { file, changed: false };
+  let committed = "";
+  try { committed = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { /* none */ }
+  const dropped = droppedKeys(rows, text, committed, context);
+  if (dropped.length) { logEvent({ ev: "tracker_publish_refused", dropped }, context); return { file, changed: false, refused: `refusing to drop ${dropped.length} committed tracker row(s)` }; }
   const next = spliceBlock(text, renderBlock(rows));
   if (next === text) return { file, changed: false };
   atomicWrite(file, next);

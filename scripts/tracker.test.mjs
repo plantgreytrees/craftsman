@@ -156,6 +156,22 @@ test("tracker: sync restores a hand-tampered block and is a no-op when it alread
   assert.equal(trackerDoc(selected), rendered);
 });
 
+test("tracker: sync refuses a render that drops 50 committed rows for 5 local ones (ARCH-TRACKER-13)", () => {
+  const selected = context();
+  const plans = path.join(selected.root, "docs", "plans");
+  fs.mkdirSync(plans, { recursive: true });
+  const committed = Array.from({ length: 50 }, (_, i) => JSON.stringify({ plan: "docs/plans/example.md", unit: `m${i}` }));
+  fs.writeFileSync(path.join(plans, "TRACKER.jsonl"), committed.join("\n") + "\n");
+  fs.writeFileSync(path.join(plans, "TRACKER.md"), "# Execution tracker\n\nNotes.\n");
+  for (let i = 0; i < 5; i++) transition({ plan: "docs/plans/example.md", unit: `m${i}`, status: "PENDING" }, selected);
+  const result = syncTrackerDoc(selected);
+  assert.equal(result.changed, false);
+  assert.match(result.refused, /45/);
+  assert.equal(trackerDoc(selected), "# Execution tracker\n\nNotes.\n");
+  const log = fs.readFileSync(path.join(selected.stateDir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(log.filter((e) => e.ev === "tracker_publish_refused").at(-1).dropped.length, 45);
+});
+
 test("tracker: a repo with no ledger rows never grows a generated section", () => {
   const selected = context();
   assert.equal(syncTrackerDoc(selected).changed, false);

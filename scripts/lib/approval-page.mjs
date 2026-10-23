@@ -1,11 +1,12 @@
 // Approval page content (ARCH-APPROVAL-02/03/07). Pure: returns strings, publishes nothing.
 const DEFAULT_PR_LINES = 400;
 const RISKY = [
-  /(^|\/)\.env(\.|$)/, /(^|\/)\.github\//, /(^|\/)\.gitlab-ci/, /(^|\/)(infra|terraform|k8s|deploy)\//,
+  /(^|\/)\.env(\.|$)/, /(^|\/)\.github\//, /(^|\/)\.gitlab-ci/, /(^|\/)\.circleci\//, /(^|\/)Jenkinsfile/, /(^|\/)(azure|bitbucket)-pipelines\.ya?ml$/, /(^|\/)(infra|terraform|k8s|deploy)\//,
   /\.tf$/, /(^|\/)Dockerfile/, /(^|\/)migrations?\//, /(^|\/)\.gitmodules$/,
   /(^|\/)hooks\//, /secrets?-/, /(^|\/)(auth|security|permissions?)[^/]*$/,
 ];
-const CHOICES = { "Merge now": "merge", "Open PR": "open-pr" };
+export const CHOICES = ["merge", "open-pr"];
+const LABEL_CHOICE = { "Merge now": "merge", "Open PR": "open-pr" };
 
 export function capabilityConfig() {
   return { db: { rules: [{ path: "approvals", read: "view", write: "owner" }] }, user: {}, artifact: {} };
@@ -99,7 +100,7 @@ export function renderApproval(run) {
   const v = view(run || {});
   const ul = (a) => (a.length ? `<ul>${a.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "<p>none</p>");
   const rec = v.recommendation.choice;
-  const btn = (label) => `<button data-choice="${CHOICES[label]}"${rec === label ? ' data-recommended="true"' : ""}>${esc(label)}${rec === label ? " (recommended)" : ""}</button>`;
+  const btn = (label) => `<button data-choice="${LABEL_CHOICE[label]}"${rec === label ? ' data-recommended="true"' : ""}>${esc(label)}${rec === label ? " (recommended)" : ""}</button>`;
   const core = `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Approval ${esc(v.run)}</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem}button{font:inherit;padding:.6rem 1.2rem;margin-right:.5rem}button[data-recommended]{font-weight:700;outline:2px solid currentColor}</style></head>
 <body><h1>Approval: ${esc(v.run)}</h1>

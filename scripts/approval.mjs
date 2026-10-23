@@ -6,11 +6,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { atomicWrite, logEvent, loadConfig, mainCheckoutRoot, projectContext } from "./lib/core.mjs";
-import { recommend, renderApproval } from "./lib/approval-page.mjs";
+import { CHOICES, recommend, renderApproval } from "./lib/approval-page.mjs";
+import { runIdFor } from "./lib/approval-gate.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { runDocChecks } from "./doc-checks.mjs";
 
-const CHOICES = ["merge", "open-pr"];
 const QUESTION = { question: "Merge now or Open PR?", options: ["Merge now", "Open PR"] };
 
 function dirs(root) {
@@ -28,6 +28,23 @@ const save = (root, rec) => atomicWrite(`${fileFor(root, rec.run)}.json`, `${JSO
 const log = (root, ev) => logEvent(ev, { stateDir: dirs(root).state });
 const refuse = (reason) => ({ ok: false, refused: true, reason });
 
+// Read-modify-write under a per-run mkdir lock; waits briefly, breaks a lock left by a crash.
+function withLock(root, run, action) {
+  const lock = `${fileFor(root, run)}.lock`;
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  for (let i = 0; ; i++) {
+    try { fs.mkdirSync(lock); break; } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      let age = 0;
+      try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; }
+      if (age > 30000) { fs.rmSync(lock, { recursive: true, force: true }); continue; }
+      if (i > 2000) throw new Error(`approval record is busy: ${run}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try { return action(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
+}
+
 // Default runners; tests inject stubs. Secret findings carry file:line:rule only, never the value.
 export function defaultRunners(root) {
   return {
@@ -40,8 +57,11 @@ export function defaultRunners(root) {
 }
 
 export function prepare(input, { root = ".", runners = defaultRunners(root), now = () => new Date().toISOString() } = {}) {
+  if (!input.plan || !input.feature) return refuse("plan and feature are required");
+  const runId = runIdFor(input.plan, input.feature);
+  if (input.run !== undefined && input.run !== runId) return refuse(`run must be ${runId}`);
   let file;
-  try { file = fileFor(root, input.run); } catch (e) { return refuse(e.message); }
+  try { file = fileFor(root, runId); } catch (e) { return refuse(e.message); }
   const findings = runners.secrets();
   if (findings.length) {
     return { ok: false, refused: true, reason: "secrets scan found findings; no approval page", findings: findings.map((f) => ({ file: f.file, line: f.line, rule: f.rule })) };
@@ -55,14 +75,23 @@ export function prepare(input, { root = ".", runners = defaultRunners(root), now
     gates: [...(ev.gates || []), ...others.map((c) => `${c.cmd}: ${c.status}`)],
     precommit: pre ? pre.status : ev.precommit || "",
   };
-  const run = { ...input, evidence, prLines: input.prLines };
+  const cfgLines = loadConfig({ root }).repoExec?.approval?.prLines;
+  const run = { ...input, run: runId, evidence, prLines: cfgLines ?? input.prLines };
   const recommendation = recommend(run);
   const { html, markdown } = renderApproval(run);
-  save(root, {
-    run: input.run, plan: input.plan, base: input.base, head_sha: input.head_sha, feature_heads: input.feature_heads || [],
-    recommendation, requested_at: now(), url: null, status: "requested",
+  const refused = withLock(root, runId, () => {
+    const prev = load(root, runId);
+    if (prev?.status === "landed") return refuse("record is already landed; start a new run");
+    const history = [...(prev?.history || [])];
+    if (prev) history.push({ status: prev.status, head_sha: prev.head_sha, choice: prev.choice ?? null, requested_at: prev.requested_at, decided_at: prev.decided_at ?? null, superseded_at: now() });
+    save(root, {
+      run: runId, plan: input.plan, feature: input.feature, base: input.base, head_sha: input.head_sha, feature_heads: input.feature_heads || [],
+      recommendation, requested_at: now(), url: null, status: "requested", history,
+    });
+    log(root, { ev: "approval_requested", run: runId, recommendation });
+    return null;
   });
-  log(root, { ev: "approval_requested", run: input.run, recommendation });
+  if (refused) return refused;
   return { ok: true, html, markdown, recommendation, docs_ok: docs.ok, record: `${file}.json` };
 }
 
@@ -74,13 +103,19 @@ export function attachUrl({ run, url }, { root = "." } = {}) {
   return { ok: true };
 }
 
-export function check({ run, row, writer_is_owner }, { root = "." } = {}) {
+export function check(input, { root = "." } = {}) {
+  try { return withLock(root, input.run, () => checkLocked(input, { root })); } catch (e) { return refuse(e.message); }
+}
+
+function checkLocked({ run, row, writer_is_owner }, { root }) {
   const rec = load(root, run);
   if (!rec) return refuse("no approval record");
   if (rec.status !== "requested") return refuse(`record status is ${rec.status}, not requested`);
   if (writer_is_owner !== true) return refuse("writer is not the artifact owner");
   if (!row || !CHOICES.includes(row.choice)) return refuse("choice must be merge or open-pr");
   if (!rec.head_sha || row.head_sha !== rec.head_sha) return refuse("head_sha does not match the recorded head");
+  const at = Date.parse(row.decided_at);
+  if (!(at >= Date.parse(rec.requested_at))) return refuse("decision predates the approval request");
   save(root, { ...rec, status: "decided", choice: row.choice, decided_at: new Date().toISOString() });
   log(root, { ev: "approval_decided", run, choice: row.choice });
   return { ok: true, choice: row.choice };

@@ -6,6 +6,7 @@ import { logEvent, mainCheckoutRoot } from "./core.mjs";
 import { currentState } from "../tracker.mjs";
 import { retireCheck } from "../doc-retire.mjs";
 import { landed as approvalLanded } from "../approval.mjs";
+import { CHOICES } from "./approval-page.mjs";
 
 // Only with feature branches on: otherwise units merge straight to base and no verification point exists.
 export function approvalRequired(cfg) {
@@ -20,7 +21,7 @@ export const runIdFor = (plan, feature) => `${path.basename(String(plan), ".md")
 export function evaluateApproval(record, { headSha } = {}) {
   if (!record) return { ok: false, reason: "no approval record" };
   if (record.status !== "decided") return { ok: false, reason: `approval record status is ${record.status}, not decided` };
-  if (!["merge", "open-pr"].includes(record.choice)) return { ok: false, reason: "approval record has no valid choice" };
+  if (!CHOICES.includes(record.choice)) return { ok: false, reason: "approval record has no valid choice" };
   if (!record.head_sha || record.head_sha !== headSha) return { ok: false, reason: "feature head differs from the approved head_sha" };
   return { ok: true, choice: record.choice };
 }
