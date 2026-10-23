@@ -111,6 +111,9 @@ const CLAIMS = [
   ...(have("unzip") && have("zip") ? ["unzip -l --l -d .craftsman stage/off.zip", "unzip -l -d .craftsman --l stage/off.zip", "unzip -l -o-l -d .craftsman stage/off.zip",
     "unzip -t --t -o -d .craftsman stage/off.zip", "unzip -c --c -o -d .craftsman stage/off.zip", "unzip -z --z -o -d .craftsman stage/off.zip",
     "unzip -l --l -o stage/off.zip -d .craftsman", "unzip -l --l -o stage/s.zip -d .claude"] : []),
+  // round 11: a list letter in a member pattern after the zipfile is not an option, and the current directory (here made protected by cd) is the destination
+  ...(have("unzip") && have("zip") ? ["cd .claude && unzip -o ../stage/s.zip settings.json -l", "cd .claude && unzip -qo ../stage/s.zip settings.json -hh",
+    "cd .claude && unzip -o ../stage/s.zip '*' -l"] : []),
   // round 9: words after the zipfile or after -x are patterns, not options, so they must not switch the destination check off
   ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip off -l -d .craftsman", "unzip -o stage/off.zip -d .craftsman -x -c", "unzip -o stage/off.zip -d .craftsman -x -h",
     "unzip -o stage/s.zip settings.json -v -d .claude"] : []),
@@ -195,9 +198,9 @@ test("an extraction with an unreadable option is refused outright with a message
 });
 
 // Round 10 (53.x): the list-only skip is total: anything but a plain letter cluster falls to the refusing allowlist. The cost is stated.
-test("the stated cost of the total skip: a list flag next to a destination is refused, and a pattern that looks like a list flag with no destination stays allowed (53.1)", { skip }, () => {
-  for (const command of ["unzip -l -d .craftsman stage/off.zip", "unzip stage/off.zip -d .craftsman -l"]) assert.equal(verdictOf(command), 2, `refused: ${command}`);
-  for (const ok of ["unzip stage/off.zip -l", "unzip -l stage/off.zip", "unzip -lv -o stage/off.zip", "unzip -Z stage/off.zip", "unzip -o stage/off.zip -d out"]) assert.equal(verdictOf(ok), 0, `allowed: ${ok}`);
+test("the stated cost of the total skip: a list flag next to a destination, or after the zipfile where it is a pattern, is refused (53.1, 55.2)", { skip }, () => {
+  for (const command of ["unzip -l -d .craftsman stage/off.zip", "unzip stage/off.zip -d .craftsman -l", "unzip stage/off.zip -l"]) assert.equal(verdictOf(command), 2, `refused: ${command}`);
+  for (const ok of ["unzip -l stage/off.zip", "unzip -lv -o stage/off.zip", "unzip -Z stage/off.zip", "unzip -o stage/off.zip -d out"]) assert.equal(verdictOf(ok), 0, `allowed: ${ok}`);
 });
 
 // Round 6 (41.x): variable setters the guard does not read stay with the sandbox. A loop variable or a brace-built name sets the

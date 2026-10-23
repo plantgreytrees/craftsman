@@ -669,8 +669,12 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       // every dash-word in the command is a plain letter cluster with no `d` and no `x`. A negated flag (`--l`, `-o-l` cancel `-l`), a
       // destination, an exclusion list, a long option or a pattern that starts with `-` all make the skip not taken, and the allowlist
       // below decides, which refuses what it cannot read.
+      // The list letter must sit in a LEADING option word (before the zipfile): after the zipfile, `-l` is a member pattern, not an option,
+      // and the command still extracts into the current directory, which may be protected.
       const dashWords = rest.filter((a) => a.startsWith("-"));
-      if (dashWords.every((a) => /^-[A-Za-z]+$/.test(a) && !/[dx]/.test(a)) && dashWords.some((a) => /[ltpZvczh]/.test(a))) return;
+      const leading = [];
+      for (const a of rest) { if (!a.startsWith("-")) break; leading.push(a); }
+      if (dashWords.every((a) => /^-[A-Za-z]+$/.test(a) && !/[dx]/.test(a)) && leading.some((a) => /[ltpZvczh]/.test(a))) return;
       // The same allowlist: clusters of argument-free letters, `-d DIR` / `-dDIR`, and operands. Anything else leaves the destination
       // unknown, and the command is refused.
       const dirs = [];
