@@ -140,6 +140,11 @@ test("run.sh filter: a linked worktree project always runs the guard on reads, w
       f.call(payload(tool, input));
       assert.equal(f.nodeRan(), true, `${tool} in a linked worktree started node`);
     }
+    // a session started in a subdirectory of the linked worktree is the same project
+    fs.mkdirSync(path.join(f.project, "src"), { recursive: true });
+    f.reset();
+    f.call(payload("Read", { file_path: "/etc/hostname" }), { env: { CLAUDE_PROJECT_DIR: path.join(f.project, "src") } });
+    assert.equal(f.nodeRan(), true, "Read from a subdirectory of a linked worktree started node");
     // the same project without the .git file (a plain checkout) still takes the cheap path
     fs.rmSync(path.join(f.project, ".git"), { force: true });
     f.reset();
