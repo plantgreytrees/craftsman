@@ -13,3 +13,5 @@ Human index (the loop never reads this file). Each area is a pair:
 - [docs](./docs.md): plan-doc retirement, `/sync-docs --archive` / `--prune`, and the commit-id archive index
 - [slim](./slim.md): byte caps per file and per invocation, the ratchet, and how a trim keeps gate strength
 - [approval](./approval.md): the verification point, the approval page (Merge now / Open PR), and the slim-Craftsman design overview
+- [views](./views.md): the local visual dashboard (`/digest --html`), the generated notes folder for Obsidian, Foam and Quartz, the idea inbox and the `NEXT.md` session queue
+- [archive](./archive.md): the workspace-level archive repo for finished plans, link rewriting and automatic archiving at landing
