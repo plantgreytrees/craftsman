@@ -68,7 +68,7 @@ export function stopRefresh(context, { budgetMs = RENDER_BUDGET_MS, script = DIG
   } catch { return "failed"; }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   try {
     const raw = await readStdin();
     let event = "";
