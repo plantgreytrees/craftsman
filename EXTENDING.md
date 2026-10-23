@@ -379,3 +379,15 @@ Keep `.claude/CLAUDE.md` and project rules small — they load every session.
 Detail belongs in skills (loaded on demand), not in CLAUDE.md. Run `/context` to
 see the footprint, and `/craftsman:stats` to delete gates that don't earn their
 tokens. That discipline is the whole point of the reliability-per-token design.
+
+## Update channel and CI lint
+
+Installs track commits: the manifests carry no `version` key (CHANGELOG 2.2.0), so every push to the default branch is an update. To hold a project on tested code, add the marketplace as `plantgreytrees/craftsman#stable`, a branch the owner fast-forwards after the plugin's own loop passes. Rollback is moving `stable` back. `/craftsman:upgrade` is the update path.
+
+CI lint one-liner:
+
+```
+git clone --depth 1 https://github.com/plantgreytrees/craftsman /tmp/craftsman && node /tmp/craftsman/scripts/arch-check.mjs lint --root .
+```
+
+A repo with a justfile but no `check` recipe must drop the `justfile` marker from `stopGate.commands` in its project config.

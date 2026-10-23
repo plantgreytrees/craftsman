@@ -215,3 +215,19 @@ test("init update treats a FEATURE_MERGED tracker row as active", () => {
   assert.deepEqual(audit.statuses, ["FEATURE_MERGED"]);
   assert.equal(audit.active, true);
 });
+
+test("init update scaffolds a tiny craftsman-loop rule only when absent and writes no justfile, pre-commit or CI file", () => {
+  const root = fixture();
+  const rule = path.join(root, ".claude", "rules", "craftsman-loop.md");
+  const plan = buildUpdatePlan(root, { checkTools: false });
+  assert.ok(plan.changes.includes(rule));
+  assert.ok(Buffer.byteLength(plan.files[rule]) <= 200);
+  assert.equal(buildInitPlan(root, { checkTools: false }).changes.includes(rule), false);
+  applyInitPlan(plan);
+  assert.ok(fs.existsSync(rule));
+  for (const f of ["justfile", ".pre-commit-config.yaml", ".github"]) assert.equal(fs.existsSync(path.join(root, f)), false);
+  assert.equal(buildUpdatePlan(root, { checkTools: false }).changes.includes(rule), false);
+  fs.writeFileSync(rule, "mine\n");
+  applyInitPlan(buildUpdatePlan(root, { checkTools: false }));
+  assert.equal(fs.readFileSync(rule, "utf8"), "mine\n");
+});
