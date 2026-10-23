@@ -68,10 +68,10 @@ units:
     language: javascript
     security: high
     scope:
-      read: [scripts/pre-guard.mjs, scripts/lib/force-block.mjs, scripts/lib/shell-words.mjs]
-      docs: [docs/architecture/state.rules.md, docs/architecture/landing.rules.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard-narrow.test.mjs]
-    arch: [ARCH-STATE-12, ARCH-STATE-13, ARCH-LAND-23, ARCH-DOCS-07]
+      read: [scripts/lib/force-block.mjs, scripts/lib/shell-words.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-narrow.test.mjs, scripts/lib/force-block.mjs]
+    arch: [ARCH-STATE-12, ARCH-STATE-13, ARCH-LAND-23, ARCH-SAFETY-03, ARCH-SAFETY-05, ARCH-DOCS-07]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: guard-stats
     scope_id: guard-stats
@@ -268,6 +268,19 @@ units:
       write: [CHANGELOG.md]
     arch: [ARCH-SLIM-08]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: profile-knobs
+    scope_id: profile-knobs
+    project: .
+    depends_on: []
+    module: scripts/lib/user-config.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [.claude-plugin/plugin.json, craftsman.config.json, scripts/lib/core.mjs, scripts/release-identity.test.mjs]
+      docs: [docs/architecture/plan.rules.md, docs/architecture/mod.rules.md, docs/architecture/docs.rules.md, docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
+      write: [.claude-plugin/plugin.json, craftsman.config.json, scripts/lib/core.mjs, scripts/lib/user-config.mjs, scripts/lib/user-config.test.mjs, scripts/release-identity.test.mjs, EXTENDING.md]
+    arch: [ARCH-PLAN-07, ARCH-MOD-06, ARCH-DOCS-15, ARCH-ENGINE-22, ARCH-STATE-01]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -301,6 +314,7 @@ Depends on: none
 ### Step 4 — guard-narrowing (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: force-lease
+PR #1 landed (a92c915), so 4.0 holds. `pre-guard.mjs` (93 KB) exceeds the unit-context budget: it is write-listed, not read-listed; read it in parts. PR #1 adds `docs/architecture/safety.rules.md`, which now governs `pre-guard.mjs` (ARCH-SAFETY-01 leaves outside-root deletes and credential reads to the sandbox). Do not add a guard for them.
 - [ ] 4.0 Precondition: `git cat-file -e origin/main:docs/architecture/safety.rules.md` (PR #1 landed). Absent → PARK the unit with decision `{question: "PR #1 has not landed on origin/main; this unit edits scripts/pre-guard.mjs, which PR #1 also rewrites. Wait or proceed?", options: ["wait for PR #1", "proceed and accept a rebase conflict"], recommended: "wait for PR #1"}`; no edit → accept: the unit either parks or the file exists on origin/main
 - [ ] 4.1 Add `scripts/pre-guard-narrow.test.mjs` first: env-prefix, for-loop, while and subshell commands naming no guarded path are allowed and log `guard_unparsed {reason, command}`; the same forms naming a guarded path, or a git commit/push outside a heredoc body, are refused; `--no-verify` as prose inside a heredoc body is allowed → accept: red before the change
 - [ ] 4.2 Narrow the refusal in `pre-guard.mjs` (ARCH-STATE-12) and wire the own-branch lease check from force-lease (ARCH-LAND-23) → accept: new tests green, the existing `pre-guard.test.mjs` suite unchanged and green
@@ -412,6 +426,16 @@ Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: profile-and-release
 - [ ] 19.1 Add one concise `[Unreleased]` entry for the programme (existing bullets for related features are edited, not duplicated), staying under 8 KB (ARCH-SLIM-08) → accept: `changelog.test.mjs` green
 - [ ] 19.2 `metadata.release` is not touched here; releases are cut by the owner → accept: `plugin.json` unchanged by this unit
+
+### Step 20 — profile-knobs (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+Owner decision (2026-10-23): map three knobs, `modelTier` reserved. Platform facts (code.claude.com plugins-reference, verified): `userConfig` options are strict objects; allowed keys are `type`, `title`, `description`, `default` (plus `required`, `multiple`, `sensitive`, `min`, `max`, `options`); this unit uses only `type`, `title`, `description`, `default` because `options` breaks Claude Code before v2.1.271; option keys are identifiers and reach hooks as `CLAUDE_PLUGIN_OPTION_<KEY>` uppercased (`AUTONOMYLEVEL`, `REVIEWDEPTH`, `MODELTIER`, `BUDGETSENFORCE`).
+- [ ] 20.1 Add `scripts/lib/user-config.test.mjs` first: `applyUserConfig(defaults, env)` maps `AUTONOMYLEVEL` attended|standard|unattended to `repoExec.approval.prLines` 100|400|1000, `REVIEWDEPTH` light|standard|deep to `planning.blindRederivation` never|auto|always, `BUDGETSENFORCE` "true"|"false" to `docs.budgets.enforce`; `MODELTIER` is accepted and changes nothing (reserved); an unset variable leaves the default; an unknown value is ignored and never throws; `loadConfig` over a temp project that sets the same key wins over the machine-wide value → accept: red before the lib exists
+- [ ] 20.2 Implement the pure `applyUserConfig` in `scripts/lib/user-config.mjs` and call it in `loadConfig` between the plugin defaults and the project files (project config overrides), reading only `CLAUDE_PLUGIN_OPTION_*` variables, so nothing changes when the platform exports none → accept: tests green, the full suite unchanged
+- [ ] 20.3 Declare `userConfig` in `.claude-plugin/plugin.json` with exactly `autonomyLevel`, `reviewDepth`, `modelTier` (string options with a default) and `budgetsEnforce` (boolean, default true), each with only `type`, `title`, `description`, `default`; no `options`, no `version` → accept: `release-identity.test.mjs` asserts the four keys, the allowed field names and that `version` and `options` are absent
+- [ ] 20.4 Add `claudeMdLines: 200` and `openPlans: 30` beside `enforce: true` in `docs.budgets` in `craftsman.config.json` (generous, so other repos keep linting clean; this repo has 14 open plans and no CLAUDE.md) → accept: config parses, `arch-check lint` PASS on this repo
+- [ ] 20.5 Document the four machine-wide settings, their mapping and that a project config wins, in one short `EXTENDING.md` section within its cap → accept: the section exists, `doc-size-policy` green
 
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
