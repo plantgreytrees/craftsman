@@ -18,7 +18,7 @@ test("_approval.md is a non-invocable shared doc with a short description", () =
 
 const POINTS = {
   "when it applies": /`planning\.featureBranches` is on\. With it off, units merge straight to base and there is no verification point/,
-  "prepare": /`A prepare` with run, plan, base, head_sha .*feature_heads, evidence, changes, risk, rollback/,
+  "prepare": /`A prepare` with plan, feature, base, head_sha .*feature_heads, evidence, changes, risk, rollback/,
   "secrets refusal lists file:line:rule only": /file:line:rule only, never values/,
   "private artifact with capabilityConfig": /PRIVATE Artifact with capabilities exactly as `capabilityConfig\(\)`/,
   "attach-url and one-line notice": /`A attach-url`[\s\S]*one line: link and recommendation\. Do not share it/,
