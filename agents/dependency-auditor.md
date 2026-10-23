@@ -1,6 +1,6 @@
 ---
 name: dependency-auditor
-description: Reviews a new/upgraded dependency in a package manifest for supply-chain and license risk; max 5 findings.
+description: Reviews a new or upgraded dependency for supply-chain and license risk. Max 5 findings.
 tools: Read, Grep, Glob, Bash
 model: haiku
 maxTurns: 12

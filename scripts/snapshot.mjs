@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { gateUsable } from "./lib/gate-command.mjs";
 import { loadConfig, enabled, sessionDir, markerPresent, splitCmd, projectContext, git, sha1 } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
@@ -19,7 +20,7 @@ if (!enabled(cfg) || cfg.stopGate?.enabled === false || cfg.stopGate?.snapshotAt
 
 const entries = [];
 for (const [m, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
-  if (await markerPresent(m, context)) entries.push(cmd);
+  if (await markerPresent(m, context) && gateUsable(context.root, m, cmd, { markerOk: true })) entries.push(cmd);
 }
 if (!entries.length) process.exit(0);
 

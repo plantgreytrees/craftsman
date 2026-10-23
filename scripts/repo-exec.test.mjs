@@ -197,7 +197,7 @@ test("repo-exec: cleanup:false keeps the worktree; cleanup of an unmerged branch
 
 // repoExec.land:"pr" — host CLI faked; git, push and bare origin real.
 function usePrLanding(root, repoExec = {}) {
-  fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ repoExec: { land: "pr", host: "github", ...repoExec } }));
+  fs.writeFileSync(path.join(root, "craftsman.config.json"), JSON.stringify({ repoExec: { land: "pr", host: "github", approval: { required: false }, ...repoExec } }));
 }
 
 function addOrigin(workspace, root) {
@@ -848,7 +848,7 @@ test("repo-exec land-unit: a red gate blocks, keeping the unit branch and a clea
 // land-feature (ARCH-LAND-18): two FEATURE_MERGED units land on base.
 function landFeatureFixture(data, statuses = ["FEATURE_MERGED", "FEATURE_MERGED"]) {
   const context = projectContext("one");
-  fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true } }));
+  fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true }, repoExec: { approval: { required: false } } }));
   git(context.root, ["add", "craftsman.config.json"]);
   git(context.root, ["commit", "-q", "-m", "config"]);
   const { origin, base } = addOrigin(data.workspace, context.root);
@@ -969,7 +969,7 @@ test("repo-exec pr mode: a unit PR targets the feature branch, the feature PR ta
   try {
     withManifest(data.manifest, () => {
       const { context, info, feature, base, rows, statuses } = landFeatureFixture(data);
-      fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true }, repoExec: { land: "pr", host: "github" } }));
+      fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true }, repoExec: { land: "pr", host: "github", approval: { required: false } } }));
       git(context.root, ["commit", "-qam", "pr mode"]);
       const unit = commitUnit(context, info, "pr-feat-unit");
       const unitRun = fakeGh();

@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews one code diff for correctness, security, and maintainability against the repo's standards, citing file:line on every finding.
+description: Reviews one code diff for correctness, security and maintainability, citing file:line.
 tools: Read, Grep, Glob, Bash
 model: haiku
 maxTurns: 12

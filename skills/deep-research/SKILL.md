@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Perform isolated, thorough repository research and return a concise summary with file references.
+description: Isolated repository research returning a concise summary with file references.
 context: fork
 agent: Explore
 allowed-tools: Read, Grep, Glob

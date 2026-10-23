@@ -1,5 +1,5 @@
 ---
-description: ADHD-friendly progress digest — what shipped, what needs a decision, what's next, and % complete per plan. Read-only.
+description: Progress digest: what shipped, what needs a decision, what is next. Read-only.
 allowed-tools: Bash
 ---
 

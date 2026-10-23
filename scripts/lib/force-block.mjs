@@ -64,28 +64,47 @@ const longFlag = (word, ...options) => {
 // Stops at ( ) ` $ too, so a substitution after a message is never one.
 const MESSAGE_OPERAND = /\bgit\b[^;&|\n()`$]*\s(?:commit|tag)\b[^;&|\n()`$]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
 
+// The one exception (ARCH-LAND-23): a lease push whose every refspec names a
+// branch matching `ownBranches` (globs such as `feature/<plan>-*` and claimed
+// unit branches). Another flag, a `+` refspec, no refspec or an unexpanded
+// word is no exception.
+const LEASE_OK = new Set(["-u", "--set-upstream", "-q", "--quiet", "--force-if-includes"]);
+export function leaseToOwnBranch(rest, ownBranches = []) {
+  const own = ownBranches.map((glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")}$`));
+  const isLease = (w) => w.startsWith("--force-w") && "--force-with-lease".startsWith(w.split("=")[0]);
+  const flags = rest.filter((w) => w.startsWith("-"));
+  const [remote, ...refs] = rest.filter((w) => !w.startsWith("-"));
+  if (!remote || !refs.length || rest.includes(UNEXPANDED)) return false;
+  if (!flags.some(isLease) || !flags.every((w) => isLease(w) || LEASE_OK.has(w))) return false;
+  return refs.every((ref) => {
+    const dst = ref.slice(ref.indexOf(":") + 1).replace(/^refs\/heads\//, "");
+    return !ref.startsWith("+") && dst !== "" && own.some((re) => re.test(dst));
+  });
+}
+
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
 // Every quoted string is checked as a command (`bash -c`, `python3 -c`, …)
 // except a commit/tag message operand without $( ) or a backtick. Alias
 // definitions are checked as what they define, and an alias call as its
 // resolved words plus call-site flags.
-export function destructiveGit(value) {
+export function destructiveGit(value, ownBranches = []) {
   for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
     const inner = quoted[1] ?? quoted[2];
     if (MESSAGE_OPERAND.test(value.slice(0, quoted.index)) && !/\$\(|`/.test(inner)) continue;
-    const found = destructiveGit(inner);
+    const found = destructiveGit(inner, ownBranches);
     if (found) return found;
   }
   const aliases = new Map();
   for (const alias of value.matchAll(/\balias\.([\w.-]+)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
     const defined = (alias[2] ?? alias[3] ?? alias[4]).replace(/^!\s*/, "");
     aliases.set(alias[1], defined.replace(/^git\s+/, "").split(/\s+/).filter(Boolean));
-    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`);
+    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`, ownBranches);
     if (found) return found;
   }
   for (let words of gitInvocations(value)) {
     for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++) words = [...aliases.get(words[0]), ...words.slice(1)];
     const [sub, ...rest] = words;
+    if (sub === "push" && leaseToOwnBranch(rest, ownBranches)) continue;
     if (sub === "push" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force-with-lease", "--force-if-includes", "--mirror") || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--hard"))) return "git reset --hard";
     if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git worktree remove --force";

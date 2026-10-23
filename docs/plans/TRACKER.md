@@ -65,6 +65,67 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 
 | plan | unit | module | status | evidence | updated |
 |---|---|---|---|---|---|
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-page | scripts/lib/approval-page.mjs | COMPLETE | all 3 acceptance criteria ticked; d077cb4 on main; approval-page tests 8/8; pag… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-protocol | commands/_approval.md | COMPLETE | all 4 acceptance criteria ticked; 4e075d5 on main; _approval.md 2130 B; auto.md… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-record | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; 038049b on main; approval tests 6/6; check re… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | baseline-metric | scripts/telemetry.mjs | COMPLETE | all 3 acceptance criteria ticked; 6d43dce on main; baseline event once per sid;… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | closing-changelog | CHANGELOG.md | COMPLETE | all 2 acceptance criteria ticked; d04dc32 on main; one [Unreleased] entry under… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | docs-budgets | scripts/arch-check.mjs | MERGED | 77d2da8 on main; arch-check tests 21/21; openPlans and claudeMdLines left to pr… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | force-lease | scripts/lib/force-block.mjs | COMPLETE | all 2 acceptance criteria ticked; 0e0428f on main; force-block tests 3/3; no ca… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-narrowing | scripts/pre-guard.mjs | PARKED | Precondition 4.0 failed: safety.rules.md absent on origin/main (PR #1 not lande… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-stats | scripts/stats.mjs | COMPLETE | all 2 acceptance criteria ticked; 267514e on main; stats tests 6/6; also ranks … | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | land-gate | scripts/repo-exec.mjs | COMPLETE | all 5 acceptance criteria ticked; 461422a on main; 9 gate tests; suite 621/622 … | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | ledger-guard | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; b6e6c00 on main; tracker-publish tests 15/15;… | 2026-10-22 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | ledger-repair | scripts/tracker.mjs | COMPLETE | all 3 acceptance criteria ticked; e2cec01 on main; tracker tests 43/43; helpers… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | profile-and-release | .claude-plugin/plugin.json | MERGED | d94c05e on main; init scaffold + stable-channel docs + no-version test; 18.1 us… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | retire-check | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; 340cbf2 on main; doc-retire tests 40/40 | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | rolling-scrutinise | commands/scrutinise.md | COMPLETE | all 2 acceptance criteria ticked; 6177f44 on main; scrutinise.md 8307 bytes und… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | surface-trim | agents/*, commands/* | COMPLETE | all 4 acceptance criteria ticked; 3c62097 on main; 12 reviewers maxTurns, toggl… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tdd-step | agents/unit-runner.md | PARKED | 12.0 precondition failed: docs/architecture/safety.rules.md absent from origin/… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tool-slots | craftsman.config.json | COMPLETE | all 4 acceptance criteria ticked; 67a9d35 on main; doc-checks/tool-slots tests … | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | vendored-skills | skills/* | COMPLETE | all 4 acceptance criteria ticked; f70741b on main; 3 skills attributed; descrip… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | archive-commands | commands/sync-docs.md | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | archive-lib | scripts/lib/archive.mjs | BLOCKED | Smoke gate red before any edit: pre-existing failure pre-guard.test.mjs:619 (st… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | auto-archive | scripts/repo-exec.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | changelog | CHANGELOG.md | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | dashboard-archive-tab | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | dashboard-core | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | digest-html | scripts/digest.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | export-notes | scripts/lib/export-notes.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | next-queue | scripts/lib/next-queue.mjs | BLOCKED | implementation finished in worktree but pre-guard refused git commit (cwd reset… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | retire-copy | scripts/doc-retire.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | retire-rewrite | scripts/doc-retire.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | stop-refresh | scripts/tracker-sync.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | tracker-heading | scripts/tracker.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | view-commands | commands/digest.md | PENDING | — | 2026-10-22 |
+| [p](./p.md) | u1 | — | MERGED | abc | 2026-10-22 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-lock-stale-race | scripts/approval.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-owner-trust | scripts/pre-guard.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-scan-config-source | scripts/approval.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | budget-ratchet-keys | scripts/arch-check.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-hardening | scripts/approval.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-record | scripts/approval.mjs | COMPLETE | all 7 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-reprepare | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-scan | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-budget-growth | scripts/arch-check.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-cli-contract | scripts/tracker.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-gate-lookup | scripts/lib/gate-command.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-land-race | scripts/repo-exec.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-retire | scripts/repo-exec.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-atomic | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-cli | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-single-use | scripts/tracker-publish.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-trust | scripts/tracker-publish.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-stats-and-prose | scripts/stats.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-sync-guard | scripts/tracker.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-doc-claim | commands/auto.md | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-glob-anchoring | scripts/lib/force-block.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | ledger-parser-dedupe | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | offline-landed-record | scripts/lib/approval-gate.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | profile-knobs | .claude-plugin/plugin.json | PARKED | waits for PR #1 (core.mjs) | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | publish-observability-tests | scripts/tracker-publish-cli.test.mjs | PENDING | round 5 suggestions: assert the second publish is a refusal not an unchanged no… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | telemetry-baseline-marker | scripts/telemetry.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | workspace-key-collision | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
 | [fixes-and-safety](../../fixes-and-safety) | ask-via-prompt | ask-via-prompt | MERGED | commit b862187 on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | bypass-flags | bypass-flags | MERGED | commit 62864b6 on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | ci-home-test | ci-home-test | MERGED | commit 64b4718 on feat/fixes-and-safety; CI set green | 2026-10-21 |

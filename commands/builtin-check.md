@@ -1,8 +1,8 @@
 ---
-description: After a `claude update`, check every built-in craftsman wraps still matches wrapper's assumptions, surface new ones worth wrapping, and update on approval.
+description: After `claude update`, check that the built-ins craftsman wraps still match.
 argument-hint: "[--report-only]"
 disable-model-invocation: true
-allowed-tools: Bash, Read, Glob, Grep, WebFetch, Task, Agent, AskUserQuestion, SlashCommand, Edit, Write
+allowed-tools: Bash, Read, Glob, Grep, WebFetch, Task, Agent, AskUserQuestion, Skill, Edit, Write
 model: sonnet
 ---
 

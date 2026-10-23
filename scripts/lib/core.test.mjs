@@ -17,6 +17,8 @@ import {
   writeRootPin, rootPinPath, resolveProjectRoot, agentGrantFile, grantRunnerDispatches, spendRunnerDispatch,
   acceptanceCriteria, featureCriteria, runnerDispatchCount, hasDocWriteGrant,
 } from "./core.mjs";
+import * as coreNs from "./core.mjs";
+import { writeBaseline, filterBaseline } from "./core.mjs";
 
 test("globToRe: ** crosses path segments", () => {
   const re = globToRe("**/node_modules/**");
@@ -129,12 +131,140 @@ test("filterAttributed: a line with no path:line prefix is dropped, not kept as 
   assert.deepEqual(filterAttributed(["  --> just an arrow, no path"], "src/lib.rs"), []);
 });
 
-test("extractSig: eslint's --format unix [Error/rule-id] suffix is captured over the generic fallback", () => {
-  assert.equal(extractSig("eslint", "src/x.js:1:1: 'y' is never reassigned. [Error/prefer-const]"), "prefer-const");
+const ESLINT_JSON = JSON.stringify([{
+  filePath: "/p/src/x.js",
+  messages: [
+    { ruleId: "prefer-const", severity: 2, message: "'y' is never reassigned.", line: 1, column: 1 },
+    { ruleId: "react/jsx-key", severity: 1, message: "missing key.", line: 2, column: 2 },
+    { ruleId: null, severity: 2, message: "Parsing error: Unexpected token", line: 3, column: 4 },
+  ],
+}]);
+const ESLINT_LINES = [
+  "/p/src/x.js:1:1: 'y' is never reassigned. [Error/prefer-const]",
+  "/p/src/x.js:2:2: missing key. [Warning/react/jsx-key]",
+  "/p/src/x.js:3:4: Parsing error: Unexpected token [Error]",
+];
+
+test("parseEslintJson: turns eslint --format json into path:line:col: message [Severity/rule] lines", () => {
+  assert.deepEqual(coreNs.parseEslintJson(ESLINT_JSON), ESLINT_LINES);
 });
 
-test("extractSig: a scoped eslint rule ([Warning/plugin/rule-id]) is captured whole", () => {
-  assert.equal(extractSig("eslint", "src/x.tsx:2:2: missing key. [Warning/react/jsx-key]"), "react/jsx-key");
+test("parseEslintJson: extractSig on a converted line is the rule id, scoped rules whole", () => {
+  const [a, b] = coreNs.parseEslintJson(ESLINT_JSON);
+  assert.equal(extractSig("eslint", a), "prefer-const");
+  assert.equal(extractSig("eslint", b), "react/jsx-key");
+});
+
+test("parseEslintJson: unparseable or non-array output is null, an empty result is []", () => {
+  assert.equal(coreNs.parseEslintJson("Oops, something went wrong!"), null);
+  assert.equal(coreNs.parseEslintJson('{"not":"an array"}'), null);
+  assert.deepEqual(coreNs.parseEslintJson("[]"), []);
+});
+
+test("parseEslintJson: the baseline new-issues-only result matches the old unix-format fixture", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-eslint-base-"));
+  try {
+    const ctx = { stateDir: dir };
+    writeBaseline("/p/src/x.js", ESLINT_LINES.slice(0, 2), ctx);
+    const fromJson = filterBaseline("/p/src/x.js", coreNs.parseEslintJson(ESLINT_JSON), ctx);
+    const fromUnix = filterBaseline("/p/src/x.js", ESLINT_LINES, ctx);
+    assert.deepEqual(fromJson, fromUnix);
+    assert.deepEqual(fromJson, [ESLINT_LINES[2]]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("shipped config: every eslint check asks for json, never the removed unix formatter", () => {
+  const cfg = JSON.parse(fs.readFileSync(new URL("../../craftsman.config.json", import.meta.url), "utf8"));
+  const cmds = Object.values(cfg.languages).flatMap((l) => l.check || []).filter((c) => c.startsWith("eslint"));
+  assert.ok(cmds.length >= 4);
+  for (const c of cmds) assert.match(c, /--format json/, c);
+});
+
+// A fake `eslint` on PATH: prints $FAKE_ESLINT_OUT, appends to $FAKE_ESLINT_LOG, exits $FAKE_ESLINT_EXIT.
+function fakeEslintDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-fake-eslint-"));
+  const bin = path.join(dir, "eslint");
+  fs.writeFileSync(bin, '#!/bin/sh\necho x >> "$FAKE_ESLINT_LOG"\nprintf %s "$FAKE_ESLINT_OUT"\nexit ${FAKE_ESLINT_EXIT:-0}\n');
+  fs.chmodSync(bin, 0o755);
+  return dir;
+}
+function fakeEnv(extra) {
+  const env = cleanEnv(extra);
+  for (const k of ["CLAUDE_PLUGIN_ROOT", "CRAFTSMAN"]) delete env[k];
+  return env;
+}
+const CORE_URL = pathToFileURL(fileURLToPath(new URL("./core.mjs", import.meta.url))).href;
+
+function runChecksWithFake(exit, out) {
+  const bins = fakeEslintDir();
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rc-"));
+  try {
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      const lang = { name: "javascript", check: ["eslint --no-color --format json {file}"] };
+      const r = await m.runChecks(${JSON.stringify(path.join(proj, "a.js"))}, lang, {}, { root: ${JSON.stringify(proj)}, stateDir: ${JSON.stringify(proj + "/.craftsman")} });
+      console.log(JSON.stringify(r));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      cwd: proj, encoding: "utf8",
+      env: fakeEnv({ PATH: `${bins}${path.delimiter}${process.env.PATH}`, FAKE_ESLINT_OUT: out, FAKE_ESLINT_EXIT: String(exit), FAKE_ESLINT_LOG: path.join(proj, "eslint.log") }),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  } finally {
+    fs.rmSync(bins, { recursive: true, force: true });
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+}
+
+test("runChecks: eslint exit 1 with JSON findings becomes failure lines", () => {
+  const r = runChecksWithFake(1, ESLINT_JSON);
+  assert.equal(r.failures.length, 1);
+  assert.deepEqual(r.failures[0].out.split("\n"), ESLINT_LINES);
+  assert.deepEqual(r.unavailable || [], []);
+});
+
+test("runChecks: eslint exit 2 (crash) is unavailable, never a finding", () => {
+  const r = runChecksWithFake(2, "Oops! Something went wrong! :(");
+  assert.deepEqual(r.failures, []);
+  assert.deepEqual(r.unavailable, ["eslint"]);
+});
+
+test("runChecks: unparseable output on exit 1 is unavailable, never a finding", () => {
+  const r = runChecksWithFake(1, "not json at all");
+  assert.deepEqual(r.failures, []);
+  assert.deepEqual(r.unavailable, ["eslint"]);
+});
+
+test("quality-gate: an eslint crash twice gives one notice, zero findings, no block, one tool run", () => {
+  const bins = fakeEslintDir();
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-qg-"));
+  try {
+    const git = (...a) => spawnSync("git", a, { cwd: proj, encoding: "utf8" });
+    git("init", "-q");
+    fs.writeFileSync(path.join(proj, "a.js"), "const a = 1;\n");
+    const log = path.join(proj, "eslint.log");
+    const env = fakeEnv({ PATH: `${bins}${path.delimiter}${process.env.PATH}`, FAKE_ESLINT_OUT: "crash", FAKE_ESLINT_EXIT: "2", FAKE_ESLINT_LOG: log });
+    const gate = fileURLToPath(new URL("../quality-gate.mjs", import.meta.url));
+    const run = () => spawnSync(process.execPath, [gate], {
+      cwd: proj, encoding: "utf8", env,
+      input: JSON.stringify({ session_id: "qg-crash", tool_name: "Edit", tool_input: { file_path: path.join(proj, "a.js") } }),
+    });
+    const first = run();
+    fs.writeFileSync(path.join(proj, "a.js"), "const a = 2;\n"); // new content: not served from the pass cache
+    const second = run();
+    for (const r of [first, second]) {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stderr, "", "a crash is never a finding the model must fix");
+    }
+    assert.match(first.stdout, /eslint/);
+    assert.match(first.stdout, /unavailable/);
+    assert.equal(second.stdout, "", "reported once per session");
+    assert.equal(fs.readFileSync(log, "utf8").split("\n").filter(Boolean).length, 1, "the failure is cached for the session");
+  } finally {
+    fs.rmSync(bins, { recursive: true, force: true });
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
 });
 
 test("extractSig: a bare trailing (rule-id), as some other formatters emit, is also recognized", () => {
@@ -505,7 +635,7 @@ test("config: hierarchy key defaults, and project config overrides them", () => 
   const c = JSON.parse(fs.readFileSync(CFG, "utf8"));
   assert.deepEqual(
     [c.planning.featureBranches, c.planning.featureUnitCap, c.tracker.publish, c.execution.maxSubagents, c.execution.maxSessions],
-    [false, 8, "push", 0, 1]); // maxSubagents 0 = root-only
+    [false, 8, "on-approve", 0, 1]); // maxSubagents 0 = root-only
   const m = deepMerge(c, { planning: { featureBranches: true, featureUnitCap: 3 }, tracker: { publish: "pr" },
     execution: { maxSubagents: 2, maxSessions: 4 } });
   assert.deepEqual(
@@ -599,4 +729,267 @@ test("hasDocWriteGrant: pending grant, session grant and none", () => {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// 7.1: an advisory hook still fails open on bad input, but never silently (ARCH-SAFETY-04).
+test("advisorySkipped: one visible notice per hook per session, then silence", () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-advisory-"));
+  try {
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      process.stdout.write(JSON.stringify([m.advisorySkipped("quality-gate", "bad input"), m.advisorySkipped("quality-gate", "bad input"), m.advisorySkipped("stop-gate", "bad input")]));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      cwd: proj, encoding: "utf8", env: { ...fakeEnv({ CLAUDE_CODE_SESSION_ID: "advisory-unit" }) },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const notices = r.stdout.split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l).systemMessage);
+    assert.deepEqual(notices, ["craftsman: quality-gate skipped (bad input), advisory only", "craftsman: stop-gate skipped (bad input), advisory only"]);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+for (const script of ["quality-gate.mjs", "stop-gate.mjs", "builtin-skill-context.mjs"]) {
+  test(`${script}: bad JSON twice is exit 0 and exactly one notice`, () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-advisory-spawn-"));
+    try {
+      spawnSync("git", ["init", "-q"], { cwd: proj });
+      const file = fileURLToPath(new URL(`../${script}`, import.meta.url));
+      const run = () => spawnSync(process.execPath, [file], { cwd: proj, input: "not json", encoding: "utf8", env: fakeEnv({ CLAUDE_CODE_SESSION_ID: `advisory-${script}` }) });
+      const first = run();
+      const second = run();
+      for (const r of [first, second]) assert.equal(r.status, 0, r.stderr);
+      const name = script.replace(/\.mjs$/, "");
+      assert.equal(first.stdout.split(`craftsman: ${name} skipped (bad input), advisory only`).length - 1, 1);
+      assert.equal(second.stdout + second.stderr, "", "silent after the first notice");
+    } finally {
+      fs.rmSync(proj, { recursive: true, force: true });
+    }
+  });
+}
+
+// the SessionStart guard-state reasons, as a pure function
+test("guardState: separates what turns safety off from what turns only the quality machinery off", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-guardstate-"));
+  try {
+    const ctx = { root: dir, offFlag: path.join(dir, "off") };
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: ctx, env: {}, tmp: dir, sid: "g1" }), { safety: [], quality: [] });
+    fs.writeFileSync(path.join(dir, "off"), "");
+    const all = coreNs.guardState({ cfg: { enabled: false }, context: ctx, env: { CRAFTSMAN: "0", CRAFTSMAN_SAFETY: "off" }, tmp: dir, sid: "g1" });
+    assert.deepEqual(all.safety, ["CRAFTSMAN_SAFETY=off is set in the environment"]);
+    assert.equal(all.quality.length, 3);
+    const marker = path.join(dir, `craftsman-launcher-${process.getuid?.() ?? 0}`, "node-missing-g2");
+    fs.mkdirSync(marker, { recursive: true });
+    const none = { root: dir, offFlag: path.join(dir, "none") };
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: none, env: {}, tmp: dir, sid: "g2" }).safety,
+      ["node was missing earlier this session (hooks/run.sh left its marker)"]);
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: none, env: {}, tmp: dir, sid: "has.dot" }).safety, [],
+      "a session id run.sh would not accept is the shared marker, not this session's");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 8.2: the safety side has one off switch, and it is the user's environment.
+test("safetyEnabled: only CRAFTSMAN_SAFETY=off turns it off; CRAFTSMAN=off does not", () => {
+  assert.equal(coreNs.safetyEnabled({}), true);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN: "off" }), true);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN: "0" }), true);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN_SAFETY: "off" }), false);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN_SAFETY: "OFF" }), false);
+  assert.equal(coreNs.safetyEnabled({ CRAFTSMAN_SAFETY: "on" }), true);
+});
+
+test("recordCommand / commandInvoked: per session, by command, by route, and not past the ttl", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-commands-"));
+  try {
+    const context = { stateDir: dir };
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context }), false);
+    coreNs.recordCommand("s1", "plan", "skill", context);
+    assert.equal(coreNs.commandInvoked("s1", ["plan", "orchestrate"], { context }), true);
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context, via: "prompt" }), false, "route matters");
+    assert.equal(coreNs.commandInvoked("s1", ["toggle"], { context }), false, "command matters");
+    assert.equal(coreNs.commandInvoked("s2", ["plan"], { context }), false, "session matters");
+    coreNs.recordCommand("s1", "plan", "prompt", context);
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context, via: "prompt" }), true);
+    assert.equal(coreNs.commandInvoked("s1", ["plan"], { context, now: Date.now() + 2 * 3600 * 1000, ttlMs: 3600000 }), false, "ttl");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 11.1: not being in a git repo turns the quality machinery off and leaves safety on.
+test("safetyEnabled vs enabled: a non-git project root leaves safety on and the quality side off, and logEvent writes nothing", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-core-nongit-")));
+  try {
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      m.logEvent({ ev: "probe" });
+      console.log(JSON.stringify({ safety: m.safetyEnabled({}), quality: m.enabled({}, null), off: m.safetyEnabled({ CRAFTSMAN_SAFETY: "off" }) }));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: dir, encoding: "utf8", env: fakeEnv({ CLAUDE_PROJECT_DIR: dir }) });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { safety: true, quality: false, off: false });
+    assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "no events.jsonl for an unanchored root");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("RECORDED_COMMANDS: the doc writers, toggle and instruction (goal tokens are minted after /instruction)", () => {
+  assert.ok(coreNs.RECORDED_COMMANDS.includes("instruction"));
+  assert.ok(coreNs.RECORDED_COMMANDS.includes("toggle"));
+  for (const name of coreNs.DOC_WRITER_COMMANDS) assert.ok(coreNs.RECORDED_COMMANDS.includes(name), name);
+  assert.equal(coreNs.DOC_WRITER_COMMANDS.includes("instruction"), false, "/instruction writes nothing under docs/");
+});
+
+// A directory is not a marker: `mkdir` can create one without writing a file,
+// so a grant or an off flag must be a regular file (ARCH-STATE-06, ARCH-SAFETY-05).
+test("a directory is neither a doc-write grant nor an off flag", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-isfile-"));
+  try {
+    const ctx = { root: dir, grantStateDir: dir, offFlag: path.join(dir, "off") };
+    fs.mkdirSync(path.join(dir, "doc-write-pending"));
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), false, "a pending directory grants nothing");
+    fs.mkdirSync(path.join(dir, "sessions", "s1", "doc-write"), { recursive: true });
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), false, "a session marker directory grants nothing");
+    fs.mkdirSync(ctx.offFlag);
+    assert.equal(coreNs.enabled({}, ctx), true, "an off directory does not switch the machinery off");
+    assert.deepEqual(coreNs.guardState({ cfg: {}, context: ctx, env: {}, tmp: dir, sid: "s1" }), { safety: [], quality: [] },
+      "guardState agrees with enabled()");
+    fs.rmSync(ctx.offFlag, { recursive: true });
+    fs.writeFileSync(ctx.offFlag, "");
+    assert.equal(coreNs.enabled({}, ctx), false, "a regular off file still does");
+    fs.rmSync(path.join(dir, "doc-write-pending"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "doc-write-pending"), "x");
+    assert.equal(hasDocWriteGrant({ sid: "s1" }, ctx), true, "a regular pending file still grants");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A typed command is the user's word; a later model Skill call for the same command must not replace it.
+test("recordCommand: a skill record never replaces the user's typed (prompt) record, while a prompt record upgrades a skill one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    coreNs.recordCommand("r1", "toggle", "prompt", ctx);
+    coreNs.recordCommand("r1", "toggle", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("r1", ["toggle"], { context: ctx, via: "prompt" }), true, "the typed record survives");
+    coreNs.recordCommand("r2", "plan", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("r2", ["plan"], { context: ctx, via: "prompt" }), false);
+    coreNs.recordCommand("r2", "plan", "prompt", ctx);
+    assert.equal(coreNs.commandInvoked("r2", ["plan"], { context: ctx, via: "prompt" }), true, "typing it afterwards counts");
+    const stale = JSON.parse(fs.readFileSync(path.join(dir, "sessions", "r1", "commands.json"), "utf8"));
+    stale.toggle.at = new Date(Date.now() - 2 * 3600000).toISOString();
+    fs.writeFileSync(path.join(dir, "sessions", "r1", "commands.json"), JSON.stringify(stale));
+    coreNs.recordCommand("r1", "toggle", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("r1", ["toggle"], { context: ctx, via: "skill" }), true, "an expired typed record is replaced");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A check tool that could not run, or was killed by a signal, says nothing about the code.
+function runChecksWithTool(script) {
+  const bins = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tool-"));
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-rc-"));
+  try {
+    fs.writeFileSync(path.join(bins, "faketool"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    const code = `const m = await import(${JSON.stringify(CORE_URL)});
+      const lang = { name: "python", check: ["faketool {file}"] };
+      const r = await m.runChecks(${JSON.stringify(path.join(proj, "a.py"))}, lang, {}, { root: ${JSON.stringify(proj)}, stateDir: ${JSON.stringify(proj + "/.craftsman")} });
+      console.log(JSON.stringify(r));`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      cwd: proj, encoding: "utf8", env: fakeEnv({ PATH: `${bins}${path.delimiter}${process.env.PATH}` }),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  } finally {
+    fs.rmSync(bins, { recursive: true, force: true });
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+}
+
+test("runChecks: any check tool killed by a signal or exiting 126+ is unavailable, a plain nonzero exit is still a finding", () => {
+  for (const script of ["kill -SEGV $$", "exit 139", "exit 127", "exit 126"]) {
+    const r = runChecksWithTool(script);
+    assert.deepEqual(r.failures, [], script);
+    assert.deepEqual(r.unavailable, ["faketool"], script);
+  }
+  const finding = runChecksWithTool('echo "a.py:1:1: E501 line too long"; exit 1');
+  assert.equal(finding.failures.length, 1);
+  assert.deepEqual(finding.unavailable, []);
+});
+
+// Round 4 (30.1): outside a repository the shared-state lookup must not leak git's own "fatal:" text into a denial the model reads.
+test("sharedStateDir is quiet outside a repository, so a pre-guard call there writes only craftsman's own message (30.1)", { skip: process.platform === "win32" && "needs a POSIX tmp dir" }, () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-norepo-")));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-norepo-home-")));
+  try {
+    const guard = fileURLToPath(new URL("../pre-guard.mjs", import.meta.url));
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, USERPROFILE: home, GIT_CEILING_DIRECTORIES: path.dirname(dir) };
+    delete env.CRAFTSMAN; delete env.CRAFTSMAN_SAFETY;
+    const call = (command) => spawnSync(process.execPath, [guard], { cwd: dir, env, encoding: "utf8", input: JSON.stringify({ session_id: "nr", tool_name: "Bash", tool_input: { command } }) });
+    const denied = call("echo x > .craftsman/off");
+    assert.equal(denied.status, 2, "a protected write is still denied outside a repository");
+    assert.doesNotMatch(denied.stderr, /fatal:/, `the denial carries no git noise: ${denied.stderr}`);
+    const allowed = call("ls");
+    assert.equal(allowed.status, 0);
+    assert.doesNotMatch(allowed.stderr, /fatal:/, `an allowed call writes no git noise: ${allowed.stderr}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Round 4 (32.1): a repo whose craftsman.config.json is also the shipped default (this one) needs a place for project-only values.
+test("loadConfig merges an optional craftsman.project.json after craftsman.config.json; absent changes nothing, malformed is ignored (32.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-projcfg-")));
+  const write = process.stderr.write;
+  try {
+    assert.deepEqual(coreNs.loadConfig({ root: dir }).stopGate.markdownTests, [], "the shipped default");
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ timeoutMs: 111, stopGate: { requireAcceptanceCriteria: false } }));
+    assert.equal(coreNs.loadConfig({ root: dir }).timeoutMs, 111, "the base project file");
+    fs.writeFileSync(path.join(dir, "craftsman.project.json"), JSON.stringify({ timeoutMs: 222, stopGate: { markdownTests: ["README.md"] } }));
+    const merged = coreNs.loadConfig({ root: dir });
+    assert.equal(merged.timeoutMs, 222, "the override wins over the base project file");
+    assert.deepEqual(merged.stopGate.markdownTests, ["README.md"]);
+    assert.equal(merged.stopGate.requireAcceptanceCriteria, false, "keys the override does not name keep the base value");
+    assert.equal(merged.stopGate.enabled, true, "and the shipped default");
+    let warned = "";
+    process.stderr.write = (chunk) => { warned += chunk; return true; };
+    fs.writeFileSync(path.join(dir, "craftsman.project.json"), "{ not json");
+    const ignored = coreNs.loadConfig({ root: dir });
+    process.stderr.write = write;
+    assert.equal(ignored.timeoutMs, 111, "a malformed override is ignored, the base file still applies");
+    assert.match(warned, /craftsman\.project\.json/, "and it says so");
+    fs.rmSync(path.join(dir, "craftsman.project.json"));
+    assert.equal(coreNs.loadConfig({ root: dir }).timeoutMs, 111, "absent: today's behaviour");
+  } finally {
+    process.stderr.write = write;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("this repo's craftsman.project.json lists the markdown its own tests read, and the shipped default stays empty (32.3)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const project = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "craftsman.project.json"), "utf8"));
+  const shipped = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "craftsman.config.json"), "utf8"));
+  assert.deepEqual(shipped.stopGate.markdownTests, [], "the default other projects get");
+  for (const pattern of ["README.md", "CHANGELOG.md", "commands/*.md", "agents/*.md", "docs/architecture/*.md"]) assert.ok(project.stopGate.markdownTests.includes(pattern), pattern);
+  assert.deepEqual(Object.keys(project), ["stopGate"], "only project-only values live here");
+});
+
+// Round 6 (42.1): the nonce is required whatever files exist; no marker can stand in for it.
+test("consumeNonce: a leftover safety-off file does not stand in for the nonce, and a nonce is per script and one-shot (42.1)", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-nonce-"));
+  try {
+    const context = { stateDir };
+    const dir = path.join(stateDir, "sessions", "s1");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "safety-off"), "off\n");
+    assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), false);
+    coreNs.mintNonce("s1", "doc-write", { context });
+    assert.equal(coreNs.consumeNonce("s1", "toggle", { context }), false, "a nonce is per script");
+    assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), true);
+    assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), false, "and one-shot");
+  } finally { fs.rmSync(stateDir, { recursive: true, force: true }); }
 });

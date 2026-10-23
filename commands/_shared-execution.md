@@ -1,6 +1,7 @@
 ---
-description: Shared per-unit execution loop for /orchestrate Phase C. Not invoked.
+description: Per-unit loop for /orchestrate Phase C.
 disable-model-invocation: true
+user-invocable: false
 ---
 > `Read` only when about to run Phase X.
 
@@ -8,11 +9,11 @@ disable-model-invocation: true
 
 A lock guards **the merge only**, never the work. Sessions may share a base branch.
 
-- Locking, base-branch discovery, worktrees, and merges are repository-local via `scripts/repo-exec.mjs` for each step's selected `project` — never assume `main`/`origin/main`/the controller checkout. Its atomic lock lives in that repository's Git-common directory.
+- Locking, base-branch discovery, worktrees, and merges are repository-local via `scripts/repo-exec.mjs` for each step's selected `project` — never assume `main`/`origin/main`/the controller checkout. Its atomic lock lives under that repository's Git-common directory.
 - Every unit works in its own worktree/branch (Phase X.2) — implement → gates → review → conflict-resolution are all **lockless**. Acquire the lock only for the final merge; release the instant it validates.
 - Merge-time rules (Phase X.9d):
   - **Absent** → create lock, `checkout <base> && pull` + `merge --no-ff` + validate + push, delete lock immediately.
-  - **Present, heartbeat < 30 min** → another session mid-merge. Don't wait/block — defer this merge, do other lockless work, retry next pass. Never lands → PARKED(locked), worktree left for later.
+  - **Present, heartbeat < 30 min** → another session mid-merge. Don't wait — defer this merge, do other lockless work, retry next pass. Never lands → PARKED(locked), worktree kept.
   - **Present, heartbeat > 30 min** → stale (crash); overwrite, log the reclaim, proceed.
   - **Release is mandatory + immediate** on every path (abort/conflict/error included) — never hold across a wait, build, gate, or approval.
 
@@ -25,7 +26,7 @@ For each unit, dependency order (shared/library → consumers → UI last). **En
 1. **Claim** — atomically claim plan/unit via `scripts/claim.mjs` (real session id, plan, unit); an existing claim is BLOCKED/duplicate, never overwrite. Transitions go through `scripts/tracker.mjs`. Release only after close-out or explicit PARKED.
 2. **Worktree + branch** — `repo-exec.mjs action:"prepare"` (project, unit, slug, session id, optional worktree path). Discovers the real base branch, fetches its own remote, creates/reattaches the worktree. ALL edits/gates/review/conflict-resolution run there; base branch untouched until step 9. **No worktree → no edits.**
 3. **Detect language & tooling** (tracker notes; never assume) — read repo markers, derive build/test/lint/format/typecheck commands from the project's own config (`package.json` scripts + lockfile manager, `pyproject.toml`/`tox.ini`, `go.mod`, `Cargo.toml`, `*.csproj`/`.sln`, `build.gradle`, `Gemfile`, `Makefile`). Missing command = skip + note, never invent. Pass governing `docs/standards/` entries on.
-4. **Delegate implementation** via Task to `implementer`: plan-doc path, worktree path (its only writable scope), task list, design spec, detected commands. Activate `scripts/scope.mjs` there first with the unit's exact manifest (incl. absolute `worktree_path`), mark scope-required. Implementer edits + runs local checks, no commit. Recall bounded plan memory: `printf '%s' '{"action":"recall","plan":"<plan>","unit":"<unit>","scope_id":"<scope_id>","query":"<task area>","max_items":6,"max_chars":3000,"summary_only":true}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-memory.mjs"` — treat as unverified hints, verify cited files in-scope, never widen the manifest from memory.
+4. **Implement** with `implementer` (`agents/implementer.md`): you under root-only, a fresh agent only under `agentMode: "subagents"`. Give it the plan-doc path, worktree path (its only writable scope), tasks, spec, detected commands. Activate `scripts/scope.mjs` there first with the unit's exact manifest, mark scope-required. The implementer edits and runs local checks; it never commits (the unit-runner, or you, commits in the worktree). Recall bounded plan memory: `printf '%s' '{"action":"recall","plan":"<plan>","unit":"<unit>","scope_id":"<scope_id>","query":"<task area>","max_items":6,"max_chars":3000,"summary_only":true}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-memory.mjs"` — treat as unverified hints; never widen the manifest from memory.
 5. **Specialist gates** (read-only, parallel where multiple apply, per manifest). Critical/Major → back to implementer (counts toward retry budget); Minor → tracker notes. After each specialist (this step and step 8): `node "${CLAUDE_PLUGIN_ROOT}/scripts/log-specialist.mjs" <agent-name> <finding-count>`.
    - **Security** (mandatory on HIGH = auth/secrets/crypto/tenancy/permissions/external I/O): `security-auditor` on the diff.
    - **Deterministic floor:** `node "${CLAUDE_PLUGIN_ROOT}/scripts/gate-select.mjs" <merge-base>..<worktree-head>` once per unit — prints zero or more of `ui`/`migration`/`api`/`dependency`/`performance`/`observability`; dispatch the matching specialist with the diff. A floor, not a ceiling — escalate on judgment too (e.g. embedded DDL).
@@ -34,7 +35,7 @@ For each unit, dependency order (shared/library → consumers → UI last). **En
 6. **Simplify** — built-in `simplify` (Skill); revert off-manifest or behaviour-changing edits.
 7. **GATE** (detected commands, in order) — format → lint → typecheck → tests, 100% (no skips added, no weakened assertions). **Coverage** where tooling exists: touched code below threshold (default 80%) = fail → add tests; no coverage tooling → note, don't skip silently. Failure #1 → raw output to implementer; #2 → `build-doctor` triage, its `FIX FOR IMPLEMENTER` for the final retry. **Max 2 retries**, then PARK: `wip:` commit on `feat/<slug>`, `repo-exec.mjs action:"cleanup"`, tracker → BLOCKED(failing gate + triage + branch).
 8. **Review — routed.** `review-router` (haiku) on the diff first; log via `node "${CLAUDE_PLUGIN_ROOT}/scripts/log-router.mjs" <verdict> "<reason>"` before acting. **Architecture:** whatever the route, the diff is checked against every ARCH rule the unit cites (`_architecture.md`) — by `code-reviewer` on ESCALATE, by you on SKIP; a broken `decided` rule blocks like a REJECT.
-   - **SKIP** (≤~120 lines, no new API/endpoint, no auth/permissions/migration/concurrency/contract change, manifest names no mandatory specialist) → GATE (step 7) already passed; skip the whole panel, note `reviewed: skipped(router)`.
+   - **SKIP** (the criteria in `agents/review-router.md`, and the manifest names no mandatory specialist) → GATE (step 7) already passed; skip the whole panel, note `reviewed: skipped(router)`.
    - **ESCALATE** → built-in `code-review` (Skill, `high`; forked, await it): candidates for `code-reviewer`. Then, in parallel: `code-reviewer` (correctness/security/maintainability; owns VERDICT), `standards-keeper` (audit mode — repo's own conventions), `idiom-reviewer` (simplification). `performance-`/`observability-reviewer` only if step 5 flags them.
      - **Blocking:** `code-reviewer` `VERDICT: REJECT`, or `standards-keeper` Critical/Major → implementer fixes → re-review. Max 2 rounds; unresolved → PARK as BLOCKED.
      - **Advisory-only, never blocks:** `idiom-reviewer` findings, `standards-keeper` Minor deviations — fold in the cheap ones this round, rest → tracker notes `reviewed: idiom-advisory(...)`. Step 5's specialist findings fold in the same way.

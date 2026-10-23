@@ -1,6 +1,6 @@
 ---
 name: observability-reviewer
-description: Design review of a DIFF for logging, metrics, and tracing gaps — can this fail silently in production?; max 5 findings.
+description: Design review of a DIFF for logging, metrics and tracing gaps. At most 5 findings.
 tools: Read, Grep, Glob, Bash
 model: haiku
 maxTurns: 12

@@ -73,6 +73,22 @@ test("tracker: criteria tagged with the unit's scope_id also gate MERGED; PARKED
   assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "gate failed twice" }, selected).status, "PARKED");
 });
 
+// Stated limit (ARCH-SAFETY-05, safety.md): CRAFTSMAN=off is the user's switch for the quality side, so the quality gates honour it in a
+// script's own environment, where any command can set it for one script. They are not a security boundary; this pins today's behaviour.
+test("tracker: the MERGED acceptance gate honours CRAFTSMAN=off in its own environment (a stated limit of the quality side)", () => {
+  const selected = context();
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(selected.stateDir, "acceptance.md"), "- [ ] [unit:unit-1] still open\n");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  assert.throws(() => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc" }, selected), /MERGED refused/);
+  const was = process.env.CRAFTSMAN;
+  try {
+    process.env.CRAFTSMAN = "off";
+    assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc" }, selected).status, "MERGED");
+  } finally { if (was === undefined) delete process.env.CRAFTSMAN; else process.env.CRAFTSMAN = was; }
+});
+
 function status(selected, unit) {
   return currentState(selected).find((row) => row.unit === unit)?.status;
 }
@@ -154,6 +170,22 @@ test("tracker: sync restores a hand-tampered block and is a no-op when it alread
   fs.writeFileSync(file, rendered.replace("| PENDING |", "| COMPLETE |"));
   assert.equal(syncTrackerDoc(selected).changed, true);
   assert.equal(trackerDoc(selected), rendered);
+});
+
+test("tracker: sync refuses a render that drops 50 committed rows for 5 local ones (ARCH-TRACKER-13)", () => {
+  const selected = context();
+  const plans = path.join(selected.root, "docs", "plans");
+  fs.mkdirSync(plans, { recursive: true });
+  const committed = Array.from({ length: 50 }, (_, i) => JSON.stringify({ plan: "docs/plans/example.md", unit: `m${i}` }));
+  fs.writeFileSync(path.join(plans, "TRACKER.jsonl"), committed.join("\n") + "\n");
+  fs.writeFileSync(path.join(plans, "TRACKER.md"), "# Execution tracker\n\nNotes.\n");
+  for (let i = 0; i < 5; i++) transition({ plan: "docs/plans/example.md", unit: `m${i}`, status: "PENDING" }, selected);
+  const result = syncTrackerDoc(selected);
+  assert.equal(result.changed, false);
+  assert.match(result.refused, /45/);
+  assert.equal(trackerDoc(selected), "# Execution tracker\n\nNotes.\n");
+  const log = fs.readFileSync(path.join(selected.stateDir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(log.filter((e) => e.ev === "tracker_publish_refused").at(-1).dropped.length, 45);
 });
 
 test("tracker: a repo with no ledger rows never grows a generated section", () => {

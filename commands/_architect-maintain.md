@@ -1,6 +1,7 @@
 ---
-description: Shared protocol for /architect --init and --update. Not invoked directly.
+description: Shared protocol for /architect --init and --update.
 disable-model-invocation: true
+user-invocable: false
 ---
 > Canonical protocol for `/architect --init` and `/architect --update`. `/architect`
 > `Read`s this only when one of those flags is passed. Not user-invocable.

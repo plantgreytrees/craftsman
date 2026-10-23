@@ -27,7 +27,7 @@
 // "workflow". An inline or ad-hoc script is always blocked.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS, PLUGIN_ROOT, RUNNER_AGENTS, spendRunnerDispatch, autoActive } from "./lib/core.mjs";
+import { loadConfig, safetyEnabled, projectContext, readStdin, logEvent, sidOf, spendAgentGrant, GRANTED_AGENTS, PLUGIN_ROOT, RUNNER_AGENTS, spendRunnerDispatch, autoActive } from "./lib/core.mjs";
 
 // The plugin workflow a Workflow call runs (path relative to the plugin), or
 // null for anything else: an inline script, a path outside workflows/, or a
@@ -53,11 +53,25 @@ const GRANTING_COMMAND = {
   "architect-analyst": "/architect --deep",
 };
 
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
+// top-level await would otherwise exit 1, which Claude Code treats as a non-blocking failure.
+const GUARD = "agent-mode-guard";
+function failClosed(why) {
+  process.stderr.write(`craftsman: ${GUARD} could not decide (${why}), so the call is denied.\n`);
+  process.exit(2);
+}
+process.on("uncaughtException", (error) => failClosed(error?.message || String(error)));
+process.on("unhandledRejection", (error) => failClosed(error?.message || String(error)));
+
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+const rawInput = await readStdin();
+try { input = JSON.parse(rawInput); } catch { failClosed(rawInput.trim() ? "bad JSON on stdin" : "empty stdin"); }
+if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("stdin is not a JSON object");
+// Test-only: lets the suite prove an exception denies. It can only ever deny.
+if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context)) process.exit(0);
+if (!safetyEnabled()) process.exit(0);
 
 if (input?.tool_name === "Workflow") {
   const workflow = pluginWorkflow(input.tool_input || {});

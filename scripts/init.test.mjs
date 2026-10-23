@@ -4,6 +4,9 @@ import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyInitPlan, buildInitPlan, buildUpdatePlan, claudeIgnorePatterns, pluginVersion, renderInitDiff } from "./init.mjs";
+import * as initMod from "./init.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-"));
@@ -214,4 +217,92 @@ test("init update treats a FEATURE_MERGED tracker row as active", () => {
   const audit = buildUpdatePlan(root, { checkTools: false }).update.planAudit.find((p) => p.slug === "feat");
   assert.deepEqual(audit.statuses, ["FEATURE_MERGED"]);
   assert.equal(audit.active, true);
+});
+
+// 13.1 / ARCH-SAFETY-10: init offers to merge sandbox settings into the project's .claude/settings.json.
+// It shows the diff first, merges and never overwrites, and writes nothing until it is told to.
+const INIT = fileURLToPath(new URL("./init.mjs", import.meta.url));
+const settingsPath = (root) => path.join(root, ".claude", "settings.json");
+const initCli = (root, flag) => spawnSync(process.execPath, [INIT, flag], { cwd: root, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: root } });
+
+test("init --settings-diff shows the merge and writes nothing; declining leaves the file byte-identical", () => {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, ".claude"));
+  const original = JSON.stringify({ model: "opus", permissions: { allow: ["Bash(npm test)"] } }, null, 2) + "\n";
+  fs.writeFileSync(settingsPath(root), original);
+  const r = initCli(root, "--settings-diff");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\+ sandbox\.enabled: true/);
+  assert.match(r.stdout, /\+ permissions\.ask: Bash\(git push --force \*\)/);
+  assert.equal(fs.readFileSync(settingsPath(root), "utf8"), original, "a preview never writes");
+  assert.equal(fs.existsSync(path.join(root, ".craftsman", "init-backups")), false);
+});
+
+test("init --settings-write merges into an existing file, keeps every key and array, and backs the old file up", () => {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, ".claude"));
+  fs.writeFileSync(settingsPath(root), JSON.stringify({ model: "opus", permissions: { allow: ["Bash(npm test)"], ask: ["Bash(sudo *)"] } }, null, 2));
+  const r = initCli(root, "--settings-write");
+  assert.equal(r.status, 0, r.stderr);
+  const next = JSON.parse(fs.readFileSync(settingsPath(root), "utf8"));
+  assert.equal(next.model, "opus");
+  assert.deepEqual(next.permissions.allow, ["Bash(npm test)"]);
+  assert.equal(next.permissions.ask.filter((rule) => rule === "Bash(sudo *)").length, 1);
+  assert.equal(next.sandbox.enabled, true);
+  const backups = fs.readdirSync(path.join(root, ".craftsman", "init-backups"));
+  assert.equal(backups.length, 1);
+  assert.match(fs.readFileSync(path.join(root, ".craftsman", "init-backups", backups[0], ".claude", "settings.json"), "utf8"), /"model": "opus"/);
+  // idempotent: nothing left to add, so nothing is written and no second backup appears
+  assert.match(initCli(root, "--settings-write").stdout, /nothing to add/);
+  assert.equal(fs.readdirSync(path.join(root, ".craftsman", "init-backups")).length, 1);
+});
+
+test("init --settings-write creates .claude/settings.json when there is none", () => {
+  const root = fixture();
+  assert.equal(initCli(root, "--settings-write").status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(root), "utf8")).sandbox, { enabled: true });
+});
+
+test("init settings merge aborts on invalid JSON and leaves the file untouched", () => {
+  const root = fixture();
+  fs.mkdirSync(path.join(root, ".claude"));
+  fs.writeFileSync(settingsPath(root), "{ not json");
+  for (const flag of ["--settings-diff", "--settings-write"]) {
+    const r = initCli(root, flag);
+    assert.equal(r.status, 2, flag);
+    assert.match(r.stderr, /settings\.json/);
+  }
+  assert.equal(fs.readFileSync(settingsPath(root), "utf8"), "{ not json");
+});
+
+test("init: the settings merge and the other modes are mutually exclusive", () => {
+  const root = fixture();
+  const r = spawnSync(process.execPath, [INIT, "--settings-write", "--write"], { cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /choose only one/);
+  assert.equal(typeof initMod.previewSandboxSettings, "function");
+});
+
+// Round 5 (38.2): the architecture dir comes from the merged project config, so craftsman.project.json applies.
+test("init update reads architecture.dir from craftsman.project.json too (38.2)", () => {
+  const root = fixture();
+  fs.writeFileSync(path.join(root, "craftsman.project.json"), JSON.stringify({ architecture: { dir: "docs/arch-from-override" } }));
+  const plan = buildUpdatePlan(root, { checkTools: false });
+  assert.equal(plan.update.architecture.dir, "docs/arch-from-override");
+});
+
+test("init update scaffolds a tiny craftsman-loop rule only when absent and writes no justfile, pre-commit or CI file", () => {
+  const root = fixture();
+  const rule = path.join(root, ".claude", "rules", "craftsman-loop.md");
+  const plan = buildUpdatePlan(root, { checkTools: false });
+  assert.ok(plan.changes.includes(rule));
+  assert.ok(Buffer.byteLength(plan.files[rule]) <= 200);
+  assert.equal(buildInitPlan(root, { checkTools: false }).changes.includes(rule), false);
+  applyInitPlan(plan);
+  assert.ok(fs.existsSync(rule));
+  for (const f of ["justfile", ".pre-commit-config.yaml", ".github"]) assert.equal(fs.existsSync(path.join(root, f)), false);
+  assert.equal(buildUpdatePlan(root, { checkTools: false }).changes.includes(rule), false);
+  fs.writeFileSync(rule, "mine\n");
+  applyInitPlan(buildUpdatePlan(root, { checkTools: false }));
+  assert.equal(fs.readFileSync(rule, "utf8"), "mine\n");
 });

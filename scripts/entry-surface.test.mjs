@@ -23,9 +23,9 @@ export function flaggedCommands(root = ROOT) {
 }
 
 // Files (other than the command's own) that invoke `name`: `/craftsman:name`,
-// a quoted "craftsman:name" command, or `/name` on a SlashCommand line.
+// a quoted "craftsman:name" command, or `/name` on a Skill line.
 export function invokers(name, files, read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8")) {
-  const re = new RegExp(`craftsman:${name}\\b|SlashCommand[^\\n]*/${name}\\b`);
+  const re = new RegExp(`craftsman:${name}\\b|Skill[^\\n]*/${name}\\b`);
   return files.filter((f) => f !== `commands/${name}.md` && re.test(read(f)));
 }
 

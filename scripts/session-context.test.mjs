@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Target 3072; set to the measured size and only lowered from here.
+const CAP_BYTES = 3072;
 const SESSION_CONTEXT = path.join(ROOT, "session-context.mjs");
 
 function run(script, dir, input) {
@@ -20,7 +22,7 @@ function run(script, dir, input) {
 
 function withProject(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-session-context-"));
-  try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(`${dir}-remote.git`, { recursive: true, force: true }); }
 }
 
 test("session-context: a session opened above a repo, with no workspace manifest, is off with one notice", () => {
@@ -30,6 +32,7 @@ test("session-context: a session opened above a repo, with no workspace manifest
     const result = run(SESSION_CONTEXT, dir, { session_id: "above" });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /^craftsman off: .* is not a git repository/);
+    assert.match(result.stdout, /the quality, doc and tracker gates are off; the safety guards stay on/);
     assert.equal(result.stdout.trim().split("\n").length, 1);
     assert.equal(fs.existsSync(path.join(dir, ".craftsman")), false, "no state is written for an unanchored root");
   });
@@ -55,6 +58,11 @@ test("session-context: SessionStart removes merged, clean leftover worktrees and
     };
     git(dir, "init", "-q", "-b", "main");
     git(dir, "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+    // merged means merged into a pushed remote-tracking base (ARCH-SAFETY-07)
+    const bare = `${dir}-remote.git`;
+    spawnSync("git", ["init", "-q", "--bare", bare]);
+    git(dir, "remote", "add", "origin", bare);
+    git(dir, "push", "-q", "-u", "origin", "main");
     const clean = path.join(dir, ".worktrees", "clean");
     const dirty = path.join(dir, ".worktrees", "dirty");
     git(dir, "worktree", "add", "-q", "-b", "feat/clean", clean);
@@ -85,5 +93,156 @@ test("session-context: the HAND-OFF line carries the plan's level and adds no li
     const bare = context();
     assert.match(bare, /plan unindexed; unit u;/);
     assert.equal(withLevel.split("\n").length, bare.split("\n").length, "no new lines");
+  });
+});
+
+// 7.2: SessionStart says whether the guards are on, and if not, why (ARCH-SAFETY-04).
+function startState(dir, { env = {}, setup } = {}) {
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  setup?.(dir);
+  const childEnv = { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env };
+  for (const key of ["CRAFTSMAN", "CRAFTSMAN_SAFETY", "CLAUDE_CODE_SESSION_ID"]) if (!(key in env)) delete childEnv[key];
+  const r = spawnSync(process.execPath, [SESSION_CONTEXT], { cwd: dir, input: JSON.stringify({ session_id: "guard-state" }), encoding: "utf8", env: childEnv });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  return { message: out.systemMessage || "", context: out.hookSpecificOutput?.additionalContext || "" };
+}
+
+test("session-context: guards on is one short line of context and no user-facing message", () => {
+  withProject((dir) => {
+    const { message, context } = startState(dir);
+    assert.match(context, /^craftsman guards: on\./m);
+    assert.equal(message, "");
+  });
+});
+
+for (const [name, reason, options] of [
+  ["CRAFTSMAN=off", "CRAFTSMAN=off is set in the environment", { env: { CRAFTSMAN: "off" } }],
+  [".craftsman/off", ".craftsman/off exists", { setup: (dir) => { fs.mkdirSync(path.join(dir, ".craftsman")); fs.writeFileSync(path.join(dir, ".craftsman", "off"), ""); } }],
+  ["enabled:false", "enabled is false in craftsman.config.json", { setup: (dir) => fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ enabled: false })) }],
+]) {
+  test(`session-context: ${name} turns off the quality machinery only, and says the safety guards stay on`, () => {
+    withProject((dir) => {
+      const { message, context } = startState(dir, options);
+      const escaped = reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      assert.match(message, new RegExp(`craftsman quality, doc and tracker gates off: .*${escaped}.*safety guards stay on`));
+      assert.match(context, /safety guards stay on/);
+      assert.doesNotMatch(message + context, /craftsman guards off/);
+    });
+  });
+}
+
+// Round 5 (38.1): the reason names the file the value came from.
+for (const [files, expected, unexpected] of [
+  [{ "craftsman.project.json": { enabled: false } }, "enabled is false in craftsman.project.json", /craftsman\.config\.json/],
+  [{ "craftsman.config.json": { enabled: false }, "craftsman.project.json": { enabled: false } }, "enabled is false in craftsman.config.json and craftsman.project.json", null],
+]) {
+  test(`session-context: enabled:false from ${Object.keys(files).join(" and ")} is attributed to ${Object.keys(files).length > 1 ? "both files" : "that file"} (38.1)`, () => {
+    withProject((dir) => {
+      const { message } = startState(dir, { setup: (d) => { for (const [name, value] of Object.entries(files)) fs.writeFileSync(path.join(d, name), JSON.stringify(value)); } });
+      assert.ok(message.includes(expected), `${expected} in: ${message}`);
+      if (unexpected) assert.doesNotMatch(message, unexpected);
+    });
+  });
+}
+
+test("session-context: CRAFTSMAN_SAFETY=off is the one thing reported as guards off", () => {
+  withProject((dir) => {
+    const { message, context } = startState(dir, { env: { CRAFTSMAN_SAFETY: "off" } });
+    assert.match(message, /craftsman guards off: CRAFTSMAN_SAFETY=off is set in the environment/);
+    assert.match(context, /craftsman guards off:/);
+    assert.doesNotMatch(context, /craftsman guards: on/);
+  });
+});
+
+test("session-context: a node-missing marker left by hooks/run.sh earlier in this session is reported", () => {
+  withProject((dir) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-launcher-tmp-"));
+    try {
+      const marker = path.join(tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, "node-missing-guard-state");
+      fs.mkdirSync(marker, { recursive: true });
+      const { message } = startState(dir, { env: { TMPDIR: tmp } });
+      assert.match(message, /craftsman guards off: .*node was missing earlier this session/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// 13.2: one line when the sandbox is enabled in no settings scope (ARCH-SAFETY-01 leaves those protections to it).
+function sandboxNotice(setup) {
+  let notice = "";
+  withProject((dir) => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-sandbox-home-"));
+    const managed = path.join(home, "managed");
+    fs.mkdirSync(managed);
+    try {
+      const { context } = startState(dir, {
+        setup: (d) => setup?.({ dir: d, home, managed }),
+        env: { CLAUDE_CONFIG_DIR: path.join(home, "user"), HOME: home, CRAFTSMAN_MANAGED_SETTINGS_DIR: managed },
+      });
+      notice = context.split("\n").filter((l) => /sandbox/i.test(l)).join("\n");
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
+  });
+  return notice;
+}
+
+test("session-context: one line says the sandbox is enabled in no settings scope", () => {
+  const notice = sandboxNotice();
+  assert.match(notice, /the Claude Code sandbox is not enabled in any settings scope/);
+  assert.match(notice, /\/craftsman:init/);
+  assert.equal(notice.split("\n").length, 1);
+});
+
+test("session-context: no sandbox line when project settings, user settings or a managed file enable it", () => {
+  const enable = (file) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ sandbox: { enabled: true } })); };
+  assert.equal(sandboxNotice(({ dir }) => enable(path.join(dir, ".claude", "settings.json"))), "");
+  assert.equal(sandboxNotice(({ home }) => enable(path.join(home, "user", "settings.json"))), "");
+  assert.equal(sandboxNotice(({ managed }) => enable(path.join(managed, "managed-settings.json"))), "");
+});
+
+// 13.3a: SessionStart records the hash of every guarded doc.
+test("session-context: SessionStart snapshots the hash of every guarded doc", () => {
+  withProject((dir) => {
+    startState(dir, {
+      setup: (d) => {
+        fs.mkdirSync(path.join(d, "docs", "plans"), { recursive: true });
+        fs.writeFileSync(path.join(d, "docs", "plans", "a.md"), "# a\n");
+        fs.mkdirSync(path.join(d, "docs", "architecture"), { recursive: true });
+        fs.writeFileSync(path.join(d, "docs", "architecture", "x.rules.md"), "# x\n");
+        fs.writeFileSync(path.join(d, "app.js"), "1\n");
+      },
+    });
+    const snap = JSON.parse(fs.readFileSync(path.join(dir, ".craftsman", "sessions", "guard-state", "doc-snapshot.json"), "utf8"));
+    assert.deepEqual(Object.keys(snap.docs).sort(), ["docs/architecture/x.rules.md", "docs/plans/a.md"]);
+    assert.match(snap.docs["docs/plans/a.md"], /^[0-9a-f]{40}$/);
+    assert.equal("status" in snap, false, "nothing in the snapshot that Stop never reads");
+  });
+});
+
+test("ARCH-SLIM-10: the SessionStart additionalContext stays under its byte cap", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const out = JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "cap" }).stdout);
+    const bytes = Buffer.byteLength(out.hookSpecificOutput.additionalContext);
+    assert.ok(bytes <= CAP_BYTES, `additionalContext is ${bytes} bytes, cap ${CAP_BYTES}`);
+  });
+});
+
+test("ARCH-APPROVAL-05: SessionStart names approved-but-unlanded runs in one line, and only then", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const ctx = () => JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "appr" }).stdout).hookSpecificOutput.additionalContext;
+    assert.doesNotMatch(ctx(), /APPROVED, NOT LANDED/);
+    const d = path.join(dir, ".craftsman", "approvals");
+    fs.mkdirSync(d, { recursive: true });
+    const rec = (run, status) => fs.writeFileSync(path.join(d, `${run}.json`), JSON.stringify({ run, plan: "p", status, choice: "merge", url: "u" }));
+    rec("p-a", "decided");
+    rec("p-b", "landed");
+    rec("p-c", "requested");
+    const lines = ctx().split("\n").filter((l) => l.includes("APPROVED, NOT LANDED"));
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /p-a/);
+    assert.doesNotMatch(lines[0], /p-b|p-c/);
   });
 });

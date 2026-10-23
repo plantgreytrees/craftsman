@@ -1,6 +1,7 @@
 ---
-description: Contract for /architect's rules docs. Not invoked.
+description: Rules-doc contract.
 disable-model-invocation: true
+user-invocable: false
 ---
 > How every command (`/idea`, `/instruction`, `/plan`, `/orchestrate`,
 > `/scrutinise`, `/sync-docs`, `/understand`, `/investigate`, `/fix-tests`)

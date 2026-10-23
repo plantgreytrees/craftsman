@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { rootContextRows, rootContextSection, latencySection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection } from "./stats.mjs";
+import { rootContextRows, rootContextSection, latencySection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection, approvalSection } from "./stats.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = (sid, tokens, percent, unit = null) => ({ ts: 1, ev: "context", sid, phase: "orchestrate", unit, tokens, percent, cost: null });
@@ -20,13 +20,20 @@ const EVENTS = [
 
 test("stats: root context per run — samples, peak, final and peak percent per sid", () => {
   assert.deepEqual(rootContextRows(EVENTS), [
-    { sid: "root-a", samples: 3, peak: 90_000, final: 60_000, peakPercent: 45, units: ["telemetry", "baseline-run"] },
-    { sid: "root-b", samples: 1, peak: 10_000, final: 10_000, peakPercent: 5, units: [] },
+    { sid: "root-a", samples: 3, peak: 90_000, final: 60_000, peakPercent: 45, baseline: null, growth: null, units: ["telemetry", "baseline-run"] },
+    { sid: "root-b", samples: 1, peak: 10_000, final: 10_000, peakPercent: 5, baseline: null, growth: null, units: [] },
   ]);
   const section = rootContextSection(EVENTS);
   assert.match(section, /^Root context per run: 2 sessions/);
   assert.match(section, /root-a\s+3 samples · peak 90000 · final 60000 · peak 45% · units telemetry,baseline-run/);
   assert.match(rootContextSection([]), /No context samples yet/);
+});
+
+test("stats: baseline, peak and growth per session; the baseline is not a sample", () => {
+  const events = [{ ...ctx("s", 12_000, 6), phase: "baseline" }, ctx("s", 30_000, 15), ctx("s", 50_000, 25), { ...ctx("s", 99, 1), phase: "baseline" }];
+  const [row] = rootContextRows(events);
+  assert.deepEqual([row.baseline, row.peak, row.growth, row.samples], [12_000, 50_000, 38_000, 2]);
+  assert.match(rootContextSection(events), /baseline 12000 · growth 38000/);
 });
 
 test("stats: the CLI prints the root context section from events.jsonl", () => {
@@ -105,4 +112,17 @@ test("stats: blocks-by-reason table and last-7-days guard_unparsed list", () => 
   assert.doesNotMatch(out, /old/);
   // 5.2: every line is indented, so no new top-level section name appears
   assert.ok(out.split("\n").every((l) => l.startsWith("  ")));
+});
+
+test("stats: approval section pairs requested with decided by run (ARCH-APPROVAL-06)", () => {
+  const ev = [
+    { ts: 1000, ev: "approval_requested", run: "a" },
+    { ts: 2000, ev: "approval_requested", run: "b" },
+    { ts: 11_000, ev: "approval_decided", run: "a", choice: "merge" },
+    { ts: 32_000, ev: "approval_decided", run: "b", choice: "open-pr" },
+    { ts: 40_000, ev: "approval_decided", run: "orphan", choice: "merge" },
+  ];
+  const out = approvalSection(ev);
+  assert.match(out, /^  approvals: 2 decided · p50 30s · p95 30s$/);
+  assert.match(approvalSection([]), /^  approvals: none decided yet$/);
 });

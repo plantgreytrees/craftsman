@@ -9,32 +9,64 @@ import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
   sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
-  ROOT_SOURCE, rootUnanchored, writeRootPin,
+  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState, atomicWrite,
 } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
+import { sandboxEnabledAnywhere } from "./lib/settings-merge.mjs";
+import { snapshotDocs } from "./lib/doc-snapshot.mjs";
+import { pending as pendingApprovals } from "./approval.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
 const sid = sidOf(input);
-// Opened above a repo with no workspace manifest: nothing to anchor state to
-// (ARCH-STATE-01). Say so once instead of silently splitting state.
+// Opened above a repo with no workspace manifest: nothing to anchor state to (ARCH-STATE-01), so the
+// quality, doc and tracker machinery is off; the safety guards are not (ARCH-SAFETY-08). One line.
 if (ROOT_SOURCE === "project-dir" && rootUnanchored()) {
   process.stdout.write(
-    `craftsman off: ${PROJECT_ROOT} is not a git repository. Open the session inside a repo, ` +
-    `or register its projects with /craftsman:workspace-init.\n`
+    `craftsman off: ${PROJECT_ROOT} is not a git repository, so the quality, doc and tracker gates are off; the safety guards stay on. ` +
+    `Open the session inside a repo, or register its projects with /craftsman:workspace-init.\n`
   );
   process.exit(0);
 }
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context)) process.exit(0);
+// ARCH-SAFETY-04: say whether the guards are on, and if not, why. Off for a reason the user may not
+// know about is the dangerous case, so it reaches the user as well as the model.
+const state = guardState({ cfg, context, sid: input.session_id });
+const guardsOffLine = `craftsman guards off: ${state.safety.join("; ")}.`;
+const qualityOffLine = `craftsman quality, doc and tracker gates off: ${state.quality.join("; ")}; the safety guards stay on.`;
+const stateLines = [state.safety.length ? guardsOffLine : "", state.quality.length ? qualityOffLine : ""].filter(Boolean);
+if (!enabled(cfg, context)) {
+  // The quality side is off; say so, and say the guards are not.
+  const text = stateLines.join("\n") || qualityOffLine;
+  process.stdout.write(JSON.stringify({
+    systemMessage: text,
+    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text },
+  }));
+  process.exit(0);
+}
 // Bash-run scripts have no CLAUDE_PROJECT_DIR; this pin is how they find
 // the same root the hooks use.
 writeRootPin(sid, PROJECT_ROOT);
+
+// ARCH-SAFETY-10: the post-hoc check on guarded docs starts here — their hashes at session start,
+// compared at Stop. Best-effort: a snapshot that cannot be taken just means no report.
+if (cfg.docWriteGuard?.enabled !== false) {
+  try {
+    atomicWrite(path.join(sessionDir(sid, context), "doc-snapshot.json"), JSON.stringify(snapshotDocs(context.root, cfg.docWriteGuard?.docPaths || ["docs/**"])));
+  } catch { /* no snapshot, no report */ }
+}
+// ARCH-SAFETY-01: outside-root writes, deletes and credential reads are the sandbox's job; say when it is off everywhere.
+let sandboxLine = "";
+try {
+  if (!sandboxEnabledAnywhere({ root: context.root })) {
+    sandboxLine = "craftsman: the Claude Code sandbox is not enabled in any settings scope, so writes outside the project and credential reads are not isolated; /craftsman:init can add it.";
+  }
+} catch { /* unreadable settings: say nothing */ }
 
 const markers = {
   "package.json": "JavaScript/TypeScript", "deno.json": "Deno",
@@ -247,8 +279,14 @@ try {
 // while still keeping AGENT MODE's directive force — the one line that
 // actually prevents token-costly subagent fan-out, so it stays explicit
 // rather than compressed into vagueness.
+// Approved but not yet landed runs (ARCH-APPROVAL-05): one line, only when some exist.
+let approved = [];
+try { approved = pendingApprovals({}, { root: context.root }).runs; } catch { /* best-effort */ }
+
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
+  state.safety.length ? guardsOffLine : "craftsman guards: on.",
+  sandboxLine,
   rootOnly
     ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, the one isolated agent each of /scrutinise, /idea and /architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
     : "",
@@ -260,6 +298,7 @@ const parts = [
   handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}${handoffLevel ? ` (${handoffLevel})` : ""}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
   swept.length ? `WORKTREES SWEPT (merged, clean): ${summarizeUnits(swept.map((e) => path.relative(context.root, e.path)))}.` : "",
   lingering.length ? `LINGERING WORKTREES: ${summarizeUnits(lingering.map((e) => path.relative(context.root, e.path)))} — merged, clean, unowned. Remove: printf '%s' '{"action":"sweep","all_merged":true}' | node "${path.join(PLUGIN_ROOT, "scripts", "worktree-sweep.mjs")}"` : "",
+  approved.length ? `APPROVED, NOT LANDED: ${summarizeUnits(approved.map((r) => r.run))} — land with repo-exec land-feature (commands/_approval.md).` : "",
   trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
   restoredMemory.length ? `PLAN MEMORY (verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}] ${entry.summary}`).join("\n") : "",
   rules.length
@@ -270,5 +309,6 @@ const parts = [
 
 logEvent({ ev: "session_start", sid, langs, tools: present.length, rules: rules.length });
 process.stdout.write(JSON.stringify({
+  ...(state.safety.length ? { systemMessage: guardsOffLine } : {}),
   hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: parts.join("\n") },
 }));

@@ -1,6 +1,7 @@
 ---
-description: Root-side network phase for workflow runs. Not invoked.
+description: Root network phase for workflows.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Network phase (ARCH-LAND-19)
 

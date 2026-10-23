@@ -170,6 +170,7 @@ export function projectContext(project = ".") {
 
 export function isGitRoot(root) {
   try {
+    // stderr ignored: outside a repo git's "fatal: not a git repository" would otherwise reach the user on every hook
     return execFileSync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() === root;
   } catch { return false; }
 }
@@ -221,7 +222,10 @@ export function sessionDir(sid, context = null) {
   return path.join(context?.stateDir || STATE_DIR, "sessions", sid);
 }
 
-const grantMtime = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
+// A marker is a regular file: `mkdir` can make a directory of the same name
+// without writing anything, so a directory never counts (ARCH-SAFETY-05).
+const isFlagFile = (file) => { try { return fs.statSync(file).isFile(); } catch { return false; } };
+const grantMtime = (file) => { try { const st = fs.statSync(file); return st.isFile() ? st.mtimeMs : null; } catch { return null; } };
 const grantTtl = (ttl) => typeof ttl === "number" && Number.isFinite(ttl) && ttl > 0;
 
 // Pure grant rule: the session's own marker lives for ttlMs, the global
@@ -406,6 +410,7 @@ export function sharedStateDir(context = null) {
   try {
     const commonGitDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
       cwd: context?.root || PROJECT_ROOT, encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"], // outside a repository git says so on stderr, which a denial must not carry
     }).trim();
       if (commonGitDir) return path.resolve(path.resolve(context?.root || PROJECT_ROOT, commonGitDir), ".craftsman");
   } catch {}
@@ -556,18 +561,27 @@ export function pruneSessions(maxAgeMs = 7 * 24 * 3600 * 1000, context = null) {
 
 // ---------------------------------------------------------------- config ---
 
+// The project config files loadConfig merges over the defaults, in order (run.sh scans the same list for protectedPaths; launcher.test pins that).
+export const PROJECT_CONFIG_FILES = ["craftsman.config.json", "craftsman.project.json"];
 export function loadConfig(context = null) {
   const defaults = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, "craftsman.config.json"), "utf8")
   );
-  const local = path.join(context?.root || PROJECT_ROOT, "craftsman.config.json");
-  if (!fs.existsSync(local)) return defaults;
-  try {
-    return deepMerge(defaults, JSON.parse(fs.readFileSync(local, "utf8")));
-  } catch (e) {
-    warn(`ignoring malformed ./craftsman.config.json: ${e.message}`);
-    return defaults;
+  // The project's own values: craftsman.config.json, then craftsman.project.json over it. The second file exists for a repo
+  // whose craftsman.config.json IS the shipped default (this plugin's own), which cannot hold project-only values.
+  // An absent file adds nothing; a malformed one is ignored with a warning.
+  const root = context?.root || PROJECT_ROOT;
+  let merged = defaults;
+  for (const name of PROJECT_CONFIG_FILES) {
+    const file = path.join(root, name);
+    if (!fs.existsSync(file)) continue;
+    try {
+      merged = deepMerge(merged, JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch (e) {
+      warn(`ignoring malformed ./${name}: ${e.message}`);
+    }
   }
+  return merged;
 }
 
 export function deepMerge(a, b) {
@@ -595,8 +609,107 @@ export function enabled(cfg, context = null) {
   const env = (process.env.CRAFTSMAN || "").toLowerCase();
   if (env === "off" || env === "0" || env === "false") return false;
   if (ROOT_SOURCE === "project-dir" && rootUnanchored()) return false;
-  if (fs.existsSync(context?.offFlag || OFF_FLAG)) return false;
+  if (isFlagFile(context?.offFlag || OFF_FLAG)) return false;
   return cfg.enabled !== false;
+}
+
+// ARCH-SAFETY-05/08: the safety hooks (pre-guard, agent-mode-guard) have one off switch, and it is the
+// user's own environment. CRAFTSMAN=off, .craftsman/off and `enabled:false` in the config switch off
+// the quality, doc and tracker machinery only: a tool call could set the last two. Not being in a git
+// repository switches off that same machinery and leaves safety on, because an unanchored session is
+// exactly where nothing else is watching.
+export function safetyEnabled(env = process.env) {
+  return String(env.CRAFTSMAN_SAFETY || "").toLowerCase() !== "off";
+}
+
+// The orchestration plumbing that keeps state per project (scope activation, the scope-required flag,
+// command markers): safety, but meaningless without a repo to anchor state to (ARCH-STATE-01), so it
+// writes nothing for an unanchored root.
+export function orchestrationEnabled(env = process.env) {
+  return safetyEnabled(env) && !(ROOT_SOURCE === "project-dir" && rootUnanchored());
+}
+
+// Which craftsman command ran in a session, and by which route ("prompt" = the user typed it,
+// "skill" = a Skill tool call). The doc writers and /toggle are told to run doc-write.mjs and
+// toggle.mjs; pre-guard lets those scripts through only after the command that owns them.
+export const DOC_WRITER_COMMANDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check"];
+// `instruction` writes nothing under docs/, so it is not a doc writer; it is recorded because goal-token.mjs mints only after it (or /auto).
+export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle", "instruction"];
+const COMMAND_TTL_MS = 3600000;
+const commandsFile = (sid, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), "commands.json");
+export function recordCommand(sid, command, via, context = null) {
+  const file = commandsFile(sid, context);
+  let known = {};
+  try { known = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  // The user's typed command outranks a model's Skill call for the same command while it is fresh.
+  const held = known[command];
+  if (via !== "prompt" && held?.via === "prompt" && Date.now() - Date.parse(held.at) < COMMAND_TTL_MS) return;
+  known[command] = { via, at: new Date().toISOString() };
+  atomicWrite(file, JSON.stringify(known) + "\n");
+}
+export function commandInvoked(sid, names, { context = null, via = null, ttlMs = COMMAND_TTL_MS, now = Date.now() } = {}) {
+  let known;
+  try { known = JSON.parse(fs.readFileSync(commandsFile(sid, context), "utf8")); } catch { return false; }
+  return names.some((name) => {
+    const entry = known?.[name];
+    return entry && (!via || entry.via === via) && now - Date.parse(entry.at) < ttlMs;
+  });
+}
+
+// ARCH-SAFETY-05: the authority scripts (doc-write.mjs on, toggle.mjs off, goal-token.mjs) trust the session id from their
+// environment, which any process can set. pre-guard alone knows the real session of the tool call, so when it lets such a
+// command through it leaves a one-shot nonce for that session and script, and the script consumes it. A script started any
+// other way (an interpreter, a spawned child, a borrowed id) finds none and refuses. Nothing skips it: not the script's own
+// environment and not a file, because anything a child process or another session can set or lend would be a way round. Under
+// CRAFTSMAN_SAFETY=off pre-guard enforces nothing, so doc-write.mjs is a no-op there rather than a bypass (see that script).
+const NONCE_TTL_MS = 60000;
+const nonceFile = (sid, name, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), `nonce-${name}`);
+export function mintNonce(sid, name, { context = null, now = Date.now() } = {}) {
+  try { atomicWrite(nonceFile(sid, name, context), `${now}\n`); } catch { /* no state dir: the script will refuse, which is the safe side */ }
+}
+export function consumeNonce(sid, name, { context = null, now = Date.now(), ttlMs = NONCE_TTL_MS } = {}) {
+  const file = nonceFile(sid, name, context);
+  let minted;
+  try { minted = Number(fs.readFileSync(file, "utf8")); fs.unlinkSync(file); } catch { return false; }
+  return Number.isFinite(minted) && now - minted >= 0 && now - minted < ttlMs;
+}
+
+// ARCH-SAFETY-04: an advisory hook still fails open on bad input, but never silently. The
+// first skip of each hook in a session says so; later ones stay quiet. The input is bad, so the
+// session id comes from the environment, not from stdin.
+export function advisorySkipped(hook, reason, { env = process.env, stateDir = STATE_DIR } = {}) {
+  const marker = path.join(sessionDir(sidOf({ session_id: env.CLAUDE_CODE_SESSION_ID }), { stateDir }), `advisory-skipped-${hook}`);
+  if (fs.existsSync(marker)) return false;
+  try { atomicWrite(marker, String(Date.now())); } catch { /* no state dir: the notice still goes out, once per call */ }
+  process.stdout.write(JSON.stringify({ systemMessage: `craftsman: ${hook} skipped (${reason}), advisory only` }) + "\n");
+  return true;
+}
+
+// hooks/run.sh names its once-per-session marker after the session id, or "shared" when the id
+// holds anything but [A-Za-z0-9_-]. Same rule here, so SessionStart finds the marker it left.
+export const launcherMarker = (sid, tmp = os.tmpdir()) => path.join(
+  tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, `node-missing-${/^[A-Za-z0-9_-]+$/.test(String(sid || "")) ? sid : "shared"}`);
+
+// Which of the project config files hold a value (`test` on its parsed content), as "a.json and b.json" for a message.
+function projectFilesSetting(context, test) {
+  const root = context?.root || PROJECT_ROOT;
+  const names = PROJECT_CONFIG_FILES.filter((name) => {
+    try { return Boolean(test(JSON.parse(fs.readFileSync(path.join(root, name), "utf8")))); } catch { return false; }
+  });
+  return names.join(" and ");
+}
+
+/** Why craftsman is not fully running, as short reasons (SessionStart). `safety` lists what turns
+ * the guards off; `quality` lists what turns off only the quality, doc and tracker machinery. */
+export function guardState({ cfg, context = null, env = process.env, tmp = os.tmpdir(), sid } = {}) {
+  const safety = [];
+  const quality = [];
+  if (["off", "0", "false"].includes(String(env.CRAFTSMAN || "").toLowerCase())) quality.push("CRAFTSMAN=off is set in the environment");
+  if (isFlagFile(context?.offFlag || OFF_FLAG)) quality.push(".craftsman/off exists");
+  if (cfg?.enabled === false) quality.push(`enabled is false in ${projectFilesSetting(context, (c) => c?.enabled === false) || "the project config"}`);
+  if (String(env.CRAFTSMAN_SAFETY || "").toLowerCase() === "off") safety.push("CRAFTSMAN_SAFETY=off is set in the environment");
+  if (fs.existsSync(launcherMarker(sid, tmp))) safety.push("node was missing earlier this session (hooks/run.sh left its marker)");
+  return { safety, quality };
 }
 
 // ------------------------------------------------------------ glob / skip ---
@@ -752,24 +865,69 @@ async function runOne(cmdTemplate, file, timeoutMs, context = null) {
     return { ok: true, out: (stdout + stderr).trim(), bin };
   } catch (e) {
     if (e.killed) return { ok: false, timedOut: true, bin, out: `${bin}: timed out` };
-    return { ok: false, bin, out: ((e.stdout || "") + (e.stderr || "")).trim() || e.message };
+    // A tool that could not start, was killed by a signal or exited 126+ (not executable, not found,
+    // a crash) failed itself; it says nothing about the file.
+    if (typeof e.code === "string" || e.signal || (typeof e.code === "number" && e.code >= 126)) return { skipped: true, unavailable: true, bin };
+    return {
+      ok: false, bin, out: ((e.stdout || "") + (e.stderr || "")).trim() || e.message,
+      stdout: e.stdout || "", code: e.code,
+    };
   }
+}
+
+/** eslint's `--format json` output as the `path:line:col: message
+ * [Error/rule-id]` lines the baseline and `extractSig` already key on (the
+ * shape of the `unix` formatter eslint 9 removed). `null` when the text is not
+ * eslint's JSON, so a crash can never be read as findings. */
+export function parseEslintJson(text) {
+  let files;
+  try { files = JSON.parse(text); } catch { return null; }
+  if (!Array.isArray(files)) return null;
+  const lines = [];
+  for (const f of files) {
+    if (!f || typeof f.filePath !== "string" || !Array.isArray(f.messages)) return null;
+    for (const m of f.messages) {
+      const severity = m.severity === 2 ? "Error" : "Warning";
+      lines.push(`${f.filePath}:${m.line ?? 1}:${m.column ?? 1}: ${m.message} [${severity}${m.ruleId ? `/${m.ruleId}` : ""}]`);
+    }
+  }
+  return lines;
+}
+
+const usesEslintJson = (bin, cmdTemplate) => /(^|[\\/])eslint(\.cmd)?$/.test(bin) && /(--format|-f)[ =]json\b/.test(cmdTemplate);
+
+// An eslint JSON run is a finding only when it exited 1 with parseable JSON that
+// holds messages. Exit 2, a crash or unparseable output means the tool itself
+// failed: unavailable, never something the model must fix.
+function normalizeEslintJson(result) {
+  if (result.ok !== false || result.timedOut) return result;
+  const lines = result.code === 1 ? parseEslintJson(result.stdout) : null;
+  if (lines === null) return { skipped: true, unavailable: true, bin: result.bin };
+  return lines.length ? { ...result, out: lines.join("\n") } : { ok: true, out: "", bin: result.bin };
 }
 
 /** Run format commands (best-effort, silent) then checks in parallel.
  * `failures` excludes timeouts — a slow tool on a big file isn't a defect
- * the model introduced, so it's reported separately and never blocks. */
-export async function runChecks(file, lang, cfg, context = null) {
+ * the model introduced, so it's reported separately and never blocks.
+ * `unavailable` lists tools that crashed; `skipBins` names tools already known
+ * to be unavailable this session, which are not run again. */
+export async function runChecks(file, lang, cfg, context = null, { skipBins = [] } = {}) {
   const t0 = Date.now();
   for (const f of lang.format || []) await runOne(f, file, cfg.timeoutMs ?? 20000, context);
 
   const results = await Promise.all(
-    (lang.check || []).map((c) => runOne(c, file, cfg.timeoutMs ?? 20000, context))
+    (lang.check || []).map(async (c) => {
+      const [bin] = tokenize(c, file, context);
+      if (skipBins.includes(bin)) return { skipped: true, bin };
+      const result = await runOne(c, file, cfg.timeoutMs ?? 20000, context);
+      return usesEslintJson(bin, c) ? normalizeEslintJson(result) : result;
+    })
   );
   const failures = results.filter((r) => r.ok === false && !r.timedOut);
   const timedOut = results.filter((r) => r.timedOut).map((r) => r.bin);
   const skipped = results.filter((r) => r.skipped).map((r) => r.bin);
-  return { failures, timedOut, skipped, ms: Date.now() - t0 };
+  const unavailable = results.filter((r) => r.unavailable).map((r) => r.bin);
+  return { failures, timedOut, skipped, unavailable, ms: Date.now() - t0 };
 }
 
 // ----------------------------------------------------------- diff filter ---
@@ -914,6 +1072,7 @@ function pruneCache(cacheDir = CACHE_DIR) {
 // --------------------------------------------------------------- logging ---
 
 export function logEvent(ev, context = null) {
+  if (ROOT_SOURCE === "project-dir" && rootUnanchored(context?.root ?? PROJECT_ROOT)) return; // no state for an unanchored root
   const stateDir = context?.stateDir || STATE_DIR;
   try {
     fs.mkdirSync(stateDir, { recursive: true });

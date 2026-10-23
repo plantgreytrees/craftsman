@@ -365,3 +365,65 @@ test("agent-mode-guard: an /auto session gets one runner dispatch per grant; a n
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error used to exit 1,
+// which Claude Code treats as a non-blocking failure, so the guard was silently off.
+function failClosedCases(guard, script, dir) {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-badplugin-"));
+  fs.writeFileSync(path.join(plugin, "craftsman.config.json"), "{ not json");
+  const manifest = path.join(plugin, "workspace.json");
+  fs.writeFileSync(manifest, "{ bad");
+  // plan-strategist is the one dispatch the guard always allows, so an exit 2 can only mean fail-closed
+  const payload = JSON.stringify({ session_id: "fail-closed", tool_name: "Agent", tool_input: { subagent_type: "craftsman:plan-strategist" } });
+  const cases = [
+    ["bad JSON on stdin", "not json", {}],
+    ["empty stdin", "", {}],
+    ["a thrown error inside the guard", payload, { CRAFTSMAN_TEST_THROW: guard }],
+    ["an unreadable default config", payload, { CLAUDE_PLUGIN_ROOT: plugin }],
+    // projectContext() throws on a broken workspace manifest (ARCH-SAFETY-03); it used to exit 1 silently
+    ["an invalid workspace manifest", payload, { CRAFTSMAN_WORKSPACE_MANIFEST: manifest }],
+  ];
+  try {
+    for (const [label, input, env] of cases) {
+      const r = spawnSync(process.execPath, [script], {
+        cwd: dir, input, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env },
+      });
+      assert.equal(r.status, 2, `${guard} denies on ${label}: ${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`craftsman: ${guard}`), `${guard} names itself on ${label}`);
+    }
+    // the throw hook only ever denies: another guard's name does nothing
+    const other = spawnSync(process.execPath, [script], {
+      cwd: dir, input: payload, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN_TEST_THROW: "someone-else" },
+    });
+    assert.notEqual(other.status, 2, "the test hook is scoped to one guard");
+  } finally {
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+}
+
+test("agent-mode-guard: bad input, an exception or a broken default config denies and names the guard (6.1, 6.2)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-failclosed-amg-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    failClosedCases("agent-mode-guard", path.join(path.dirname(fileURLToPath(import.meta.url)), "agent-mode-guard.mjs"), dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ARCH-SAFETY-05: the dispatch rules are safety, so only CRAFTSMAN_SAFETY=off lifts them.
+test("agent-mode-guard: CRAFTSMAN=off still blocks a dispatch; CRAFTSMAN_SAFETY=off allows it (8.2)", () => {
+  const dir = tmpProject();
+  try {
+    const dispatch = { session_id: "safety-env", tool_name: "Agent", tool_input: { subagent_type: "craftsman:implementer" } };
+    const under = (env) => spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(dispatch), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env } });
+    assert.equal(under({}).status, 2, "baseline: root-only blocks the implementer");
+    assert.equal(under({ CRAFTSMAN: "off" }).status, 2);
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "off"), "off\n");
+    assert.equal(under({}).status, 2, ".craftsman/off does not lift it");
+    assert.equal(under({ CRAFTSMAN_SAFETY: "off" }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -107,3 +107,8 @@ Outside the plugin (owner's workstation): hourly btrfs snapshots and restic befo
 - **Verification point:** the moment all work is on feature branches and green, before base changes.
 - **Run:** one /auto Phase B pass over a plan or feature set.
 - **head_sha:** the feature branch commit the page describes.
+
+## Amendments (2026-10-23, owner-approved)
+
+- **ARCH-APPROVAL-08** replaces 01: the verification point exists only with `planning.featureBranches` on (default off). With it off, units land on base through `repo-exec merge` and `approval_unenforced` is logged. The default stays off because flipping it changes the branch workflow of every repo.
+- **ARCH-APPROVAL-09** replaces 02: env key names are derived from the diff; migrations, CI/hook, dependency and API items, and any diagram, come from the caller.

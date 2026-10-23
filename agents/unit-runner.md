@@ -1,6 +1,6 @@
 ---
 name: unit-runner
-description: Runs ONE step (implement, review, land, park or block) of ONE plan unit in its own worktree and returns schema JSON.
+description: Runs ONE step of ONE plan unit in its own worktree and returns schema JSON.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
@@ -15,7 +15,7 @@ Prompt gives `role`, root `session_id`, `plugin_root`, `project_root`, `project`
 5. Open decision only the user can make → no edit, no default: `PARKED` with `parked:[{question, options[], recommended?}]`.
 6. Implement as `agents/implementer.md`: scope.read/docs and scope.write only, every cited `[decided]` rule, tests for every criterion. A rule you cannot honour → `BLOCKED` with its id.
 7. Gate with the repo's commands; must be green.
-8. Commit on the unit branch; return `IMPLEMENTED` with `sha`, `worktree_path`.
+8. Commit in `<worktree_path>` (the implementer never commits); return `IMPLEMENTED` with `sha`, `worktree_path`.
 
 Fix round (`worktree_path`, findings): fix only those, then 7–8.
 

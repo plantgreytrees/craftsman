@@ -1,6 +1,6 @@
 ---
 name: build-doctor
-description: Diagnoses a failing build or test run to root cause and returns the minimal fix instruction, without doing feature work.
+description: Diagnoses a failing build or test run to root cause and returns the minimal fix.
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---

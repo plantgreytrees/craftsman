@@ -1,6 +1,7 @@
 ---
-description: Protocol for /sync-docs --archive and --prune. Not invoked.
+description: Protocol for /sync-docs --archive/--prune.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Sync-docs `--archive` / `--prune` protocol
 
@@ -8,7 +9,7 @@ Read only under `--archive`/`--prune` (ARCH-DOCS-04/05). Grant as in `sync-docs.
 
 ## `--archive`
 
-Retire each COMPLETE plan (confirm via `tracker.mjs` action `status`, not `lookup`, which reads only the archive) with `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-retire.mjs"`, stdin `{"plan":"docs/plans/<slug>.md","sid":"<session>"}`. It removes the plan, closed siblings and ledger rows. A refusal is final: report the referrer, never force.
+Retire each COMPLETE plan (confirm via `tracker.mjs` action `status`, not `lookup`) with `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-retire.mjs"`, stdin `{"plan":"docs/plans/<slug>.md","sid":"<session>"}`. It removes the plan, closed siblings, ledger rows. A refusal is final: report the referrer, never force. Not with `CRAFTSMAN_SAFETY=off`.
 
 ## `--prune`
 

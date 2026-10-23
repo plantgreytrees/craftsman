@@ -1,5 +1,5 @@
 ---
-description: Create or explicitly update a Craftsman workspace manifest for selected existing Git projects without scanning the workspace.
+description: Create or update a Craftsman workspace manifest for selected Git projects.
 argument-hint: "<project-id=relative/path ...> [--manifest <path>] [--update]"
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 ---

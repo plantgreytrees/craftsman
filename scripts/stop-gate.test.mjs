@@ -40,14 +40,29 @@ function makeFixture(configOverride) {
 
 function cleanup(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(`${dir}-remote.git`, { recursive: true, force: true });
+}
+
+// A worktree counts as merged only into a pushed remote-tracking base (ARCH-SAFETY-07), so the sweep
+// tests give the fixture a bare origin with its current branch pushed.
+function pushBase(dir) {
+  const bare = `${dir}-remote.git`;
+  spawnSync("git", ["init", "-q", "--bare", bare]);
+  const git = (...args) => {
+    const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  git("remote", "add", "origin", bare);
+  git("push", "-q", "-u", "origin", git("branch", "--show-current"));
 }
 
 // Spawns `node scripts/stop-gate.mjs` with cwd=dir and the given session_id
 // on stdin, matching real invocation shape. Returns stdout/stderr/exit code
 // plus the parsed `.craftsman/events.jsonl` lines for this session.
-function runStopGate(dir, sid, extra = {}) {
+function runStopGate(dir, sid, extra = {}, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [STOP_GATE_PATH], { cwd: dir });
+    const child = spawn(process.execPath, [STOP_GATE_PATH], { cwd: dir, env: { ...process.env, ...env } });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
@@ -127,6 +142,7 @@ function addMergedWorktree(dir, slug) {
 // remembering a cleanup step.
 test("stop-gate: a merged, clean worktree another session left is removed automatically without blocking", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   try {
     const theirs = addMergedWorktree(dir, "other-session-unit");
     const result = await runStopGate(dir, "no-ledger-session");
@@ -140,6 +156,7 @@ test("stop-gate: a merged, clean worktree another session left is removed automa
 
 test("stop-gate: a merged, clean worktree in this session's ledger is removed and forgotten, not blocked on", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   try {
     const sid = "owning-session";
     const mine = addMergedWorktree(dir, "my-unit");
@@ -157,6 +174,7 @@ test("stop-gate: a merged, clean worktree in this session's ledger is removed an
 
 test("stop-gate: a merged ledger worktree with uncommitted changes survives the sweep and blocks as NOT SWEPT", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   try {
     const sid = "owning-session";
     const mine = addMergedWorktree(dir, "my-unit");
@@ -526,6 +544,7 @@ test("stop-gate: a genuinely failing (non-killed, non-zero exit) command still b
 // another branch — the sweep went silent on exactly the leftovers it exists for.
 test("stop-gate: a ledger worktree merged into the base while the checkout sits on another branch still blocks", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
   const g = (...args) => {
     const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
     if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
@@ -541,6 +560,7 @@ test("stop-gate: a ledger worktree merged into the base while the checkout sits 
     g("checkout", "-q", "-b", "scratch");
     g("checkout", "-q", base);
     g("merge", "-q", "--no-ff", "-m", "merge unit", mine.branch);
+    g("push", "-q", "origin", base);
     g("checkout", "-q", "scratch");
     fs.writeFileSync(path.join(mine.worktree, "wip.txt"), "wip\n"); // dirty, so the sweep must leave it for the gate
     const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
@@ -548,7 +568,7 @@ test("stop-gate: a ledger worktree merged into the base while the checkout sits 
     fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
     const result = await runStopGate(dir, sid);
     assert.match(result.stdout, /WORKTREE NOT SWEPT/);
-    assert.match(result.stdout, new RegExp(`merged into ${base}`));
+    assert.match(result.stdout, new RegExp(`merged into origin/${base}`));
   } finally {
     cleanup(dir);
   }
@@ -718,4 +738,326 @@ test("stop-gate: terminal pass and block events carry numeric ms", async () => {
   } finally {
     cleanup(dir);
   }
+});
+
+// 3.x: the Stop gate re-runs the suite only when a turn edited something a test could
+// regress on. A docs-only turn leaves no `dirty` marker, so no test command runs.
+const QUALITY_GATE_PATH = fileURLToPath(new URL("./quality-gate.mjs", import.meta.url));
+
+function editThroughQualityGate(dir, sid, rel, content = "x\n") {
+  const file = path.join(dir, rel);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  return spawnSync(process.execPath, [QUALITY_GATE_PATH], {
+    cwd: dir, encoding: "utf8",
+    input: JSON.stringify({ session_id: sid, tool_name: "Edit", tool_input: { file_path: file } }),
+  });
+}
+
+// A green-at-start suite whose "test command" records that it ran.
+function seedGreenStart(dir, sid) {
+  fs.writeFileSync(path.join(dir, "mark.js"), "require('node:fs').appendFileSync('tests-ran.log', 'ran\\n');\n");
+  const sessionDir = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, "session-start.json"), JSON.stringify({ results: [{ cmd: "node mark.js", green: true }] }));
+  return { dirty: path.join(sessionDir, "dirty"), log: path.join(dir, "tests-ran.log") };
+}
+
+const quietFixture = () => makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+
+test("stop-gate: a turn that edits only docs leaves no dirty marker and runs no test command", async () => {
+  const dir = quietFixture();
+  try {
+    const sid = "docs-only";
+    const { dirty, log } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "docs/x.md", "# notes\n");
+    assert.equal(fs.existsSync(dirty), false, "docs/x.md is not source a test can regress on");
+    const { events } = await runStopGate(dir, sid);
+    assert.equal(fs.existsSync(log), false, "the suite was not re-run");
+    assert.ok(events.some((e) => e.ev === "stop-tests-skipped"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a .mjs edit still sets the dirty marker and the suite re-runs", async () => {
+  const dir = quietFixture();
+  try {
+    const sid = "mjs-edit";
+    const { dirty, log } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "src/a.mjs", "export const a = 1;\n");
+    assert.equal(fs.existsSync(dirty), true);
+    await runStopGate(dir, sid);
+    assert.equal(fs.readFileSync(log, "utf8"), "ran\n");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a test-command marker file (package.json) edit sets dirty; an ignored tree does not", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "markers";
+    const { dirty } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "node_modules/dep/index.js", "module.exports = 1;\n");
+    assert.equal(fs.existsSync(dirty), false, "an ignored path never marks the session dirty");
+    editThroughQualityGate(dir, sid, "package.json", "{}\n");
+    assert.equal(fs.existsSync(dirty), true, "package.json is a stopGate.commands marker");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: an edit to a fixture, tsconfig or env file marks the session dirty; docs, markdown and state do not", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "denylist";
+    const { dirty } = seedGreenStart(dir, sid);
+    for (const rel of ["docs/y.md", "README.md", "notes/a.md", "docs/plans/p.json", ".craftsman/runs/r.json", "node_modules/dep/data.json"]) {
+      editThroughQualityGate(dir, sid, rel, "{}\n");
+      assert.equal(fs.existsSync(dirty), false, `${rel} leaves nothing a test could regress on`);
+    }
+    for (const rel of ["test/fixtures/a.json", "tsconfig.json", ".eslintrc.json", "src/__snapshots__/a.snap", "db/schema.sql", ".env.test", "data/cases.yaml"]) {
+      try { fs.unlinkSync(dirty); } catch {}
+      editThroughQualityGate(dir, sid, rel, "{}\n");
+      assert.equal(fs.existsSync(dirty), true, `${rel} can change a test result`);
+    }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// Round 3 (22.x): markdown that the project's own tests read is named in stopGate.markdownTests and marks the session dirty.
+test("stop-gate: markdown listed in stopGate.markdownTests marks the session dirty and Stop re-runs the suite; other markdown does not (22.1)", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, markdownTests: ["README.md", "commands/*.md", "docs/architecture/*.md"] } });
+  try {
+    const sid = "md-tests";
+    const { dirty, log } = seedGreenStart(dir, sid);
+    for (const rel of ["notes/a.md", "docs/y.md", "CHANGELOG.md", "commands/deep/x.md"]) {
+      editThroughQualityGate(dir, sid, rel, "# n\n");
+      assert.equal(fs.existsSync(dirty), false, `${rel} is not listed, so it stays a docs-only edit`);
+    }
+    for (const rel of ["README.md", "commands/plan.md", "docs/architecture/safety.md"]) {
+      try { fs.unlinkSync(dirty); } catch {}
+      editThroughQualityGate(dir, sid, rel, "# n\n");
+      assert.equal(fs.existsSync(dirty), true, `${rel} is read by a test, so it marks the session dirty`);
+    }
+    await runStopGate(dir, sid);
+    assert.equal(fs.readFileSync(log, "utf8"), "ran\n", "Stop re-ran the suite");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: with the shipped default (no stopGate.markdownTests) a README edit is still a docs-only edit, and .craftsman state never counts (22.1)", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "md-default";
+    const { dirty } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, "README.md", "# n\n");
+    assert.equal(fs.existsSync(dirty), false);
+    const listed = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, markdownTests: [".craftsman/**", "**/*.md"] } });
+    try {
+      const { dirty: d2 } = seedGreenStart(listed, "md-state");
+      editThroughQualityGate(listed, "md-state", ".craftsman/runs/r.md", "# n\n");
+      assert.equal(fs.existsSync(d2), false, "even a broad list never makes craftsman's own state count");
+    } finally { cleanup(listed); }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: an edit of the acceptance file still does not mark the session dirty", () => {
+  const dir = quietFixture();
+  try {
+    const sid = "acceptance-only";
+    const { dirty } = seedGreenStart(dir, sid);
+    editThroughQualityGate(dir, sid, ".craftsman/acceptance.md", "- [ ] a criterion\n");
+    assert.equal(fs.existsSync(dirty), false);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// 9.2: Stop reports unpushed work as a systemMessage and blocks only when stopGate.blockOnUnpushed is true.
+function unpushedFixture(extraStopGate = {}) {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, ...extraStopGate } });
+  fs.writeFileSync(path.join(dir, "wip.txt"), "wip\n"); // uncommitted
+  return dir;
+}
+
+test("stop-gate: unpushed work is reported as a systemMessage and does not block by default", async () => {
+  const dir = unpushedFixture();
+  try {
+    const { code, stdout } = await runStopGate(dir, "unpushed-default");
+    assert.equal(code, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, undefined, "advisory by default");
+    assert.match(out.systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    assert.match(out.systemMessage, /uncommitted changes in the main checkout/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: stopGate.blockOnUnpushed true turns the same report into a block", async () => {
+  const dir = unpushedFixture({ blockOnUnpushed: true });
+  try {
+    const { stdout } = await runStopGate(dir, "unpushed-block");
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, "block");
+    assert.match(out.reason, /UNPUSHED WORK/);
+    assert.match(out.reason, /uncommitted changes in the main checkout/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: the shipped default for stopGate.blockOnUnpushed is false", () => {
+  const cfg = JSON.parse(fs.readFileSync(new URL("../craftsman.config.json", import.meta.url), "utf8"));
+  assert.equal(cfg.stopGate.blockOnUnpushed, false);
+});
+
+// 13.3: Stop reports guarded docs that changed without passing the doc guard (informational).
+function docSnapshotFor(dir, sid) {
+  const lib = new URL("./lib/doc-snapshot.mjs", import.meta.url).href;
+  const code = `import(${JSON.stringify(lib)}).then((m) => { const fs = require("node:fs"), path = require("node:path");
+    const d = path.join(${JSON.stringify(dir)}, ".craftsman", "sessions", ${JSON.stringify(sid)}); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "doc-snapshot.json"), JSON.stringify(m.snapshotDocs(${JSON.stringify(dir)}, ["docs/plans/**", "docs/ideas/**", "docs/architecture/**"]))); })`;
+  const r = spawnSync(process.execPath, ["-e", code], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(r.stderr);
+}
+
+function docFixture() {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# a\n");
+  pushBase(dir);
+  return dir;
+}
+
+test("stop-gate: a guarded doc edited out of band is reported, informationally and without blocking", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "oob-doc";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    const { code, stdout } = await runStopGate(dir, sid);
+    assert.equal(code, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, undefined, "report only");
+    assert.match(out.systemMessage, /guarded docs changed this session without passing the doc guard \(informational\)/);
+    assert.match(out.systemMessage, /docs\/plans\/a\.md \(modified\)/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: a doc edit the doc guard allowed this session, or no snapshot at all, is not reported", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "seen-doc";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited through Write\n");
+    fs.appendFileSync(path.join(dir, ".craftsman", "events.jsonl"), JSON.stringify({ ts: Date.now(), ev: "preguard", sid, tool: "Write", file: "docs/plans/a.md", result: "allowed" }) + "\n");
+    const seen = await runStopGate(dir, sid);
+    assert.doesNotMatch(seen.stdout, /guarded docs changed/);
+    const none = await runStopGate(dir, "never-snapshotted");
+    assert.doesNotMatch(none.stdout, /guarded docs changed/);
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: a guarded doc that was only read, then changed out of band, is still reported", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "read-then-oob";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    fs.appendFileSync(path.join(dir, ".craftsman", "events.jsonl"), JSON.stringify({ ts: Date.now(), ev: "preguard", sid, tool: "Read", file: "docs/plans/a.md", result: "allowed" }) + "\n");
+    const { stdout } = await runStopGate(dir, sid);
+    assert.match(JSON.parse(stdout).systemMessage, /docs\/plans\/a\.md \(modified\)/);
+  } finally { cleanup(dir); }
+});
+
+// ARCH-SAFETY-06: Stop reports unpushed work whenever the safety side is on, even where the quality side is off.
+test("stop-gate: unpushed work is still reported with CRAFTSMAN=off or .craftsman/off, and not with CRAFTSMAN_SAFETY=off", async () => {
+  const dir = unpushedFixture();
+  try {
+    const off = await runStopGate(dir, "unpushed-env-off", {}, { CRAFTSMAN: "off" });
+    assert.match(JSON.parse(off.stdout).systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "off"), "");
+    const flag = await runStopGate(dir, "unpushed-flag-off");
+    assert.match(JSON.parse(flag.stdout).systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    const safety = await runStopGate(dir, "unpushed-safety-off", {}, { CRAFTSMAN_SAFETY: "off" });
+    assert.equal(safety.stdout.trim(), "", "the user's own off switch silences the report");
+  } finally { cleanup(dir); }
+});
+
+// Scrutiny round 2 (17.x): the Stop that ends a turn after a block (stop_hook_active) still owes the reports.
+test("stop-gate: with stop_hook_active the loop guard still reports unpushed work and unseen doc drift, without blocking (17.1)", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "loop-guard";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    fs.writeFileSync(path.join(dir, "wip.txt"), "wip\n"); // uncommitted
+    const { code, stdout } = await runStopGate(dir, sid, { stop_hook_active: true });
+    assert.equal(code, 0);
+    const out = JSON.parse(stdout);
+    assert.equal(out.decision, undefined, "the loop guard never blocks");
+    assert.match(out.systemMessage, /craftsman: unpushed work \(local refs only\)/);
+    assert.match(out.systemMessage, /uncommitted changes in the main checkout/);
+    assert.match(out.systemMessage, /docs\/plans\/a\.md \(modified\)/);
+    assert.equal((out.systemMessage.match(/unpushed work \(local refs only\)/g) || []).length, 1, "reported once");
+  } finally { cleanup(dir); }
+});
+
+test("stop-gate: the loop-guard Stop prints nothing for a clean repo or with CRAFTSMAN_SAFETY=off (17.1)", async () => {
+  const dir = docFixture();
+  try {
+    const sid = "loop-guard-clean";
+    fs.appendFileSync(path.join(dir, ".git", "info", "exclude"), ".craftsman/\n"); // as a real project ignores its state
+    for (const args of [["add", "-A"], ["commit", "-q", "-m", "fixture"], ["push", "-q"]]) spawnSync("git", args, { cwd: dir }); // a clean, pushed tree
+    docSnapshotFor(dir, sid);
+    const clean = await runStopGate(dir, sid, { stop_hook_active: true });
+    assert.equal(clean.code, 0);
+    const status = spawnSync("git", ["status", "--short"], { cwd: dir, encoding: "utf8" }).stdout;
+    assert.equal(clean.stdout.trim(), "", `nothing to report (working tree: ${status.trim().replace(/\n/g, "; ")})`);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited\n");
+    fs.writeFileSync(path.join(dir, "wip.txt"), "wip\n");
+    const off = await runStopGate(dir, sid, { stop_hook_active: true }, { CRAFTSMAN_SAFETY: "off" });
+    assert.equal(off.stdout.trim(), "", "the user's own off switch silences the report");
+  } finally { cleanup(dir); }
+});
+
+// Round 4 (32.3): a project-only value from craftsman.project.json reaches the quality gate.
+test("stop-gate: stopGate.markdownTests set in craftsman.project.json marks the session dirty for that markdown, and without the file it does not (32.3)", () => {
+  const withFile = quietFixture();
+  const without = quietFixture();
+  try {
+    fs.writeFileSync(path.join(withFile, "craftsman.project.json"), JSON.stringify({ stopGate: { markdownTests: ["README.md", "commands/*.md"] } }));
+    const a = seedGreenStart(withFile, "pc-with");
+    editThroughQualityGate(withFile, "pc-with", "README.md", "# changed\n");
+    assert.equal(fs.existsSync(a.dirty), true, "README.md is listed in the override");
+    try { fs.unlinkSync(a.dirty); } catch {}
+    editThroughQualityGate(withFile, "pc-with", "notes/z.md", "# n\n");
+    assert.equal(fs.existsSync(a.dirty), false, "other markdown is still a docs-only edit");
+    const b = seedGreenStart(without, "pc-without");
+    editThroughQualityGate(without, "pc-without", "README.md", "# changed\n");
+    assert.equal(fs.existsSync(b.dirty), false, "without the file the default applies");
+  } finally { cleanup(withFile); cleanup(without); }
+});
+
+// Round 4 (30.2): SessionStart writes the doc snapshot under the ROOT state dir; Stop must read it there even while a
+// unit scope points the gate at another root (a unit's worktree).
+test("stop-gate: the doc-drift report reads the root snapshot while a unit scope names another root (30.2)", async () => {
+  const dir = docFixture();
+  const unitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-unit-root-"));
+  try {
+    const sid = "wt-drift";
+    docSnapshotFor(dir, sid);
+    fs.writeFileSync(path.join(dir, "docs", "plans", "a.md"), "# edited behind the guard's back\n");
+    const sessions = path.join(dir, ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(path.join(sessions, "scope.json"), JSON.stringify({ plan: "docs/plans/p.md", unit: "u", project: ".", project_root: unitRoot, scope: { read: [], docs: [], write: [] }, arch: [] }));
+    const { stdout } = await runStopGate(dir, sid);
+    assert.match(JSON.parse(stdout).systemMessage ?? "", /docs\/plans\/a\.md \(modified\)/, "the drift is reported although the active scope is another root");
+    const quiet = await runStopGate(dir, "wt-no-snapshot");
+    assert.doesNotMatch(quiet.stdout, /guarded docs changed/, "no snapshot, no report");
+  } finally { cleanup(dir); fs.rmSync(unitRoot, { recursive: true, force: true }); }
 });

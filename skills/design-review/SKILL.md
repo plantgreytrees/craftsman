@@ -1,6 +1,6 @@
 ---
 name: design-review
-description: Use when reviewing or writing a diff that touches UI code (components, templates, styles) — a compact checklist for hierarchy, spacing, accessibility and generic-AI-slop patterns. Not for backend.
+description: UI diff checklist: hierarchy, spacing, accessibility, AI-slop. Not for backend.
 ---
 
 # Design review checklist

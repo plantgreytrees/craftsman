@@ -57,14 +57,32 @@ test("telemetry: the Stop hook appends the event to events.jsonl through logEven
     const hook = spawnSync(process.execPath, [TELEMETRY], { cwd: dir, env, encoding: "utf8", input: JSON.stringify({ session_id: "hook-sid", transcript_path: transcript }) });
     assert.equal(hook.status, 0, hook.stderr);
     assert.equal(hook.stdout, "", "a Stop hook prints nothing");
-    const cli = spawnSync(process.execPath, [TELEMETRY, "--transcript", transcript, "--sid", "cli-sid", "--phase", "baseline", "--unit", "u1"], { cwd: dir, env, encoding: "utf8" });
+    const cli = spawnSync(process.execPath, [TELEMETRY, "--transcript", transcript, "--sid", "cli-sid", "--phase", "orchestrate", "--unit", "u1"], { cwd: dir, env, encoding: "utf8" });
     assert.equal(cli.status, 0, cli.stderr);
     const events = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l))
-      .filter((e) => e.ev === "context").map(({ ts, ...rest }) => rest);
+      .filter((e) => e.ev === "context" && e.phase !== "baseline").map(({ ts, ...rest }) => rest);
     assert.deepEqual(events, [
       { ev: "context", sid: "hook-sid", phase: null, unit: null, tokens: 50_000, percent: 25, cost: null },
-      { ev: "context", sid: "cli-sid", phase: "baseline", unit: "u1", tokens: 50_000, percent: 25, cost: null },
+      { ev: "context", sid: "cli-sid", phase: "orchestrate", unit: "u1", tokens: 50_000, percent: 25, cost: null },
     ]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("telemetry: one baseline event per session id across two Stop runs, from the first assistant usage", () => {
+  const dir = tmpRepo();
+  try {
+    const transcript = path.join(dir, "t.jsonl");
+    fs.writeFileSync(transcript, [user("go"), assistant({ input_tokens: 7_000 }), user("more"), assistant(USAGE)].join("\n") + "\n");
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+    for (let i = 0; i < 2; i++) {
+      const r = spawnSync(process.execPath, [TELEMETRY], { cwd: dir, env, encoding: "utf8", input: JSON.stringify({ session_id: "b-sid", transcript_path: transcript }) });
+      assert.equal(r.status, 0, r.stderr);
+    }
+    const events = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const baselines = events.filter((e) => e.phase === "baseline");
+    assert.equal(baselines.length, 1);
+    assert.equal(baselines[0].tokens, 7_000);
+    assert.equal(events.filter((e) => e.ev === "context").length, 3);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
