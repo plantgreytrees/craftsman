@@ -71,3 +71,4 @@ ARCH-STATE-12 narrows the 18 Oct fail-closed choice, with the owner's approval. 
 ## Amendments (2026-10-23, owner-approved)
 
 - **ARCH-STATE-14** replaces 12: the guard's removal-word refusal stays fail-closed as PR #1 built it. Only two things change: heredoc prose is not a hook-bypass flag unless the heredoc feeds a shell or interpreter, and a lease push to the run's own branches is allowed. `guard_unparsed` is not emitted.
+- **ARCH-STATE-15** replaces 13: outside-worktree deletes and credential reads are the Claude Code sandbox's job (ARCH-SAFETY-01), not pre-guard's. Craftsman keeps `protectedPaths` for env files and the stop-gate secrets scan, and publication still waits for approval. Nothing PARKs on a secret hit today; the guard exits 2 with the fix.
