@@ -15,9 +15,15 @@ function setup() {
     secrets: () => [],
     docChecks: () => ({ ok: true, checks: [{ cmd: "lint", status: "pass" }, { cmd: "pre-commit (stub)", status: "pass" }] }),
   };
-  const input = { plan: "p.md", feature: "f", base: "main", head_sha: "abc123", feature_heads: ["abc123"], evidence: { gates: ["npm test"] }, changes: [{ path: "a.js" }] };
+  const git0 = (...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" }).trim();
+  git0("init", "-q", "-b", "main"); git0("config", "user.email", "t@t"); git0("config", "user.name", "t");
+  fs.writeFileSync(path.join(root, "seed.txt"), "1\n"); git0("add", "seed.txt"); git0("commit", "-qm", "one");
+  const A = git0("rev-parse", "HEAD");
+  fs.writeFileSync(path.join(root, "seed.txt"), "2\n"); git0("commit", "-qam", "two");
+  const B = git0("rev-parse", "HEAD");
+  const input = { plan: "p.md", feature: "f", base: "main", head_sha: A, feature_heads: [A], evidence: { gates: ["npm test"] }, changes: [{ path: "a.js" }] };
   const events = () => { try { return fs.readFileSync(path.join(root, ".craftsman/events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  return { root, runners, input, events, rec: () => JSON.parse(fs.readFileSync(path.join(root, ".craftsman/approvals/p-f.json"), "utf8")) };
+  return { root, A, B, runners, input, events, rec: () => JSON.parse(fs.readFileSync(path.join(root, ".craftsman/approvals/p-f.json"), "utf8")) };
 }
 
 test("prepare writes the record, folds runner results and logs approval_requested", () => {
@@ -30,7 +36,7 @@ test("prepare writes the record, folds runner results and logs approval_requeste
   const r = s.rec();
   assert.equal(r.status, "requested");
   assert.equal(r.url, null);
-  assert.equal(r.head_sha, "abc123");
+  assert.equal(r.head_sha, s.A);
   assert.ok(r.requested_at && r.recommendation.choice);
   assert.deepEqual(s.events().map((e) => e.ev), ["approval_requested"]);
 });
@@ -69,16 +75,16 @@ test("prepare refuses a landed record and archives an earlier decision in histor
   const s = setup();
   const o = { root: s.root };
   prepare(s.input, { root: s.root, runners: s.runners });
-  check({ run: "p-f", row: { choice: "merge", head_sha: "abc123", decided_at: LATER }, writer_is_owner: true }, o);
-  prepare({ ...s.input, head_sha: "def456" }, { root: s.root, runners: s.runners });
+  check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o);
+  prepare({ ...s.input, head_sha: s.B }, { root: s.root, runners: s.runners });
   const r = s.rec();
   assert.equal(r.status, "requested");
   assert.equal(r.choice, undefined);
   assert.equal(r.history.length, 1);
   assert.equal(r.history[0].status, "decided");
   assert.equal(r.history[0].choice, "merge");
-  assert.equal(r.history[0].head_sha, "abc123");
-  check({ run: "p-f", row: { choice: "merge", head_sha: "def456", decided_at: LATER }, writer_is_owner: true }, o);
+  assert.equal(r.history[0].head_sha, s.A);
+  check({ run: "p-f", row: { choice: "merge", head_sha: s.B, decided_at: LATER }, writer_is_owner: true }, o);
   landed({ run: "p-f", sha: "s", mode: "merge" }, o);
   assert.match(prepare(s.input, { root: s.root, runners: s.runners }).reason, /landed/);
   assert.equal(s.rec().status, "landed");
@@ -89,8 +95,8 @@ test("check refuses a stale row whose decided_at predates the request", () => {
   prepare(s.input, { root: s.root, runners: s.runners });
   const stale = new Date(Date.now() - 3600000).toISOString();
   const o = { root: s.root };
-  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: "abc123", decided_at: stale }, writer_is_owner: true }, o).reason, /predates/);
-  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: "abc123" }, writer_is_owner: true }, o).reason, /predates/);
+  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: stale }, writer_is_owner: true }, o).reason, /predates/);
+  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: s.A }, writer_is_owner: true }, o).reason, /predates/);
   assert.equal(s.rec().status, "requested");
 });
 
@@ -99,7 +105,7 @@ test("two concurrent checks leave exactly one decision", () => {
   prepare(s.input, { root: s.root, runners: s.runners });
   const mod = path.join(path.dirname(fileURLToPath(import.meta.url)), "approval.mjs");
   const code = `import { check } from ${JSON.stringify(mod)};
-    const r = check({ run: "p-f", row: { choice: process.argv[1], head_sha: "abc123", decided_at: ${JSON.stringify(LATER)} }, writer_is_owner: true }, { root: ${JSON.stringify(s.root)} });
+    const r = check({ run: "p-f", row: { choice: process.argv[1], head_sha: ${JSON.stringify(s.A)}, decided_at: ${JSON.stringify(LATER)} }, writer_is_owner: true }, { root: ${JSON.stringify(s.root)} });
     process.stdout.write(JSON.stringify(r));`;
   const outs = ["merge", "open-pr"].map((c) => new Promise((res) => {
     import("node:child_process").then(({ execFile }) => execFile(process.execPath, ["--input-type=module", "-e", code, c], (e, out) => res(JSON.parse(out))));
@@ -116,12 +122,12 @@ test("check refuses mismatched head_sha, non-owner, bad choice; accepts owner ma
   prepare(s.input, { root: s.root, runners: s.runners });
   const o = { root: s.root };
   assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: "zzz" }, writer_is_owner: true }, o).reason, /head_sha/);
-  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: "abc123", decided_at: LATER }, writer_is_owner: false }, o).reason, /owner/);
-  assert.match(check({ run: "p-f", row: { choice: "force", head_sha: "abc123", decided_at: LATER }, writer_is_owner: true }, o).reason, /choice/);
+  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: LATER }, writer_is_owner: false }, o).reason, /owner/);
+  assert.match(check({ run: "p-f", row: { choice: "force", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o).reason, /choice/);
   assert.equal(s.rec().status, "requested");
-  assert.equal(check({ run: "p-f", row: { choice: "open-pr", head_sha: "abc123", decided_at: LATER }, writer_is_owner: true }, o).ok, true);
+  assert.equal(check({ run: "p-f", row: { choice: "open-pr", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o).ok, true);
   assert.equal(s.rec().status, "decided");
-  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: "abc123", decided_at: LATER }, writer_is_owner: true }, o).reason, /status/);
+  assert.match(check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o).reason, /status/);
   assert.deepEqual(s.events().map((e) => e.ev), ["approval_requested", "approval_decided"]);
 });
 
@@ -133,7 +139,7 @@ test("landed only from decided; pending lists decided runs; attach-url stores ht
   assert.equal(attachUrl({ run: "p-f", url: "javascript:x" }, o).refused, true);
   assert.equal(attachUrl({ run: "p-f", url: "https://claude.ai/a/1" }, o).ok, true);
   assert.deepEqual(pending({}, o).runs, []);
-  check({ run: "p-f", row: { choice: "merge", head_sha: "abc123", decided_at: LATER }, writer_is_owner: true }, o);
+  check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o);
   assert.deepEqual(pending({}, o).runs.map((r) => r.run), ["p-f"]);
   assert.equal(landed({ run: "p-f", sha: "s1", mode: "merge" }, o).ok, true);
   assert.deepEqual(pending({}, o).runs, []);
@@ -153,9 +159,6 @@ const git = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "u
 
 test("prepare scans the feature head in a detached worktree, not the main checkout", () => {
   const s = setup();
-  git(s.root, "init", "-q", "-b", "main");
-  git(s.root, "config", "user.email", "t@t");
-  git(s.root, "config", "user.name", "t");
   fs.writeFileSync(path.join(s.root, "a.txt"), "ok\n");
   fs.writeFileSync(path.join(s.root, "craftsman.config.json"), JSON.stringify({ security: { check: [] } }));
   git(s.root, "add", "."); git(s.root, "commit", "-qm", "base");
@@ -183,4 +186,40 @@ test("prepare refuses a secret-shaped risk string in the rendered page without e
   assert.ok(out.findings.every((f) => f.file && f.line && f.rule && Object.keys(f).length === 3));
   assert.ok(!JSON.stringify(out).includes(secret));
   assert.ok(!fs.existsSync(path.join(s.root, ".craftsman/approvals/p-f.json")));
+});
+
+test("prepare refuses a head_sha that is not a 40-hex commit", () => {
+  const s = setup();
+  const o = { root: s.root, runners: s.runners };
+  for (const bad of ["main", s.A.slice(0, 7), "--force", "0".repeat(40), s.A.toUpperCase(), undefined]) {
+    assert.equal(prepare({ ...s.input, head_sha: bad }, o).refused, true, String(bad));
+  }
+  assert.ok(!fs.existsSync(path.join(s.root, ".craftsman/approvals/p-f.json")));
+});
+
+test("landed and attachUrl run under the lock and refuse when the record is busy", () => {
+  const s = setup();
+  const o = { root: s.root, lockTries: 2 };
+  prepare(s.input, { root: s.root, runners: s.runners });
+  check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o);
+  const before = fs.readFileSync(path.join(s.root, ".craftsman/approvals/p-f.json"), "utf8");
+  fs.mkdirSync(path.join(s.root, ".craftsman/approvals/p-f.lock"));
+  assert.match(landed({ run: "p-f", sha: "s", mode: "merge" }, o).reason, /busy/);
+  assert.match(attachUrl({ run: "p-f", url: "https://x.y/a" }, o).reason, /busy/);
+  const out = prepare(s.input, { ...o, runners: s.runners });
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /busy/);
+  assert.equal(fs.readFileSync(path.join(s.root, ".craftsman/approvals/p-f.json"), "utf8"), before);
+  fs.rmSync(path.join(s.root, ".craftsman/approvals/p-f.lock"), { recursive: true });
+  assert.equal(landed({ run: "p-f", sha: "s", mode: "merge" }, o).ok, true);
+});
+
+test("fallback writes the markdown prepare rendered and scanned, ignoring caller text", () => {
+  const s = setup();
+  const p = prepare(s.input, { root: s.root, runners: s.runners });
+  const secret = `${"AKIA"}${"ZYXWVUTSRQPONMLK"}`;
+  const out = fallback({ run: "p-f", markdown: `leak ${secret}` }, { root: s.root });
+  const text = fs.readFileSync(out.file, "utf8");
+  assert.equal(text, p.markdown);
+  assert.ok(!text.includes(secret));
 });
