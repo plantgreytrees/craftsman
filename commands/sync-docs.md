@@ -29,9 +29,9 @@ Target: `$ARGUMENTS`. Under `--archive`/`--prune` read `${CLAUDE_PLUGIN_ROOT}/co
 
 ## `--tracker` — TRACKER reconciliation
 
-The human-readable tracker is deliberately concise: keep one direct relative Markdown plan link, one short status, and terse evidence per row. Move implementation prose and review history to the linked plan or archive so the goal and next action remain easy to scan.
+The human-readable tracker is deliberately concise: keep one direct relative Markdown plan link, one short status, and terse evidence per row. Move prose and history to the plan or archive.
 
-Use the **main checkout's** `TRACKER.md`; its generated ledger block changes only via an evidenced `tracker.mjs` transition.
+Use the **main checkout's** `TRACKER.md`; its generated ledger block changes only via an evidenced `tracker.mjs` transition. After the owner confirms, run `tracker.mjs publish` with `{manual:true}`.
 
 The known failure mode: rows already built but still chipped open — trusting the chip wastes a session re-implementing shipped work. Evidence beats chips.
 1. Parse in-scope rows (default: every open row; `$ARGUMENTS` may narrow to a bucket/id): id, claimed status, area, plan link. The linked plan's `[ ]`/`[x]` marks are claims too. Recall only the linked plan's bounded memory entries, when present, and use them to identify decisions, unresolved risks, and prior evidence that the row verifier should check.

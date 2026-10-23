@@ -44,3 +44,6 @@ leaves it stale. It is regenerated on the next transition or read.
 
 ## Plan-hierarchy additions (2026-10-18)
 ARCH-TRACKER-10..12: generated epic/story rollups, `tracker publish` (the only path that commits progress to base) and the `TRACKER.jsonl` snapshot with refuse-to-blank. See [plan](./plan.md) for the reasoning and rejected alternatives.
+
+## Partial-ledger amendments (2026-10-23)
+ARCH-TRACKER-12 → 13: publish refuses to drop *any* committed row key without an archive event, not only a shrink to empty. Loost showed why: 5 local rows against 50 committed would have published silently. Repair is by name (`init --merge`), never a silent union, which could resurrect rows archived on another machine. ARCH-TRACKER-14: `init --from-block` rebuilds a ledger from the committed table when no `TRACKER.jsonl` exists (Loost); it is lossy on long evidence by design. This lands on main before PR #1 is rebased. See [approval](./approval.md).

@@ -18,6 +18,7 @@ import { loadIndex } from "./lib/plan-index.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 import { sandboxEnabledAnywhere } from "./lib/settings-merge.mjs";
 import { snapshotDocs } from "./lib/doc-snapshot.mjs";
+import { pending as pendingApprovals } from "./approval.mjs";
 
 let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { /* no stdin */ }
@@ -278,6 +279,10 @@ try {
 // while still keeping AGENT MODE's directive force — the one line that
 // actually prevents token-costly subagent fan-out, so it stays explicit
 // rather than compressed into vagueness.
+// Approved but not yet landed runs (ARCH-APPROVAL-05): one line, only when some exist.
+let approved = [];
+try { approved = pendingApprovals({}, { root: context.root }).runs; } catch { /* best-effort */ }
+
 const parts = [
   `craftsman active — ${langs.join(", ") || "unknown stack"}${branch ? ` (${branch})` : ""}.`,
   state.safety.length ? guardsOffLine : "craftsman guards: on.",
@@ -293,6 +298,7 @@ const parts = [
   handoff ? `HAND-OFF RESTORED (${handoff.written_at || "unknown time"}${handoffStale ? "; repo advanced — recheck tracker" : ""}): plan ${handoff.plan}${handoffLevel ? ` (${handoffLevel})` : ""}; unit ${handoff.unit || "phase"}; completed ${summarizeUnits(handoff.completed_units)}; remaining ${summarizeUnits(handoff.remaining_units)}; next: ${handoff.next_action}` : "",
   swept.length ? `WORKTREES SWEPT (merged, clean): ${summarizeUnits(swept.map((e) => path.relative(context.root, e.path)))}.` : "",
   lingering.length ? `LINGERING WORKTREES: ${summarizeUnits(lingering.map((e) => path.relative(context.root, e.path)))} — merged, clean, unowned. Remove: printf '%s' '{"action":"sweep","all_merged":true}' | node "${path.join(PLUGIN_ROOT, "scripts", "worktree-sweep.mjs")}"` : "",
+  approved.length ? `APPROVED, NOT LANDED: ${summarizeUnits(approved.map((r) => r.run))} — land with repo-exec land-feature (commands/_approval.md).` : "",
   trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
   restoredMemory.length ? `PLAN MEMORY (verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}] ${entry.summary}`).join("\n") : "",
   rules.length

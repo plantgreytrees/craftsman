@@ -1,6 +1,7 @@
 ---
 description: After `claude update`, check that the built-ins craftsman wraps still match.
 argument-hint: "[--report-only]"
+disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, WebFetch, Task, Agent, AskUserQuestion, Skill, Edit, Write
 model: sonnet
 ---

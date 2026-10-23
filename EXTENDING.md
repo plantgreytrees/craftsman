@@ -181,6 +181,22 @@ host merges once its checks and approvals pass:
 - A unit that depends on another unit's still-open request is parked until
   that request merges, because new units branch from `origin/<base>`.
 
+### Remotes that need credentials (sandboxed runners)
+
+`/craftsman:auto` and `/orchestrate` with `execution.engine: "workflow"` run each
+unit in a sandboxed agent that holds no credentials, and the sandbox should keep
+denying credential directories such as `~/.config/gh`. So `repo-exec` splits the
+network from the work: the root session runs `{"action":"network","step":"fetch"}`
+before a run and `{"action":"network","step":"drain"}` after it (outside the
+sandbox, with your approval for that call), and runners only do local git,
+queueing each push for the drain. Pushes stay plain; nothing is forced. If a
+runner needs the network for something else (`"pr"` mode, a fetch older than
+`repoExec.offlineMaxFetchAgeMinutes`, default 120) the run stops with
+`needs_network` and root runs the named action and relaunches. Nothing to
+configure for the common case; `commands/_network.md` has the exact steps.
+`repoExec.attachDetached` (default `true`) lets `repo-exec` attach a detached
+submodule checkout that sits exactly on `origin/<base>`.
+
 ### Plan levels, feature worktrees and published progress
 
 Plans form a tree: an epic has stories, a story has features, a feature has
@@ -379,3 +395,15 @@ the markdown its own tests read:
 ```
 
 An ordinary project does not need it: put the same keys in `craftsman.config.json`.
+
+## Update channel and CI lint
+
+Installs track commits: the manifests carry no `version` key (CHANGELOG 2.2.0), so every push to the default branch is an update. To hold a project on tested code, add the marketplace as `plantgreytrees/craftsman#stable`, a branch the owner fast-forwards after the plugin's own loop passes. Rollback is moving `stable` back. `/craftsman:upgrade` is the update path.
+
+CI lint one-liner:
+
+```
+git clone --depth 1 https://github.com/plantgreytrees/craftsman /tmp/craftsman && node /tmp/craftsman/scripts/arch-check.mjs lint --root .
+```
+
+A justfile without a `check` recipe (or no `just` binary) is skipped and the next marker wins. To drop any marker, set it to `null` in the project config's `stopGate.commands`.

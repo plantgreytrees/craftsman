@@ -14,7 +14,7 @@ import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, m
 import { forceBlocked } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
 import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
-import { readScope, scopeRequired } from "./scope.mjs";
+import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
@@ -1079,7 +1079,9 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].inc
     candidates.push(path.relative(activeRoot, searchRoot).split(path.sep).join("/") || ".");
   }
   const buckets = bucket === "read" ? ["read", "docs"] : ["write"];
-  const violation = scopeVerdict(activeScope, tool, bucket, buckets, candidates);
+  // Read-only access to the plugin's own reference files (never a write).
+  const pluginRead = bucket === "read" && insidePluginRoot(tool === "Read" ? file : path.resolve(activeRoot, toolInput.path || "."), activeRoot);
+  const violation = pluginRead ? null : scopeVerdict(activeScope, tool, bucket, buckets, candidates);
   if (violation) {
     const message = `craftsman: ${tool} blocked outside active unit scope (${activeScope.unit}). ` +
       `Required target: ${violation}. Stop and re-analyse the unit dependencies; add the exact ` +
@@ -1309,7 +1311,8 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
   }
 }
 
-if (!activeScope && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
+const pluginReadOnly = ["Read", "Glob", "Grep"].includes(tool) && insidePluginRoot(tool === "Read" ? file : path.resolve(activeRoot, toolInput.path || "."), activeRoot);
+if (!activeScope && !pluginReadOnly && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   process.stderr.write(
     `craftsman: ${tool} blocked because this session requires an active unit scope. ` +
     `Re-analyse the unit boundary, activate scripts/scope.mjs with the exact read/docs/write ` +

@@ -94,14 +94,18 @@
   },
   "tracker": {
     "nudgeLines": 300,
-    "publish": "push"
+    "publish": "on-approve"
   },
   "repoExec": {
     "verifyTestsBeforeMerge": true,
     "land": "direct",
     "host": "auto",
     "autoMerge": true,
-    "mergeMethod": "merge"
+    "mergeMethod": "merge",
+    "approval": {
+      "required": true,
+      "prLines": 400
+    }
   },
   "baseline": {
     "errorsDoc": "docs/errors/KNOWN_ISSUES.md"
@@ -115,6 +119,7 @@
     "blockOnUnpushed": false,
     "markdownTests": [],
     "commands": {
+      "justfile": "just check",
       "package.json": "npm test --silent",
       "Cargo.toml": "cargo test --quiet",
       "pyproject.toml": "pytest -q",
@@ -131,6 +136,14 @@
   "worktrees": {
     "disposable": ["**/node_modules/**", "**/dist/**", "**/build/**", "**/target/**", "**/out/**", "**/coverage/**", "**/.next/**", "**/.nuxt/**", "**/.output/**", "**/.svelte-kit/**", "**/__pycache__/**", "**/.venv/**", "**/venv/**", "**/obj/**", "**/.cache/**", "**/.pytest_cache/**", "**/.mypy_cache/**", "**/.ruff_cache/**", "**/.turbo/**", "**/.craftsman/**"],
     "sweepClaudeWorktrees": false
+  },
+  "docs": {
+    "checks": [],
+    "budgets": {
+      "planBytes": 61440,
+      "scrutiniseBytes": 30720,
+      "enforce": true
+    }
   },
   "security": {
     "enabled": true,

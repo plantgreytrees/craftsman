@@ -36,6 +36,8 @@ function remote() {
 function clone(bare) {
   const dir = tmp("clone");
   execFileSync("git", ["clone", "-q", bare, dir], { env: ENV });
+  // The shipped default is "on-approve"; these tests exercise the push path.
+  fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ tracker: { publish: "push" } }));
   return { id: ".", root: dir, stateDir: path.join(dir, ".craftsman") };
 }
 
@@ -85,6 +87,73 @@ test("publish: a competing push is retried once against the new base", () => {
   assert.ok(git(bare, "show", "main:docs/plans/TRACKER.jsonl"));
 });
 
+function onApprove(ctx) {
+  fs.writeFileSync(path.join(ctx.root, "craftsman.config.json"), JSON.stringify({ tracker: { publish: "on-approve" } }));
+}
+function record(ctx, run, status) {
+  const dir = path.join(ctx.root, ".craftsman", "approvals");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${run}.json`), JSON.stringify({ run, status }));
+}
+
+test("publish: on-approve refuses approved:true without a run or with a run not landed", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a);
+  const before = git(bare, "rev-parse", "main");
+  record(a, "r-decided", "decided");
+  for (const input of [{ approved: true }, { approved: true, run: "r-missing" }, { approved: true, run: "r-decided" }, { approved: true, run: "../x" }]) {
+    assert.equal(publishTracker(input, a).published, false);
+  }
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish: on-approve publishes for a landed run record or manual:true", () => {
+  const a = clone(remote().bare), b = clone(remote().bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, true);
+  seedLedger(b); onApprove(b);
+  assert.equal(publishTracker({ manual: true }, b).published, true);
+});
+
+test("publish: a landed run publishes once; a second publish with the same run is refused", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, true);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(a.root, ".craftsman", "approvals", "r1.json"), "utf8")).published_at);
+  const before = git(bare, "rev-parse", "main");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish: push mode with repoExec.approval.required behaves as on-approve", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  fs.writeFileSync(path.join(a.root, "craftsman.config.json"), JSON.stringify({ tracker: { publish: "push" }, repoExec: { approval: { required: true } }, planning: { featureBranches: true } }));
+  const before = git(bare, "rev-parse", "main");
+  assert.equal(publishTracker({}, a).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+  record(a, "r1", "landed");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, true);
+});
+
+test("publish: manual:true logs tracker_publish_manual", () => {
+  const a = clone(remote().bare);
+  seedLedger(a); onApprove(a);
+  assert.equal(publishTracker({ manual: true }, a).published, true);
+  assert.match(fs.readFileSync(path.join(a.stateDir, "events.jsonl"), "utf8"), /tracker_publish_manual/);
+});
+
+test("publish: legacy push mode logs tracker_publish_unapproved", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  publishTracker({}, a);
+  assert.match(fs.readFileSync(path.join(a.stateDir, "events.jsonl"), "utf8"), /tracker_publish_unapproved/);
+});
+
 test("publish: off mode is a no-op", () => {
   const { bare } = remote();
   const a = clone(bare);
@@ -108,8 +177,8 @@ test("publish: refuses to blank a committed non-empty block without an archive e
   assert.equal(refused.published, false);
   assert.match(refused.refused, /blank/);
   assert.equal(git(bare, "rev-parse", "main"), before);
-  assert.equal(publishTracker({ archived: true }, fresh).published, true);
-  assert.equal(git(bare, "show", "main:docs/plans/TRACKER.jsonl"), "");
+  assert.equal(publishTracker({ archived: true }, fresh).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
 });
 
 test("publish: a checkout merely behind origin cannot blank the block; a real archive event can", () => {
@@ -222,4 +291,110 @@ test("force block: allows the plain publish push, still blocks force flags", asy
   for (const cmd of ["git push --force origin HEAD:main", "git push -f origin HEAD:main", "git push --force-with-lease origin HEAD:main", "git push origin +HEAD:main"]) {
     assert.ok(await forceBlocked(cmd), cmd);
   }
+});
+
+function manyRows(n) {
+  return Array.from({ length: n }, (_, i) => ({ ...EVENTS[0], key: `.::docs/plans/p.md::m${i}`, unit: `m${i}` }));
+}
+
+function shrunkFixture({ dropJsonl = false } = {}) {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a, manyRows(50));
+  assert.equal(publishTracker({}, a).published, true);
+  if (dropJsonl) {
+    const other = clone(bare);
+    git(other.root, "rm", "-q", "docs/plans/TRACKER.jsonl");
+    git(other.root, "commit", "-m", "drop jsonl"); git(other.root, "push", "origin", "main");
+  }
+  const fresh = clone(bare);
+  seedLedger(fresh, manyRows(5));
+  return { bare, fresh };
+}
+
+test("publish guard: 50 committed rows vs 5 local rows is refused and logs the dropped keys", () => {
+  const { bare, fresh } = shrunkFixture();
+  const before = git(bare, "rev-parse", "main");
+  const result = publishTracker({}, fresh);
+  assert.equal(result.published, false);
+  assert.ok(result.refused);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+  const log = fs.readFileSync(path.join(fresh.stateDir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  const ev = log.find((e) => e.ev === "tracker_publish_refused");
+  assert.equal(ev.dropped.length, 45);
+});
+
+test("publish guard: TRACKER.jsonl absent, the committed block alone guards the rows", () => {
+  const { bare, fresh } = shrunkFixture({ dropJsonl: true });
+  const before = git(bare, "rev-parse", "main");
+  assert.equal(publishTracker({}, fresh).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish guard: an archive event for another plan does not excuse the dropped rows; one for the dropped plan does", () => {
+  const planLog = (ctx, plan) => {
+    fs.mkdirSync(ctx.stateDir, { recursive: true });
+    fs.writeFileSync(path.join(ctx.stateDir, "events.jsonl"), JSON.stringify({ ts: 1, ev: "tracker_archived", plan, units: 1 }) + "\n");
+  };
+  const other = shrunkFixture();
+  planLog(other.fresh, "docs/plans/other.md");
+  assert.equal(publishTracker({}, other.fresh).published, false);
+  const same = shrunkFixture();
+  planLog(same.fresh, "docs/plans/p.md");
+  assert.equal(publishTracker({}, same.fresh).published, true);
+});
+
+test("publish guard: archived:true is refused; a later archive event lets the shrink through", () => {
+  const { fresh } = shrunkFixture();
+  assert.equal(publishTracker({ archived: true }, fresh).published, false);
+  const second = shrunkFixture();
+  writeLog(second.fresh, "tracker_archived");
+  assert.equal(publishTracker({}, second.fresh).published, true);
+});
+
+const approvalFile = (ctx, run) => path.join(ctx.root, ".craftsman", "approvals", `${run}.json`);
+const events = (ctx) => fs.readFileSync(path.join(ctx.stateDir, "events.jsonl"), "utf8");
+const spend = (ctx, run) => fs.writeFileSync(approvalFile(ctx, run), JSON.stringify({ run, status: "landed", published_at: "2026-01-01T00:00:00.000Z" }));
+
+test("publish atomic: a token spent during the lock wait leaves the second publish refused", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  const before = git(bare, "rev-parse", "main");
+  const result = publishTracker({ approved: true, run: "r1" }, a, { afterLock: () => spend(a, "r1") });
+  assert.equal(result.published, false);
+  assert.equal(result.refused, "token spent");
+  assert.match(events(a), /tracker_publish_token_spent/);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish atomic: a markPublished refusal after the push logs tracker_publish_mark_failed", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  const result = publishTracker({ approved: true, run: "r1" }, a, { beforePush: () => spend(a, "r1") });
+  assert.equal(result.published, true);
+  assert.match(events(a), /tracker_publish_mark_failed/);
+});
+
+test("publish atomic: an approved publish that ends unchanged consumes the token", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  assert.equal(publishTracker({ manual: true }, a).published, true);
+  const result = publishTracker({ approved: true, run: "r1" }, a);
+  assert.equal(result.unchanged, true);
+  assert.ok(JSON.parse(fs.readFileSync(approvalFile(a, "r1"), "utf8")).published_at);
+});
+
+test("publish atomic: an absent tracker.publish key behaves as on-approve", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  fs.writeFileSync(path.join(a.root, "craftsman.config.json"), "{}");
+  const before = git(bare, "rev-parse", "main");
+  const result = publishTracker({}, a);
+  assert.equal(result.published, false);
+  assert.equal(result.mode, "on-approve");
+  assert.equal(git(bare, "rev-parse", "main"), before);
 });

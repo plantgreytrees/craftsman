@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Target 3072; set to the measured size and only lowered from here.
+const CAP_BYTES = 3072;
 const SESSION_CONTEXT = path.join(ROOT, "session-context.mjs");
 
 function run(script, dir, input) {
@@ -215,5 +217,32 @@ test("session-context: SessionStart snapshots the hash of every guarded doc", ()
     assert.deepEqual(Object.keys(snap.docs).sort(), ["docs/architecture/x.rules.md", "docs/plans/a.md"]);
     assert.match(snap.docs["docs/plans/a.md"], /^[0-9a-f]{40}$/);
     assert.equal("status" in snap, false, "nothing in the snapshot that Stop never reads");
+  });
+});
+
+test("ARCH-SLIM-10: the SessionStart additionalContext stays under its byte cap", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const out = JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "cap" }).stdout);
+    const bytes = Buffer.byteLength(out.hookSpecificOutput.additionalContext);
+    assert.ok(bytes <= CAP_BYTES, `additionalContext is ${bytes} bytes, cap ${CAP_BYTES}`);
+  });
+});
+
+test("ARCH-APPROVAL-05: SessionStart names approved-but-unlanded runs in one line, and only then", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const ctx = () => JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "appr" }).stdout).hookSpecificOutput.additionalContext;
+    assert.doesNotMatch(ctx(), /APPROVED, NOT LANDED/);
+    const d = path.join(dir, ".craftsman", "approvals");
+    fs.mkdirSync(d, { recursive: true });
+    const rec = (run, status) => fs.writeFileSync(path.join(d, `${run}.json`), JSON.stringify({ run, plan: "p", status, choice: "merge", url: "u" }));
+    rec("p-a", "decided");
+    rec("p-b", "landed");
+    rec("p-c", "requested");
+    const lines = ctx().split("\n").filter((l) => l.includes("APPROVED, NOT LANDED"));
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /p-a/);
+    assert.doesNotMatch(lines[0], /p-b|p-c/);
   });
 });

@@ -5,43 +5,21 @@
 // pathspecs and push HEAD:<base> (plain push). One retry on rejection. Never parks.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin } from "./lib/core.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 import { acquireLock, releaseLock, heartbeat, inspectRepo, run } from "./repo-exec.mjs";
+import { approvalRequired } from "./lib/approval-gate.mjs";
+import { markPublished } from "./approval.mjs";
+import { droppedKeys } from "./lib/ledger-keys.mjs";
 import { generatedBlock, renderBlock, renderState, spliceBlock, trackerRoot } from "./tracker.mjs";
 
 const DOC = "docs/plans/TRACKER.md";
 const JSONL = "docs/plans/TRACKER.jsonl";
 const ARCHIVE = "docs/plans/TRACKER-archive.md";
 
-// A real archive event is a tracker_archived or doc_retired line in the event log;
-// a checkout merely behind origin differs in TRACKER-archive.md but logs neither.
-// Only events after the last tracker_published count (an earlier one was already
-// published); a log with no tracker_published counts every archive event. Without a
-// stateDir nothing is read, so the process cwd is never consulted.
-function hasArchiveEvent(context) {
-  if (!context?.stateDir) return false;
-  const lines = read(path.join(context.stateDir, "events.jsonl")).split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let ev;
-    try { ev = JSON.parse(lines[i]).ev; } catch { continue; }
-    if (ev === "tracker_published") return false;
-    if (ev === "tracker_archived" || ev === "doc_retired") return true;
-  }
-  return false;
-}
-
 function read(file) {
   try { return fs.readFileSync(file, "utf8"); } catch { return ""; }
-}
-
-// A block holds data when any table row after the header has a cell other than the dash.
-function blockHasRows(text) {
-  const block = generatedBlock(text);
-  if (!block) return false;
-  const data = block.split("\n").filter((line) => line.startsWith("|")).slice(2);
-  return data.some((line) => line.split("|").slice(1, -1).some((c) => c.trim() && c.trim() !== "—"));
 }
 
 export function jsonlText(rows) {
@@ -49,14 +27,16 @@ export function jsonlText(rows) {
 }
 
 // Render into `temp`; returns the pathspecs to stage, or a refusal.
-function render(temp, rows, context, input) {
+function render(temp, rows, context) {
   const docFile = path.join(temp, DOC);
   const jsonlFile = path.join(temp, JSONL);
   const doc = read(docFile);
   const committedJsonl = read(jsonlFile);
-  if (!rows.length && (blockHasRows(doc) || committedJsonl.trim())) {
-    const archived = input.archived === true || hasArchiveEvent(context);
-    if (!archived) return { refused: "blank: refusing to shrink a committed non-empty tracker block to empty without an archive event" };
+  const dropped = droppedKeys(rows, doc, committedJsonl, context);
+  if (dropped.length) {
+    logEvent({ ev: "tracker_publish_refused", dropped }, context);
+    const what = rows.length ? "shrink" : "blank";
+    return { refused: `${what}: refusing to drop ${dropped.length} committed tracker row(s) without an archive event`, dropped };
   }
   const paths = [];
   if (rows.length || generatedBlock(doc) !== null) {
@@ -73,10 +53,29 @@ function render(temp, rows, context, input) {
   return { paths };
 }
 
-// `deps.beforePush(attempt)` is a test seam for a competing push.
+// ARCH-LAND-24: on-approve publishes only for a landed approval record named by `run`
+// (ARCH-LAND-22), or a /sync-docs --tracker the owner ran (`manual:true`).
+function runLanded(context, run) {
+  if (typeof run !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(run)) return false;
+  const file = path.join(mainCheckoutRoot(context.root), ".craftsman", "approvals", `${run}.json`);
+  try { const rec = JSON.parse(fs.readFileSync(file, "utf8")); return rec.status === "landed" && !rec.published_at; } catch { return false; }
+}
+
+// Consume the approval token; a refusal after the push is logged, never thrown.
+function consume(mode, input, context, base) {
+  if (mode !== "on-approve" || input.manual === true) return;
+  const marked = markPublished(input.run, { root: context.root });
+  if (!marked?.ok) logEvent({ ev: "tracker_publish_mark_failed", run: input.run, base, reason: marked?.error || marked?.reason || "refused" }, context);
+}
+
+// `deps.beforePush(attempt)` is a test seam for a competing push; `deps.afterLock()` runs once the base lock is held.
 export function publishTracker(input = {}, context = projectContext(input.project || "."), deps = {}) {
-  const mode = loadConfig(context).tracker?.publish ?? "push";
-  if (mode !== "push") return { published: false, mode };
+  const cfg = loadConfig(context);
+  let mode = cfg.tracker?.publish ?? "on-approve";
+  if (mode === "push" && approvalRequired(cfg)) mode = "on-approve";
+  if (mode === "on-approve" ? !(input.manual === true || (input.approved === true && runLanded(context, input.run))) : mode !== "push") return { published: false, mode };
+  if (mode === "push") logEvent({ ev: "tracker_publish_unapproved", mode }, context);
+  if (mode === "on-approve" && input.manual === true) logEvent({ ev: "tracker_publish_manual" }, context);
   let lock = null;
   let temp = null;
   let added = false;
@@ -87,6 +86,12 @@ export function publishTracker(input = {}, context = projectContext(input.projec
     const base = info.base_branch;
     const rows = renderState(context);
     lock = acquireLock(info, { ...input, unit: input.unit || "tracker-publish" });
+    deps.afterLock?.();
+    // The token may have been spent while this publish waited for the lock.
+    if (mode === "on-approve" && input.manual !== true && !runLanded(context, input.run)) {
+      logEvent({ ev: "tracker_publish_token_spent", run: input.run }, context);
+      return { published: false, mode, refused: "token spent" };
+    }
     temp = path.join(info.common_git_dir, ".craftsman", "publish", `${base.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
     let reason = "";
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -96,16 +101,17 @@ export function publishTracker(input = {}, context = projectContext(input.projec
       run(root, ["worktree", "prune"], { allowFailure: true });
       run(root, ["worktree", "add", "--detach", temp, `origin/${base}`]);
       added = true;
-      const rendered = render(temp, rows, context, input);
+      const rendered = render(temp, rows, context);
       if (rendered.refused) return { published: false, mode, refused: rendered.refused };
       if (rendered.paths.length) run(temp, ["add", "--", ...rendered.paths]);
-      if (!rendered.paths.length || !run(temp, ["diff", "--cached", "--name-only"])) return { published: false, mode, unchanged: true };
+      if (!rendered.paths.length || !run(temp, ["diff", "--cached", "--name-only"])) { consume(mode, input, context, base); return { published: false, mode, unchanged: true }; }
       run(temp, ["commit", "-m", `docs(tracker): publish ledger (${rows.length} rows)`, "--", ...rendered.paths]);
       deps.beforePush?.(attempt);
       try {
         run(temp, ["push", "origin", `HEAD:${base}`]);
         const sha = run(temp, ["rev-parse", "HEAD"]);
         logEvent({ ev: "tracker_published", base, rows: rows.length, sha, attempt }, context);
+        consume(mode, input, context, base);
         return { published: true, mode, base, sha, attempt };
       } catch (error) {
         reason = String(error.stderr || error.message).trim().split("\n")[0];

@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   acceptanceNotice, archivePath, archivePlan, compactLedger, currentState, formatArchiveHeading, lookupArchive, parseArchiveHeading, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
-  syncTrackerDoc, trackerDocPath, trackerRoot, transition,
+  initLedger, syncTrackerDoc, trackerDocPath, trackerRoot, transition,
 } from "./tracker.mjs";
 
 const fixtures = new Set();
@@ -154,6 +154,22 @@ test("tracker: sync restores a hand-tampered block and is a no-op when it alread
   fs.writeFileSync(file, rendered.replace("| PENDING |", "| COMPLETE |"));
   assert.equal(syncTrackerDoc(selected).changed, true);
   assert.equal(trackerDoc(selected), rendered);
+});
+
+test("tracker: sync refuses a render that drops 50 committed rows for 5 local ones (ARCH-TRACKER-13)", () => {
+  const selected = context();
+  const plans = path.join(selected.root, "docs", "plans");
+  fs.mkdirSync(plans, { recursive: true });
+  const committed = Array.from({ length: 50 }, (_, i) => JSON.stringify({ plan: "docs/plans/example.md", unit: `m${i}` }));
+  fs.writeFileSync(path.join(plans, "TRACKER.jsonl"), committed.join("\n") + "\n");
+  fs.writeFileSync(path.join(plans, "TRACKER.md"), "# Execution tracker\n\nNotes.\n");
+  for (let i = 0; i < 5; i++) transition({ plan: "docs/plans/example.md", unit: `m${i}`, status: "PENDING" }, selected);
+  const result = syncTrackerDoc(selected);
+  assert.equal(result.changed, false);
+  assert.match(result.refused, /45/);
+  assert.equal(trackerDoc(selected), "# Execution tracker\n\nNotes.\n");
+  const log = fs.readFileSync(path.join(selected.stateDir, "events.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(log.filter((e) => e.ev === "tracker_publish_refused").at(-1).dropped.length, 45);
 });
 
 test("tracker: a repo with no ledger rows never grows a generated section", () => {
@@ -431,4 +447,35 @@ test("tracker: a rows-less hierarchy parent archives with the full heading and l
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("tracker: init --merge adds absent keys but never resurrects an archived plan", () => {
+  const selected = context();
+  const docs = path.join(selected.root, "docs", "plans");
+  fs.mkdirSync(docs, { recursive: true });
+  const row = (plan, unit) => JSON.stringify({ key: `.::docs/plans/${plan}.md::${unit}`, project: ".", plan: `docs/plans/${plan}.md`, unit, status: "COMPLETE", evidence: "x" });
+  fs.writeFileSync(path.join(docs, "TRACKER.jsonl"), [row("live", "a"), row("live", "b"), row("old", "z")].join("\n") + "\n");
+  fs.writeFileSync(archivePath(selected), "# Tracker archive\n\n## old (2026-01-01)\n");
+  transition({ plan: "docs/plans/live.md", unit: "a", status: "PENDING" }, selected);
+  const result = initLedger({ merge: true }, selected);
+  assert.equal(result.added, 1);
+  const keys = fs.readFileSync(ledgerPath(selected), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l).key);
+  assert.ok(keys.includes(".::docs/plans/live.md::b"));
+  assert.ok(!keys.some((k) => k.includes("old.md")));
+  assert.equal(currentState(selected).find((r) => r.unit === "a").status, "PENDING");
+});
+
+test("tracker: init --from-block rehydrates one row per block row and is idempotent", () => {
+  const selected = context();
+  const rows = Array.from({ length: 50 }, (_, i) => ({ plan: "docs/plans/big.md", unit: `u${i}`, module: `m${i}`, status: i % 2 ? "COMPLETE" : "PENDING", evidence: "e", updated_at: "2026-01-01T00:00:00Z" }));
+  fs.mkdirSync(path.join(selected.root, "docs", "plans"), { recursive: true });
+  fs.writeFileSync(trackerDocPath(selected), `# Execution tracker\n\n${renderBlock(rows)}\n`);
+  assert.equal(initLedger({ from_block: true }, selected).added, 50);
+  const state = currentState(selected);
+  assert.equal(state.length, 50);
+  assert.equal(state[3].evidence, "rehydrated from TRACKER.md block");
+  assert.equal(state[3].module, "m3");
+  assert.equal(state[3].status, "COMPLETE");
+  assert.equal(initLedger({ from_block: true }, selected).added, 0);
+  assert.equal(currentState(selected).length, 50);
 });

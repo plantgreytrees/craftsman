@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { grantValid, retire } from "./doc-retire.mjs";
+import { grantValid, retire, retireCheck } from "./doc-retire.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
 
@@ -653,4 +653,21 @@ test("doc-retire 16.2: a sibling that has rows archives under its own goal", () 
   assert.equal(out.retired, PLAN, JSON.stringify(out));
   assert.equal(lookupArchive({ plan: SIB }, context).goal, "Shared goal");
   assert.equal(lookupArchive({ plan: PLAN }, context).goal, "Explicit plan goal");
+});
+
+test("retireCheck lists referrers for a cited plan and none for an uncited one, without mutating", () => {
+  const root = repo({ files: { "docs/plans/beta.md": "# beta\n", "docs/guide.md": "see docs/plans/alpha.md\n" } }).root;
+  const before = run(root, "status", "--porcelain");
+  const result = retireCheck([PLAN, "docs/plans/beta.md"], root);
+  assert.deepEqual(result.find((r) => r.plan === PLAN).referrers.includes("docs/guide.md"), true);
+  assert.deepEqual(result.find((r) => r.plan === "docs/plans/beta.md").referrers, []);
+  assert.equal(run(root, "status", "--porcelain"), before);
+  assert.ok(fs.existsSync(path.join(root, PLAN)));
+});
+
+test("retireCheck never throws: an unreadable root returns an empty list and a reason", () => {
+  const result = retireCheck([PLAN], path.join(os.tmpdir(), "craftsman-no-such-root-xyz"));
+  assert.deepEqual(result[0].referrers, []);
+  assert.match(result[0].reason, /scan failed/);
+  assert.doesNotThrow(() => retireCheck(null, undefined));
 });

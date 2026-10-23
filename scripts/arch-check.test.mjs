@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs, unitContextBytes, checkUnitContext, lintPlans, DEFAULT_UNIT_CONTEXT_BYTES } from "./arch-check.mjs";
+import { overlaps, parseRulesDoc, checkScope, lintRules, loadRules, governingDocs, unmanagedDocs, unitContextBytes, checkUnitContext, lintPlans, lintBudgets, DEFAULT_UNIT_CONTEXT_BYTES } from "./arch-check.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
@@ -299,4 +299,72 @@ test("7.1 lintRules skips the source: check only for the init and backfill senti
   assert.deepEqual(run("backfill"), []);
   assert.ok(run("docs/ideas/gone.md").some((e) => /source docs\/ideas\/gone\.md is missing/.test(e)));
   assert.ok(run("gone").some((e) => /source gone is missing/.test(e)));
+});
+
+test("9.1 shipped config carries docs.budgets and parses", () => {
+  const b = JSON.parse(fs.readFileSync(path.join(ROOT, "..", "craftsman.config.json"), "utf8")).docs.budgets;
+  // claudeMdLines and openPlans are never plugin defaults: a repo sets them in its own config, at its own size.
+  assert.deepEqual(Object.keys(b).sort(), ["enforce", "planBytes", "scrutiniseBytes"]);
+  assert.equal(b.enforce, true);
+  assert.equal(b.planBytes, 61440);
+  assert.equal(b.scrutiniseBytes, 30720);
+});
+
+test("7.1 budgets: growth under the default passes; over the default only shrinks", () => {
+  const git = (dir, ...a) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, encoding: "utf8" });
+  const dir = project({ "docs/plans/small.md": "x".repeat(10240), "docs/plans/big.md": "y".repeat(71680) });
+  const cfg = { docs: { budgets: { planBytes: 61440, scrutiniseBytes: 30720, enforce: true } } };
+  const write = (rel, n) => fs.writeFileSync(path.join(dir, rel), "z".repeat(n));
+  try {
+    git(dir, "add", "-A"); git(dir, "commit", "-qm", "base"); git(dir, "branch", "-M", "main");
+    const base = git(dir, "rev-parse", "HEAD").stdout.trim();
+    write("docs/plans/small.md", 11264);
+    assert.deepEqual(lintBudgets(dir, cfg, base).errors, [], "10 KB to 11 KB under 60 KB passes");
+    write("docs/plans/big.md", 72704);
+    assert.equal(lintBudgets(dir, cfg, base).errors.length, 1, "70 KB growing fails");
+    write("docs/plans/big.md", 70000);
+    assert.deepEqual(lintBudgets(dir, cfg, base).errors, [], "70 KB shrinking passes");
+    write("docs/plans/new.md", 61441);
+    assert.equal(lintBudgets(dir, cfg, base).errors.length, 1, "new file takes the default");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("9.2 budgets: growth fails lint, shrink passes, new files default, enforce:false only reports", () => {
+  const git = (dir, ...a) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, encoding: "utf8" });
+  const dir = project({ "docs/plans/old.md": "x".repeat(1000), "docs/plans/scrutinise-old.md": "y".repeat(500) });
+  const cfg = (extra = {}) => ({ docs: { budgets: { planBytes: 2000, scrutiniseBytes: 800, enforce: true, ...extra } } });
+  const write = (rel, n) => fs.writeFileSync(path.join(dir, rel), "z".repeat(n));
+  try {
+    git(dir, "add", "-A"); git(dir, "commit", "-qm", "base"); git(dir, "branch", "-M", "main");
+    const base = git(dir, "rev-parse", "HEAD").stdout.trim();
+    assert.deepEqual(lintBudgets(dir, cfg(), base).errors, []);
+    write("docs/plans/old.md", 2001);
+    const grown = lintBudgets(dir, cfg(), base);
+    assert.match(grown.errors[0], /^docs\/plans\/old\.md: 2001 bytes exceeds its 2000-bytes? budget/);
+    write("docs/plans/old.md", 1500);
+    assert.deepEqual(lintBudgets(dir, cfg(), base).errors, [], "under the default may grow");
+    write("docs/plans/old.md", 900);
+    assert.deepEqual(lintBudgets(dir, cfg(), base).errors, []);
+    write("docs/plans/new.md", 2001);
+    write("docs/plans/scrutinise-new.md", 801);
+    const fresh = lintBudgets(dir, cfg(), base).errors;
+    assert.equal(fresh.length, 2, fresh.join("\n"));
+    write("docs/plans/new.md", 2000);
+    write("docs/plans/scrutinise-new.md", 800);
+    assert.deepEqual(lintBudgets(dir, cfg(), base).errors, []);
+    // ratchet: a config that raises a limit above the merge-base config does not raise the cap
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify(cfg()));
+    git(dir, "add", "-A"); git(dir, "commit", "-qm", "cfg");
+    const base2 = git(dir, "rev-parse", "HEAD").stdout.trim();
+    write("docs/plans/new.md", 2500);
+    assert.equal(lintBudgets(dir, cfg({ planBytes: 9000 }), base2).errors.length, 1, "limit cannot rise above the merge-base value");
+    // enforce:false reports, CLI exits 0; enforce:true exits 1
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify(cfg({ enforce: false })));
+    const run = () => spawnSync(process.execPath, [path.join(ROOT, "arch-check.mjs"), "lint", "--root", dir], { encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir } });
+    const quiet = run();
+    assert.match(quiet.stdout, /budget docs\/plans\/old\.md: 900\/2000 bytes/);
+    assert.doesNotMatch(quiet.stderr, /exceeds/);
+    assert.match(quiet.stdout, /report only/);
+    assert.equal(lintBudgets(dir, cfg({ enforce: false }), base2).enforce, false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

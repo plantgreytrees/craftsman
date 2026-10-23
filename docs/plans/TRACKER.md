@@ -65,80 +65,108 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 
 | plan | unit | module | status | evidence | updated |
 |---|---|---|---|---|---|
-| [feature-branch-plans](./feature-branch-plans.md) | changelog-cut | CHANGELOG.md | COMPLETE | all 1 acceptance criteria ticked; changelog+descriptions tests 5/5; direct merg… | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | doc-retire | scripts/doc-retire.mjs | COMPLETE | all 4 acceptance criteria ticked; merged to main 27d2ac9 (direct push) | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | doc-retire-tree | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 3805942 (direct ff) | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | hook-timing | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 7e9998c | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | lookup-callers | commands/ | COMPLETE | all 2 acceptance criteria ticked; merged to main 19f98d6 (direct ff push) | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | retire-guard | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 11d1b16 (direct push) | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | size-policy | scripts/doc-size-policy.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 0bfdd4e (direct push) | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | source-lint | scripts/arch-check.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main b628d6530cf42b7b455b802ea8116b… | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | stats-latency | scripts/stats.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main 08bb97a (direct ff push); resu… | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | sync-docs-modes | commands/sync-docs.md | COMPLETE | all 2 acceptance criteria ticked; wiring+arch-check+descriptions 30/30, size po… | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | tracker-lookup | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 2f36f44 (direct ff) | 2026-10-18 |
-| [feature-branch-plans](./feature-branch-plans.md) | trim-at-cap | commands/ | COMPLETE | all 2 acceptance criteria ticked; merged to main 6f72cb1 (direct ff push); size… | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | arch-lint | scripts/arch-check.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | claim-feature | scripts/claim.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main eb0c140 | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | command-docs | commands/ | COMPLETE | all 2 acceptance criteria ticked; merged to main 58e9536 (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | config-keys | craftsman.config.json | COMPLETE | all 2 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | core-features | scripts/lib/core.mjs | COMPLETE | all 3 acceptance criteria ticked; merged direct to main 9d0f577 | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | engine-run | workflows/run.js | COMPLETE | all 2 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | graph-features | scripts/plan-graph.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | guard-session | scripts/orchestrate-scope-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 134ce05 (direct ff push) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | init-stamp | scripts/init.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main bfbbe88 (direct ff) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | land-feature | scripts/repo-exec.mjs | COMPLETE | all 2 acceptance criteria ticked; merged direct to main, 741347a; repo-exec.tes… | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | land-unit | scripts/repo-exec.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main e76fecf, pushed | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | ledger-feature | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main a0a0fe8 (direct push) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | plan-index | scripts/lib/plan-index.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main 896ba13 (direct ff push); 11 t… | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | pr-submodule | scripts/repo-exec.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | publish | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; direct merge to main c479e6e | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | release-docs | CHANGELOG.md | COMPLETE | all 2 acceptance criteria ticked; merged to main (direct); 20.2 judged against … | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | repo-prepare | scripts/repo-exec.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main f563f6c (direct ff); 31 tests … | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | rollups | scripts/lib/tracker-rollup.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | shared-scope | scripts/scope.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main 7b4451b | 2026-10-18 |
-| [plan-hierarchy](./plan-hierarchy.md) | stop-feature | scripts/stop-gate.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 2d00eaa direct ff | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | ci-size-delta | scripts/script-size-delta.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main 0816ee8 | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-bypass | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; direct merge e56a6be on main | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-env | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; direct merge to main ca26733 | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-failclosed | scripts/pre-guard.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main 0dfec17 (direct push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-failclosed-2 | scripts/pre-guard.mjs | IN_PROGRESS | unit-runner | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-failclosed-fix | scripts/pre-guard.mjs | COMPLETE | all 6 acceptance criteria ticked; merged to main 3c9a10b (direct ff push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-find-icase | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main e17c43b | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-git-env | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 8ad7d0b (direct ff push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-icase-env | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; landed by hand after classifier denial: full … | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-overblock | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 035b946 (direct ff push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-pathspec | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main c122a11 (direct ff push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-quotes | scripts/pre-guard.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main b0a7c45 | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-regress | scripts/pre-guard.mjs | COMPLETE | all 3 acceptance criteria ticked; landed by hand after classifier denial: pre-g… | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-subshell | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; landed by hand after classifier denial: full … | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-vars | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; landed by hand after classifier denial: full … | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | guard-xargs-git | scripts/pre-guard.mjs | CANCELLED | superseded by user decision (b): fail-closed pre-guard redesign; nothing was bu… | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | lint-sentinels | scripts/arch-check.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 1b20920 (direct) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | preguard-event | scripts/stats.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main c9c6fc5 (direct ff) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | prune-archive-input | commands/_sync-docs-prune.md | COMPLETE | all 1 acceptance criteria ticked; merged to main 52593f6 (direct push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-epic | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main c4d686d (direct ff) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-goalless | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; doc-retire+tracker tests 46/46; direct merge … | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-hardening | scripts/doc-retire.mjs | COMPLETE | all 4 acceptance criteria ticked; merged to main 7fc96bb | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-index-heal | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 2863364 (direct push) | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-rollback-index | scripts/doc-retire.mjs | COMPLETE | all 3 acceptance criteria ticked; merged to main ce993dd | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-rollup-parent | scripts/doc-retire.mjs | COMPLETE | all 3 acceptance criteria ticked; direct merge 5debc60 on main | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | retire-single-parser | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; merged direct to main 9ad8d40 | 2026-10-18 |
-| [scrutinise-feature-branch-plans](./scrutinise-feature-branch-plans.md) | rm-guard | scripts/pre-guard.mjs | COMPLETE | all 2 acceptance criteria ticked; direct merge to main 7099a2947257c8e97d72a019… | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | feature-criteria | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; repo-exec.test 38/38; direct merge | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | feature-fields | commands/_features.md | COMPLETE | all 2 acceptance criteria ticked; engine+wiring 23/23; doc-size PASS; direct me… | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | gate-chain | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 4d69b45 (direct) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | gate-fail-closed | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 8e583e7 (direct) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | gate-parser | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge a6d0a07 on main | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | gate-rollups | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; repo-exec.test 36/36; direct ff merge b08a152… | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | guard-level-flags | scripts/orchestrate-scope-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 193c240 (direct ff push) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | historic-budget | docs/plans/autonomous-e2e-loop.md | COMPLETE | all 1 acceptance criteria ticked; merged to main cc2b6b0 (direct) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | index-hardening | scripts/lib/plan-index.mjs | COMPLETE | all 2 acceptance criteria ticked; merged direct to main dde1fa1 | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | land-linked | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main af4a642 | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | plan-graph-cap | scripts/plan-graph.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main (direct) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | publish-archive-window | scripts/tracker-publish.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main 01aecf7 (direct ff push) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | publish-hardening | scripts/tracker-publish.mjs | COMPLETE | all 2 acceptance criteria ticked; tracker-publish.test 8/8; direct merge 694ab3… | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | repo-hardening | scripts/repo-exec.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 843c7b6 (pushed) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | status-consumers | scripts/digest.mjs | COMPLETE | all 1 acceptance criteria ticked; merged to main b08a152 (direct push) | 2026-10-18 |
-| [scrutinise-plan-hierarchy](./scrutinise-plan-hierarchy.md) | tracker-park | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; merged to main 468d719 (direct ff) | 2026-10-18 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-page | scripts/lib/approval-page.mjs | COMPLETE | all 3 acceptance criteria ticked; d077cb4 on main; approval-page tests 8/8; pag… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-protocol | commands/_approval.md | COMPLETE | all 4 acceptance criteria ticked; 4e075d5 on main; _approval.md 2130 B; auto.md… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-record | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; 038049b on main; approval tests 6/6; check re… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | baseline-metric | scripts/telemetry.mjs | COMPLETE | all 3 acceptance criteria ticked; 6d43dce on main; baseline event once per sid;… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | closing-changelog | CHANGELOG.md | COMPLETE | all 2 acceptance criteria ticked; d04dc32 on main; one [Unreleased] entry under… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | docs-budgets | scripts/arch-check.mjs | MERGED | 77d2da8 on main; arch-check tests 21/21; openPlans and claudeMdLines left to pr… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | force-lease | scripts/lib/force-block.mjs | COMPLETE | all 2 acceptance criteria ticked; 0e0428f on main; force-block tests 3/3; no ca… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-narrowing | scripts/pre-guard.mjs | PARKED | Precondition 4.0 failed: safety.rules.md absent on origin/main (PR #1 not lande… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-stats | scripts/stats.mjs | COMPLETE | all 2 acceptance criteria ticked; 267514e on main; stats tests 6/6; also ranks … | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | land-gate | scripts/repo-exec.mjs | COMPLETE | all 5 acceptance criteria ticked; 461422a on main; 9 gate tests; suite 621/622 … | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | ledger-guard | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; b6e6c00 on main; tracker-publish tests 15/15;… | 2026-10-22 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | ledger-repair | scripts/tracker.mjs | COMPLETE | all 3 acceptance criteria ticked; e2cec01 on main; tracker tests 43/43; helpers… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | profile-and-release | .claude-plugin/plugin.json | MERGED | d94c05e on main; init scaffold + stable-channel docs + no-version test; 18.1 us… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | retire-check | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; 340cbf2 on main; doc-retire tests 40/40 | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | rolling-scrutinise | commands/scrutinise.md | COMPLETE | all 2 acceptance criteria ticked; 6177f44 on main; scrutinise.md 8307 bytes und… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | surface-trim | agents/*, commands/* | COMPLETE | all 4 acceptance criteria ticked; 3c62097 on main; 12 reviewers maxTurns, toggl… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tdd-step | agents/unit-runner.md | PARKED | 12.0 precondition failed: docs/architecture/safety.rules.md absent from origin/… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tool-slots | craftsman.config.json | COMPLETE | all 4 acceptance criteria ticked; 67a9d35 on main; doc-checks/tool-slots tests … | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | vendored-skills | skills/* | COMPLETE | all 4 acceptance criteria ticked; f70741b on main; 3 skills attributed; descrip… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | archive-commands | commands/sync-docs.md | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | archive-lib | scripts/lib/archive.mjs | BLOCKED | Smoke gate red before any edit: pre-existing failure pre-guard.test.mjs:619 (st… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | auto-archive | scripts/repo-exec.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | changelog | CHANGELOG.md | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | dashboard-archive-tab | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | dashboard-core | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | digest-html | scripts/digest.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | export-notes | scripts/lib/export-notes.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | next-queue | scripts/lib/next-queue.mjs | BLOCKED | implementation finished in worktree but pre-guard refused git commit (cwd reset… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | retire-copy | scripts/doc-retire.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | retire-rewrite | scripts/doc-retire.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | stop-refresh | scripts/tracker-sync.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | tracker-heading | scripts/tracker.mjs | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | view-commands | commands/digest.md | PENDING | — | 2026-10-22 |
+| [p](./p.md) | u1 | — | MERGED | abc | 2026-10-22 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-lock-stale-race | scripts/approval.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-owner-trust | scripts/pre-guard.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-scan-config-source | scripts/approval.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | budget-ratchet-keys | scripts/arch-check.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-hardening | scripts/approval.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-record | scripts/approval.mjs | COMPLETE | all 7 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-reprepare | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-scan | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-budget-growth | scripts/arch-check.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-cli-contract | scripts/tracker.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-gate-lookup | scripts/lib/gate-command.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-land-race | scripts/repo-exec.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-retire | scripts/repo-exec.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-atomic | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-cli | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-single-use | scripts/tracker-publish.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-trust | scripts/tracker-publish.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-stats-and-prose | scripts/stats.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-sync-guard | scripts/tracker.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-doc-claim | commands/auto.md | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-glob-anchoring | scripts/lib/force-block.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | ledger-parser-dedupe | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | offline-landed-record | scripts/lib/approval-gate.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | profile-knobs | .claude-plugin/plugin.json | PARKED | waits for PR #1 (core.mjs) | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | publish-observability-tests | scripts/tracker-publish-cli.test.mjs | PENDING | round 5 suggestions: assert the second publish is a refusal not an unchanged no… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | telemetry-baseline-marker | scripts/telemetry.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | workspace-key-collision | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
+| [fixes-and-safety](../../fixes-and-safety) | ask-via-prompt | ask-via-prompt | MERGED | commit b862187 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | bypass-flags | bypass-flags | MERGED | commit 62864b6 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | ci-home-test | ci-home-test | MERGED | commit 64b4718 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | descriptions | descriptions | MERGED | commit dcc8869 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | docs-final | docs-final | MERGED | commit c27533d on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | eslint-json | eslint-json | MERGED | commit 020e0d9 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | failclosed-guards | failclosed-guards | MERGED | commit 3c892cc on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | goal-token | goal-token | MERGED | commit dc35b09 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | guard-filter | guard-filter | MERGED | commit 2029061 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | instruction-consistency | instruction-consistency | MERGED | commit 728634c on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | invocable-partials | invocable-partials | MERGED | commit 91d51c8 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | launcher | launcher | MERGED | commit 13ebb57 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | loud-advisory | loud-advisory | MERGED | commit dc467ab on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | outside-git | outside-git | MERGED | commit 7f78bd0 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | platform | platform | MERGED | commit 3471575 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | pr | pr | MERGED | pr:https://github.com/plantgreytrees/craftsman/pull/1 (branch feat/fixes-and-sa… | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | reconcile-24-26 | reconcile-24-26 | MERGED | commit 96a029c on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | release-identity | release-identity | MERGED | commit 3c814c1 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | self-disable | self-disable | MERGED | commit cbbed66 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | stop-gate-gated | stop-gate-gated | MERGED | commit 9bca6c5 on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | sweep-safety | sweep-safety | MERGED | commit 4b5648a on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | tool-names | tool-names | MERGED | commit 44cd3ed on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [fixes-and-safety](../../fixes-and-safety) | unpushed-report | unpushed-report | MERGED | commit 2408b0e on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-2 | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 295ba6c on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-3 | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | config-keys-protected | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | core-isfile | scripts/lib/core.mjs | COMPLETE | all 1 acceptance criteria ticked; commit ce003c9 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | core-small-correctness | scripts/lib/core.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 1e78c9d on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | doc-drift-and-stop-report | scripts/lib/doc-snapshot.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 07cf953 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | followup-md-dirty-marker | scripts/quality-gate.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | followup-skill-record | scripts/lib/core.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | launcher-promptsubmit | hooks/run.sh | COMPLETE | all 1 acceptance criteria ticked; commit 86ad5ef on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | prompt-failclosed | hooks/run.sh | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | quality-dirty-marker | scripts/quality-gate.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 89c8b9e on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | script-authority-in-scripts | scripts/doc-write.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | self-scoped-shared | scripts/scope.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-markers | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 8c5064e on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-scripts | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5d447ba on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-settings-notebook | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5b70e57 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-shell-words | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | state-filter-dedupe | scripts/lib/unpushed.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5ef1ef9 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
+| [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | stop-loopguard-reports | scripts/stop-gate.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
 
 <!-- craftsman:ledger:end -->

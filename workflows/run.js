@@ -13,7 +13,12 @@ export const meta = {
 // Every repo action runs inside an agent through craftsman's own scripts.
 // args: { sessionId, pluginRoot, projectRoot, protocolText?, project, plan,
 //         featureBranches?, maxSubagents?, featuresText?,
-//         units: [{ unit, feature?, depends_on?, task, criteria, scope, arch }] }
+//         units: [{ unit, feature?, depends_on?, task, criteria, scope, arch }],
+//         landed?: [unit], resume?: { <unit>: { stage: 'land', worktree_path } },
+//         featureWorktrees?: { <featureId>: path }, featuresDone?: [featureId] }
+// A runner has no credentials (ARCH-LAND-19). A step that cannot run offline comes back
+// NEEDS_NETWORK; the run stops and returns { results, needs_network: { unit, action, resume }}.
+// Root runs `action` outside the sandbox, then relaunches with landed/resume/featureWorktrees/featuresDone.
 // featureBranches mirrors planning.featureBranches and maxSubagents mirrors
 // execution.maxSubagents; root reads the config and passes both (the script reads no files).
 
@@ -25,11 +30,13 @@ const RESULT = {
   type: 'object',
   properties: {
     unit: { type: 'string' },
-    status: { type: 'string', enum: ['IMPLEMENTED', 'APPROVED', 'CHANGES', 'MERGED', 'PARKED', 'BLOCKED'] },
+    status: { type: 'string', enum: ['IMPLEMENTED', 'APPROVED', 'CHANGES', 'MERGED', 'PARKED', 'BLOCKED', 'NEEDS_NETWORK'] },
     evidence: { type: 'string' },
     sha: { type: 'string' },
     pr: { type: 'string' },
     worktree_path: { type: 'string' },
+    network_action: { type: 'string' },
+    network_pending: { type: 'boolean' },
     findings: { type: 'array', items: { type: 'string' } },
     parked: {
       type: 'array',
@@ -151,9 +158,9 @@ async function close(result, u) {
   let out = result
   if (out.status === 'IMPLEMENTED') {
     const landed = (await run('land', u, 'Land', `worktree_path: ${out.worktree_path}`)) || dead(u, 'land')
-    out = { ...landed, worktree_path: landed.worktree_path || out.worktree_path }
+    out = { ...landed, worktree_path: landed.worktree_path || out.worktree_path, ...(landed.status === 'NEEDS_NETWORK' ? { network_stage: 'land' } : {}) }
   }
-  if (out.status === 'MERGED') return out
+  if (out.status === 'MERGED' || out.status === 'NEEDS_NETWORK') return out
   if (out.status === 'PARKED') return park(out, u)
   return block(out, u)
 }
@@ -165,6 +172,8 @@ function summary(result) {
     evidence: String(result.evidence || '').slice(0, 2000),
     ...(result.sha ? { sha: result.sha } : {}),
     ...(result.pr ? { pr: result.pr } : {}),
+    ...(result.network_pending ? { network_pending: true } : {}),
+    ...(result.network_action ? { network_action: result.network_action } : {}),
     parked: result.parked || [],
   }
   while (JSON.stringify(keep).length > SUMMARY_CHARS && keep.parked.length) keep.parked.pop()
@@ -195,10 +204,24 @@ const apart = (a, b) => !(a.depends_on || []).includes(b.unit) && !(b.depends_on
 const results = []
 const landed = new Set()
 const ids = new Set(args.units.map((u) => u.unit))
+const already = new Set(args.landed || [])
+const featuresDone = new Set(args.featuresDone || [])
+const resume = args.resume || {}
+let pendingNetwork = null
+
+// The stage a NEEDS_NETWORK result stopped at, so the relaunch skips finished work.
+function networkStop(u, raw, stage = raw.network_stage || 'implement') {
+  return { unit: u.unit, action: raw.network_action || '', resume: { stage, worktree_path: raw.worktree_path || '' } }
+}
 
 async function oneUnit(u, extra) {
   log(`unit ${u.unit}`)
-  const [result] = await pipeline([u], (item) => run('implement', item, 'Implement', extra), reviewLoop, close)
+  const back = resume[u.unit]
+  // Resumed at land: the work is committed and approved; only the landing is left.
+  const stages = back && back.stage === 'land'
+    ? [() => ({ unit: u.unit, status: 'IMPLEMENTED', evidence: 'resumed at land after a network step', worktree_path: back.worktree_path, parked: [] }), (r) => r, close]
+    : [(item) => run('implement', item, 'Implement', extra), reviewLoop, close]
+  const [result] = await pipeline([u], ...stages)
   const raw = result || await block(dead(u, 'pipeline'), u)
   return { raw, done: summary(raw) }
 }
@@ -207,15 +230,20 @@ async function oneUnit(u, extra) {
 // whose worktree_path comes from the feature's first unit result. A unit whose
 // dependency did not land stays PENDING, never dispatched.
 for (const group of groups) {
-  let fw = ''
+  let fw = (group.id && (args.featureWorktrees || {})[group.id]) || ''
   const members = []
   const queue = group.units.slice()
-  while (queue.length) {
+  while (queue.length && !pendingNetwork) {
     const batch = [queue.shift()]
     while (waveCap && fw && queue.length && batch.length < waveCap && batch.every((m) => apart(m, queue[0]))) batch.push(queue.shift())
     const runnable = []
     for (const raw of batch) {
       const u = group.id ? { ...raw, featureId: group.id } : raw
+      if (already.has(u.unit)) {
+        members.push(u)
+        landed.add(u.unit)
+        continue
+      }
       const waiting = (u.depends_on || []).filter((d) => ids.has(d) && !landed.has(d))
       if (waiting.length) {
         members.push(u)
@@ -233,16 +261,23 @@ for (const group of groups) {
       const { raw, done } = outs[i]
       if (!wave && !fw && raw.worktree_path && group.id) fw = raw.worktree_path
       if (done.status === 'MERGED') landed.add(u.unit)
+      if (done.status === 'NEEDS_NETWORK' && !pendingNetwork) pendingNetwork = networkStop(u, raw)
       results.push(done)
     })
   }
+  if (pendingNetwork) break
   // One land-feature call after the feature's last unit, only when every unit landed.
-  if (group.id && members.length && members.every((u) => landed.has(u.unit))) {
+  if (group.id && !featuresDone.has(group.id) && members.length && members.every((u) => landed.has(u.unit))) {
     const last = members[members.length - 1]
     const out = await run('land-feature', last, 'Land',
       `worktree_path: ${fw}\nunits: ${JSON.stringify(members.map((u) => u.unit))}`) || dead(last, 'land-feature')
+    if (out.status === 'NEEDS_NETWORK') {
+      pendingNetwork = { ...networkStop(last, out, 'land-feature'), feature: group.id, worktree_path: fw }
+      results.push({ ...summary(out), unit: `feature:${group.id}` })
+      break
+    }
     const settled = out.status === 'MERGED' ? out : out.status === 'PARKED' ? await park(out, last) : await block(out, last)
     results.push({ ...summary(settled), unit: `feature:${group.id}` })
   }
 }
-return { results }
+return pendingNetwork ? { results, needs_network: pendingNetwork } : { results }

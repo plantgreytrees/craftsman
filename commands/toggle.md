@@ -1,5 +1,6 @@
 ---
 description: Turn the craftsman quality gates on or off for this repo.
+disable-model-invocation: true
 allowed-tools: Bash
 argument-hint: "[on|off]"
 ---

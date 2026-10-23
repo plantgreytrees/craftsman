@@ -1,11 +1,21 @@
 #!/usr/bin/env node
 // Validate and order scope-specific plan steps without loading plan prose.
-import { loadConfig, loadWorkspaceManifest } from "./lib/core.mjs";
+import { loadConfig, loadWorkspaceManifest, projectIdOf } from "./lib/core.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { checkSubmoduleBumps } from "./lib/plan-submodules.mjs";
 
-export function validateSteps(steps, { workspace = loadWorkspaceManifest(), isGitlink, featureUnitCap = 8, featureBranches = false } = {}) {
-  if (!Array.isArray(steps) || !steps.length) throw new Error("plan must contain at least one step");
+// `project:` and `bumps:` may be written as manifest ids or as the project's declared root path.
+function canonicalSteps(steps, workspace) {
+  if (!workspace) return steps;
+  const id = (ref) => (typeof ref === "string" ? projectIdOf(workspace, ref) ?? ref : ref);
+  return steps.map((step) => (step && typeof step === "object" && (step.project !== undefined || step.bumps !== undefined)
+    ? { ...step, ...(step.project !== undefined ? { project: id(step.project) } : {}), ...(step.bumps !== undefined ? { bumps: id(step.bumps) } : {}) }
+    : step));
+}
+
+export function validateSteps(given, { workspace = loadWorkspaceManifest(), isGitlink, featureUnitCap = 8, featureBranches = false } = {}) {
+  if (!Array.isArray(given) || !given.length) throw new Error("plan must contain at least one step");
+  const steps = canonicalSteps(given, workspace);
   const ids = new Set();
   for (const step of steps) {
     if (!step || typeof step !== "object" || typeof step.id !== "string" || !step.id.trim()) {
@@ -91,8 +101,8 @@ export function waves(steps, { maxSubagents = 0 } = {}) {
   return batches;
 }
 
-export function orderSteps(steps, options) {
-  validateSteps(steps, options);
+export function orderSteps(given, options) {
+  const steps = validateSteps(given, options);
   const byId = new Map(steps.map((step) => [step.id, step]));
   const state = new Map();
   const ordered = [];

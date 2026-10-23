@@ -9,21 +9,22 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill
 
 Target: `$ARGUMENTS`; for `--level`/`--feature` read `commands/_features.md` § levels and flags. Questions first and last; the middle is unattended (ARCH-AUTO-01).
 
-**Git authority.** Invoking `/craftsman:auto` is standing approval to commit, branch, merge base in, push, land and clean up worktrees and branches across every registered workspace project (ARCH-LAND-01). **Limits:** never `--force`/`-f`/`+refspec` on push, `reset --hard` or `worktree remove --force`, and never `push --mirror`. `pre-guard.mjs` blocks them while `/auto` is active, and also blocks any command it cannot read in time, including any over 16 KB (ARCH-LAND-05). A conflict, rejected push or failed auto-merge PARKs the unit with a decision for Phase C (ARCH-LAND-06).
+**Git authority.** Invoking `/craftsman:auto` is standing approval to commit, branch, merge base in, push, land and clean up this run's own branches and worktrees in every registered project; base, PR and external posts wait for approval (ARCH-LAND-22). **Limits:** never `--force`/`-f`/`+refspec` on push, `reset --hard` or `worktree remove --force`; `--force-with-lease` only to this run's own branch (ARCH-LAND-23). `pre-guard.mjs` blocks them and any command it cannot read in time. A conflict, rejected push or failed auto-merge PARKs the unit (ARCH-LAND-06).
 
 ## Phase A — Ask
 
-Run each stage not yet run, in order, to completion. Unknown slug → `tracker.mjs lookup` before treating it as new. `/idea <request>` (no `docs/ideas/<slug>.md`) → `/architect <slug>` (idea not `architected` while it touches a governed area) → `/plan <slug>` (no `docs/plans/<slug>.md`). Collect every open decision they surface (idea questions, architecture options, plan scope or product ambiguity) and ask them all now with `AskUserQuestion`, before Phase B starts.
+Run each stage not yet run, in order, to completion. Unknown slug → `tracker.mjs lookup` before treating it as new. `/idea <request>` (no `docs/ideas/<slug>.md`) → `/architect <slug>` (idea not `architected` while it touches a governed area) → `/plan <slug>` (no `docs/plans/<slug>.md`). Collect every open decision they surface and ask them all now with `AskUserQuestion`, before Phase B.
 
 **Never default an open decision** (ARCH-AUTO-02). A default is allowed only for a conventional choice the repo already settles (naming, file layout, test placement); say which. Record each answer where its stage keeps it.
 
 ## Phase B — Run
 
 1. Compose the `/goal` exactly as `commands/instruction.md` Phase 2 does for this slug (plan exists → it starts at `/orchestrate`), keeping its evidence, BLOCKED ON USER and parked-rows clauses and its ≤ 4,000-character limit by `wc -c` (ARCH-AUTO-04).
-   **Engine** (`execution.engine`, ARCH-ENGINE-12): units run in fresh contexts. `workflow` (default) → the plugin workflow `craftsman:run` (`workflows/run.js`); Workflow unavailable → `subagent`, one `unit-runner` per unit via Agent, granted by this invocation (ARCH-AUTO-06), never silently `root`; `root` only when the config says so. Both follow `agents/unit-runner.md` (ARCH-ENGINE-04).
+   **Engine** (`execution.engine`, ARCH-ENGINE-12): `workflow` (default) → `craftsman:run` (`workflows/run.js`), args via `run-args.mjs`; Workflow unavailable → `subagent`, one `unit-runner` per unit via Agent, granted by this invocation (ARCH-AUTO-06), never silently `root`; `root` only when the config says so. Both follow `agents/unit-runner.md` (ARCH-ENGINE-04). Runners hold no credentials: network steps run in root, outside the sandbox (`commands/_network.md`, ARCH-LAND-19).
 2. **Turn cap per pass:** size it from the rows still open for the slug with instruction.md's bands — ≤ 1 row QUICK 20 · 2–3 MEDIUM 50 · 4–7 LONG 100 · ≥ 8 EXTRA LONG 180 — fresh on every pass (ARCH-AUTO-05).
 3. Save it to `.craftsman/instructions/<slug>.goal.txt`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/goal-token.mjs" <path>`, end the turn. The mod (`hooks/register.js`) launches a goal file so recorded at turn end: `/goal` via `command.run`, else the directive via `prompt.submit`, else its band asks the user to type `/craftsman:auto-go` (ARCH-MOD-02).
 4. **Fallback:** where the mod cannot launch (`-p`, `disableAllHooks`, no mod support), print the paste-ready goal in one fenced block with its path and character count, as `/instruction` does, and stop for the user to paste (ARCH-AUTO-07).
+5. Phase B ends at the verification point; see `commands/_approval.md`.
 
 ## Phase C — Ask again
 
@@ -31,4 +32,4 @@ When the goal ends, build the round from the ledger, not from memory: `tracker.m
 
 ## Finish
 
-End **every** run by listing the remaining rows for the slug (id, status, the decision or blocker) and prompting the user to continue — `/craftsman:auto <slug>` runs the next Phase B → C pass (ARCH-AUTO-03). Repeat B–C until every row for the slug is COMPLETE; then say so and list nothing.
+End **every** run by listing the remaining rows for the slug (id, status, decision or blocker) and prompting the user to continue — `/craftsman:auto <slug>` runs the next Phase B → C pass (ARCH-AUTO-03). Repeat B–C until every row for the slug is COMPLETE; then say so.

@@ -56,13 +56,44 @@ export function preguardBlocks(events) {
   return events.filter((e) => e.ev === "preguard" && e.result === "blocked");
 }
 
+// Blocks by reason (indented under the existing PreToolUse block line, so no
+// new top-level section): count per reason, most frequent first.
+export function blocksByReason(events) {
+  const m = new Map();
+  for (const e of events) {
+    const blocked = e.result === "blocked" || e.result === "block";
+    let r = null;
+    if (e.ev === "preguard") { if (blocked) r = e.reason || e.pattern || "preguard"; }
+    else if (e.ev === "docguard") { if (blocked) r = String(e.file || "docguard").replace(/^\(|\)$/g, "").slice(0, 90); }
+    else if (/_blocked$/.test(String(e.ev))) r = e.ev;
+    if (r) m.set(r, (m.get(r) || 0) + 1);
+  }
+  return [...m.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
+}
+
+// guard_unparsed events from the last 7 days (ARCH-STATE-12).
+export function guardUnparsedRecent(events, now = Date.now()) {
+  const cutoff = now - 7 * 24 * 3600 * 1000;
+  return events.filter((e) => e.ev === "guard_unparsed" && typeof e.ts === "number" && e.ts >= cutoff);
+}
+
+export function guardReasonsSection(events, now = Date.now()) {
+  const lines = [];
+  for (const { reason, count } of blocksByReason(events)) lines.push(`  by reason: ${reason.padEnd(24)} ${count}`);
+  const un = guardUnparsedRecent(events, now);
+  lines.push(`  guard_unparsed (last 7 days): ${un.length}`);
+  for (const e of un) lines.push(`    ${new Date(e.ts).toISOString().slice(0, 10)} ${e.reason || "unspecified"}: ${String(e.command || "").slice(0, 120)}`);
+  return lines.join("\n");
+}
+
 // Root context per run (ARCH-MOD-03): one row per session from its
 // {ev:"context"} samples, in first-seen order.
 export function rootContextRows(events) {
   const bySid = new Map();
   for (const e of events) {
     if (e.ev !== "context" || typeof e.tokens !== "number") continue;
-    const row = bySid.get(e.sid) || { sid: e.sid, samples: 0, peak: 0, final: 0, peakPercent: 0, units: new Set() };
+    const row = bySid.get(e.sid) || { sid: e.sid, samples: 0, peak: 0, final: 0, peakPercent: 0, baseline: null, units: new Set() };
+    if (e.phase === "baseline") { row.baseline ??= e.tokens; bySid.set(e.sid, row); continue; }
     row.samples += 1;
     row.peak = Math.max(row.peak, e.tokens);
     row.final = e.tokens;
@@ -70,7 +101,7 @@ export function rootContextRows(events) {
     if (e.unit) row.units.add(e.unit);
     bySid.set(e.sid, row);
   }
-  return [...bySid.values()].map((row) => ({ ...row, units: [...row.units] }));
+  return [...bySid.values()].map((row) => ({ ...row, growth: row.baseline === null ? null : row.peak - row.baseline, units: [...row.units] }));
 }
 
 export function rootContextSection(events) {
@@ -79,9 +110,26 @@ export function rootContextSection(events) {
   if (!rows.length) lines.push("  No context samples yet.");
   for (const r of rows) {
     const units = r.units.length ? ` · units ${r.units.join(",")}` : "";
-    lines.push(`  ${String(r.sid).padEnd(38)} ${r.samples} samples · peak ${r.peak} · final ${r.final} · peak ${r.peakPercent}%${units}`);
+    const base = r.baseline === null ? "" : ` · baseline ${r.baseline} · growth ${r.growth}`;
+    lines.push(`  ${String(r.sid).padEnd(38)} ${r.samples} samples · peak ${r.peak} · final ${r.final} · peak ${r.peakPercent}%${base}${units}`);
   }
   return lines.join("\n");
+}
+
+// Time-to-approve (ARCH-APPROVAL-06): approval_requested paired with
+// approval_decided by run; lines are indented under the Stop gate line.
+export function approvalSection(events) {
+  const asked = new Map();
+  const secs = [];
+  for (const e of events) {
+    if (e.ev === "approval_requested") asked.set(e.run, e.ts);
+    else if (e.ev === "approval_decided" && asked.has(e.run) && typeof e.ts === "number" && typeof asked.get(e.run) === "number") {
+      secs.push(Math.max(0, (e.ts - asked.get(e.run)) / 1000));
+      asked.delete(e.run);
+    }
+  }
+  if (!secs.length) return "  approvals: none decided yet";
+  return `  approvals: ${secs.length} decided · p50 ${pct(secs, 50)}s · p95 ${pct(secs, 95)}s`;
 }
 
 function main() {
@@ -114,7 +162,9 @@ function main() {
   console.log(`${latencySection(events)}\n`);
 
   console.log(`PreToolUse protected-path blocks: ${pre.length}`);
+  console.log(guardReasonsSection(events));
   console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);
+  console.log(approvalSection(events));
   console.log(`SessionStart injections: ${ss.length}`);
 
   const router = events.filter((e) => e.ev === "router");

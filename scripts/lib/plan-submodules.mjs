@@ -3,6 +3,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { projectIdOf } from "./core.mjs";
 
 // True when the parent repo's index records a gitlink (mode 160000) at the
 // child's path: what `git submodule status` reports, read from a registered
@@ -60,7 +61,9 @@ function dependsOn(byId, from, target) {
 }
 
 // Steps are already validated (ids unique, dependencies known).
-export function checkSubmoduleBumps(steps, workspace, { isGitlink } = {}) {
+export function checkSubmoduleBumps(given, workspace, { isGitlink } = {}) {
+  const id = (ref) => (typeof ref === "string" ? projectIdOf(workspace, ref) ?? ref : ref);
+  const steps = given.map((step) => ({ ...step, ...(step.project !== undefined ? { project: id(step.project) } : {}), ...(step.bumps !== undefined ? { bumps: id(step.bumps) } : {}) }));
   const parents = submoduleParents(workspace, isGitlink);
   const byId = new Map(steps.map((step) => [step.id, step]));
   for (const step of steps) {

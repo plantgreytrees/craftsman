@@ -1,10 +1,10 @@
 ---
 area: engine
-governs: ["workflows/**", "agents/unit-runner.md", "commands/_shared-execution.md", "commands/_features.md", "craftsman.config.json", "scripts/wiring.test.mjs", "scripts/claim.mjs"]
+governs: ["workflows/**", "scripts/run-args.mjs", "commands/_network.md", "agents/unit-runner.md", "commands/_shared-execution.md", "commands/_features.md", "craftsman.config.json", "scripts/wiring.test.mjs", "scripts/claim.mjs"]
 human: docs/architecture/engine.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ac57d0e891bc7343dcb07f174e179ab8f1fd68c9
-updated: 2026-10-18
+verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
+updated: 2026-10-23
 ---
 # ARCH engine — enforced rules
 
@@ -26,3 +26,7 @@ updated: 2026-10-18
 - **ARCH-ENGINE-16** [decided] Two or more units of one feature run concurrently (a wave) only when execution allows at least that many sub-agents (the per-session cap, root-only by default, no nested agents), plan-graph finds units with no depends_on between them and disjoint scope.write, and the wave spike has passed; workflows/run.js dispatches a wave with parallel() from the root and the units of a wave never share a worktree — check: plan-graph.test.mjs wave cases, wiring.test.mjs — cite: workflows/run.js:166-183
 - **ARCH-ENGINE-17** [decided] Units run sequentially in plan-graph order inside the feature worktree; the only concurrency is an ARCH-ENGINE-16 wave, and workflows/run.js carries the feature's worktree_path from the first unit's result to every later unit, so agents/unit-runner.md prepare reattaches instead of creating — check: workflows use pipeline() outside waves, wiring.test.mjs — cite: workflows/run.js:142-183
 - **ARCH-ENGINE-18** [decided] A plan without features: is one implicit feature (id = slug) on the feature-worktree and land-feature path (ARCH-LAND-13, ARCH-LAND-18); a feature holds at most planning.featureUnitCap (default 8) units and plan-graph refuses more, or a depends_on into a later feature — check: plan-graph.test.mjs implicit-feature and cap cases — cite: scripts/plan-graph.mjs:6-34
+- **ARCH-ENGINE-19** [decided] A runner that needs the network returns NEEDS_NETWORK with network_action and records nothing (ARCH-LAND-19); workflows/run.js then stops without blocking or parking and returns needs_network {unit, action, resume}, and a relaunch skips what args.landed / featuresDone name and resumes at args.resume / featureWorktrees; root builds run args only with scripts/run-args.mjs (one run per project, in plan-graph order) and runs the network steps outside the sandbox per commands/_network.md — check: engine.test.mjs NEEDS_NETWORK cases, followups.test.mjs run-args case — cite: workflows/run.js:210-283
+- **ARCH-ENGINE-20** [superseded by ARCH-ENGINE-22]
+- **ARCH-ENGINE-21** [decided] A code unit follows red-green: the implementer writes a failing test for each testable [unit:] criterion before the change and the reviewer refuses a unit whose new test never failed; verification before completion means fresh gate output in the unit's evidence — check: unit-runner.md steps, workflows/run.js reviewer schema — cite: agents/unit-runner.md:16
+- **ARCH-ENGINE-22** [decided] Project tools enter craftsman only through config adapters, each skipped silently when its binary or config is absent: stopGate.commands prefers "justfile": "just check" when a justfile exists; security.check runs gitleaks with the built-in scanner as fallback; docs.checks (empty by default) runs at the verification point; pre-commit run --all-files runs once at the verification point and never per unit (git's own commit hook is left as the repo configures it); /init never writes a justfile, pre-commit config or CI workflow — check: core.test.mjs absent-tool skip, init.test.mjs writes none of them — cite: craftsman.config.json:113-148
