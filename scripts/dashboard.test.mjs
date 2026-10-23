@@ -5,6 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { projectContext } from "./lib/core.mjs";
+import { ledgerPath } from "./tracker.mjs";
 import { buildModel, renderHtml, writeDashboard, esc, SECTIONS, MERMAID_SRC } from "./lib/dashboard.mjs";
 
 const SECRET_BODY = "SECRET-BODY-TEXT-NEVER-RENDERED";
@@ -178,4 +180,17 @@ test("archive: with an archive project prose referrers class as rewrite", () => 
   assert.equal(by.free.class, "auto");
   assert.equal(by.ruled.class, "blocked");
   assert.ok(!JSON.stringify(m).includes("body"), "no doc body text");
+});
+
+test("buildModel: real project context lists ready plans and execution.maxSessions lanes (ARCH-VIEWS-07)", () => {
+  const root = mk();
+  git(root, "init", "-q");
+  put(root, "craftsman.config.json", JSON.stringify({ execution: { maxSessions: 2 } }));
+  for (const n of ["one", "two", "three"]) put(root, `docs/plans/${n}.md`, `---\nslug: ${n}\ngoal: Goal ${n}\n---\n`);
+  const ctx = { ...projectContext("."), root, stateDir: path.join(root, ".craftsman") };
+  const row = (n) => JSON.stringify({ key: `.::docs/plans/${n}.md::u`, project: ".", plan: `docs/plans/${n}.md`, unit: "u", status: "PENDING", evidence: "t", updated_at: "2026-10-02T00:00:00Z" });
+  put(root, path.relative(root, ledgerPath(ctx)), ["one", "two", "three"].map(row).join("\n") + "\n");
+  const q = buildModel(ctx).queue;
+  assert.deepEqual(q.map((e) => e.slug).sort(), ["one", "three", "two"]);
+  assert.equal(q.filter((e) => e.lane).length, 2);
 });

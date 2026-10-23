@@ -4,7 +4,7 @@
 // external resource is one pinned Mermaid script. Titles, goals, fields only.
 import fs from "node:fs";
 import path from "node:path";
-import { logEvent } from "./core.mjs";
+import { logEvent, loadConfig } from "./core.mjs";
 import { loadIndex, parseFrontmatter } from "./plan-index.mjs";
 import { queue } from "./next-queue.mjs";
 import { exportRoot } from "./export-notes.mjs";
@@ -92,7 +92,7 @@ export function buildModel(context) {
   })).filter((c) => c.cards.length);
 
   let q = [];
-  try { q = queue(context); } catch { q = []; }
+  try { q = queue({ ...context, rows, sessions: loadConfig(context).execution?.maxSessions }); } catch { q = []; }
   const sessionQueue = q.map((e) => ({ slug: e.slug, intent: one(e.intent), source: e.source, lane: !!e.lane }));
 
   // ideas by verdict
