@@ -52,6 +52,23 @@ test("narrow: a heredoc fed to a shell or interpreter still runs its body, so th
   });
 });
 
+test("narrow: bypassView is an allowlist, so any unlisted consumer of a heredoc keeps its body in view (fail closed)", () => {
+  fixture(({ bash }) => {
+    const body = `\ngit commit ${BYPASS} -m x\nEOF`;
+    for (const c of ["tcsh", "mksh", "ash", "busybox sh", "deno", "bun", "lua", "pwsh", "nodejs", "perl5.36"]) {
+      assert.equal(bash(`${c} <<'EOF'${body}`).status, 2, `refused: ${c} heredoc`);
+    }
+    for (const run of ["sh x", "./x", "source x", "bash x"]) {
+      assert.equal(bash(`cat > x <<'EOF'${body}\n${run}`).status, 2, `refused: write then ${run}`);
+    }
+    assert.equal(bash(`git -c alias.x='!sh' x <<'EOF'${body}`).status, 2);
+    assert.equal(bash(`cat <<'EOF' | tcsh${body}`).status, 2);
+    for (const c of ["git commit -F -", "cat", "cat > notes.txt", "tee f"]) {
+      assert.equal(bash(`${c} <<'EOF'\nnever pass ${BYPASS} here\nEOF`).status, 0, `allowed: ${c}`);
+    }
+  });
+});
+
 test("narrow: the hard lines stay (ARCH-STATE-13): guarded removals and redirects still refuse", () => {
   fixture(({ bash }) => {
     assert.equal(bash("rm -rf docs/plans").status, 2);
