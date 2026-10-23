@@ -8,6 +8,7 @@
     "maxSubagents": 0,
     "maxSessions": 1
   },
+  "archive": { "project": "archive" },
   "timeoutMs": 20000,
   "maxFeedbackLines": 40,
   "noisePatterns": [
