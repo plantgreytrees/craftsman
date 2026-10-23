@@ -117,7 +117,7 @@ async function reviewLoop(done, u) {
   let head = done
   for (let round = 0; ; round++) {
     const review = await run('review', u, 'Review',
-      `worktree_path: ${head.worktree_path}\nevidence: ${head.evidence}`)
+      `worktree_path: ${head.worktree_path}\nevidence: ${done.evidence}${head === done ? '' : `\nfix round: ${head.evidence}`}`)
     if (!review) return dead(u, 'review')
     if (review.status === 'APPROVED') return head
     if (round === MAX_FIX_ROUNDS) {

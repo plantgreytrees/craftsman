@@ -23,4 +23,4 @@ You implement one plan unit end to end. Your prompt names that unit, its files, 
 2. Format if the repo enforces formatting.
 3. Add tests so every criterion is asserted for real, each failing before your change (Reviewer refuses a unit whose new test never failed); none skipped/weakened.
 
-**Return** raw facts: files changed, tests added or updated, each gate command with pass/fail output, and anything you could not complete with the reason. No prose padding.
+**Return** raw facts: files changed, tests added (the failing run of each new test), each gate command with pass/fail output, and anything you could not complete with the reason.

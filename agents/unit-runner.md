@@ -11,10 +11,10 @@ Prompt has `role`, root `session_id`, `plugin_root`, `project_root`, `project`, 
 1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner", session_id}` (+`feature`, `feature_branch`).
 2. `S repo-exec` `{action:"prepare", session_id, project, unit, slug:unit}`.
 3. `S scope` `{session_id, plan, unit, project, worktree_path, arch, scope}`, then `{action:"require", session_id, project, worktree_path}`; refused → `BLOCKED`.
-4. Smoke gate (ARCH-TRACKER-05): repo tests; red → `BLOCKED`.
+4. Smoke gate: repo tests; red → `BLOCKED`.
 5. User-only decision → no edit, no default: `PARKED` with `parked:[{question, options[], recommended?}]`.
 6. Implement as `agents/implementer.md`: scope.read/docs and scope.write only, every cited `[decided]` rule; write each testable criterion's test first and run it red before the change (ARCH-ENGINE-21). Unhonourable rule → `BLOCKED`.
-7. Gate with the repo's commands; green; evidence names fresh gate output.
+7. Gate with repo commands; evidence names fresh gate output and the failing run of each new test.
 8. Commit in `<worktree_path>` (implementer never commits); return `IMPLEMENTED` with `sha`, `worktree_path`.
 
 Fix round (`worktree_path`, findings): fix only those; 7–8.
