@@ -2,7 +2,7 @@
 // prose consumer; any other head (a shell, an interpreter, a file run) keeps the bodies in view.
 import { shellSegments } from "./shell-words.mjs";
 
-const PLAIN = new Set(["cat", "tee", "echo", "printf", "true", "wc", "sort", "uniq", "head", "tail"]);
+const PLAIN = new Set(["cat", "tee"]); // consumers that cannot run a program (sort, echo, printf, wc ... dropped)
 
 export function proseOnly(stripped) {
   return shellSegments(stripped).every((words) => {
