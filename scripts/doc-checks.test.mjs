@@ -58,3 +58,11 @@ test("doc-checks: pre-commit runs only with --verify, a config file and the bina
   const none = withPath(f.root, () => runDocChecks({ root: f.root, verify: true }));
   assert.equal(none.checks[0].status, "skipped");
 });
+
+test("doc-checks: a relative binary path resolves against the spawn cwd", () => {
+  const f = fixture();
+  f.tool("lychee", 0);
+  const r = runDocChecks({ root: f.root, checks: ["./bin/lychee ."] });
+  assert.equal(r.checks[0].status, "pass");
+  assert.ok(fs.existsSync(path.join(f.root, "lychee.log")));
+});
