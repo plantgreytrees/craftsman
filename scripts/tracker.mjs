@@ -5,8 +5,9 @@ import path from "node:path";
 import {
   atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
-  mainCheckoutRoot,
+  mainCheckoutRoot, loadWorkspaceManifest,
 } from "./lib/core.mjs";
+import { resolveArchive, archivePathFor, restoreCommand } from "./lib/archive.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
 import { droppedKeys } from "./lib/ledger-keys.mjs";
@@ -467,13 +468,13 @@ export function archivePath(context = projectContext(".")) {
 const headField = (value) => String(value ?? "").replace(/\s+/g, " ").trim().replaceAll(" · ", "; ").replaceAll(" — ", "; ");
 
 // One heading grammar for TRACKER-archive.md (ARCH-TRACKER-09):
-//   ## <plan> (<date>) [— <goal> · doc <sha> · landed <sha>]
+//   ## <plan> (<date>) [— <goal> · doc <sha> · landed <sha> [· archive <sha>]]
 //   ## idea <slug> (<date>) — <verdict> · <deciding fact> · doc <sha>
 export function formatArchiveHeading(f) {
   if (f.kind === "idea" || f.slug) {
     return `## idea ${f.slug} (${f.date}) — ${headField(f.verdict)} · ${headField(f.fact)} · doc ${f.doc}`;
   }
-  if (f.goal && f.doc && f.landed) return `## ${f.plan} (${f.date}) — ${headField(f.goal)} · doc ${f.doc} · landed ${f.landed}`;
+  if (f.goal && f.doc && f.landed) return `## ${f.plan} (${f.date}) — ${headField(f.goal)} · doc ${f.doc} · landed ${f.landed}${f.archive ? ` · archive ${f.archive}` : ""}`;
   return `## ${f.plan} (${f.date})`;
 }
 
@@ -484,8 +485,9 @@ export function parseArchiveHeading(line) {
     const [verdict, ...rest] = `${m[3]} · ${m[4]}`.split(" · ");
     return { kind: "idea", slug: m[1], date: m[2], verdict, fact: rest.join("; "), doc: m[5] };
   }
-  m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\) — (.*) · doc (\S+) · landed (\S+)$/.exec(line);
-  if (m) return { kind: "plan", plan: m[1], date: m[2], goal: m[3], doc: m[4], landed: m[5] };
+  m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\) — (.*) · doc (\S+) · landed (\S+?)(?: · archive (\S+))?$/.exec(line);
+  // `archive` is present only when the heading carries it, so older headings parse unchanged (ARCH-TRACKER-09).
+  if (m) return { kind: "plan", plan: m[1], date: m[2], goal: m[3], doc: m[4], landed: m[5], ...(m[6] ? { archive: m[6] } : {}) };
   m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\)$/.exec(line);
   if (m) return { kind: "plan", plan: m[1], date: m[2], goal: null, doc: null, landed: null };
   return null;
@@ -504,7 +506,28 @@ export function lookupArchive(input, context = projectContext(".")) {
     const hit = rec.kind === "idea" ? rec.slug === key : rec.plan === key || path.posix.basename(rec.plan, ".md") === key;
     if (hit) found = rec;
   }
+  if (found?.kind === "plan") {
+    found = { ...found, archive: found.archive ?? null };
+    const restore = found.archive ? restoreCommandFor(found, context) : null;
+    if (restore) found.restoreCommand = restore;
+  }
   return found;
+}
+
+// ARCH-ARCHIVE-04: the command that restores the archived plan doc, or null when no archive project resolves.
+function restoreCommandFor(rec, context) {
+  try {
+    const archive = resolveArchive(context);
+    if (!archive.root) return null;
+    const root = trackerRoot(context);
+    let productId = path.basename(root);
+    try {
+      const projects = loadWorkspaceManifest()?.projects ?? {};
+      productId = Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? productId;
+    } catch { /* fall back to the directory name */ }
+    const slug = path.posix.basename(rec.plan, ".md");
+    return restoreCommand(archive.root, rec.archive, archivePathFor({ productId, kind: "plans", slug, file: rec.plan }));
+  } catch { return null; }
 }
 
 // Retire a finished plan: every row must be COMPLETE or CANCELLED. Its rows
@@ -529,7 +552,7 @@ export function archivePlan(input, context = projectContext(".")) {
     const doc = archivePath(context);
     let text = "";
     try { text = fs.readFileSync(doc, "utf8"); } catch { text = "# Tracker archive\n\nRows retired from the live ledger by `tracker.mjs archive`.\n"; }
-    atomicWrite(doc, `${text.trimEnd()}\n\n${formatArchiveHeading({ plan: input.plan, date: day, goal: input.goal, doc: input.doc, landed: input.landed })}\n\n${entries.join("\n")}\n`);
+    atomicWrite(doc, `${text.trimEnd()}\n\n${formatArchiveHeading({ plan: input.plan, date: day, goal: input.goal, doc: input.doc, landed: input.landed, archive: input.archive })}\n\n${entries.join("\n")}\n`);
     atomicWrite(file, kept.length ? kept.map((e) => JSON.stringify(e)).join("\n") + "\n" : "");
     return rows.map((row) => row.unit);
   });
