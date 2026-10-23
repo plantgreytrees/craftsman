@@ -1,13 +1,13 @@
 ---
 slug: env-branch-hierarchy-pr-review
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
 isolation: isolated
 created: 2026-10-23
 updated: 2026-10-23
-related: [docs/ideas/plugin-optimisation-recheck.md, docs/plans/pr-land-mode.md, docs/architecture/landing.rules.md, docs/ideas/dev-lifecycle-docs-plan.md (branch worktree-idea-dev-lifecycle-docs-plan), docs/architecture/approval.rules.md (same branch), docs/ideas/feature-branch-plans.md]
+related: [docs/ideas/plugin-optimisation-recheck.md, docs/plans/pr-land-mode.md, docs/architecture/landing.rules.md, docs/ideas/dev-lifecycle-docs-plan.md, docs/architecture/approval.rules.md, docs/ideas/feature-branch-plans.md]
 touches: [scripts/lib/land.mjs, scripts/repo-exec.mjs, commands/_approval.md (new, other branch), commands/scrutinise.md, agents/scrutineer.md, commands/merge.md, commands/auto.md, docs/architecture/landing.rules.md, docs/architecture/approval.rules.md (other branch), craftsman.config.json, EXTENDING.md, README.md, CHANGELOG.md]
 ---
 
@@ -129,7 +129,10 @@ None. The critic's corrections stand: `develop` triggers are at
 
 ## Open questions
 - Answered 2026-10-23: no separate staging environment exists; "approve" means a review
-  verdict comment with the owner's merge as the gate.
+  verdict with the owner's merge as the gate.
+- Answered at /architect, 2026-10-23: **no pull requests, direct merge** for Gleam. This
+  supersedes recommendation 2 above (the verdict as a PR comment): the verdict is evidence
+  on the approval page instead. See ARCH-APPROVAL-10..12 and ARCH-LAND-30.
 - Open: should tag-based prod promotion be designed now, ahead of the hierarchy?
 
 ## Next step

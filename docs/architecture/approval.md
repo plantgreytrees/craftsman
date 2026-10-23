@@ -112,3 +112,26 @@ Outside the plugin (owner's workstation): hourly btrfs snapshots and restic befo
 
 - **ARCH-APPROVAL-08** replaces 01: the verification point exists only with `planning.featureBranches` on (default off). With it off, units land on base through `repo-exec merge` and `approval_unenforced` is logged. The default stays off because flipping it changes the branch workflow of every repo.
 - **ARCH-APPROVAL-09** replaces 02: env key names are derived from the diff; migrations, CI/hook, dependency and API items, and any diagram, come from the caller.
+
+## Independent review before approval (2026-10-23, owner-approved)
+_Source idea: [env-branch-hierarchy-pr-review](../ideas/env-branch-hierarchy-pr-review.md)_
+
+You asked for a review that is independent of the authoring session, followed by your own merge, and for no pull requests in Gleam. The review therefore lives on the approval page, not on a PR.
+
+```mermaid
+flowchart LR
+  VP[verification point<br/>gates green on feature head] --> SC[/scrutinise origin/base..head<br/>one fresh-context scrutineer/]
+  SC --> D{0 Critical, Warning,<br/>Architecture, UNMET?}
+  D -- no --> FIX[fix round, head moves,<br/>review is stale] --> SC
+  D -- yes --> PREP[approval prepare<br/>checks verdict, head, dispatch event]
+  PREP --> PG[page: verdict under Evidence<br/>Merge now / Open PR]
+  PG -- owner clicks Merge now --> L[land-feature]
+```
+
+| id | decision | why | rejected alternatives |
+|---|---|---|---|
+| ARCH-APPROVAL-10 | *Replaces 03.* `repoExec.approval.recommendPr` (default true); false makes the recommendation always "Merge now" while the sensitive-path reasons still show | You want direct merges in Gleam and no PRs; both buttons stay so a click can still choose a PR | Remove the button (a heavier amendment); change nothing and avoid the click |
+| ARCH-APPROVAL-11 | `repoExec.approval.review` (default `required`): prepare refuses without a scrutineer verdict for `origin/<base>..<head_sha>` at the exact head, all counts zero, plus a `scrutineer_dispatched` event for its session | A review that can be skipped or reused after a fix proves nothing; the guard already logs the isolated dispatch, so root cannot invent a verdict | Advisory only (can be silently skipped); trust any `reviews` text |
+| ARCH-APPROVAL-12 | A verdict is evidence, never approval, and never a host action | GitHub bars an author approving their own PR, and Gleam has no branch protection to enforce one | A second identity or GitHub Pro (not wanted now) |
+
+**Known limits.** The dispatch event proves a scrutineer ran for that session, not that root copied its counts honestly; the page shows the counts so you can see them. Any commit after the review moves `head_sha`, so a fix round forces a fresh review and a fresh page.

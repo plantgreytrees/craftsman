@@ -70,3 +70,8 @@ ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and ext
 
 - **ARCH-LAND-28** replaces 22: adds that with `planning.featureBranches` off, units merge to base without a verification point.
 - **ARCH-LAND-29** replaces 24: `tracker.publish` is `off|on-approve` (default on-approve). The legacy `push` value acts as on-approve when approval is required. An approved publish names a landed, unpublished approval record, is spent once and is re-checked under the base lock; `manual:true` is logged.
+
+## One base per project (2026-10-23, owner-approved)
+_Source idea: [env-branch-hierarchy-pr-review](../ideas/env-branch-hierarchy-pr-review.md)_
+
+**ARCH-LAND-30:** every project lands on exactly one base branch. Development, staging and production branches, promotion between them and a level-skip rule are out of scope. Gleam has no staging deploy target (only `main` deploys, with a manual Azure approval stage) and, on a private Free-plan repo, no server-side branch protection, so a hierarchy would promote nothing and a skip rule would live only inside craftsman, bypassed by any direct push. Production promotion stays the repo's own CI and deploy. **Reopen when** the project has both a separate staging deploy target and enforceable branch protection (GitHub Pro or another host); the cheaper step in the meantime is a tag- or release-triggered production deploy, which needs no craftsman change. Rejected: environment branches now (drift, no target); a config-only `repoExec.targets` map (deferred until a second environment exists).
