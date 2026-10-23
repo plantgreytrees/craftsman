@@ -92,7 +92,8 @@ export function rootContextRows(events) {
   const bySid = new Map();
   for (const e of events) {
     if (e.ev !== "context" || typeof e.tokens !== "number") continue;
-    const row = bySid.get(e.sid) || { sid: e.sid, samples: 0, peak: 0, final: 0, peakPercent: 0, units: new Set() };
+    const row = bySid.get(e.sid) || { sid: e.sid, samples: 0, peak: 0, final: 0, peakPercent: 0, baseline: null, units: new Set() };
+    if (e.phase === "baseline") { row.baseline ??= e.tokens; bySid.set(e.sid, row); continue; }
     row.samples += 1;
     row.peak = Math.max(row.peak, e.tokens);
     row.final = e.tokens;
@@ -100,7 +101,7 @@ export function rootContextRows(events) {
     if (e.unit) row.units.add(e.unit);
     bySid.set(e.sid, row);
   }
-  return [...bySid.values()].map((row) => ({ ...row, units: [...row.units] }));
+  return [...bySid.values()].map((row) => ({ ...row, growth: row.baseline === null ? null : row.peak - row.baseline, units: [...row.units] }));
 }
 
 export function rootContextSection(events) {
@@ -109,7 +110,8 @@ export function rootContextSection(events) {
   if (!rows.length) lines.push("  No context samples yet.");
   for (const r of rows) {
     const units = r.units.length ? ` · units ${r.units.join(",")}` : "";
-    lines.push(`  ${String(r.sid).padEnd(38)} ${r.samples} samples · peak ${r.peak} · final ${r.final} · peak ${r.peakPercent}%${units}`);
+    const base = r.baseline === null ? "" : ` · baseline ${r.baseline} · growth ${r.growth}`;
+    lines.push(`  ${String(r.sid).padEnd(38)} ${r.samples} samples · peak ${r.peak} · final ${r.final} · peak ${r.peakPercent}%${base}${units}`);
   }
   return lines.join("\n");
 }
