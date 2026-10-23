@@ -36,6 +36,8 @@ function remote() {
 function clone(bare) {
   const dir = tmp("clone");
   execFileSync("git", ["clone", "-q", bare, dir], { env: ENV });
+  // The shipped default is "on-approve"; these tests exercise the push path.
+  fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ tracker: { publish: "push" } }));
   return { id: ".", root: dir, stateDir: path.join(dir, ".craftsman") };
 }
 
