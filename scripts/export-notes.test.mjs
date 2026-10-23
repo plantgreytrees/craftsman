@@ -140,6 +140,21 @@ test("writeNotes: refuses a symlinked notes root", () => {
   assert.deepEqual(fs.readdirSync(outside), []);
 });
 
+test("writeNotes: a symlinked notes subdirectory is never followed", () => {
+  const { context } = fixture();
+  const outside = mk();
+  fs.mkdirSync(notesRoot(context), { recursive: true });
+  fs.symlinkSync(outside, path.join(notesRoot(context), "plans"));
+  fs.symlinkSync(outside, path.join(notesRoot(context), "ideas"));
+  const res = writeNotes(context);
+  assert.deepEqual(fs.readdirSync(outside), []);
+  assert.ok(res.skipped.includes("plans/alpha.md") && res.skipped.includes("ideas/idea-one.md"));
+  // a generated file already outside is neither rewritten nor removed
+  fs.writeFileSync(path.join(outside, "stale.md"), "---\ngenerated: true\n---\nx\n");
+  writeNotes(context); clearNotes(context);
+  assert.deepEqual(fs.readdirSync(outside), ["stale.md"]);
+});
+
 test("README.md is written into the notes root and removable by the generator (8.5)", () => {
   const { context } = fixture();
   writeNotes(context);

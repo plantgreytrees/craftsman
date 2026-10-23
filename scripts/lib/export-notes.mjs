@@ -166,6 +166,33 @@ function assertNotesRoot(context) {
   return notes;
 }
 
+// True when file's parent directory resolves (symlinks followed) inside notes.
+function realParentInside(notes, file) {
+  try {
+    const base = fs.realpathSync(notes);
+    const parent = fs.realpathSync(path.dirname(file));
+    return parent === base || inside(base, parent);
+  } catch { return false; }
+}
+
+// Creates dir (under notes) one component at a time; false if any existing
+// component is a symlink or not a directory.
+function ensureRealDir(notes, dir) {
+  const parts = path.relative(notes, dir).split(path.sep).filter(Boolean);
+  let cur = notes;
+  for (const part of parts) {
+    cur = path.join(cur, part);
+    try {
+      const st = fs.lstatSync(cur);
+      if (st.isSymbolicLink() || !st.isDirectory()) return false;
+    } catch (e) {
+      if (e.code !== "ENOENT") return false;
+      fs.mkdirSync(cur);
+    }
+  }
+  return realParentInside(notes, path.join(dir, "x"));
+}
+
 // Writes and updates notes; removes only generated files whose source is gone.
 export function writeNotes(context) {
   const notes = assertNotesRoot(context);
@@ -179,14 +206,14 @@ export function writeNotes(context) {
     try { existing = fs.lstatSync(file); } catch { /* new */ }
     if (existing && (!existing.isFile() || !isGenerated(file))) { result.skipped.push(rel); continue; }
     if (existing && fs.readFileSync(file, "utf8") === text) continue;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (!ensureRealDir(notes, path.dirname(file))) { result.skipped.push(rel); continue; }
     fs.writeFileSync(file, text);
     result.written.push(rel);
   }
   for (const rel of walkGenerated(notes, notes)) {
     if (wanted.has(rel)) continue;
     const file = path.join(notes, rel);
-    if (isGenerated(file)) { fs.unlinkSync(file); result.removed.push(rel); }
+    if (realParentInside(notes, file) && isGenerated(file)) { fs.unlinkSync(file); result.removed.push(rel); }
   }
   return result;
 }
@@ -197,7 +224,7 @@ export function clearNotes(context) {
   const removed = [];
   for (const rel of walkGenerated(notes, notes)) {
     const file = path.join(notes, rel);
-    if (isGenerated(file)) { fs.unlinkSync(file); removed.push(rel); }
+    if (realParentInside(notes, file) && isGenerated(file)) { fs.unlinkSync(file); removed.push(rel); }
   }
   return removed;
 }
