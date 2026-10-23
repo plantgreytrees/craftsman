@@ -87,6 +87,43 @@ test("publish: a competing push is retried once against the new base", () => {
   assert.ok(git(bare, "show", "main:docs/plans/TRACKER.jsonl"));
 });
 
+function onApprove(ctx) {
+  fs.writeFileSync(path.join(ctx.root, "craftsman.config.json"), JSON.stringify({ tracker: { publish: "on-approve" } }));
+}
+function record(ctx, run, status) {
+  const dir = path.join(ctx.root, ".craftsman", "approvals");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${run}.json`), JSON.stringify({ run, status }));
+}
+
+test("publish: on-approve refuses approved:true without a run or with a run not landed", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a);
+  const before = git(bare, "rev-parse", "main");
+  record(a, "r-decided", "decided");
+  for (const input of [{ approved: true }, { approved: true, run: "r-missing" }, { approved: true, run: "r-decided" }, { approved: true, run: "../x" }]) {
+    assert.equal(publishTracker(input, a).published, false);
+  }
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish: on-approve publishes for a landed run record or manual:true", () => {
+  const a = clone(remote().bare), b = clone(remote().bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, true);
+  seedLedger(b); onApprove(b);
+  assert.equal(publishTracker({ manual: true }, b).published, true);
+});
+
+test("publish: legacy push mode logs tracker_publish_unapproved", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  publishTracker({}, a);
+  assert.match(fs.readFileSync(path.join(a.stateDir, "events.jsonl"), "utf8"), /tracker_publish_unapproved/);
+});
+
 test("publish: off mode is a no-op", () => {
   const { bare } = remote();
   const a = clone(bare);

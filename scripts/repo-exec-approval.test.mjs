@@ -160,8 +160,11 @@ test("tracker.publish: off, push and on-approve modes", () => {
     assert.deepEqual(publishTracker({ approved: true, manual: true }, ctx("off")), { published: false, mode: "off" });
     assert.deepEqual(publishTracker({}, ctx("on-approve")), { published: false, mode: "on-approve" });
     assert.deepEqual(publishTracker({ approved: false }, ctx("on-approve")), { published: false, mode: "on-approve" });
-    // push mode and approved on-approve both proceed past the mode check (no repo here, so they fail later, not with the mode result)
-    for (const [mode, input] of [["push", {}], ["on-approve", { approved: true }], ["on-approve", { manual: true }]]) {
+    // approved:true without a landed run is not trusted (ARCH-LAND-24)
+    assert.deepEqual(publishTracker({ approved: true }, ctx("on-approve")), { published: false, mode: "on-approve" });
+    assert.deepEqual(publishTracker({ approved: true, run: "nope" }, ctx("on-approve")), { published: false, mode: "on-approve" });
+    // push mode and manual on-approve proceed past the mode check (no repo here, so they fail later, not with the mode result)
+    for (const [mode, input] of [["push", {}], ["on-approve", { manual: true }]]) {
       let out;
       try { out = publishTracker(input, ctx(mode)); } catch { out = null; }
       assert.notDeepEqual(out, { published: false, mode });
