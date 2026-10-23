@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { prepare, attachUrl, check, landed, markPublished, pending, fallback } from "./approval.mjs";
 
 const LATER = new Date(Date.now() + 60000).toISOString();
@@ -236,4 +236,25 @@ test("markPublished sets published_at once, only on a landed record", () => {
   assert.ok(at);
   assert.equal(markPublished("p-f", o).refused, true);
   assert.equal(s.rec().published_at, at);
+});
+
+test("prepare supersedes an open-pr landing into history but refuses a base-merge landing", () => {
+  const s = setup();
+  const o = { root: s.root };
+  prepare(s.input, { root: s.root, runners: s.runners });
+  check({ run: "p-f", row: { choice: "open-pr", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o);
+  landed({ run: "p-f", sha: "s", mode: "open-pr" }, o);
+  assert.equal(s.rec().status, "landed");
+  assert.equal(prepare({ ...s.input, head_sha: s.B }, { root: s.root, runners: s.runners }).ok, true);
+  const r = s.rec();
+  assert.equal(r.status, "requested");
+  assert.equal(r.history.at(-1).status, "landed");
+  assert.equal(r.history.at(-1).head_sha, s.A);
+});
+
+test("the approval CLI no longer accepts the landed action", () => {
+  const s = setup();
+  const out = spawnSync(process.execPath, [fileURLToPath(new URL("./approval.mjs", import.meta.url)), "landed"], { cwd: s.root, input: JSON.stringify({ run: "p-f", sha: "s", mode: "merge" }), encoding: "utf8" });
+  assert.equal(out.status, 1);
+  assert.match(out.stdout, /unknown action/);
 });

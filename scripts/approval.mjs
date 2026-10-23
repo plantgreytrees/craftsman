@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Approval record (ARCH-APPROVAL-01/04/05/06/07): JSON on stdin, JSON on stdout.
-// Actions: prepare, attach-url, check, landed, pending, fallback. Records live in the
+// Actions: prepare, attach-url, check, pending, fallback (landed is module-only, reached by repo-exec). Records live in the
 // main checkout's .craftsman/approvals so worktree sessions and SessionStart see one place.
 import fs from "node:fs";
 import path from "node:path";
@@ -130,7 +130,7 @@ export function prepare(input, { root = ".", runners, now = () => new Date().toI
   let refused;
   try { refused = withLock(root, runId, () => {
     const prev = load(root, runId);
-    if (prev?.status === "landed") return refuse("record is already landed; start a new run");
+    if (prev?.status === "landed" && prev.landed_mode !== "open-pr") return refuse("record is already landed; start a new run");
     const history = [...(prev?.history || [])];
     if (prev) history.push({ status: prev.status, head_sha: prev.head_sha, choice: prev.choice ?? null, requested_at: prev.requested_at, decided_at: prev.decided_at ?? null, superseded_at: now() });
     save(root, {
@@ -218,7 +218,7 @@ export function fallback({ run }, { root = "." } = {}) {
   return { ok: true, file, ...QUESTION };
 }
 
-const ACTIONS = { prepare, "attach-url": attachUrl, check, landed, pending, fallback };
+const ACTIONS = { prepare, "attach-url": attachUrl, check, pending, fallback };
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   let input = {};
