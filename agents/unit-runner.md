@@ -25,7 +25,7 @@ Edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, criteria, cited 
 ## land
 1. Tick each `[unit:<unit>]` line in `.craftsman/acceptance.md` only if the diff proves it; else `BLOCKED`.
 2. `S scope` `{action:"release", session_id, project, worktree_path}`.
-3. `S repo-exec` `{action:"sync", …}` then `{action:"merge", session_id, project, unit, slug:unit, worktree_path}`. Keep merge sha/`pr.url`. `{parked:true, decision}` → return `PARKED` with `parked:[decision]`.
+3. `S repo-exec` `{action:"sync", …}` then `{action:"merge", session_id, project, unit, slug:unit, worktree_path}`. Keep sha/`pr.url`. `{parked:true, decision}` → return `PARKED` with `parked:[decision]`.
 4. `S tracker` → `MERGED` with it (refusal → `BLOCKED`), then release claim (`S claim`).
 
 ## park

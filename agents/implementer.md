@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 
-You implement one plan unit end to end. Your prompt names that unit, its files, and its acceptance criteria. Do that unit and nothing else.
+You implement one plan unit. Your prompt names that unit, its files, and its acceptance criteria. Do that unit and nothing else.
 
 **Detect the stack first.** Read the repo markers before writing code — manifest/lockfiles, build config, and the directory you are editing — to learn the target language, formatter, test runner, and build command. Match the conventions already in the surrounding files; do not import idioms from another language.
 
