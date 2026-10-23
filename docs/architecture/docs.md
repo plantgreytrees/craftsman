@@ -53,3 +53,7 @@ ARCH-DOCS-10: per-project doc budgets in `arch-check lint`, enforced by default.
 
 ## Archive amendments (2026-10-23)
 ARCH-DOCS-12 is superseded by ARCH-DOCS-13: prose mentions of an archived plan are rewritten to archive pointers after a confirmed dry run, `docs/plans/NEXT.md` is never a referrer, and rules, tests and top-level docs still refuse. ARCH-DOCS-04 is superseded by ARCH-DOCS-14: a plan with no referrer and a verified archive copy is archived automatically at landing; prune and every other archive stay owner-run. See [archive](./archive.md).
+
+## Amendments (2026-10-23, owner-approved)
+
+- **ARCH-DOCS-15** replaces 10: a plan or scrutinise doc may grow up to its default; one already over the default can only shrink; `claudeMdLines` and `openPlans` are optional; `enforce` defaults to true.
