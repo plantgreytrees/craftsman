@@ -4,6 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, loadWorkspaceManifest, logEvent } from "./core.mjs";
+import { findReferrers, retire as docRetire } from "../doc-retire.mjs";
+import { currentState } from "../tracker.mjs";
+import { mainCheckoutRoot } from "./core.mjs";
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const KINDS = ["plans", "ideas"];
@@ -101,5 +104,82 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
     const err = error instanceof Error ? error : new Error(String(error));
     logEvent({ ev: "archive_refused", plan, reason: err.message }, context);
     throw err;
+  }
+}
+
+// ARCH-DOCS-14 / ARCH-LAND-30: may land-feature archive this plan on its own? Read-only; returns {eligible, reason?}, never throws.
+// Every condition must hold: an archive project resolves, every tracker row of the plan is COMPLETE or CANCELLED, the referrer
+// scan succeeds and finds no hit at all (the plan, its ledger/rollup and its own scrutinise-/investigate- siblings excepted),
+// and the doc is tracked and clean. seams: {resolveArchive, currentState, findReferrers, git(args, context)}.
+export function autoArchiveEligible(context, plan, seams = {}) {
+  const no = (reason) => ({ eligible: false, reason });
+  try {
+    if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) return no("invalid plan path");
+    const slug = path.posix.basename(plan, ".md");
+    const dir = path.posix.dirname(plan);
+    const archive = (seams.resolveArchive || resolveArchive)(context);
+    if (!archive?.root) return no(`no archive project: ${archive?.off ?? "unresolved"}`);
+    const rows = (seams.currentState || currentState)(context).filter((row) => row.plan === plan);
+    if (!rows.length) return no("plan has no tracker rows");
+    const open = rows.filter((row) => row.status !== "COMPLETE" && row.status !== "CANCELLED");
+    if (open.length) return no(`open rows: ${open.map((row) => `${row.unit}=${row.status}`).join(", ")}`);
+    const scan = (seams.findReferrers || findReferrers)(context, plan, slug);
+    if (scan === null || scan === undefined) return no("referrer scan failed");
+    const own = new Set([plan, path.posix.join("docs/plans", slug, "TRACKER.md"),
+      path.posix.join(dir, `scrutinise-${slug}.md`), path.posix.join(dir, `investigate-${slug}.md`)]);
+    const hits = (scan.hits ?? []).filter((file) => !own.has(file) && !/^docs\/plans\/TRACKER[^/]*\.md$/.test(file));
+    if (hits.length) return no(`referenced by ${hits.sort().join(", ")}`);
+    const git = seams.git || ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    try { git(["ls-files", "--error-unmatch", "--", plan], context); } catch { return no(`${plan} is not tracked by git`); }
+    if (String(git(["status", "--porcelain", "--", plan], context) ?? "").trim()) return no(`uncommitted changes in ${plan}`);
+    return { eligible: true };
+  } catch (error) {
+    return no(`eligibility check failed: ${error?.message ?? error}`);
+  }
+}
+
+const sh = (root, args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const quiet = (root, args) => { try { return sh(root, args); } catch { return ""; } };
+
+// The retire commits in the main checkout, so it must sit on base and hold the landed merge. A clean checkout whose tip is an
+// ancestor of the merge is fast-forwarded to it (never anything else); a dirty or diverged one is left alone and the retire skipped.
+function holdsLanding(main, base, sha) {
+  const is = (a, b) => { try { sh(main, ["merge-base", "--is-ancestor", a, b]); return true; } catch { return false; } };
+  if (quiet(main, ["rev-parse", "--abbrev-ref", "HEAD"]) !== base) return false;
+  if (is(sha, "HEAD")) return true;
+  if (!is("HEAD", sha) || quiet(main, ["status", "--porcelain", "-uno"])) return false;
+  try { sh(main, ["merge", "--ff-only", "-q", sha]); return true; } catch { return false; }
+}
+
+// ARCH-LAND-30 / ARCH-DOCS-14: after land-feature has promoted and pushed, archive each closed, unreferenced plan. The archive repo is
+// committed locally and archive_push_pending is logged; nothing is ever pushed (ARCH-ARCHIVE-05). Nothing here can throw, park or
+// change the landing result (ARCH-LAND-06 is for real landing failures): refusals and exceptions are logged and swallowed.
+// deps seams: autoArchiveEligible(context, plan), retire(input, context).
+export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
+  const note = (ev) => { try { logEvent(ev, context); } catch { /* logging never changes a landing */ } };
+  try {
+    const main = mainCheckoutRoot(context.root);
+    const here = { ...context, root: main };
+    const eligible = deps.autoArchiveEligible || autoArchiveEligible;
+    const retire = deps.retire || docRetire;
+    for (const plan of [...new Set(rows.map((row) => row.plan))]) {
+      try {
+        if (!holdsLanding(main, info.base_branch, sha)) {
+          note({ ev: "doc_retire_skipped", plan, reason: `main checkout is not on ${info.base_branch} holding the landed merge` });
+          continue;
+        }
+        const verdict = eligible(here, plan);
+        if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
+        const out = retire({ plan, sid: input.session_id, auto: true, landed_sha: sha }, here);
+        if (out?.refused) { note({ ev: "doc_retire_skipped", plan, reason: out.reason }); continue; }
+        note({ ev: "doc_retired", plan, sha: out.sha, auto: true });
+        const archive = resolveArchive(here);
+        note({ ev: "archive_push_pending", plan, commit: archive.root ? quiet(archive.root, ["rev-parse", "HEAD"]) : "" });
+      } catch (error) {
+        note({ ev: "doc_retire_skipped", plan, reason: `auto-archive failed: ${error?.message ?? error}` });
+      }
+    }
+  } catch (error) {
+    note({ ev: "doc_retire_skipped", reason: `auto-archive failed: ${error?.message ?? error}` });
   }
 }

@@ -1,0 +1,174 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { autoArchiveEligible } from "./lib/archive.mjs";
+import { inspectRepo, landFeature, prepare } from "./repo-exec.mjs";
+import { ledgerPath } from "./tracker.mjs";
+import { projectContext } from "./lib/core.mjs";
+
+function git(root, args) {
+  const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr);
+  return result.stdout.trim();
+}
+
+// ---- 5.1: autoArchiveEligible, one reason-bearing case per condition -------------------------------------------------
+const PLAN = "docs/plans/p.md";
+const closed = [{ plan: PLAN, unit: "a", status: "COMPLETE" }, { plan: PLAN, unit: "b", status: "CANCELLED" }];
+const ok = {
+  resolveArchive: () => ({ id: "archive", root: "/tmp/archive" }),
+  currentState: () => closed,
+  findReferrers: () => ({ hits: [PLAN, "docs/plans/TRACKER.md"], blocking: [], rewritable: [] }),
+  git: () => "",
+};
+const ctx = { root: "/tmp/x" };
+
+test("autoArchiveEligible: eligible only when every condition holds", () => {
+  assert.deepEqual(autoArchiveEligible(ctx, PLAN, ok), { eligible: true });
+});
+
+test("autoArchiveEligible: each failing condition is refused with its reason", () => {
+  const notTracked = () => { throw new Error("not tracked"); };
+  const table = [
+    ["no archive project", { resolveArchive: () => ({ off: "no workspace manifest" }) }, /no archive project: no workspace manifest/],
+    ["no tracker rows", { currentState: () => [] }, /no tracker rows/],
+    ["an open row", { currentState: () => [...closed, { plan: PLAN, unit: "c", status: "IN_PROGRESS" }] }, /open rows: c=IN_PROGRESS/],
+    ["a failed scan", { findReferrers: () => null }, /referrer scan failed/],
+    ["a blocking referrer", { findReferrers: () => ({ hits: [PLAN, "scripts/x.test.mjs"] }) }, /referenced by scripts\/x\.test\.mjs/],
+    ["a rewritable prose referrer", { findReferrers: () => ({ hits: [PLAN, "docs/plans/q.md"], rewritable: ["docs/plans/q.md"] }) }, /referenced by docs\/plans\/q\.md/],
+    ["an untracked doc", { git: (args) => { if (args[0] === "ls-files") notTracked(); return ""; } }, /not tracked/],
+    ["a dirty doc", { git: (args) => (args[0] === "status" ? " M docs/plans/p.md\n" : "") }, /uncommitted changes/],
+    ["a throwing seam", { resolveArchive: () => { throw new Error("boom"); } }, /eligibility check failed: boom/],
+    ["a bad plan path", { plan: "../p.md" }, /invalid plan path/],
+  ];
+  for (const [name, override, reason] of table) {
+    const { plan, ...seams } = override;
+    const verdict = autoArchiveEligible(ctx, plan ?? PLAN, { ...ok, ...seams });
+    assert.equal(verdict.eligible, false, name);
+    assert.match(verdict.reason, reason, name);
+  }
+});
+
+test("autoArchiveEligible: sibling plans and the plan's own rollup are not referrers", () => {
+  const hits = [PLAN, "docs/plans/p/TRACKER.md", "docs/plans/scrutinise-p.md", "docs/plans/investigate-p.md", "docs/plans/TRACKER-x.md"];
+  assert.equal(autoArchiveEligible(ctx, PLAN, { ...ok, findReferrers: () => ({ hits }) }).eligible, true);
+});
+
+// ---- 5.2/5.3: land-feature wiring ------------------------------------------------------------------------------------
+function scenario(deps, { dirtyMain = false } = {}) {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-archive-"));
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  try {
+    const repos = {};
+    for (const id of ["one", "archive"]) {
+      const root = path.join(workspace, id);
+      fs.mkdirSync(root, { recursive: true });
+      git(root, ["init", "-q"]);
+      git(root, ["config", "user.email", "t@example.com"]);
+      git(root, ["config", "user.name", "t"]);
+      fs.writeFileSync(path.join(root, "README.md"), `${id}\n`);
+      git(root, ["add", "README.md"]);
+      git(root, ["commit", "-q", "-m", "init"]);
+      const origin = path.join(workspace, `${id}-origin.git`);
+      git(workspace, ["init", "-q", "--bare", origin]);
+      git(root, ["remote", "add", "origin", origin]);
+      git(root, ["push", "-q", "-u", "origin", git(root, ["branch", "--show-current"])]);
+      repos[id] = { root, origin };
+    }
+    const manifest = path.join(workspace, "craftsman.workspace.json");
+    fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { one: { root: "one" }, archive: { root: "archive" } } }));
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+    const context = projectContext("one");
+    fs.writeFileSync(path.join(context.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true }, repoExec: { approval: { required: false } } }));
+    git(context.root, ["add", "craftsman.config.json"]);
+    git(context.root, ["commit", "-q", "-m", "config"]);
+    git(context.root, ["push", "-q", "origin", git(context.root, ["branch", "--show-current"])]);
+    const info = inspectRepo(context);
+    const feature = prepare(context, { unit: "f-x", slug: "p-f1", branch: "feature/p-f1" }, info);
+    git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/p-f1"]);
+    fs.writeFileSync(path.join(feature.worktree_path, "a.txt"), "a\n");
+    git(feature.worktree_path, ["add", "a.txt"]);
+    git(feature.worktree_path, ["commit", "-q", "-m", "feat: a"]);
+    git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
+    const rows = ["u0", "u1"].map((unit) => ({ key: `.::p::${unit}`, project: ".", plan: "docs/plans/p.md", unit, status: "IN_PROGRESS", evidence: "x", session_id: "s", feature: "f1", feature_branch: "feature/p-f1", updated_at: "2026-01-01T00:00:00Z" }));
+    const file = ledgerPath(context);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, rows.flatMap((row) => [JSON.stringify(row), JSON.stringify({ ...row, status: "FEATURE_MERGED" })]).join("\n") + "\n");
+    if (dirtyMain) fs.appendFileSync(path.join(context.root, "README.md"), "dirty\n");
+    const archiveBefore = git(repos.archive.root, ["rev-parse", "HEAD"]);
+    const originBefore = git(repos.archive.origin, ["rev-parse", "HEAD"]);
+    const calls = { retire: [] };
+    const result = landFeature(context, { plan: "docs/plans/p.md", feature: "f1", session_id: "s" }, info, deps(calls, repos));
+    const events = fs.existsSync(path.join(context.stateDir, "events.jsonl"))
+      ? fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
+    const normal = JSON.parse(JSON.stringify(result, (k, v) => (typeof v === "string" ? v.replaceAll(workspace, "<ws>").replace(/\b[0-9a-f]{40}\b/g, "<sha>") : v)));
+    return { normal, events, calls, repos, archiveBefore, originBefore, archiveAfter: git(repos.archive.root, ["rev-parse", "HEAD"]), originAfter: git(repos.archive.origin, ["rev-parse", "HEAD"]), context };
+  } finally {
+    if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+}
+
+const eligibleSeam = () => ({ eligible: true });
+const noRetire = () => ({});
+
+test("land-feature: no retire is attempted when the plan is not eligible, and the landing is unchanged", () => {
+  const baseline = scenario(noRetire);
+  const skipped = scenario((calls) => ({ autoArchiveEligible: () => ({ eligible: false, reason: "referenced by x" }), retire: (i) => { calls.retire.push(i); return {}; } }));
+  assert.equal(skipped.calls.retire.length, 0);
+  assert.ok(skipped.events.some((e) => e.ev === "doc_retire_skipped" && e.reason === "referenced by x"));
+  assert.deepEqual(skipped.normal, baseline.normal);
+  assert.equal(baseline.normal.merged, true);
+});
+
+test("land-feature: an eligible plan is retired with auto:true, archive_push_pending is logged and the archive is never pushed", () => {
+  const baseline = scenario(noRetire);
+  const done = scenario((calls, repos) => ({
+    autoArchiveEligible: eligibleSeam,
+    retire: (input) => {
+      calls.retire.push(input);
+      fs.writeFileSync(path.join(repos.archive.root, "x.txt"), "x\n");
+      git(repos.archive.root, ["add", "x.txt"]);
+      git(repos.archive.root, ["commit", "-q", "-m", "archive p"]);
+      return { retired: input.plan, sha: "abc" };
+    },
+  }));
+  assert.equal(done.calls.retire.length, 1);
+  assert.equal(done.calls.retire[0].auto, true);
+  assert.equal(done.calls.retire[0].plan, "docs/plans/p.md");
+  assert.equal(done.calls.retire[0].sid, "s");
+  assert.notEqual(done.archiveAfter, done.archiveBefore, "archive committed locally");
+  assert.equal(done.originAfter, done.originBefore, "archive remote untouched");
+  const pending = done.events.find((e) => e.ev === "archive_push_pending");
+  assert.equal(pending.commit, done.archiveAfter);
+  assert.ok(done.events.some((e) => e.ev === "doc_retired" && e.auto === true));
+  assert.deepEqual(done.normal, baseline.normal);
+});
+
+test("land-feature: a retire refusal or exception leaves the landing result identical and never parks", () => {
+  const baseline = scenario(noRetire);
+  const variants = {
+    refused: () => ({ autoArchiveEligible: eligibleSeam, retire: () => ({ refused: true, reason: "no doc-write grant" }) }),
+    throws: () => ({ autoArchiveEligible: eligibleSeam, retire: () => { throw new Error("retire exploded"); } }),
+    eligibilityThrows: () => ({ autoArchiveEligible: () => { throw new Error("check exploded"); }, retire: () => ({}) }),
+  };
+  for (const [name, deps] of Object.entries(variants)) {
+    const run = scenario(deps);
+    assert.deepEqual(run.normal, baseline.normal, name);
+    assert.equal(run.normal.merged, true, name);
+    assert.equal(run.normal.parked, undefined, name);
+    assert.equal(run.originAfter, run.originBefore, name);
+    assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped"), name);
+    assert.ok(!run.events.some((e) => e.ev === "archive_push_pending"), name);
+  }
+});
+
+test("land-feature: a dirty main checkout skips the retire without changing the landing", () => {
+  const baseline = scenario(noRetire);
+  const dirty = scenario((calls) => ({ autoArchiveEligible: eligibleSeam, retire: (i) => { calls.retire.push(i); return {}; } }), { dirtyMain: true });
+  assert.equal(dirty.calls.retire.length, 0);
+  assert.deepEqual(dirty.normal, baseline.normal);
+});
