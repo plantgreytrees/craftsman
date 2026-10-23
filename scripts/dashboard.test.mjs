@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { buildModel, renderHtml, writeDashboard, esc, SECTIONS, MERMAID_SRC } from "./lib/dashboard.mjs";
 
 const SECRET_BODY = "SECRET-BODY-TEXT-NEVER-RENDERED";
@@ -28,7 +29,7 @@ function fixture() {
   return { root, context: { root, rows, stateDir: path.join(root, ".craftsman"), sessions: 1 } };
 }
 
-test("buildModel: fixture yields all six sections, titles only, one project", () => {
+test("buildModel: fixture yields all seven sections, titles only, one project", () => {
   const { context } = fixture();
   const m = buildModel(context);
   assert.deepEqual(m.plans.map((c) => c.state), ["PENDING", "IN_PROGRESS", "COMPLETE"]);
@@ -58,6 +59,7 @@ test("renderHtml: golden skeleton of an empty-model page", () => {
 <section id="architecture"><h2>Architecture map</h2><p class="empty">No architecture rules yet.</p></section>
 <section id="tree"><h2>Plan tree</h2><p class="empty">No plans in the plan tree.</p></section>
 <section id="sizes"><h2>Doc sizes</h2><p class="empty">No docs found.</p></section>
+<section id="archive"><h2>Archive</h2><h3>Archived</h3><p class="empty">Nothing archived yet.</p><h3>Archive candidates</h3><p class="empty">No archive candidates.</p></section>
 <script src="${MERMAID_SRC}"></script>
 <script></script>
 </body></html>
@@ -87,7 +89,7 @@ test("empty repo: no ledger, ideas or NEXT.md renders every section with an empt
   const context = { root, rows: [], stateDir: path.join(root, ".craftsman") };
   const html = renderHtml(buildModel(context));
   for (const s of SECTIONS) assert.match(html, new RegExp(`<section id="${s}">`));
-  assert.equal((html.match(/class="empty"/g) || []).length, 6);
+  assert.equal((html.match(/class="empty"/g) || []).length, 8);
   assert.match(html, /No ledger yet/);
   assert.match(html, /No ideas yet/);
   assert.match(html, /No docs\/plans\/NEXT\.md/);
@@ -104,5 +106,76 @@ test("writeDashboard: writes only under .craftsman/export and logs dashboard_ren
   const ev = events.find((e) => e.ev === "dashboard_render");
   assert.equal(typeof ev.ms, "number");
   assert.equal(ev.skipped, false);
-  assert.equal(ev.sections, 6);
+  assert.equal(ev.sections, 7);
+});
+
+const git = (root, ...a) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" });
+function archiveFixture() {
+  const root = mk();
+  git(root, "init", "-q");
+  const plan = (n) => put(root, `docs/plans/${n}.md`, `---\nslug: ${n}\ngoal: Goal ${n}\n---\nbody\n`);
+  for (const n of ["free", "prose", "ruled"]) plan(n);
+  put(root, "docs/plans/notes.md", "see prose-plan docs/plans/prose.md\n");
+  put(root, "docs/architecture/z.rules.md", "- **ARCH-Z-01** [decided] x — cite: docs/plans/ruled.md\n");
+  put(root, "docs/plans/TRACKER-archive.md", [
+    "# Tracker archive", "",
+    "## docs/plans/old.md (2026-10-01) — Old goal · doc abc1234 · landed def5678 · archive 9999999",
+    "## docs/plans/older.md (2026-09-01) — Older goal · doc aaa1111 · landed bbb2222", ""].join("\n"));
+  git(root, "add", "-A");
+  git(root, "-c", "user.email=t@e.x", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-qm", "init");
+  const row = (p, status) => ({ plan: `docs/plans/${p}.md`, unit: "u", status, updated_at: "2026-10-02T00:00:00Z" });
+  const rows = [row("free", "COMPLETE"), row("prose", "COMPLETE"), row("ruled", "CANCELLED"), row("notes", "PENDING")];
+  return { root, context: { root, rows, stateDir: path.join(root, ".craftsman") } };
+}
+
+test("archive: headings listed with and without archive sha", () => {
+  const { context } = archiveFixture();
+  const m = buildModel(context);
+  assert.deepEqual(m.archive.headings.map((h) => [h.name, h.goal, h.doc_sha, h.archive_sha]),
+    [["docs/plans/old.md", "Old goal", "abc1234", "9999999"], ["docs/plans/older.md", "Older goal", "aaa1111", ""]]);
+  const html = renderHtml(m);
+  assert.match(html, /<section id="archive">/);
+  assert.match(html, /docs\/plans\/old\.md<\/code> <span class="mut">2026-10-01<\/span> &mdash; Old goal <span class="mut">doc abc1234, archive 9999999/);
+  assert.match(html, /docs\/plans\/older\.md<\/code>.*doc aaa1111<\/span>/);
+});
+
+test("archive: candidates classed auto, rewrite or blocked, blocked names its file", () => {
+  const { context } = archiveFixture();
+  const noWs = path.join(os.tmpdir(), "craftsman-none-dash", "craftsman.workspace.json");
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = noWs;
+  let m;
+  try { m = buildModel(context); } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
+  const by = Object.fromEntries(m.archive.candidates.map((c) => [path.basename(c.plan, ".md"), c]));
+  assert.deepEqual(Object.keys(by).sort(), ["free", "prose", "ruled"], "open plan and missing docs are not candidates");
+  assert.equal(by.free.class, "auto");
+  assert.deepEqual(by.free.blocking, []);
+  assert.ok(by.free.bytes > 0);
+  assert.equal(by.ruled.class, "blocked");
+  assert.deepEqual(by.ruled.blocking, ["docs/architecture/z.rules.md"]);
+  // no archive project: every prose hit blocks too
+  assert.equal(by.prose.class, "blocked");
+  assert.deepEqual(by.prose.blocking, ["docs/plans/notes.md"]);
+  const html = renderHtml(m);
+  assert.match(html, /<strong>blocked<\/strong>.*blocked by <code>docs\/architecture\/z\.rules\.md/);
+});
+
+test("archive: with an archive project prose referrers class as rewrite", () => {
+  const { context } = archiveFixture();
+  const ws = mk();
+  const arch = path.join(ws, "archive");
+  fs.mkdirSync(arch);
+  git(arch, "init", "-q");
+  fs.writeFileSync(path.join(ws, "craftsman.workspace.json"), JSON.stringify({ version: 1, projects: { archive: { root: "archive" } } }));
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = path.join(ws, "craftsman.workspace.json");
+  let m;
+  try { m = buildModel(context); } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
+  const by = Object.fromEntries(m.archive.candidates.map((c) => [path.basename(c.plan, ".md"), c]));
+  assert.equal(by.prose.class, "rewrite");
+  assert.deepEqual(by.prose.referrers, ["docs/plans/notes.md"]);
+  assert.deepEqual(by.prose.blocking, []);
+  assert.equal(by.free.class, "auto");
+  assert.equal(by.ruled.class, "blocked");
+  assert.ok(!JSON.stringify(m).includes("body"), "no doc body text");
 });

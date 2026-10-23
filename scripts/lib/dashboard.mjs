@@ -8,10 +8,12 @@ import { logEvent } from "./core.mjs";
 import { loadIndex, parseFrontmatter } from "./plan-index.mjs";
 import { queue } from "./next-queue.mjs";
 import { exportRoot } from "./export-notes.mjs";
-import { currentState } from "../tracker.mjs";
+import { archivePath, currentState, parseArchiveHeading } from "../tracker.mjs";
+import { findReferrers } from "../doc-retire.mjs";
+import { execFileSync } from "node:child_process";
 
 export const MERMAID_SRC = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
-export const SECTIONS = ["plans", "queue", "ideas", "architecture", "tree", "sizes"];
+export const SECTIONS = ["plans", "queue", "ideas", "architecture", "tree", "sizes", "archive"];
 const STATES = ["PENDING", "IN_PROGRESS", "BLOCKED", "PARKED", "MERGED", "FEATURE_MERGED", "COMPLETE", "CANCELLED"];
 const one = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 const slugOf = (p) => path.basename(String(p || ""), ".md");
@@ -30,6 +32,44 @@ function mermaidBlocks(text) {
   const re = /```mermaid[ \t]*\r?\n([\s\S]*?)\r?\n```/g;
   for (let m; (m = re.exec(text)); ) out.push(m[1]);
   return out;
+}
+
+const CLOSED = ["COMPLETE", "CANCELLED"];
+const tracked = (root, file) => {
+  try { execFileSync("git", ["-C", root, "ls-files", "--error-unmatch", "--", file], { stdio: "ignore" }); return true; } catch { return false; }
+};
+
+// Archive section (ARCH-VIEWS-15): TRACKER-archive.md headings, and candidates = plans with closed (or already archived)
+// rows whose doc is still tracked, classed from findReferrers: auto (none), rewrite (prose referrers), blocked (names the file).
+function buildArchive(context, rows) {
+  const root = context.root;
+  const headings = [];
+  const archived = new Set();
+  for (const line of read(archivePath(context)).split("\n")) {
+    const rec = parseArchiveHeading(line);
+    if (!rec) continue;
+    if (rec.kind === "plan") { archived.add(rec.plan); headings.push({ name: rec.plan, date: rec.date, goal: one(rec.goal), doc_sha: rec.doc ?? "", archive_sha: rec.archive ?? "" }); }
+    else headings.push({ name: `idea ${rec.slug}`, date: rec.date, goal: one(rec.verdict), doc_sha: rec.doc ?? "", archive_sha: "" });
+  }
+  const byPlan = new Map();
+  for (const r of rows) byPlan.set(r.plan, [...(byPlan.get(r.plan) ?? []), r.status]);
+  const plans = new Set(archived);
+  for (const [plan, st] of byPlan) if (st.every((x) => CLOSED.includes(x))) plans.add(plan);
+  const candidates = [];
+  for (const plan of [...plans].sort()) {
+    if (/^docs\/plans\/(TRACKER|NEXT)/.test(plan) || !tracked(root, plan)) continue;
+    const slug = slugOf(plan);
+    let bytes = 0;
+    try { bytes = fs.statSync(path.join(root, plan)).size; } catch { /* gone */ }
+    const own = (f) => f === plan || /^docs\/plans\/TRACKER[^/]*\.md$/.test(f) || f === `docs/plans/scrutinise-${slug}.md` || f === `docs/plans/investigate-${slug}.md`;
+    let scan = null;
+    try { scan = findReferrers(context, plan, slug); } catch { scan = null; }
+    const blocking = scan ? scan.blocking.filter((f) => !own(f)) : [];
+    const rewritable = scan ? scan.rewritable.filter((f) => !own(f)) : [];
+    const cls = !scan ? "blocked" : blocking.length ? "blocked" : rewritable.length ? "rewrite" : "auto";
+    candidates.push({ plan, class: cls, bytes, blocking: scan ? blocking : ["referrer scan failed"], referrers: rewritable });
+  }
+  return { headings, candidates };
 }
 
 export function buildModel(context) {
@@ -114,8 +154,10 @@ export function buildModel(context) {
   }
   sizes.sort((a, b) => b.bytes - a.bytes || (a.path < b.path ? -1 : 1));
 
+  const archive = buildArchive(context, rows);
+
   return {
-    project: one(path.basename(root)), plans, queue: sessionQueue, ideas, architecture: areas, tree, sizes,
+    project: one(path.basename(root)), plans, queue: sessionQueue, ideas, architecture: areas, tree, sizes, archive,
     hasLedger: rows.length > 0, hasNext: sessionQueue.some((e) => e.source === "next") || fs.existsSync(path.join(planDir, "NEXT.md")),
   };
 }
@@ -149,6 +191,7 @@ function tree(nodes) {
 export function renderHtml(model) {
   const m = model;
   const max = Math.max(1, ...m.sizes.map((s) => s.bytes));
+  const ar = m.archive ?? { headings: [], candidates: [] };
   const sec = {
     plans: m.plans.length
       ? `<div class="cols">${m.plans.map((c) => `<div class="card"><h3>${esc(c.state)}</h3>${list(c.cards, (p) => `<li><code>${esc(p.slug)}</code> <span class="mut">(${esc(p.units)})</span>${p.goal ? `<br>${esc(p.goal)}` : ""}</li>`, "")}</div>`).join("")}</div>`
@@ -165,8 +208,10 @@ export function renderHtml(model) {
     sizes: m.sizes.length
       ? m.sizes.map((s) => `<div class="row"><code>${esc(s.path)}</code><div class="bar-wrap"><div class="bar" style="width:${Math.max(1, Math.round((100 * s.bytes) / max))}%"></div></div><span class="mut">${esc(s.bytes)} B</span></div>`).join("")
       : `<p class="empty">No docs found.</p>`,
+    archive: `<h3>Archived</h3>${list(ar.headings, (h) => `<li><code>${esc(h.name)}</code> <span class="mut">${esc(h.date)}</span>${h.goal ? ` &mdash; ${esc(h.goal)}` : ""} <span class="mut">doc ${esc(h.doc_sha || "none")}${h.archive_sha ? `, archive ${esc(h.archive_sha)}` : ""}</span></li>`, "Nothing archived yet.")}`
+      + `<h3>Archive candidates</h3>${list(ar.candidates, (c) => `<li><code>${esc(c.plan)}</code> <strong>${esc(c.class)}</strong> <span class="mut">${esc(c.bytes)} B</span>${c.blocking.length ? ` blocked by ${c.blocking.map((f) => `<code>${esc(f)}</code>`).join(", ")}` : ""}${c.referrers.length ? ` rewrite ${c.referrers.map((f) => `<code>${esc(f)}</code>`).join(", ")}` : ""}</li>`, "No archive candidates.")}`,
   };
-  const titles = { plans: "Plans board", queue: "Session queue", ideas: "Ideas by verdict", architecture: "Architecture map", tree: "Plan tree", sizes: "Doc sizes" };
+  const titles = { plans: "Plans board", queue: "Session queue", ideas: "Ideas by verdict", architecture: "Architecture map", tree: "Plan tree", sizes: "Doc sizes", archive: "Archive" };
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(m.project)} dashboard</title>
