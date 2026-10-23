@@ -34,6 +34,8 @@ guard_cannot_act() {
     *.env*|*node_modules*|*vendor*|*target*|*dist*|*build*|*.next*|*.nuxt*|*.output*|*.svelte-kit*|*generated*|*.pb.go*|*_pb2.py*|*.min.js*|*lock*) return 1 ;;
   esac
   d=${CLAUDE_PROJECT_DIR:-$PWD}
+  # A linked worktree keeps its session's scope files in the MAIN checkout, which the walk up from here need not reach.
+  [ -f "$d/.git" ] && return 1
   while :; do
     for f in "$d/.craftsman/sessions/$sid"/scope*; do [ -e "$f" ] && return 1; done
     # every file loadConfig merges over the defaults (scripts/lib/core.mjs; launcher.test pins that the lists agree)

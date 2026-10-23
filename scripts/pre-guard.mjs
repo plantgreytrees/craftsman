@@ -184,6 +184,17 @@ function stripHeredocs(text) {
 // Realpath of a directory, or its plain resolution when it does not exist.
 function realDir(dir) { try { return fs.realpathSync(dir); } catch { return path.resolve(dir); } }
 function realRoot() { return realDir(activeRoot); }
+// A linked worktree keeps its session's state (scope manifests, command records, grants) in the MAIN checkout's .craftsman, shared
+// through the git common dir (scope.mjs). Paths there are not under this session's root, so every root-relative check misses them:
+// name such a path relative to the main checkout, and only when it is craftsman state a tool call must never write (ARCH-SAFETY-05).
+function mainRelOf(abs) {
+  let main;
+  try { main = fs.realpathSync(mainCheckoutRoot(activeRoot)); } catch { return null; }
+  if (main === realRoot()) return null;
+  const rel = path.relative(main, abs).split(path.sep).join("/");
+  return rel && !rel.startsWith("..") ? rel : null;
+}
+const mainStateRel = (abs) => { const rel = mainRelOf(abs); return rel && selfKind(rel) === "never" ? rel : null; };
 
 // `p` resolved from `cwd`, each component through realpath while it exists, so a
 // symlink (`d -> docs`) is followed; the rest of a missing tail stays lexical.
@@ -488,7 +499,11 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
   // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
-  const foldedSelf = (t) => { const rel = path.relative(realRoot(), realResolve(process.cwd(), expandHome(t))).split(path.sep).join("/"); return rel !== "" && !rel.startsWith("..") && !!selfKind(rel); };
+  const foldedSelf = (t) => {
+    const abs = realResolve(process.cwd(), expandHome(t));
+    const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
+    return (rel !== "" && !rel.startsWith("..") && !!selfKind(rel)) || !!mainStateRel(abs);
+  };
   const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))) || (writes && foldedSelf(t)));
   const redirectsOntoDocs = () => {
     for (const m of cmd.matchAll(/>>?\|?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>()]*))/g)) {
@@ -526,16 +541,23 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     // (reachable on a case-insensitive filesystem) is also judged by selfKind, which compares case-folded.
     if (writes && !/[*?[{]/.test(arg)) {
       for (const cwd of st.cwds) {
-        const rel = path.relative(realRoot(), realResolve(cwd, arg)).split(path.sep).join("/");
+        const abs = realResolve(cwd, arg);
+        const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
         if (rel !== "" && !rel.startsWith("..") && selfKind(rel) && !hits.includes(rel)) hits.push(rel);
+        const stateRel = mainStateRel(abs); // the main checkout's session state, reached from a linked worktree
+        if (stateRel && !hits.includes(stateRel)) hits.push(stateRel);
       }
     }
     // Self-protection only: a path that is removed or moved takes everything under it along, so a directory that
     // HOLDS a protected path counts too (touchesGuarded sees only ancestors of a literal base, not of a wildcard one).
     if (writes && REMOVER_LABELS.test(label) && !/[*?[{]/.test(arg)) {
       for (const cwd of st.cwds) {
-        const rel = path.relative(realRoot(), realResolve(cwd, arg)).split(path.sep).join("/");
+        const abs = realResolve(cwd, arg);
+        const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
         if (rel !== "" && !rel.startsWith("..")) hits.push("remove:" + rel);
+        // the main checkout's session state, removed from a linked worktree (a removed scope-required flag is a removed gate)
+        const mainRel = mainRelOf(abs);
+        if (mainRel && heldNever(mainRel)) hits.push("remove:" + mainRel);
       }
     }
   }
@@ -1440,7 +1462,7 @@ if (!file) process.exit(0); // no file: nothing to time or log
 if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
   // The target by its real path too: a symlinked directory (`cs -> .craftsman/sessions`) is the same file.
   const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
-  const kinds = [selfKind(rel), selfKind(realTarget)];
+  const kinds = [selfKind(rel), selfKind(realTarget), mainStateRel(realResolve(activeRoot, file)) ? "never" : null];
   if (kinds.includes("never")) denySelfDisable(`writing ${rel}`);
   // The exemption is for a scope that names the file itself (by its real path); a name that only reaches it through a
   // symlink the session made does not count. hooks.json is judged by both spellings of its path.

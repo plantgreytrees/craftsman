@@ -294,6 +294,36 @@ function gitRepoWithWorktree() {
   return { main, worktree, text };
 }
 
+// Merge of main: scope.mjs keeps the scope manifests, command records and grants of a session in the MAIN checkout's .craftsman
+// (state is shared through the git common dir), but the guard judged every path relative to the session's own root, so from a linked
+// worktree the real state files looked like `../../../.craftsman/...` and matched nothing protected (ARCH-SAFETY-05).
+test("pre-guard: a linked worktree session cannot write the main checkout's session state (scope, commands, grants)", () => {
+  const { main, worktree } = gitRepoWithWorktree();
+  try {
+    for (const rel of ["sessions/s1/scope.json", "sessions/s1/scope-required", "sessions/s1/commands.json", "sessions/s1/doc-write", "sessions/s1/goal-tokens.json", "off", "doc-write-pending"]) {
+      for (const tool of ["Write", "Edit"]) {
+        const input = tool === "Write" ? { file_path: path.join(main, ".craftsman", rel), content: "{}" } : { file_path: path.join(main, ".craftsman", rel), old_string: "a", new_string: "b" };
+        const r = run(GUARD, worktree, { session_id: "wt-state", tool_name: tool, tool_input: input });
+        assert.equal(r.status, 2, `${tool} ${rel}: ${r.stderr}`);
+      }
+    }
+    // a Bash redirect reaches the same files by a relative path from the worktree (.claude/worktrees/wt -> main)
+    for (const command of ["printf x > ../../../.craftsman/sessions/s2/scope.json", "touch ../../../.craftsman/off", "echo '{}' | tee ../../../.craftsman/sessions/s2/commands.json"]) {
+      const r = run(GUARD, worktree, { session_id: "wt-state", tool_name: "Bash", tool_input: { command } });
+      assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+    }
+    // removing it is the same bypass (no scope-required flag, no scope)
+    for (const command of ["rm ../../../.craftsman/sessions/s2/scope-required", "rm -rf ../../../.craftsman", "mv ../../../.craftsman/sessions/s2 /tmp/gone"]) {
+      const r = run(GUARD, worktree, { session_id: "wt-state", tool_name: "Bash", tool_input: { command } });
+      assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+    }
+    // the worktree's own state stays protected, and an ordinary file in the main checkout is not made protected by this
+    assert.equal(run(GUARD, worktree, { session_id: "wt-state", tool_name: "Write", tool_input: { file_path: path.join(worktree, ".craftsman", "sessions", "s1", "scope.json"), content: "{}" } }).status, 2);
+  } finally {
+    fs.rmSync(main, { recursive: true, force: true });
+  }
+});
+
 test("pre-guard: a linked worktree's copy of TRACKER.md is blocked and points at the main checkout's", () => {
   const { main, worktree } = gitRepoWithWorktree();
   try {

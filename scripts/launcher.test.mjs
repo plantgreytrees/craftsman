@@ -128,6 +128,26 @@ function filterFixture() {
 }
 const payload = (tool, input = {}, sid = "flt-1") => ({ session_id: sid, transcript_path: "/x/t.jsonl", cwd: "/x", hook_event_name: "PreToolUse", tool_name: tool, tool_input: input, tool_use_id: "toolu_1" });
 
+// Merge of main: a session's scope files live in the MAIN checkout's .craftsman (shared through the git common dir). A linked
+// worktree is a project whose .git is a FILE, and it need not sit inside the main checkout, so the filter cannot find the scope by
+// walking up from it. It runs the guard for any linked worktree (ARCH-SAFETY-11).
+test("run.sh filter: a linked worktree project always runs the guard on reads, whatever scope files the walk finds", { skip: skipWindows }, () => {
+  const f = filterFixture();
+  try {
+    fs.writeFileSync(path.join(f.project, ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
+    for (const [tool, input] of [["Read", { file_path: "/etc/hostname" }], ["Glob", { pattern: "**/*" }], ["Grep", { pattern: "x", path: "/etc" }]]) {
+      f.reset();
+      f.call(payload(tool, input));
+      assert.equal(f.nodeRan(), true, `${tool} in a linked worktree started node`);
+    }
+    // the same project without the .git file (a plain checkout) still takes the cheap path
+    fs.rmSync(path.join(f.project, ".git"), { force: true });
+    f.reset();
+    assert.equal(f.call(payload("Read", { file_path: "/p/src/a.js" })).status, 0);
+    assert.equal(f.nodeRan(), false);
+  } finally { f.cleanup(); }
+});
+
 test("run.sh filter: Read, Glob and Grep with no scope state skip node and pass", { skip: skipWindows }, () => {
   const f = filterFixture();
   try {
