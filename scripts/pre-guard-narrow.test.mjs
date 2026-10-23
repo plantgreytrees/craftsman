@@ -1,5 +1,5 @@
-// ARCH-STATE-14 / ARCH-STATE-13 / ARCH-LAND-23: heredoc prose is not a hook-bypass flag unless the heredoc feeds a
-// shell or interpreter; the removal-word refusal stays fail-closed; a lease push to the run's own branch is allowed.
+// ARCH-STATE-16 / ARCH-LAND-23: the hook-bypass check reads heredoc bodies (PR #1); removal-word refusals stay; a lease push to the run's own branch is allowed.
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -33,39 +33,13 @@ function fixture(fn) {
   }
 }
 
-test("narrow: the bypass flag as prose in a heredoc body is allowed, as a real flag it is refused", () => {
+test("narrow: heredoc prose that mentions the bypass flag is refused like any other mention (PR #1's whole-command check, ARCH-STATE-16)", () => {
   fixture(({ bash }) => {
-    assert.equal(bash(`git commit -F - <<'EOF'\nnever pass ${BYPASS} to git commit\nEOF`).status, 0);
-    assert.equal(bash(`cat <<EOF\ngit push ${BYPASS}\nEOF`).status, 0);
+    assert.equal(bash(`git commit -F - <<'EOF'\nnever pass ${BYPASS} to git commit\nEOF`).status, 2);
+    assert.equal(bash(`cat <<EOF\ngit push ${BYPASS}\nEOF`).status, 2);
+    assert.equal(bash(`tee f <<EOF\ngit commit ${BYPASS}\nEOF`).status, 2);
+    assert.equal(bash(`bash <<'EOF'\ngit commit ${BYPASS} -m x\nEOF`).status, 2);
     assert.equal(bash(`git commit ${BYPASS} -m x`).status, 2);
-    assert.equal(bash(`git commit -F - ${BYPASS} <<'EOF'\nbody\nEOF`).status, 2);
-    assert.equal(bash(`git commit -m x <<'EOF'\nprose\nEOF\ngit push ${BYPASS} origin x`).status, 2);
-  });
-});
-
-test("narrow: a heredoc fed to a shell or interpreter still runs its body, so the bypass flag in it is refused", () => {
-  fixture(({ bash }) => {
-    for (const shell of ["bash", "sh", "zsh", "dash", "env bash", "python3", "node"]) {
-      assert.equal(bash(`${shell} <<'EOF'\ngit commit ${BYPASS} -m x\nEOF`).status, 2, `refused: ${shell} heredoc`);
-    }
-    assert.equal(bash(`cat <<'EOF' | bash\ngit push ${BYPASS}\nEOF`).status, 2);
-  });
-});
-
-test("narrow: bypassView is an allowlist, so any unlisted consumer of a heredoc keeps its body in view (fail closed)", () => {
-  fixture(({ bash }) => {
-    const body = `\ngit commit ${BYPASS} -m x\nEOF`;
-    for (const c of ["tcsh", "mksh", "ash", "busybox sh", "deno", "bun", "lua", "pwsh", "nodejs", "perl5.36"]) {
-      assert.equal(bash(`${c} <<'EOF'${body}`).status, 2, `refused: ${c} heredoc`);
-    }
-    for (const run of ["sh x", "./x", "source x", "bash x"]) {
-      assert.equal(bash(`cat > x <<'EOF'${body}\n${run}`).status, 2, `refused: write then ${run}`);
-    }
-    assert.equal(bash(`git -c alias.x='!sh' x <<'EOF'${body}`).status, 2);
-    assert.equal(bash(`cat <<'EOF' | tcsh${body}`).status, 2);
-    for (const c of ["git commit -F -", "cat", "cat > notes.txt", "tee f"]) {
-      assert.equal(bash(`${c} <<'EOF'\nnever pass ${BYPASS} here\nEOF`).status, 0, `allowed: ${c}`);
-    }
   });
 });
 
@@ -92,25 +66,4 @@ test("narrow: the lease exception covers the run's own branches only (ARCH-LAND-
   for (const c of ok) assert.equal(await forceBlocked(c, { ownBranches: own }), null, `allowed: ${c}`);
   for (const c of refused) assert.ok(await forceBlocked(c, { ownBranches: own }), `refused: ${c}`);
   assert.ok(await forceBlocked(ok[0]), "without own branches the lease push is still refused");
-});
-
-test("narrow: a program-running consumer and a ${...} word do not hide a heredoc body (round 7)", () => {
-  fixture(({ bash }) => {
-    const run = `git commit ${BYPASS} -m x`;
-    assert.equal(bash(`sort --compress-program=sh <<'EOF'\n${run}\nEOF`).status, 2, "refused: sort with a program option");
-    assert.equal(bash(`sort -u <<'EOF'\n${run}\nEOF`).status, 2, "refused: sort is no longer a prose consumer");
-    assert.equal(bash(`echo \${x:-<<EOF}\n${run}\nEOF`).status, 2, "refused: <<EOF inside ${} is literal");
-    assert.equal(bash(`echo "\${x:-<<EOF}"\n${run}\nEOF`).status, 2, "refused: same inside double quotes");
-    assert.equal(bash(`echo \${x:-<<EOF\n${run}\nEOF`).status, 2, "refused: unterminated ${ keeps the text in view");
-    for (const c of [`echo $(sh) <<'EOF'`, "echo `sh` <<'EOF'", "cat <(sh) <<'EOF'", "cat >(sh) <<'EOF'", "cat <<'EOF'; sh", "/bin/sh <<'EOF'",
-      "FOO=1 sh <<'EOF'", "git -C dir commit <<'EOF'", "git -c k=v commit <<'EOF'"]) {
-      const body = `\n${run}\nEOF`;
-      const cmd = c.endsWith("; sh") ? `cat <<'EOF'${body}\nsh` : `${c}${body}`;
-      assert.equal(bash(cmd).status, 2, `refused: ${c}`);
-    }
-    for (const c of ["git commit -F -", "cat", "cat > notes.txt", "tee f"]) {
-      assert.equal(bash(`${c} <<'EOF'\nnever pass ${BYPASS} here\nEOF`).status, 0, `allowed: ${c}`);
-    }
-    assert.equal(bash(`echo \${x:-ok} \$((1<<2))\ncat <<'EOF'\nprose ${BYPASS}\nEOF`).status, 0, "a closed ${} does not disturb a later heredoc");
-  });
 });
