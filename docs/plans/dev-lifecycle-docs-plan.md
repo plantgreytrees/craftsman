@@ -344,7 +344,7 @@ units:
       read: [scripts/lib/heredoc-allow.mjs]
       docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/landing.rules.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-narrow.test.mjs, scripts/lib/heredoc-allow.mjs]
-    arch: [ARCH-STATE-14, ARCH-STATE-13, ARCH-LAND-23, ARCH-SAFETY-03, ARCH-SAFETY-05, ARCH-DOCS-07]
+    arch: [ARCH-STATE-14, ARCH-STATE-15, ARCH-LAND-23, ARCH-SAFETY-03, ARCH-SAFETY-05, ARCH-DOCS-07]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-evidence-flow
     scope_id: fix-evidence-flow
