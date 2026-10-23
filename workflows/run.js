@@ -115,9 +115,10 @@ function dead(u, role) {
 async function reviewLoop(done, u) {
   if (!done || done.status !== 'IMPLEMENTED') return done || dead(u, 'implement')
   let head = done
+  const fixes = [] // every fix round's evidence, so a later review still sees an earlier round's failing run
   for (let round = 0; ; round++) {
     const review = await run('review', u, 'Review',
-      `worktree_path: ${head.worktree_path}\nevidence: ${done.evidence}${head === done ? '' : `\nfix round: ${head.evidence}`}`)
+      `worktree_path: ${head.worktree_path}\nevidence: ${done.evidence}${fixes.map((e, i) => `\nfix round ${i + 1}: ${e}`).join('')}`)
     if (!review) return dead(u, 'review')
     if (review.status === 'APPROVED') return head
     if (round === MAX_FIX_ROUNDS) {
@@ -133,6 +134,7 @@ async function reviewLoop(done, u) {
       `fix round ${round + 1}\nworktree_path: ${head.worktree_path}\nfindings: ${JSON.stringify(review.findings)}`)
     if (!fixed || fixed.status !== 'IMPLEMENTED') return fixed || dead(u, 'implement')
     head = fixed
+    fixes.push(fixed.evidence)
   }
 }
 

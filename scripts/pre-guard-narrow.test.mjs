@@ -67,3 +67,12 @@ test("narrow: the lease exception covers the run's own branches only (ARCH-LAND-
   for (const c of refused) assert.ok(await forceBlocked(c, { ownBranches: own }), `refused: ${c}`);
   assert.ok(await forceBlocked(ok[0]), "without own branches the lease push is still refused");
 });
+
+test("narrow: the lease exception is refused for an expanded or double-colon ref through the real guard (round 9)", async () => {
+  const own = ownBranchesOf({ branch: "feat/unit-a" }, { plan: "docs/plans/p.md" });
+  const dollar = "$";
+  for (const c of [`X=x:main; git push --force-with-lease origin feature/p-${dollar}X`, "git push --force-with-lease origin HEAD:feature/p-x:main", "git push --force-with-lease origin HEAD:feature/p-{x,y}"]) {
+    assert.ok(await forceBlocked(c, { ownBranches: own }), `refused: ${c}`);
+  }
+  assert.equal(await forceBlocked("git push --force-with-lease origin HEAD:feat/unit-a", { ownBranches: own }), null);
+});

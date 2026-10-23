@@ -69,23 +69,33 @@ const MESSAGE_OPERAND = /\bgit\b[^;&|\n()`$]*\s(?:commit|tag)\b[^;&|\n()`$]*\s(?
 // unit branches). Another flag, a `+` refspec, no refspec or an unexpanded
 // word is no exception.
 const LEASE_OK = new Set(["-u", "--set-upstream", "-q", "--quiet", "--force-if-includes"]);
-export function leaseToOwnBranch(rest, ownBranches = []) {
-  const own = ownBranches.map((glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")}$`));
+const SAFE_WORD = /^[A-Za-z0-9._\/:=-]+$/; // nothing the shell could expand, split or glob
+const SAFE_NAME = /^[A-Za-z0-9._\/-]+$/;
+export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
+  // The words were read before the shell expands them: any expansion character in the command, or in a word, is no exception.
+  if (/[$`\\]/.test(text) || rest.some((w) => !SAFE_WORD.test(w))) return false;
+  const own = ownBranches.filter((b) => SAFE_NAME.test(b.replace(/\*/g, "x"))).map((glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[A-Za-z0-9._-]+")}$`));
   const isLease = (w) => w.startsWith("--force-w") && "--force-with-lease".startsWith(w.split("=")[0]);
   const flags = rest.filter((w) => w.startsWith("-"));
   const [remote, ...refs] = rest.filter((w) => !w.startsWith("-"));
   if (!remote || !refs.length || rest.includes(UNEXPANDED)) return false;
   if (!flags.some(isLease) || !flags.every((w) => isLease(w) || LEASE_OK.has(w))) return false;
   return refs.every((ref) => {
-    const dst = ref.slice(ref.indexOf(":") + 1).replace(/^refs\/heads\//, "");
-    return !ref.startsWith("+") && dst !== "" && own.some((re) => re.test(dst));
+    const sides = ref.split(":"); // at most one colon: git splits at the last one, so a second would hide the real destination
+    if (sides.length > 2 || !sides.every((side) => SAFE_NAME.test(side))) return false;
+    const dst = sides[sides.length - 1].replace(/^refs\/heads\//, "");
+    return dst !== "" && own.some((re) => re.test(dst));
   });
 }
 
 // The branches this run owns: its bound unit branch and `feature/<plan>-*` for its plan.
 export function ownBranchesOf(binding, scope) {
   const slug = typeof scope?.plan === "string" ? scope.plan.replace(/^.*\//, "").replace(/\.md$/, "") : "";
-  return [binding?.branch, slug && `feature/${slug}-*`].filter((b) => typeof b === "string" && b && !/^(?:main|master)$/.test(b));
+  const named = (b) => typeof b === "string" && /^[A-Za-z0-9._\/-]+$/.test(b) && !/^(?:main|master)$/.test(b);
+  const own = [];
+  if (named(binding?.branch)) own.push(binding.branch); // exact name, never a pattern
+  if (named(slug)) own.push(`feature/${slug}-*`);
+  return own;
 }
 
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
@@ -110,7 +120,7 @@ export function destructiveGit(value, ownBranches = []) {
   for (let words of gitInvocations(value)) {
     for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++) words = [...aliases.get(words[0]), ...words.slice(1)];
     const [sub, ...rest] = words;
-    if (sub === "push" && leaseToOwnBranch(rest, ownBranches)) continue;
+    if (sub === "push" && leaseToOwnBranch(rest, ownBranches, value)) continue;
     if (sub === "push" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force-with-lease", "--force-if-includes", "--mirror") || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--hard"))) return "git reset --hard";
     if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git worktree remove --force";

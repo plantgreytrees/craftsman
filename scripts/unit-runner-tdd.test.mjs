@@ -34,7 +34,7 @@ test("code-reviewer scopes the failing-run refusal to per-unit review", () => {
 });
 
 test("_shared-execution step 8 passes the implementer's evidence to code-reviewer", () => {
-  assert.match(read("commands/_shared-execution.md"), /pass `code-reviewer` the implementer's evidence \(failing run of each new test\)/);
+  assert.match(read("commands/_shared-execution.md"), /on ESCALATE \(pass it the implementer's evidence: the failing run of each new test\)/);
 });
 
 test("unit-runner review role returns CHANGES when evidence lacks the failing run", () => {
@@ -65,4 +65,12 @@ test("_shared-execution step 8 SKIP route checks the failing run", () => {
 
 test("code-reviewer excludes integration and scrutinise reviews from the failing-run refusal", () => {
   assert.match(read("agents/code-reviewer.md"), /[Ii]ntegration and scrutinise reviews are not subject/);
+});
+
+test("run.js sends every fix round's evidence on each later review, and step 8 keeps its rule pointer (round 9)", () => {
+  const run = read("workflows/run.js");
+  assert.match(run, /const fixes = \[\]/);
+  assert.match(run, /fixes\.push\(fixed\.evidence\)/);
+  assert.match(run, /fixes\.map\(\(e, i\) => `\\nfix round \$\{i \+ 1\}: \$\{e\}`\)/);
+  assert.match(read("commands/_shared-execution.md"), /ARCH rule the unit cites \(`_architecture\.md`\)/);
 });
