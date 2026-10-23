@@ -64,7 +64,7 @@ Unit runners run in Claude Code's sandbox, which denies the credential files git
 ARCH-LAND-08 is superseded by ARCH-LAND-18 (units land by `land-unit` inside the feature worktree). See [plan](./plan.md).
 
 ## Approval amendments (2026-10-23)
-ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and external posts wait for the approval page; Phase A answers authorise the docs-only plan push. ARCH-LAND-05 → 23: `--force-with-lease` only, only on branches the run created. ARCH-LAND-17 → 24: tracker publish to base happens inside an approved land. ARCH-LAND-18 → 25: cite corrected to `repo-exec.mjs:568-670`. New: ARCH-LAND-26 (retire check logs candidates, never deletes) and ARCH-LAND-27 (moved base re-merges, re-gates, lands if green). See [approval](./approval.md) for the reasoning and rejected alternatives.
+ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and external posts wait for the approval page; Phase A answers authorise the docs-only plan push. ARCH-LAND-05 → 23: `--force-with-lease` only, only on branches the run created. ARCH-LAND-17 → 24: tracker publish to base happens inside an approved land. ARCH-LAND-18 → 25: cite corrected to `repo-exec.mjs:568-670`. New: ARCH-LAND-26 (retire check logs candidates, never deletes; superseded by ARCH-LAND-30, which keeps the log and lets land-feature alone archive a plan with no referrer, commit-local and never pushed, so the external-project-board auto-archive can exist; rejected: dropping the automatic archive, as the owner chose to keep it) and ARCH-LAND-27 (moved base re-merges, re-gates, lands if green). See [approval](./approval.md) for the reasoning and rejected alternatives.
 
 ## Amendments (2026-10-23, owner-approved)
 
