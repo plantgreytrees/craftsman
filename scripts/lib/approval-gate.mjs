@@ -58,14 +58,23 @@ export function gateFeature({ config, context, input, branch }) {
 }
 
 // After a landing: mark the record landed, then log retire candidates (ARCH-LAND-26). Never throws.
-export function afterLand({ gate, sha = gate.head, mode = "merge", rows = [], context, retire }, pr) {
+export function afterLand({ gate, sha = gate.head, mode = "merge", rows = [], closing = [], context, retire }, pr) {
   if (pr?.parked) return pr;
   try { if (gate.needed) approvalLanded({ run: gate.runId, sha, mode }, { root: context.root }); } catch { /* record only */ }
   try {
-    const closed = (r) => r.status === "COMPLETE" || r.status === "CANCELLED";
+    const closed = (r) => r.status === "COMPLETE" || r.status === "CANCELLED" || closing.some((c) => c.plan === r.plan && c.unit === r.unit);
     const state = currentState(context);
     const plans = [...new Set(rows.map((r) => r.plan))].filter((p) => state.filter((r) => r.plan === p).every(closed));
     for (const c of (retire || retireCheck)(plans, mainCheckoutRoot(context.root))) if (!c.reason) logEvent({ ev: "doc_retire_candidate", plan: c.plan, referrers: c.referrers }, context);
   } catch { /* a scan error never fails the landing */ }
   return pr;
+}
+
+// A unit landing on base closes its own row (the tracker marks it MERGED next): log retire candidates (ARCH-LAND-26).
+export function afterUnitLand(result, input, context, retire) {
+  if (result?.merged && !result.parked && input.plan && input.unit) {
+    const row = { plan: input.plan, unit: input.unit };
+    afterLand({ gate: { needed: false }, rows: [row], closing: [row], context, retire });
+  }
+  return result;
 }

@@ -8,7 +8,7 @@ import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
-import { afterLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
+import { afterLand, afterUnitLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
@@ -340,7 +340,12 @@ function landMode(cfg) {
 
 // `deps.runner` replaces the host CLI runner in tests; the stdin entry point
 // never passes it.
+// ARCH-LAND-26: a unit landing also logs retire candidates.
 function merge(context, input, info, deps = {}) {
+  return afterUnitLand(mergeOnly(context, input, info, deps), input, context, deps.retireCheck);
+}
+
+function mergeOnly(context, input, info, deps = {}) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
   const cfg = loadConfig(context);
@@ -358,8 +363,7 @@ function merge(context, input, info, deps = {}) {
   if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
   if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
-  // Otherwise the merge lands in the checkout that has base: this root, or
-  // the other worktree holding it — never a dirty or mid-merge one.
+  // Else merge where base is checked out (this root or another worktree), never dirty.
   const at = holder || context.root;
   if (holder && (run(holder, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })
     || run(holder, ["status", "--porcelain", "--untracked-files=no"]))) {
