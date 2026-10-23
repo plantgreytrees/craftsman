@@ -7,6 +7,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Target 3072; set to the measured size and only lowered from here.
+const CAP_BYTES = 3072;
 const SESSION_CONTEXT = path.join(ROOT, "session-context.mjs");
 
 function run(script, dir, input) {
@@ -85,5 +87,14 @@ test("session-context: the HAND-OFF line carries the plan's level and adds no li
     const bare = context();
     assert.match(bare, /plan unindexed; unit u;/);
     assert.equal(withLevel.split("\n").length, bare.split("\n").length, "no new lines");
+  });
+});
+
+test("ARCH-SLIM-10: the SessionStart additionalContext stays under its byte cap", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const out = JSON.parse(run(SESSION_CONTEXT, dir, { session_id: "cap" }).stdout);
+    const bytes = Buffer.byteLength(out.hookSpecificOutput.additionalContext);
+    assert.ok(bytes <= CAP_BYTES, `additionalContext is ${bytes} bytes, cap ${CAP_BYTES}`);
   });
 });

@@ -20,13 +20,20 @@ const EVENTS = [
 
 test("stats: root context per run — samples, peak, final and peak percent per sid", () => {
   assert.deepEqual(rootContextRows(EVENTS), [
-    { sid: "root-a", samples: 3, peak: 90_000, final: 60_000, peakPercent: 45, units: ["telemetry", "baseline-run"] },
-    { sid: "root-b", samples: 1, peak: 10_000, final: 10_000, peakPercent: 5, units: [] },
+    { sid: "root-a", samples: 3, peak: 90_000, final: 60_000, peakPercent: 45, baseline: null, growth: null, units: ["telemetry", "baseline-run"] },
+    { sid: "root-b", samples: 1, peak: 10_000, final: 10_000, peakPercent: 5, baseline: null, growth: null, units: [] },
   ]);
   const section = rootContextSection(EVENTS);
   assert.match(section, /^Root context per run: 2 sessions/);
   assert.match(section, /root-a\s+3 samples · peak 90000 · final 60000 · peak 45% · units telemetry,baseline-run/);
   assert.match(rootContextSection([]), /No context samples yet/);
+});
+
+test("stats: baseline, peak and growth per session; the baseline is not a sample", () => {
+  const events = [{ ...ctx("s", 12_000, 6), phase: "baseline" }, ctx("s", 30_000, 15), ctx("s", 50_000, 25), { ...ctx("s", 99, 1), phase: "baseline" }];
+  const [row] = rootContextRows(events);
+  assert.deepEqual([row.baseline, row.peak, row.growth, row.samples], [12_000, 50_000, 38_000, 2]);
+  assert.match(rootContextSection(events), /baseline 12000 · growth 38000/);
 });
 
 test("stats: the CLI prints the root context section from events.jsonl", () => {
