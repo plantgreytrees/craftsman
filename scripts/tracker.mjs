@@ -554,7 +554,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (input.action === "lookup") output = lookupArchive(input, context);
     else if (input.action === "publish") import("./tracker-publish.mjs").then((m) => process.stdout.write(JSON.stringify(m.publishTracker(input, context)) + "\n")).catch((e) => { process.stderr.write(`craftsman: tracker failed: ${e.message}\n`); process.exitCode = 2; });
     else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, lookup, or publish");
-    if (output) process.stdout.write(JSON.stringify(output) + "\n");
+    if (input.action !== "publish") process.stdout.write(JSON.stringify(output ?? null) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
   } catch (error) {

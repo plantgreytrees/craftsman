@@ -258,3 +258,17 @@ test("the approval CLI no longer accepts the landed action", () => {
   assert.equal(out.status, 1);
   assert.match(out.stdout, /unknown action/);
 });
+
+test("prepare keeps landed_sha, landed_mode and published_at in history when superseding an open-pr record", () => {
+  const s = setup();
+  const o = { root: s.root };
+  prepare(s.input, { root: s.root, runners: s.runners });
+  check({ run: "p-f", row: { choice: "open-pr", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o);
+  landed({ run: "p-f", sha: "abc", mode: "open-pr" }, o);
+  markPublished("p-f", o);
+  prepare({ ...s.input, head_sha: s.B }, { root: s.root, runners: s.runners });
+  const h = s.rec().history.at(-1);
+  assert.equal(h.landed_sha, "abc");
+  assert.equal(h.landed_mode, "open-pr");
+  assert.ok(h.published_at);
+});

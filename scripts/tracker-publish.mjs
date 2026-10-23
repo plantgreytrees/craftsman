@@ -88,7 +88,10 @@ export function publishTracker(input = {}, context = projectContext(input.projec
     lock = acquireLock(info, { ...input, unit: input.unit || "tracker-publish" });
     deps.afterLock?.();
     // The token may have been spent while this publish waited for the lock.
-    if (mode === "on-approve" && input.manual !== true && !runLanded(context, input.run)) return { published: false, mode };
+    if (mode === "on-approve" && input.manual !== true && !runLanded(context, input.run)) {
+      logEvent({ ev: "tracker_publish_token_spent", run: input.run }, context);
+      return { published: false, mode, refused: "token spent" };
+    }
     temp = path.join(info.common_git_dir, ".craftsman", "publish", `${base.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
     let reason = "";
     for (let attempt = 1; attempt <= 2; attempt++) {

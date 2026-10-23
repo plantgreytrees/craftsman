@@ -363,6 +363,8 @@ test("publish atomic: a token spent during the lock wait leaves the second publi
   const before = git(bare, "rev-parse", "main");
   const result = publishTracker({ approved: true, run: "r1" }, a, { afterLock: () => spend(a, "r1") });
   assert.equal(result.published, false);
+  assert.equal(result.refused, "token spent");
+  assert.match(events(a), /tracker_publish_token_spent/);
   assert.equal(git(bare, "rev-parse", "main"), before);
 });
 
