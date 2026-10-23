@@ -39,6 +39,7 @@ function project() {
   spawnSync("tar", ["-cf", path.join(dir, "stage", "root.tar"), "-C", path.join(dir, "stage"), ".claude"]);
   spawnSync("tar", ["-cf", path.join(dir, "stage", "off.tar"), "-C", path.join(dir, "stage"), "off"]);
   spawnSync("zip", ["-q", "off.zip", "off"], { cwd: path.join(dir, "stage") });
+  spawnSync("zip", ["-q", "s.zip", "settings.json"], { cwd: path.join(dir, "stage") });
   return { dir, home, env: { ...process.env, CLAUDE_PROJECT_DIR: dir, HOME: home, USERPROFILE: home, CLAUDE_CODE_SESSION_ID: "claims" },
     clean() { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); } };
 }
@@ -106,6 +107,9 @@ const CLAIMS = [
   ...(have("tar") ? ["tar -xf stage/off.tar --warning=none -C src -C ../.craftsman", "tar -xf stage/off.tar --no-overwrite-dir -C src -C ../.craftsman", "tar -xf stage/off.tar -C src --dir=../.craftsman",
     "tar -xvC.craftsman -f stage/off.tar", "tar -xC.craftsman -f stage/off.tar", "tar -xf stage/off.tar --transform=s,^,.craftsman/,"] : []),
   ...(have("unzip") && have("zip") ? ["unzip -od.craftsman stage/off.zip", "unzip -qod.craftsman stage/off.zip"] : []),
+  // round 9: words after the zipfile or after -x are patterns, not options, so they must not switch the destination check off
+  ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip off -l -d .craftsman", "unzip -o stage/off.zip -d .craftsman -x -c", "unzip -o stage/off.zip -d .craftsman -x -h",
+    "unzip -o stage/s.zip settings.json -v -d .claude"] : []),
   ...(have("tar") ? ["tar -xvC .craftsman -f stage/off.tar", "tar -x --file=stage/off.tar --dir=.craftsman", "tar xfC stage/off.tar .craftsman", "tar -xvC .claude -f stage/x.tar"] : []),
   ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip -d.craftsman", "unzip -qo stage/off.zip -d .craftsman", "unzip -od .craftsman stage/off.zip"] : []),
   ...(have("gawk") ? [`gawk -iinplace '{sub("dark","LIGHT");print}' .claude/settings.json`, `gawk --include inplace '{sub("dark","LIGHT");print}' .claude/settings.json`] : []),
