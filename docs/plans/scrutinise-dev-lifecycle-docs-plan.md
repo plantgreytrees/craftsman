@@ -4,7 +4,7 @@ goal: The approval flow, ledger guards, gate lookup and doc budgets from the sli
 level: feature
 parent: dev-lifecycle-docs-plan
 priority: P1
-classification: in-scope # /scrutinise rounds 1 (630b4de..80719a8), 2 (630b4de..a72e66a) and 3 (630b4de..9a9fee0) of dev-lifecycle-docs-plan, every finding verified by root
+classification: in-scope # /scrutinise rounds 1 (630b4de..80719a8), 2 (630b4de..a72e66a) 3 (630b4de..9a9fee0) and 4 (630b4de..f317620) of dev-lifecycle-docs-plan, every finding verified by root
 tracker_rows: []
 guards:
   blast_radius: done
@@ -203,6 +203,19 @@ units:
       write: [scripts/approval.mjs, scripts/approval.test.mjs, scripts/lib/approval-gate.mjs, scripts/repo-exec-approval.test.mjs]
     arch: [ARCH-APPROVAL-03, ARCH-APPROVAL-04, ARCH-ENGINE-20, ARCH-LAND-27]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-cli-contract
+    scope_id: fix-cli-contract
+    project: .
+    depends_on: []
+    module: scripts/tracker.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/tracker.mjs, scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs, scripts/tracker-publish-cli.test.mjs, scripts/approval.mjs, scripts/approval.test.mjs]
+      docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/approval.rules.md, docs/architecture/engine.rules.md, docs/architecture/docs.rules.md]
+      write: [scripts/tracker.mjs, scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs, scripts/tracker-publish-cli.test.mjs, scripts/approval.mjs, scripts/approval.test.mjs]
+    arch: [ARCH-TRACKER-11, ARCH-LAND-24, ARCH-APPROVAL-03, ARCH-ENGINE-13, ARCH-ENGINE-20, ARCH-DOCS-14]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Fix round 1 for the slim-Craftsman programme
@@ -320,12 +333,22 @@ Depends on: none
 - [ ] 14.2 `prepare` supersedes a `landed` record whose `landed_mode` is `open-pr` (history entry, new `requested` record) and refuses only a base-merge landing → accept: tests pass
 - [ ] 14.3 Remove `landed` from the CLI `ACTIONS` (repo-exec reaches it through the module); `afterLand` logs `approval_landed_refused {run, reason}` when `approvalLanded` returns not-ok → accept: tests pass
 
+### Step 15 — fix-cli-contract (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+- [ ] 15.1 Add tests first in `scripts/tracker-publish-cli.test.mjs`: `tracker.mjs lookup` for an unknown plan prints exactly `null` and exits 0; the `manual:true` publish asserts `status === 0` and one JSON line, spawns `process.execPath`, and a case with a bare remote and a landed record asserts `published:true`, `published_at` set and a second call refused → accept: the lookup test is red before the change (empty stdout)
+- [ ] 15.2 In `scripts/tracker.mjs` print the result unless the action is `publish` (which prints for itself), so a `null` result is printed → accept: the new tests pass, the `autonomous-e2e-loop` unit-context test stays green
+- [ ] 15.3 `tracker-publish.mjs` returns `refused: "token spent"` and logs `tracker_publish_token_spent {run}` when the lock re-check finds the token spent → accept: a test in `tracker-publish.test.mjs`
+- [ ] 15.4 `approval.mjs` `prepare` keeps `landed_sha`, `landed_mode` and `published_at` in the `history[]` entry it writes when it supersedes a record → accept: a test in `approval.test.mjs`
+
 ## Sequencing
 Independent now: fix-gate-lookup, fix-approval-record, fix-publish-trust, fix-budget-growth. Then fix-approval-scan (after record), fix-sync-guard and fix-stats-and-prose (after publish-trust), and fix-land-race last (after gate-lookup and approval-scan) because it shares `repo-exec.mjs` and `approval-gate.mjs`.
 
 Round 2 sequencing: fix-approval-hardening and fix-merge-retire are independent; fix-publish-single-use follows fix-approval-hardening because both edit `approval.mjs`.
 
 Round 3 units (fix-publish-cli, fix-publish-atomic, fix-approval-reprepare) touch disjoint files and run in parallel.
+
+Round 4 adds one unit, fix-cli-contract; it has no dependencies.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - `findGateCommand` takes the first existing marker in map order and `loadConfig` deep-merges defaults first — `scripts/repo-exec.mjs:315-326`, `scripts/lib/core.mjs:573-581`
@@ -337,6 +360,7 @@ Round 3 units (fix-publish-cli, fix-publish-atomic, fix-approval-reprepare) touc
 - Reproduced by root: a project declaring only `package.json: npm test` still resolves `just check`; one appended line to `docs/plans/dev-lifecycle-docs-plan.md` fails lint
 - Round 2: `runLanded` accepts any landed record and never consumes it — `scripts/tracker-publish.mjs:65`; `input.archived` disables the dropped-key guard — `scripts/tracker-publish.mjs:33`; `merge()` has no retire check — `scripts/repo-exec.mjs` (`merge`); `commands/_approval.md:13` documents `{approved:true}` without `run`; `head_sha` is stored unvalidated — `scripts/approval.mjs:96`
 - Round 3: `tracker.mjs publish` exits 13 (unsettled top-level await: `tracker-publish.mjs` imports `tracker.mjs` while it is still evaluating) — `scripts/tracker.mjs:558`, reproduced by root; `prepare` refuses a `landed` record, and an open-pr landing marks it `landed` at once — `scripts/approval.mjs:133`, `scripts/lib/approval-gate.mjs:61-63`; `runLanded` is checked before the base lock — `scripts/tracker-publish.mjs:69,101`
+- Round 4: `if (output)` hides the `null` that `lookupArchive` returns on a miss, so `tracker.mjs lookup` prints nothing — `scripts/tracker.mjs:557`, reproduced by root; the callers that need `null` are `commands/auto.md`, `commands/orchestrate.md`, `commands/instruction.md`
 
 CONSUMERS:
 - `findGateCommand` → `scripts/repo-exec.mjs` (merge gate), `scripts/snapshot.mjs`, `scripts/tool-slots.test.mjs`
