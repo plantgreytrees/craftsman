@@ -12,3 +12,10 @@ test("neither manifest carries a version key, so installs track commits (ARCH-MO
   assert.equal("version" in market, false);
   for (const entry of market.plugins) assert.equal("version" in entry, false);
 });
+
+test("metadata.release names the newest released CHANGELOG heading (ARCH-MOD-06)", () => {
+  const changelog = fs.readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+  const newest = /^## \[(\d+\.\d+\.\d+)\]/m.exec(changelog)?.[1];
+  assert.ok(newest, "CHANGELOG has a released heading");
+  assert.equal(read("plugin.json").metadata.release, newest);
+});
