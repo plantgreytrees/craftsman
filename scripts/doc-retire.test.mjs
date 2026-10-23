@@ -772,3 +772,100 @@ test("doc-retire: without an archive project the event has no archive field and 
   assert.ok(!("archive" in events(context).find((e) => e.ev === "doc_retired")));
   assert.ok(!/ · archive /.test(fs.readFileSync(archivePath(context), "utf8")));
 });
+
+// --- retire-rewrite: dry run, digest-confirmed rewrite, rollback, events ---
+const PROSE = { "docs/plans/other.md": "# other\nline two\nsee docs/plans/alpha.md here\n", "docs/ideas/idea.md": "related: alpha\n" };
+const tree = (context) => Object.fromEntries(Object.keys(PROSE).map((f) => [f, fs.readFileSync(path.join(context.root, f), "utf8")]));
+
+test("doc-retire rewrite: dry run lists each line with a pending pointer and writes nothing", () => {
+  const context = repo({ files: PROSE });
+  withArchive((archive) => {
+    const before = { snap: snapshot(context), files: tree(context), archive: fs.readdirSync(archive) };
+    const out = retire({ plan: PLAN, dry_run: true }, context);
+    assert.equal(out.dry_run, true, JSON.stringify(out));
+    assert.equal(out.rewrites.length, 2);
+    const other = out.rewrites.find((r) => r.file === "docs/plans/other.md");
+    assert.equal(other.line, 3);
+    assert.equal(other.before, "see docs/plans/alpha.md here");
+    assert.match(other.after, /^see archive:[^/]+\/plans\/alpha@pending here$/);
+    assert.match(out.rewrites.find((r) => r.file === "docs/ideas/idea.md").after, /^related: archive:.+\/plans\/alpha@pending$/);
+    assert.deepEqual(snapshot(context), before.snap);
+    assert.deepEqual(tree(context), before.files);
+    assert.deepEqual(fs.readdirSync(archive), before.archive);
+  });
+});
+
+test("doc-retire rewrite: a missing digest refuses and lists the referrers, changing nothing", () => {
+  const context = repo({ files: PROSE });
+  withArchive(() => {
+    const before = snapshot(context);
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.refused, true);
+    assert.deepEqual(out.referrers, ["docs/ideas/idea.md", "docs/plans/other.md"]);
+    assert.deepEqual(snapshot(context), before);
+    assert.deepEqual(tree(context), PROSE);
+  });
+});
+
+test("doc-retire rewrite: a stale digest refuses", () => {
+  const context = repo({ files: PROSE });
+  withArchive(() => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    fs.writeFileSync(path.join(context.root, "docs/ideas/idea.md"), "related: alpha, extra\n");
+    run(context.root, "commit", "-qam", "edit");
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.refused, true);
+    assert.match(out.reason, /stale/);
+    assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+  });
+});
+
+test("doc-retire rewrite: the matching digest rewrites to the archive sha in the removal commit and logs events", () => {
+  const context = repo({ files: PROSE });
+  withArchive((archive) => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    const asha = run(archive, "rev-parse", "HEAD").trim();
+    const files = tree(context);
+    assert.match(files["docs/plans/other.md"], new RegExp(`see archive:[^/]+/plans/alpha@${asha} here`));
+    assert.match(files["docs/ideas/idea.md"], new RegExp(`related: archive:[^/]+/plans/alpha@${asha}\n`));
+    const changed = run(context.root, "show", "--name-only", "--format=", "HEAD");
+    assert.ok(changed.includes("docs/plans/other.md") && changed.includes("docs/ideas/idea.md") && changed.includes(PLAN));
+    assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+    const logged = events(context).filter((e) => e.ev === "archive_rewrite");
+    assert.deepEqual(logged.map((e) => e.file).sort(), ["docs/ideas/idea.md", "docs/plans/other.md"]);
+    assert.ok(logged.every((e) => e.plan === PLAN));
+  });
+});
+
+test("doc-retire rewrite: a rule, test or top-level doc citation still refuses even with a digest", () => {
+  for (const [file, text] of [["docs/architecture/x.rules.md", "cite: docs/plans/alpha.md\n"], ["scripts/x.test.mjs", "// docs/plans/alpha.md\n"], ["NOTES.md", "docs/plans/alpha.md\n"]]) {
+    const context = repo({ files: { ...PROSE, [file]: text } });
+    withArchive(() => {
+      const dry = retire({ plan: PLAN, dry_run: true }, context);
+      assert.equal(dry.refused, true);
+      assert.ok(dry.referrers.includes(file));
+      const out = retire({ plan: PLAN, confirm_rewrites: "anything" }, context);
+      assert.equal(out.refused, true);
+      assert.ok(out.referrers.includes(file));
+      assert.deepEqual(tree(context), PROSE);
+    });
+  }
+});
+
+test("doc-retire rewrite: a failing commit restores every rewritten file", () => {
+  const context = repo({ files: PROSE });
+  withArchive(() => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    const hook = path.join(context.root, ".git", "hooks", "pre-commit");
+    fs.writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const before = snapshot(context);
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.refused, true);
+    assert.deepEqual(snapshot(context), before);
+    assert.deepEqual(tree(context), PROSE);
+    assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+    assert.equal(events(context).some((e) => e.ev === "archive_rewrite"), false);
+  });
+});
