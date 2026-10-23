@@ -174,11 +174,11 @@ test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
   const human = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.md"), "utf8");
   const rule = (id) => rules.split("\n").find((l) => l.includes(`**${id}**`)) || "";
-  for (const needle of ["never skipped", "no-op", "permission prompt", "read, printf -v", "allowlist", "refused outright", "select NAME in", "always requires", "leading options"]) {
+  for (const needle of ["never skipped", "no-op", "permission prompt", "read, printf -v", "allowlist", "refused outright", "select NAME in", "always requires", "plain letter cluster", "TAR_OPTIONS"]) {
     assert.ok(rule("ARCH-SAFETY-05").includes(needle), `ARCH-SAFETY-05 names: ${needle}`);
   }
   for (const needle of ["craftsman.project.json", "PROJECT_CONFIG_FILES"]) assert.ok(rule("ARCH-SAFETY-11").includes(needle), `ARCH-SAFETY-11 names: ${needle}`);
-  for (const needle of ["no-op", "permission prompt", "allowlist", "refused outright", "doc-retire", "select NAME in", "leading options"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
+  for (const needle of ["no-op", "permission prompt", "allowlist", "refused outright", "doc-retire", "select NAME in", "plain letter cluster", "TAR_OPTIONS"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
 });
 
 // Round 7 (44.x): an extraction with an option the allowlist cannot read is refused outright, whatever it names, and says why.
