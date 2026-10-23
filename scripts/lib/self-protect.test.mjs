@@ -34,6 +34,13 @@ test("self-protect: SELF_NEVER holds the craftsman markers, the scope files and 
   for (const rel of [".gitignore", ".git/HEAD", "src/git/config", ".github/hooks/x"]) assert.ok(!hit(rel), rel);
 });
 
+test("self-protect: a linked worktree's own git config in the main .git is held too", () => {
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/worktrees/wt/config.worktree", ".git/worktrees/wt/config", "a/.git/worktrees/x y/config.worktree"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/worktrees/wt/HEAD", ".git/worktrees/wt/gitdir", "src/worktrees/wt/config"]) assert.ok(!hit(rel), rel);
+  for (const text of [".git/worktrees/wt/config.worktree", ".git/worktrees/wt/config"]) assert.match(text, NEVER_TEXT, text);
+});
+
 test("self-protect: NEVER_TEXT is derived from SELF_NEVER and catches every spelling of a never-written path (18.3)", () => {
   for (const text of [".craftsman/off", "x > .craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/s1/doc-write", ".craftsman/sessions/s1/commands.json",
     ".craftsman/sessions/a/b/goal-tokens.json", ".craftsman/sessions/s1/scope-abc.json", ".craftsman/sessions/s1/x-worktree-binding.json", ".git/config", "a/b/.git/config",

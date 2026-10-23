@@ -21,6 +21,6 @@ You implement one plan unit end to end. Your prompt names that unit, its files, 
 **Verification loop** — use the build/test/format commands the repo actually defines (discover them, do not invent your own):
 1. Build the smallest scope covering your change; it must be clean before you finish.
 2. Format if the repo enforces formatting.
-3. Run the unit's tests, and add or adjust tests so every acceptance criterion is asserted for real — no vacuous passes, no skipped or weakened tests to get green.
+3. Add tests so every criterion is asserted for real, each failing before your change (Reviewer refuses a unit whose new test never failed); none skipped/weakened.
 
 **Return** raw facts: files changed, tests added or updated, each gate command with pass/fail output, and anything you could not complete with the reason. No prose padding.

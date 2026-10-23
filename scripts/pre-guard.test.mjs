@@ -324,6 +324,31 @@ test("pre-guard: a linked worktree session cannot write the main checkout's sess
   }
 });
 
+test("pre-guard: a sibling worktree outside the main checkout is held the same, its ordinary files are not, and so is its own git config", () => {
+  const { main } = gitRepoWithWorktree();
+  const sibling = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-sibling-"))), "sib");
+  try {
+    spawnSync("git", ["-C", main, "worktree", "add", "-q", "-b", "sib", sibling], { encoding: "utf8" });
+    const ask = (tool_name, tool_input) => run(GUARD, sibling, { session_id: "sib-state", tool_name, tool_input });
+    for (const rel of ["sessions/s1/scope.json", "sessions/s1/commands.json", "off"]) {
+      assert.equal(ask("Write", { file_path: path.join(main, ".craftsman", rel), content: "{}" }).status, 2, `Write ${rel}`);
+    }
+    for (const command of [`cd ${main}/.craftsman && printf x > off`, `printf x > ${main}/.craftsman/sessions/s2/scope.json`, `rm -rf ${main}/.craftsman`]) {
+      assert.equal(ask("Bash", { command }).status, 2, command);
+    }
+    // the worktree's own config in the main .git decides which hooks run for it
+    const own = path.join(main, ".git", "worktrees", "sib", "config.worktree");
+    assert.equal(ask("Write", { file_path: own, content: "[core]\n\thooksPath = /x\n" }).status, 2, "Write config.worktree");
+    assert.equal(ask("Bash", { command: `printf x > ${own}` }).status, 2, "redirect config.worktree");
+    // an ordinary file in the main checkout, and a build directory, are not made protected
+    assert.equal(ask("Write", { file_path: path.join(main, "src", "a.js"), content: "x" }).status, 0, "Write src/a.js");
+    assert.equal(ask("Bash", { command: "rm -rf build" }).status, 0, "rm -rf build");
+  } finally {
+    fs.rmSync(main, { recursive: true, force: true });
+    fs.rmSync(path.dirname(sibling), { recursive: true, force: true });
+  }
+});
+
 test("pre-guard: a linked worktree's copy of TRACKER.md is blocked and points at the main checkout's", () => {
   const { main, worktree } = gitRepoWithWorktree();
   try {

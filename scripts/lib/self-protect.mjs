@@ -20,6 +20,8 @@ export const SELF_NEVER = Object.freeze([
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*",
   // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
   "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
+  // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git
+  "**/.git/worktrees/*/config", "**/.git/worktrees/*/config.worktree",
 ]);
 
 // A glob as a case-insensitive RegExp: the filesystems this runs on (default macOS, Windows) reach `.Claude` as `.claude`.

@@ -2,6 +2,7 @@
 // Node-only, zero npm dependencies (Claude Code already requires Node).
 // Derived from the craftsman v0.2 engine. Fully stack-agnostic; behaviour is config-driven.
 import { execFile, execFileSync } from "node:child_process";
+import { applyUserConfig } from "./user-config.mjs";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -571,7 +572,7 @@ export function loadConfig(context = null) {
   // whose craftsman.config.json IS the shipped default (this plugin's own), which cannot hold project-only values.
   // An absent file adds nothing; a malformed one is ignored with a warning.
   const root = context?.root || PROJECT_ROOT;
-  let merged = defaults;
+  let merged = applyUserConfig(defaults, process.env);
   for (const name of PROJECT_CONFIG_FILES) {
     const file = path.join(root, name);
     if (!fs.existsSync(file)) continue;
