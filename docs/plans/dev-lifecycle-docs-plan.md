@@ -307,6 +307,32 @@ units:
       write: [agents/code-reviewer.md, scripts/unit-runner-tdd.test.mjs]
     arch: [ARCH-ENGINE-21, ARCH-ENGINE-04, ARCH-SLIM-02]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-heredoc-strict
+    scope_id: fix-heredoc-strict
+    project: .
+    depends_on: []
+    module: scripts/lib/heredoc-allow.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/shell-words.mjs, scripts/lib/heredoc-allow.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/lib/heredoc-allow.mjs, scripts/pre-guard-narrow.test.mjs]
+    arch: [ARCH-STATE-14, ARCH-STATE-13, ARCH-LAND-23, ARCH-SAFETY-03, ARCH-SAFETY-05, ARCH-DOCS-07]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-red-run-evidence
+    scope_id: fix-red-run-evidence
+    project: .
+    depends_on: []
+    module: agents/code-reviewer.md
+    language: markdown
+    security: normal
+    scope:
+      read: [agents/code-reviewer.md, agents/unit-runner.md, workflows/run.js, commands/_shared-execution.md, scripts/doc-size-policy.mjs, scripts/unit-runner-tdd.test.mjs]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/slim.rules.md, docs/architecture/plan.rules.md]
+      write: [agents/code-reviewer.md, agents/unit-runner.md, workflows/run.js, commands/_shared-execution.md, scripts/unit-runner-tdd.test.mjs, scripts/wiring.test.mjs]
+    arch: [ARCH-ENGINE-21, ARCH-ENGINE-04, ARCH-ENGINE-12, ARCH-SLIM-02, ARCH-PLAN-07]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -478,10 +504,28 @@ Finding (round 6, Warning): ARCH-ENGINE-21 says the reviewer refuses a unit whos
 - [ ] 22.1 Add to `scripts/unit-runner-tdd.test.mjs` first: `agents/code-reviewer.md` carries the refusal sentence (the unit's evidence names the failing run of each new test, else the review returns a Critical finding) → accept: red before the change
 - [ ] 22.2 Add that sentence to `agents/code-reviewer.md` by trading bytes inside the file so its `FILE_CAPS` entry (2564) does not rise → accept: the test and `doc-size-policy` green
 
+### Step 23 — fix-heredoc-strict (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+`pre-guard.mjs` (93 KB) is write-listed, not read-listed: read it in parts. Findings (round 7, Warning): (a) `sort` is on the `heredoc-allow.mjs` allowlist but `sort` can run a program (a compress-program option) and so run a heredoc body; (b) `stripHeredocs` does not track `${...}` parameter expansion, so `<<TAG}` inside `${x:-...}` (literal to bash) is read as a heredoc start and the lines after it, which bash runs, are stripped from the bypass check.
+- [ ] 23.1 Add tests first in `scripts/pre-guard-narrow.test.mjs` (flag spelled in two parts): a heredoc fed to `sort` with a program option is refused; the `${x:-<<EOF}` shape with the flag on the following line is refused; refused cases for `$( )`, backticks, `<( )`/`>( )`, `;`-chained shells, path-qualified heads (`/bin/sh`), leading assignments (`FOO=1 sh`) and `git -C dir commit`/`git -c k=v commit`; the allowed cases stay allowed (`git commit -F - <<EOF` prose, `cat <<EOF`, `cat > notes.txt <<EOF`, `tee f <<EOF`) → accept: the sort and `${}` cases fail on the current code
+- [ ] 23.2 Shrink the allowlist in `scripts/lib/heredoc-allow.mjs` to the consumers that cannot run a program: `cat`, `tee`, and `git commit|tag|notes` (drop `sort`, `echo`, `printf`, `true`, `wc`, `uniq`, `head`, `tail`) → accept: tests green
+- [ ] 23.3 Make `stripHeredocs` in `pre-guard.mjs` treat `${` … matching `}` as one opaque word in the command and double-quote contexts, as it already does for `$((` and `$[`; an unterminated `${` keeps the rest of the text in view (fail closed) → accept: tests green, `pre-guard.test.mjs` unchanged and green
+
+### Step 24 — fix-red-run-evidence (., markdown, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+Findings (round 7, Warning): the `agents/code-reviewer.md` refusal expects red-run evidence that no caller passes (`commands/_shared-execution.md` step 8 gives it the diff only; integration and scrutinise reviews have no unit evidence), and on the `/auto` workflow path `workflows/run.js` sends the review role only `worktree_path`; ARCH-PLAN-07's check names a no-fourth-profile-file assertion that does not exist.
+- [ ] 24.1 Add tests first in `scripts/unit-runner-tdd.test.mjs`: the `code-reviewer.md` sentence is scoped to per-unit review; `_shared-execution.md` step 8 tells root to pass the implementer's evidence (the failing run of each new test) to `code-reviewer`; the `## review` role in `agents/unit-runner.md` returns `CHANGES` when the evidence lacks that failing run; the review prompt in `workflows/run.js` carries the implementer's evidence → accept: red before the change
+- [ ] 24.2 Make those four edits, trading bytes inside each `.md` so no `FILE_CAPS` entry rises (`_shared-execution.md` is 12764 of 12769) → accept: the tests and `doc-size-policy` green
+- [ ] 24.3 Add to `scripts/wiring.test.mjs` the ARCH-PLAN-07 assertion that no fourth profile file exists: no tracked file named `craftsman.profile.*`, `.claude/profile.*` or a root or `docs/` `profile.json|md|yaml` → accept: the test passes and fails when such a file is added to a temp repo fixture
+
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
 
 Round 6 units (fix-bypass-allowlist, fix-reviewer-red) touch disjoint files and run in parallel. The `craftsman.project.json` edit of 9.1/20.4 waits for the owner to run /craftsman:upgrade and /reload-plugins (the installed hook is older than scripts/scope.mjs on main, so no session can record /orchestrate, and both config files are self-protected).
+
+Round 7 units (fix-heredoc-strict, fix-red-run-evidence) touch disjoint files and run in parallel.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
