@@ -665,11 +665,12 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       }
       denyArchive(verb, bad);
     } else if (verb === "unzip") {
-      // Only the leading option words count (those before the zipfile): what follows the zipfile is member patterns, and what follows -x
-      // is exclusion patterns, which unzip does not read as options and which must not switch the destination check off.
-      const leading = [];
-      for (const a of rest) { if (!a.startsWith("-")) break; leading.push(a); }
-      if (leading.some((a) => /^-(?!\w*d)[A-Za-z]*[ltpZvczh][A-Za-z]*$/.test(a))) return; // list, test, pipe, zipinfo, verbose, stdout, comment, help: nothing is written
+      // A list-only flag (list, test, pipe, zipinfo, verbose, stdout, comment, help) writes nothing, but only when it is certain to apply:
+      // every dash-word in the command is a plain letter cluster with no `d` and no `x`. A negated flag (`--l`, `-o-l` cancel `-l`), a
+      // destination, an exclusion list, a long option or a pattern that starts with `-` all make the skip not taken, and the allowlist
+      // below decides, which refuses what it cannot read.
+      const dashWords = rest.filter((a) => a.startsWith("-"));
+      if (dashWords.every((a) => /^-[A-Za-z]+$/.test(a) && !/[dx]/.test(a)) && dashWords.some((a) => /[ltpZvczh]/.test(a))) return;
       // The same allowlist: clusters of argument-free letters, `-d DIR` / `-dDIR`, and operands. Anything else leaves the destination
       // unknown, and the command is refused.
       const dirs = [];
