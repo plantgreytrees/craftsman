@@ -401,11 +401,13 @@ export function buildUpdatePlan(root, options = {}) {
   // Plans record the format release, not the build: a commit-tracked install must not rewrite every plan on each update.
   const plans = planDocuments(root, plan.plugin.version?.split("+")[0] ?? null);
   Object.assign(plan.files, plans.files);
+  const loopRule = path.join(root, ".claude", "rules", "craftsman-loop.md");
+  if (!fs.existsSync(loopRule)) plan.files[loopRule] = "# Craftsman loop\n<!-- Mechanism: craftsman.config.json. -->\n<!-- Judgement: this file. -->\n<!-- Invariants: docs/architecture/*.rules.md. -->\n";
   plan.changes = changedFiles(plan.files);
   plan.ready = plan.changes.length === 0;
   plan.mode = "update";
   plan.update = {
-    scope: ["craftsman.config.json", ".claude/CLAUDE.md", ".claudeignore", ".gitignore"],
+    scope: ["craftsman.config.json", ".claude/CLAUDE.md", ".claude/rules/craftsman-loop.md", ".claudeignore", ".gitignore"],
     pluginVersion: plan.plugin.version,
     pluginFiles: plan.plugin.files.length,
     pluginFileList: plan.plugin.files,
