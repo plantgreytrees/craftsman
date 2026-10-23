@@ -47,6 +47,24 @@ function scanReferrers(context, plan, slug) {
   return [...hits];
 }
 
+// Read-only referrer check for all-closed plans (ARCH-DOCS-02): one {plan, referrers[], reason?}
+// per plan. Never throws and mutates nothing; a scan error yields no referrers plus a reason.
+export function retireCheck(plans, root) {
+  const list = Array.isArray(plans) ? plans : [];
+  return list.map((plan) => {
+    try {
+      if (typeof plan !== "string" || !plan.trim()) return { plan, referrers: [], reason: "invalid plan path" };
+      const slug = path.posix.basename(plan, ".md");
+      const hits = scanReferrers({ root: path.resolve(String(root)) }, plan, slug);
+      if (hits === null) return { plan, referrers: [], reason: "referrer scan failed" };
+      const referrers = hits.filter((f) => f !== plan && !/^docs\/plans\/TRACKER[^/]*\.md$/.test(f)).sort();
+      return { plan, referrers };
+    } catch (error) {
+      return { plan, referrers: [], reason: `referrer scan failed: ${error?.message ?? error}` };
+    }
+  });
+}
+
 // Fallback goal for a goal-less plan: front-matter `goal:`, else the H1 (ARCH-DOCS-09).
 function planDocGoal(context, plan) {
   let text = "";
