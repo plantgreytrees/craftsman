@@ -58,9 +58,9 @@ export function committedKeys(doc, committedJsonl) {
 }
 
 // Committed keys the render `rows` would drop, minus those an archive event excuses.
-export function droppedKeys(rows, doc, committedJsonl, context, allArchived = false) {
+export function droppedKeys(rows, doc, committedJsonl, context) {
   const have = new Set(rows.map((row) => rowKey(row.plan, row.unit)));
-  const archived = allArchived ? { all: true, plans: new Set() } : archivedPlans(context);
+  const archived = archivedPlans(context);
   return [...committedKeys(doc, committedJsonl)]
     .filter((key) => !have.has(key) && !archived.all && !archived.plans.has(key.slice(0, key.lastIndexOf("|"))));
 }

@@ -84,12 +84,9 @@ function validateParkInput(input, status) {
   return null;
 }
 
-// A unit is not done while its own acceptance criteria are unticked. This is
-// the one mechanical "you are done / you are not" signal a unit gets before
-// its hand-off: the transition fails and names what is left, instead of the
-// model deciding it is finished and the Stop gate objecting a session later.
-// Only `[unit:<id>]`-tagged lines count here; untagged whole-plan criteria
-// stay with the Stop gate.
+// A unit is not done while its own acceptance criteria are unticked: the
+// transition fails and names what is left, before the Stop gate objects.
+// Only `[unit:<id>]`-tagged lines count; untagged ones stay with the Stop gate.
 function assertUnitAcceptance(input, status, context) {
   if (!["MERGED", "FEATURE_MERGED", "COMPLETE"].includes(status)) return;
   const cfg = loadConfig(context);
@@ -555,9 +552,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     else if (input.action === "sync") output = syncTrackerDoc(context);
     else if (input.action === "archive") output = archivePlan(input, context);
     else if (input.action === "lookup") output = lookupArchive(input, context);
-    else if (input.action === "publish") output = await (await import("./tracker-publish.mjs")).publishTracker(input, context);
+    else if (input.action === "publish") import("./tracker-publish.mjs").then((m) => process.stdout.write(JSON.stringify(m.publishTracker(input, context)) + "\n")).catch((e) => { process.stderr.write(`craftsman: tracker failed: ${e.message}\n`); process.exitCode = 2; });
     else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, lookup, or publish");
-    process.stdout.write(JSON.stringify(output) + "\n");
+    if (output) process.stdout.write(JSON.stringify(output) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
   } catch (error) {

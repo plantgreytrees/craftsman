@@ -351,3 +351,48 @@ test("publish guard: archived:true is refused; a later archive event lets the sh
   writeLog(second.fresh, "tracker_archived");
   assert.equal(publishTracker({}, second.fresh).published, true);
 });
+
+const approvalFile = (ctx, run) => path.join(ctx.root, ".craftsman", "approvals", `${run}.json`);
+const events = (ctx) => fs.readFileSync(path.join(ctx.stateDir, "events.jsonl"), "utf8");
+const spend = (ctx, run) => fs.writeFileSync(approvalFile(ctx, run), JSON.stringify({ run, status: "landed", published_at: "2026-01-01T00:00:00.000Z" }));
+
+test("publish atomic: a token spent during the lock wait leaves the second publish refused", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  const before = git(bare, "rev-parse", "main");
+  const result = publishTracker({ approved: true, run: "r1" }, a, { afterLock: () => spend(a, "r1") });
+  assert.equal(result.published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish atomic: a markPublished refusal after the push logs tracker_publish_mark_failed", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  const result = publishTracker({ approved: true, run: "r1" }, a, { beforePush: () => spend(a, "r1") });
+  assert.equal(result.published, true);
+  assert.match(events(a), /tracker_publish_mark_failed/);
+});
+
+test("publish atomic: an approved publish that ends unchanged consumes the token", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  assert.equal(publishTracker({ manual: true }, a).published, true);
+  const result = publishTracker({ approved: true, run: "r1" }, a);
+  assert.equal(result.unchanged, true);
+  assert.ok(JSON.parse(fs.readFileSync(approvalFile(a, "r1"), "utf8")).published_at);
+});
+
+test("publish atomic: an absent tracker.publish key behaves as on-approve", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  fs.writeFileSync(path.join(a.root, "craftsman.config.json"), "{}");
+  const before = git(bare, "rev-parse", "main");
+  const result = publishTracker({}, a);
+  assert.equal(result.published, false);
+  assert.equal(result.mode, "on-approve");
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
