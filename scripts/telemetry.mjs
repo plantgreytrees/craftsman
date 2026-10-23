@@ -7,7 +7,7 @@
 //   node scripts/telemetry.mjs --transcript <path> [--phase <p>] [--unit <u>] [--sid <id>]
 //   node scripts/telemetry.mjs --sid <id> --tokens <n> --percent <p> [--cost <usd>] [--phase <p>] [--unit <u>]
 import fs from "node:fs";
-import { loadConfig, enabled, logEvent, readStdin, sidOf } from "./lib/core.mjs";
+import { loadConfig, enabled, logEvent, readEvents, readStdin, sidOf } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 
 export const TAIL_BYTES = 256 * 1024;
@@ -27,9 +27,20 @@ export function readTail(file, max = TAIL_BYTES) {
   } finally { fs.closeSync(fd); }
 }
 
-// The newest assistant entry carrying usage, or null.
-export function lastUsage(text) {
+// The first `max` bytes of a file, cut to whole lines (the baseline sample).
+export function readHead(file, max = TAIL_BYTES) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buffer = Buffer.alloc(max);
+    const text = buffer.toString("utf8", 0, fs.readSync(fd, buffer, 0, max, 0));
+    return text.slice(0, text.lastIndexOf("\n") + 1);
+  } finally { fs.closeSync(fd); }
+}
+
+// The newest (or, with `first`, the oldest) assistant entry carrying usage, or null.
+export function lastUsage(text, first = false) {
   const lines = text.split("\n");
+  if (first) lines.reverse();
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i].trim()) continue;
     let entry;
@@ -49,8 +60,8 @@ export function contextWindow(tokens, model, cfg) {
   return DEFAULT_WINDOW;
 }
 
-export function contextEvent({ text, sid, phase = null, unit = null, cfg = {} }) {
-  const last = lastUsage(text);
+export function contextEvent({ text, sid, phase = null, unit = null, cfg = {}, first = false }) {
+  const last = lastUsage(text, first);
   if (!last) return null;
   const u = last.usage;
   const tokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
@@ -91,6 +102,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     } else if (enabled(cfg) && transcript && fs.existsSync(transcript)) {
       const sid = args.sid || sidOf(input);
       const scope = readScope({ ...input, session_id: sid });
+      // Baseline: the first assistant usage, once per session id.
+      if (!readEvents().some((e) => e.ev === "context" && e.phase === "baseline" && e.sid === sid)) {
+        const base = contextEvent({ text: readHead(transcript), sid, phase: "baseline", unit: null, cfg, first: true });
+        if (base) logEvent(base);
+      }
       const event = contextEvent({
         text: readTail(transcript),
         sid,
