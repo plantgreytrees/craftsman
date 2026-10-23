@@ -132,7 +132,7 @@ export function prepare(input, { root = ".", runners, now = () => new Date().toI
     const prev = load(root, runId);
     if (prev?.status === "landed" && prev.landed_mode !== "open-pr") return refuse("record is already landed; start a new run");
     const history = [...(prev?.history || [])];
-    if (prev) history.push({ status: prev.status, head_sha: prev.head_sha, choice: prev.choice ?? null, requested_at: prev.requested_at, decided_at: prev.decided_at ?? null, superseded_at: now() });
+    if (prev) history.push({ status: prev.status, head_sha: prev.head_sha, choice: prev.choice ?? null, requested_at: prev.requested_at, decided_at: prev.decided_at ?? null, landed_sha: prev.landed_sha ?? null, landed_mode: prev.landed_mode ?? null, published_at: prev.published_at ?? null, superseded_at: now() });
     save(root, {
       run: runId, plan: input.plan, feature: input.feature, base: input.base, head_sha: input.head_sha, feature_heads: input.feature_heads || [],
       recommendation, requested_at: now(), url: null, status: "requested", history, markdown,
