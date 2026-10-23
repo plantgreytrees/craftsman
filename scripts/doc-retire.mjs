@@ -6,7 +6,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
+import { grantValid, hasDocWriteGrant, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
+import { copyAndCommit, resolveArchive } from "./lib/archive.mjs";
 import { descendantSlugs, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
@@ -47,6 +48,25 @@ function scanReferrers(context, plan, slug) {
   return [...hits];
 }
 
+const NEXT_DOC = "docs/plans/NEXT.md";
+const isBlockingKind = (file) => /^scripts\/[^/]*\.test\.mjs$/.test(file) || !file.includes("/") && file.endsWith(".md")
+  || /^docs\/architecture\/.*\.rules\.md$/.test(file);
+const isProseDoc = (file) => /^docs\/(plans|ideas)\/.*\.md$/.test(file);
+
+// Read-only referrer scan (ARCH-DOCS-13): writes nothing. NEXT.md is never a referrer. Blocking = rule cite:/source:,
+// a scripts/*.test.mjs, a top-level *.md (and anything unclassified); rewritable = prose docs under docs/plans or
+// docs/ideas, only when an archive project resolves, else every hit blocks. Null when the scan itself fails.
+export function findReferrers(context, plan, slug) {
+  const found = scanReferrers(context, plan, slug);
+  if (found === null) return null;
+  const hits = found.filter((f) => f !== NEXT_DOC).sort();
+  let archived = false;
+  try { archived = Boolean(resolveArchive(context).root); } catch { /* off */ }
+  const rewritable = archived ? hits.filter((f) => !isBlockingKind(f) && isProseDoc(f)) : [];
+  const blocking = hits.filter((f) => !rewritable.includes(f));
+  return { hits, blocking, rewritable };
+}
+
 // Read-only referrer check for all-closed plans (ARCH-DOCS-02): one {plan, referrers[], reason?}
 // per plan. Never throws and mutates nothing; a scan error yields no referrers plus a reason.
 export function retireCheck(plans, root) {
@@ -55,7 +75,7 @@ export function retireCheck(plans, root) {
     try {
       if (typeof plan !== "string" || !plan.trim()) return { plan, referrers: [], reason: "invalid plan path" };
       const slug = path.posix.basename(plan, ".md");
-      const hits = scanReferrers({ root: path.resolve(String(root)) }, plan, slug);
+      const hits = scanReferrers({ root: path.resolve(String(root)) }, plan, slug)?.filter((f) => f !== NEXT_DOC) ?? null;
       if (hits === null) return { plan, referrers: [], reason: "referrer scan failed" };
       const referrers = hits.filter((f) => f !== plan && !/^docs\/plans\/TRACKER[^/]*\.md$/.test(f)).sort();
       return { plan, referrers };
@@ -181,8 +201,9 @@ export function retire(input, context = projectContext(".")) {
   }
   const found = new Set();
   for (const doc of [{ plan, slug }, ...descendants]) {
-    const hits = scanReferrers(context, doc.plan ?? plan, doc.slug ?? slug);
-    if (hits === null) return refuse("retire refused: referrer scan failed");
+    const scan = findReferrers(context, doc.plan ?? plan, doc.slug ?? slug);
+    if (scan === null) return refuse("retire refused: referrer scan failed");
+    const hits = scan.hits;
     const targets = [doc.plan ?? plan, doc.slug ?? slug];
     for (const file of hits) {
       if (removing.includes(file) || /^docs\/plans\/TRACKER[^/]*\.md$/.test(file)) continue;
@@ -199,9 +220,51 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: ${plan} is referenced by ${referrers.join(", ")}`, referrers);
   }
 
+  // The retired plans' lines leave NEXT.md in the same commit (ARCH-DOCS-13).
+  let nextEdit = null;
+  if (tryGit(context, ["ls-files", "--error-unmatch", "--", NEXT_DOC]) !== null) {
+    try {
+      const old = fs.readFileSync(path.join(context.root, NEXT_DOC), "utf8");
+      const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const res = [plan, ...siblings, ...descendants.map((d) => d.plan)].map((p) => new RegExp(`(?<![\\w/.-])${esc(p)}(?![\\w-])`));
+      for (const d of [slug, ...descendants.map((x) => x.slug)]) res.push(new RegExp(`(?<![\\w/.-])${esc(d)}(?![\\w/.-])`));
+      const kept = old.split("\n").filter((line) => !res.some((re) => re.test(line)));
+      if (kept.length !== old.split("\n").length) {
+        if (git(context, ["status", "--porcelain", "--", NEXT_DOC]).trim()) return refuse(`retire refused: uncommitted changes in ${NEXT_DOC}`);
+        nextEdit = kept.join("\n");
+      }
+    } catch { /* unreadable NEXT.md: left alone */ }
+  }
+
   const doc_sha = git(context, ["rev-parse", "HEAD"]).trim();
   const goal = input.goal || rowsOf(plan).find((row) => row.goal)?.goal || planDocGoal(context, plan) || slug;
   const landed_sha = input.landed_sha || doc_sha;
+
+  // ARCH-ARCHIVE-03: copy into the archive repo first; any failure refuses with nothing touched here.
+  let archiveShas = null;
+  let archiveSha;
+  try {
+    const archive = resolveArchive(context);
+    if (archive.root) {
+      const root = fs.realpathSync(trackerRoot(context));
+      let productId = path.basename(root);
+      try {
+        const projects = loadWorkspaceManifest()?.projects ?? {};
+        productId = Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? productId;
+      } catch { /* directory name */ }
+      const seams = { context };
+      archiveShas = new Map();
+      const copied = copyAndCommit({ archive, productId, kind: "plans", slug, files: [plan, ...siblings], sourceRoot: context.root, plan }, seams);
+      archiveSha = copied.sha;
+      for (const p of [plan, ...siblings]) archiveShas.set(p, copied.sha);
+      for (const d of descendants) {
+        archiveShas.set(d.plan, copyAndCommit({ archive, productId, kind: "plans", slug: d.slug, files: [d.plan], sourceRoot: context.root, plan: d.plan }, seams).sha);
+      }
+    }
+  } catch (error) {
+    return refuse(`retire refused: archive copy failed: ${error.message}`);
+  }
+  const archiveOf = (p) => archiveShas?.get(p);
 
   // Archiving re-renders every rollup; only the ancestors' are ours, so the rest are put back as found.
   const ancestorSet = new Set(ancestorRollups);
@@ -233,9 +296,14 @@ export function retire(input, context = projectContext(".")) {
     if (parentSlug) {
       try { loadIndex(context.root); } catch (error) { throw new Error(`the plan index would not load after retiring: ${error.message}`); }
     }
-    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(plan) }, context);
-    for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(d.plan) }, context);
-    for (const sibling of siblings) archivePlan({ plan: sibling, goal: siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, hierarchy: !rowsOf(sibling).length }, context);
+    if (nextEdit !== null) {
+      removing.push(NEXT_DOC);
+      fs.writeFileSync(path.join(context.root, NEXT_DOC), nextEdit);
+      git(context, ["add", "--", NEXT_DOC]);
+    }
+    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, archive: archiveOf(plan), hierarchy: hierarchy.has(plan) }, context);
+    for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, archive: archiveOf(d.plan), hierarchy: hierarchy.has(d.plan) }, context);
+    for (const sibling of siblings) archivePlan({ plan: sibling, goal: siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, archive: archiveOf(sibling), hierarchy: !rowsOf(sibling).length }, context);
     restoreUnrelated();
     const extra = [archivePath(context), trackerDocPath(context), ...ancestorRollups.map((r) => path.join(context.root, r))]
       .filter((file) => fs.existsSync(file)).map((file) => path.relative(fs.realpathSync(trackerRoot(context)), file));
@@ -258,7 +326,7 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: ${error.message}${restoreFailure}`);
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
-  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan) }, context);
+  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha }, context);
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 
