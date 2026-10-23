@@ -1,6 +1,6 @@
 ---
 name: scrutineer
-description: /scrutinise's isolated fresh-context reviewer — audits merged work for logic, security and cross-unit defects and judges each open acceptance criterion, never having seen the authoring conversation.
+description: /scrutinise's isolated reviewer: audits merged work, judges each open criterion.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

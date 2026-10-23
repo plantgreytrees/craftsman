@@ -13,7 +13,13 @@
     "language-agnostic",
     "craftsman"
   ],
+  "userConfig": {
+    "autonomyLevel": { "type": "string", "title": "Autonomy level", "description": "attended, standard or unattended: sets the PR size that needs approval (100, 400 or 1000 lines).", "default": "standard" },
+    "reviewDepth": { "type": "string", "title": "Review depth", "description": "light, standard or deep: how often planning re-derives blind (never, auto or always). light matches today's default.", "default": "light" },
+    "modelTier": { "type": "string", "title": "Model tier", "description": "Reserved for model routing; accepted and currently unused.", "default": "standard" },
+    "budgetsEnforce": { "type": "boolean", "title": "Enforce doc budgets", "description": "Whether arch-check lint fails on doc budget overruns.", "default": true }
+  },
   "metadata": {
-    "release": "2.1.0"
+    "release": "2.2.0"
   }
 }

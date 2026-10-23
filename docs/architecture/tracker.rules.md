@@ -1,10 +1,10 @@
 ---
 area: tracker
-governs: ["scripts/tracker.mjs", "scripts/tracker-sync.mjs", "scripts/digest.mjs", "scripts/run-manifest.mjs"]
+governs: ["scripts/tracker.mjs", "scripts/tracker-publish.mjs", "scripts/tracker-sync.mjs", "scripts/digest.mjs", "scripts/run-manifest.mjs"]
 human: docs/architecture/tracker.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ac57d0e891bc7343dcb07f174e179ab8f1fd68c9
-updated: 2026-10-18
+verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
+updated: 2026-10-23
 ---
 # ARCH tracker — enforced rules
 
@@ -19,4 +19,6 @@ updated: 2026-10-18
 - **ARCH-TRACKER-09** [decided] TRACKER-archive.md headings are machine-readable and tracker.mjs lookup {plan|slug} returns the parsed line — check: tracker.test.mjs lookup — cite: scripts/tracker.mjs:401-402
 - **ARCH-TRACKER-10** [decided] Each epic and story has a generated docs/plans/<slug>/TRACKER.md rollup rendered from the ledger through plan-index (a parent is COMPLETE only when every descendant row is COMPLETE); it is fenced, pre-guard-protected and never hand-edited; the root TRACKER.md block and renderBlock stay unchanged — check: tracker.test.mjs rollup snapshot, pre-guard.test.mjs — cite: scripts/tracker.mjs:147-195
 - **ARCH-TRACKER-11** [decided] `tracker.mjs publish` is the only path that commits progress to base: under the base merge lock it renders the block, the rollups and docs/plans/TRACKER.jsonl into a detached temp worktree at origin/<base>, commits only those pathspecs, pushes HEAD:<base>, re-renders and retries once on rejection, and never parks a unit; it runs at feature prepare, on each unit landed (FEATURE_MERGED), parked or blocked, at feature landing and on /sync-docs --tracker, never per IN_PROGRESS — check: tracker.test.mjs publish idempotency and race — cite: scripts/repo-exec.mjs:276-310
-- **ARCH-TRACKER-12** [decided] publish refuses to shrink a committed non-empty block to empty without an archive event, and `tracker.mjs init` rehydrates an absent local ledger from docs/plans/TRACKER.jsonl (derived, written only by publish; ARCH-TRACKER-01 unchanged) — check: tracker.test.mjs refuse-to-blank — cite: scripts/tracker.mjs:184-195
+- **ARCH-TRACKER-12** [superseded by ARCH-TRACKER-13]
+- **ARCH-TRACKER-13** [decided] publish and sync MUST refuse any render that drops a committed row key (docs/plans/TRACKER.jsonl, else the committed TRACKER.md block's plan|unit pairs) without a tracker_archived or doc_retired event for that key since the last tracker_published, logging tracker_publish_refused {dropped[]}; `tracker.mjs init` rehydrates an absent local ledger from TRACKER.jsonl, and `init --merge` adds only keys absent locally and absent from TRACKER-archive.md headings — check: tracker-publish.test.mjs 50-vs-5, jsonl-absent and merge cases — cite: scripts/lib/ledger-keys.mjs:15-66
+- **ARCH-TRACKER-14** [decided] A repo with a committed TRACKER.md block but no TRACKER.jsonl is repaired by `tracker.mjs init --from-block`: one row per block row (plan, unit, module, status), evidence "rehydrated from TRACKER.md block", never overwriting a key the local ledger holds; the next approved publish writes TRACKER.jsonl — check: tracker.test.mjs from-block case on a 50-row fixture — cite: scripts/tracker.mjs:236-268

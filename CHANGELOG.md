@@ -6,8 +6,44 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Approval before base** (ARCH-APPROVAL-01..07, ARCH-LAND-22/24/26/27). With `planning.featureBranches` on,
+  `land-feature` lands only against an approval record the artifact owner decided on a private page
+  (`scripts/approval.mjs`, `scripts/lib/approval-page.mjs`, `commands/_approval.md`): Merge now or Open PR,
+  with the recommendation, the attention list (env keys, migrations, CI), evidence, risk and rollback. The
+  record's `head_sha` must equal the feature head; a moved base re-merges and re-gates, a mismatch PARKs.
+  New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only for an
+  approved run whose record is landed, once per run, or a `manual:true` `/sync-docs --tracker`; older installs treat it as off). With feature branches off there is no
+  verification point and units still merge straight to base.
+- **Ledger guard** (ARCH-TRACKER-13/14): publish refuses to drop a committed row unless an archive event names
+  its plan; `tracker.mjs init --merge` and `--from-block` repair a partial or missing ledger.
+- **Measurement** (ARCH-SLIM-10): a per-session `context{phase:"baseline"}` sample; `stats.mjs` reports
+  baseline, peak and growth, blocks by reason and the last 7 days of `guard_unparsed`; the SessionStart
+  context has a 3 KB cap test.
+- **Docs budgets** (ARCH-DOCS-10/11): `docs.budgets` ratchet enforced by `arch-check lint`; scrutinise docs keep
+  one rolling summary plus the latest round; `retireCheck` and a `doc_retire_candidate` log (nothing is deleted).
+- **Tool slots** (ARCH-ENGINE-20): `just check` leads `stopGate.commands`; `docs.checks` run by
+  `scripts/doc-checks.mjs`, with `pre-commit run --all-files` once at the verification point.
+- Skills `test-driven-development`, `systematic-debugging`, `verification-before-completion` (adapted from
+  obra/superpowers, MIT); `maxTurns` on reviewer agents; `toggle` and `builtin-check` hidden from the model;
+  `/init --update` scaffolds an empty `.claude/rules/craftsman-loop.md`; `craftsman#stable` documented.
+- `scripts/lib/force-block.mjs` can allow `--force-with-lease` to a run's own branches (ARCH-LAND-23).
+- Not yet: guard narrowing (ARCH-STATE-12), the TDD step in `unit-runner` (ARCH-ENGINE-21) and the `userConfig`
+  knobs wait for PR #1; `pre-guard` does not use the lease exception until then.
+- Stop and SessionEnd report **unpushed** work in the main checkout and every worktree, from local refs only; `stopGate.blockOnUnpushed` (default `false`) makes Stop block on it. Stop also reports guarded docs that changed without passing the doc guard.
+- SessionStart says whether the guards are on, or off and why, and notes when no settings scope enables the **sandbox**. `/craftsman:init --settings-diff` and `--settings-write` merge `sandbox.enabled` and ask rules into `.claude/settings.json` without overwriting anything.
+- The launcher skips node for Read, Glob and Grep when `pre-guard` cannot act (about 0.5 ms instead of about 25 ms), with a parity table pinning every verdict.
+- README `Safety` section, `docs/architecture/safety.md` and ARCH-SAFETY-01 to 11. New keys: `stopGate.blockOnUnpushed`, `worktrees.disposable`, `worktrees.sweepClaudeWorktrees`.
+
 ### Fixed
 
+- **Review fixes for the approval flow and ledger guards.** `tracker.mjs publish` no longer exits 13 on its own
+  import; the merge gate skips a `stopGate.commands` marker whose tool or recipe is missing (a project sets a
+  marker to `null` to drop it); `tracker.mjs sync` refuses to drop committed ledger rows; `land-feature` takes
+  the feature lock before the approval gate and lands the approved head; the approval scan reads the approved
+  head in a detached tree; existing plans may grow up to the `docs.budgets` default; `stats.mjs` reports
+  time-to-approve; a unit `merge` logs retire candidates.
 - **Sandboxed unit runners can build in repos whose remote needs auth** (ARCH-LAND-19).
   Runners hold no credentials and the sandbox is unchanged. `repo-exec` now works
   offline from the `origin/<base>` that root fetched (`{"action":"network","step":"fetch"}`),
@@ -26,6 +62,14 @@ All notable changes to craftsman are documented here. Format loosely follows
 - Reads of the plugin's own reference files pass under an active scope (never writes).
 - `repo-exec` attaches a detached submodule when HEAD is `origin/<base>` and local `<base>` is an ancestor.
 - `scripts/state-write.mjs` writes `acceptance.md` and goal files into the main checkout for background sessions.
+- **Guards fail closed.** Every hook now runs through `hooks/run.sh`: with node missing a safety hook blocks the call and the others warn once per session. `pre-guard`, `agent-mode-guard` and `orchestrate-scope-guard` deny on bad JSON, empty input, an uncaught error or a failed config load instead of silently passing; the advisory hooks still fail open but say so once.
+- **The model cannot switch safety off.** Only `CRAFTSMAN_SAFETY=off` in your environment does; `CRAFTSMAN=off`, `.craftsman/off` and `enabled: false` now switch off the quality, doc and tracker machinery only. A tool call can no longer create the off flag, edit `hooks/hooks.json` or the `safety`/`stopGate` config keys, write a grant or marker, or run `toggle.mjs off` / `doc-write.mjs on` outside its command. Safety stays on outside a git repository.
+- **The worktree sweep is evidence-based and reversible.** A branch counts as merged only into a remote-tracking ref; worktrees holding non-disposable ignored files (`worktrees.disposable`) or living under `.claude/worktrees` (`worktrees.sweepClaudeWorktrees`) are kept; every deleted branch is logged with its sha in `.craftsman/sweep-log.jsonl`.
+- The mod launches a goal only if `/instruction` or `/auto` recorded it this session (`scripts/goal-token.mjs`).
+- The hook-bypass check also catches `git commit -n`, clustered and abbreviated flags, `-ccore.hooksPath=...`, `--config-env` and other spellings of the gpgsign override.
+- ESLint 9: checks use `--format json`, and a crashed tool is "unavailable", never a finding. Docs-only turns no longer re-run the suite at Stop. Hooks and `allowed-tools` use current tool names. `release` identity: `metadata.release` follows the changelog (2.2.0).
+- `/` menu and context: the nine internal partials are hidden from the menu, every command and agent description is a routing sentence of at most 90 characters (descriptions total 4.5 KB, was 9 KB), the root-only instruction story is stated once, and questions to the user go through `AskUserQuestion`.
+- The Linux `rm ~` test cases pin `HOME`. Steps 24-26 of the guard-failclosed plan (`scrutinise-feature-branch-plans`) are ticked against their tests.
 
 ## [2.2.0] - 2026-10-18
 

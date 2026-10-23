@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PreToolUse (Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit): deterministic
+// PreToolUse (Read|Glob|Grep|Write|Edit|NotebookEdit): deterministic
 // checks in a SINGLE process (one Node spawn per tool call) —
 //   1. hard-block edits to protected / generated / lock / secret paths
 //   2. enforce that only the doc-writing commands (/plan, /orchestrate,
@@ -10,16 +10,34 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { hasDocWriteGrant, loadConfig, enabled, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
-import { forceBlocked } from "./lib/force-block.mjs";
+import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, mintNonce, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
+import { forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
+import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
+import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
 import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
 const T0 = Date.now();
+// Authority scripts this command invokes; their nonces are left only when the whole command is allowed (ARCH-SAFETY-05).
+const pendingNonces = [];
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
+// top-level await would otherwise exit 1, which Claude Code treats as a non-blocking failure.
+const GUARD = "pre-guard";
+function failClosed(why) {
+  process.stderr.write(`craftsman: ${GUARD} could not decide (${why}), so the call is denied.\n`);
+  process.exit(2);
+}
+process.on("uncaughtException", (error) => failClosed(error?.message || String(error)));
+process.on("unhandledRejection", (error) => failClosed(error?.message || String(error)));
+
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
-const file = input?.tool_input?.file_path;
+const rawInput = await readStdin();
+try { input = JSON.parse(rawInput); } catch { failClosed(rawInput.trim() ? "bad JSON on stdin" : "empty stdin"); }
+if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("stdin is not a JSON object");
+// Test-only: lets the suite prove an exception denies. It can only ever deny.
+if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
+const file = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path; // NotebookEdit names its file notebook_path
 const tool = input.tool_name || "";
 const toolInput = input.tool_input || {};
 const target = file || toolInput.path;
@@ -166,6 +184,17 @@ function stripHeredocs(text) {
 // Realpath of a directory, or its plain resolution when it does not exist.
 function realDir(dir) { try { return fs.realpathSync(dir); } catch { return path.resolve(dir); } }
 function realRoot() { return realDir(activeRoot); }
+// A linked worktree keeps its session's state (scope manifests, command records, grants) in the MAIN checkout's .craftsman, shared
+// through the git common dir (scope.mjs). Paths there are not under this session's root, so every root-relative check misses them:
+// name such a path relative to the main checkout, and only when it is craftsman state a tool call must never write (ARCH-SAFETY-05).
+function mainRelOf(abs) {
+  let main;
+  try { main = fs.realpathSync(mainCheckoutRoot(activeRoot)); } catch { return null; }
+  if (main === realRoot()) return null;
+  const rel = path.relative(main, abs).split(path.sep).join("/");
+  return rel && !rel.startsWith("..") ? rel : null;
+}
+const mainStateRel = (abs) => { const rel = mainRelOf(abs); return rel && selfKind(rel) === "never" ? rel : null; };
 
 // `p` resolved from `cwd`, each component through realpath while it exists, so a
 // symlink (`d -> docs`) is followed; the rest of a missing tail stays lexical.
@@ -175,7 +204,19 @@ function realResolve(cwd, p) {
     if (part === "" || part === ".") continue;
     if (part === "..") { cur = path.dirname(cur); continue; }
     const next = path.join(cur, part);
-    try { cur = fs.realpathSync(next); } catch { cur = next; }
+    try { cur = fs.realpathSync(next); } catch { cur = followDangling(next); }
+  }
+  return cur;
+}
+// A symlink whose target does not exist yet still decides where a write lands (it creates the target), so follow
+// it by hand, one link at a time, up to 40 hops. Anything that is not a dangling link stays as it is.
+function followDangling(p) {
+  let cur = p;
+  for (let hops = 0; hops < 40; hops++) {
+    let target;
+    try { if (!fs.lstatSync(cur).isSymbolicLink()) return cur; target = fs.readlinkSync(cur); } catch { return cur; }
+    const next = path.resolve(path.dirname(cur), target);
+    try { return fs.realpathSync(next); } catch { cur = next; }
   }
   return cur;
 }
@@ -322,6 +363,15 @@ const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|ev
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
+// Writers beyond the removal words; only the self-protection scan (removedDocs `writes`) reads them as write targets.
+// Both lists come from the one WRITER_VERBS in lib/self-protect.mjs.
+const WRITE_VERBS = new Set(WRITER_VERBS.filter((verb) => !RM_LIKE.has(verb)));
+// Writers whose target is not a plain operand: they edit in place, patch or unpack. Read only by the self-protection scan.
+const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
+const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`);
+const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
+// The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
+const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 const SAFE_HEADS = new Set(["echo", "printf", "grep", "egrep", "fgrep"]);
 const DECLARERS = new Set(["export", "declare", "typeset", "readonly", "local"]);
@@ -439,7 +489,7 @@ function tokenize(text, fail) {
   return cmds;
 }
 
-function removedDocs(cmd, docPaths) {
+function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const hits = [];
   const unsafe = (why) => { hits.push("(command the parser cannot prove safe: " + why + ")"); };
   // The gate reads the text with its quotes and backslashes removed as well as the
@@ -448,7 +498,13 @@ function removedDocs(cmd, docPaths) {
   const bare = cmd.replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
-  const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))));
+  // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
+  const foldedSelf = (t) => {
+    const abs = realResolve(process.cwd(), expandHome(t));
+    const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
+    return (rel !== "" && !rel.startsWith("..") && !!selfKind(rel)) || !!mainStateRel(abs);
+  };
+  const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))) || (writes && foldedSelf(t)));
   const redirectsOntoDocs = () => {
     for (const m of cmd.matchAll(/>>?\|?\s*(?:"([^"]*)"|'([^']*)'|([^\s;&|<>()]*))/g)) {
       if (redirectBad(m[1] ?? m[2] ?? m[3] ?? "")) return true;
@@ -460,7 +516,8 @@ function removedDocs(cmd, docPaths) {
     };
     return walk(cmd, 0);
   };
-  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare) && !redirectsOntoDocs()) return hits;
+  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
+      && !(writes && WRITE_TEXT.test(bare)) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
   // One removal target, resolved from every directory the command may run in.
@@ -480,6 +537,29 @@ function removedDocs(cmd, docPaths) {
     if (!st.cwds) return hits.push("(" + label + " in a directory the parser cannot resolve)");
     if (env.execdir && /(?:^|\/)\.\.(?:\/|$)/.test(arg)) return hits.push("(" + label + " target above a find -execdir directory: " + arg + ")");
     for (const cwd of st.cwds) { const h = touchesGuarded(arg, cwd, docPaths); if (h) hits.push(label === "redirect" ? "redirect:" + h : h); }
+    // Self-protection only: touchesGuarded matches the patterns in their exact case, so a target such as `.Craftsman/OFF`
+    // (reachable on a case-insensitive filesystem) is also judged by selfKind, which compares case-folded.
+    if (writes && !/[*?[{]/.test(arg)) {
+      for (const cwd of st.cwds) {
+        const abs = realResolve(cwd, arg);
+        const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
+        if (rel !== "" && !rel.startsWith("..") && selfKind(rel) && !hits.includes(rel)) hits.push(rel);
+        const stateRel = mainStateRel(abs); // the main checkout's session state, reached from a linked worktree
+        if (stateRel && !hits.includes(stateRel)) hits.push(stateRel);
+      }
+    }
+    // Self-protection only: a path that is removed or moved takes everything under it along, so a directory that
+    // HOLDS a protected path counts too (touchesGuarded sees only ancestors of a literal base, not of a wildcard one).
+    if (writes && REMOVER_LABELS.test(label) && !/[*?[{]/.test(arg)) {
+      for (const cwd of st.cwds) {
+        const abs = realResolve(cwd, arg);
+        const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
+        if (rel !== "" && !rel.startsWith("..")) hits.push("remove:" + rel);
+        // the main checkout's session state, removed from a linked worktree (a removed scope-required flag is a removed gate)
+        const mainRel = mainRelOf(abs);
+        if (mainRel && heldNever(mainRel)) hits.push("remove:" + mainRel);
+      }
+    }
   }
   const targetsOf = (rest) => {
     const out = []; let dashes = false;
@@ -491,6 +571,176 @@ function removedDocs(cmd, docPaths) {
     }
     return out;
   };
+  // Where `cp|install|ln|mv SOURCE... DEST` leaves its files. A DEST that is a directory (an existing one, a trailing
+  // slash, `.`/`..`, or the `-t` directory) receives DEST/basename(SOURCE) for every source, so the path to judge is
+  // the joined one: `cp x .claude/` writes `.claude/x`, which is `.claude/settings.json` when x is named that.
+  const destIsDir = (dest, st) => /\/$/.test(dest) || dest === "." || dest === ".."
+    || (st.cwds || []).some((cwd) => { try { return fs.statSync(realResolve(cwd, expandHome(dest))).isDirectory(); } catch { return false; } });
+  // Every file under a directory, relative to it, up to a budget (null: unreadable or larger than the budget).
+  function listTree(abs, budget = { n: 2000 }) {
+    const out = [];
+    const walk = (dir, prefix) => {
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+      for (const e of entries) {
+        if (--budget.n < 0) return false;
+        const rel = prefix ? prefix + "/" + e.name : e.name;
+        out.push(rel);
+        if (e.isDirectory() && !e.isSymbolicLink() && walk(path.join(dir, e.name), rel) === false) return false;
+      }
+      return true;
+    };
+    return walk(abs, "") === false ? null : out;
+  }
+  const isDirAt = (abs) => { try { return fs.statSync(abs).isDirectory(); } catch { return false; } };
+  // `recursive` is true for cp -r/-R/-a, for rsync and for mv: a directory source then brings every file under it, so
+  // DEST/<each file> is judged as well as DEST/basename(SOURCE). A directory that cannot be listed is `unlisted`.
+  function placements(rest, st, recursive = false) {
+    const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
+    const dirOpt = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
+    const operands = targetsOf(t < 0 ? rest : rest.filter((_, i) => i !== t && !(i === t + 1 && !rest[t].includes("="))));
+    const sources = dirOpt !== undefined ? operands : operands.slice(0, -1);
+    const dest = dirOpt !== undefined ? dirOpt : operands[operands.length - 1];
+    if (dest === undefined) return { sources: [], placed: [], unlisted: [], dest: undefined };
+    const asDir = dirOpt !== undefined || destIsDir(dest, st);
+    const dd = dest.replace(/\/+$/, "") || dest;
+    const join = (s) => dd + "/" + path.basename(s.replace(/\/+$/, ""));
+    const placed = !sources.length ? [dest] : asDir ? sources.map(join) : [dest];
+    const unlisted = [];
+    const deep = recursive || rest.some((a) => (/^-[A-Za-z]*[rRa]/.test(a) && !a.startsWith("--")) || a === "--recursive" || a === "--archive");
+    if (deep) for (const s of sources) {
+      const dirs = (st.cwds || []).map((cwd) => realResolve(cwd, expandHome(s))).filter(isDirAt);
+      if (!dirs.length) continue;
+      const listing = dirs.map((d) => listTree(d)).find(Boolean);
+      if (!listing) { unlisted.push(dd, join(s)); continue; }
+      for (const e of listing) { placed.push(dd + "/" + e); if (asDir) placed.push(join(s) + "/" + e); }
+    }
+    return { sources, dest, placed, unlisted };
+  }
+  // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names.
+  function copyTargets(rest, st, env, recursive = false) {
+    const { placed, unlisted } = placements(rest, st, recursive);
+    for (const p of placed) target(p, st, "write", env);
+    for (const u of unlisted) target(u, st, "holds", env);
+  }
+  // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
+  function moveTargets(rest, st, env) {
+    const { sources, placed, unlisted } = placements(rest, st, true);
+    for (const source of sources) target(source, st, "mv", env);
+    for (const p of placed) target(p, st, "write", env);
+    for (const u of unlisted) target(u, st, "holds", env);
+  }
+  // Writers that edit in place, patch or unpack (`awk -i inplace`, `ed`, `patch`, `tar -x`, `unzip`): the files they name, and
+  // for an archive the directory it is unpacked into. What an archive or a patch on stdin contains is not read.
+  // The destination of an extraction cannot be read, so the command is refused whatever it names (the cost is a legitimate unusual
+  // spelling; the message says how to write it so the guard can read it).
+  function denyArchive(verb, word) {
+    denySelfDisable(`archive extraction with an option the guard cannot read (${verb} ${word || "?"})`,
+      `spell the destination as -C DIR / -d DIR, or ask the user to run it. The guard reads only plain spellings because a clustered or ` +
+      `abbreviated one can hide where the archive is unpacked.`);
+  }
+  function otherWriters(verb, rest, st, env) {
+    const operands = (valued = []) => {
+      const out = [];
+      for (let i = 0; i < rest.length; i++) { if (valued.includes(rest[i])) { i++; continue; } if (!rest[i].startsWith("-")) out.push(rest[i]); }
+      return out;
+    };
+    let files = [];
+    if (verb === "awk" || verb === "gawk") {
+      // In-place mode is the xgawk `inplace` library: `-i inplace`, `-iinplace`, `--include inplace`, `--include=inplace`.
+      if (!rest.some((a, i) => ((a === "-i" || a === "--include") && /^inplace/.test(rest[i + 1] || "")) || /^-iinplace/.test(a) || /^--include=inplace/.test(a))) return;
+      const ops = operands(["-i", "--include", "-f", "--file", "-v", "--assign", "-F", "--field-separator"]);
+      files = rest.some((a) => a === "-f" || a === "--file" || a.startsWith("--file=")) ? ops : ops.slice(1);
+    } else if (verb === "ed") files = operands();
+    else if (verb === "patch") {
+      if (rest.some((a) => a === "--dry-run" || a === "--check" || a === "-C")) return;
+      files = operands(["-i", "--input", "-p", "--strip", "-d", "--directory", "-o", "--output", "-r", "--reject-file", "-B", "-V", "-z", "-D"]);
+    } else if (verb === "tar") {
+      const first = rest[0] ?? "";
+      const extracts = rest.some((a) => /^-[A-Za-z]*x/.test(a) || a === "--extract" || a === "--get") || (!first.startsWith("-") && /^[A-Za-z]*x[A-Za-z]*$/.test(first));
+      if (!extracts) return;
+      // An allowlist, not a parser of every spelling: only the option words below are read exactly. Any other word (a cluster that
+      // holds C, an abbreviated or unknown long option, --transform) leaves the destination unknown, and the command is refused.
+      const flags = /^-?[xvzjJpkoOmPSwa]+f?$/, longFlags = /^--(?:extract|get|verbose|gzip|gunzip|xz|bzip2|keep-old-files|overwrite|no-same-owner|same-owner|preserve-permissions|keep-newer-files|skip-old-files|totals|wildcards|no-same-permissions|strip-components=\d+)$/;
+      const dirs = [];
+      let known = true, bad = "";
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (i === 0 && !a.startsWith("-") && /^[A-Za-z]+$/.test(a)) { if (flags.test(a)) { if (a.endsWith("f")) i++; } else { known = false; bad ||= a; } continue; }
+        if (a.startsWith("-") && !a.startsWith("--") && flags.test(a)) { if (a.endsWith("f")) i++; continue; }
+        if (a === "-f" || a === "--file") { i++; continue; }
+        if (a.startsWith("--file=") || longFlags.test(a)) continue;
+        if (a === "-C" || a === "--directory") { if (rest[i + 1] === undefined) { known = false; bad ||= a; } else dirs.push(rest[++i]); continue; }
+        if (a.startsWith("--directory=")) { dirs.push(a.slice(12)); continue; }
+        if (/^-C./.test(a)) { dirs.push(a.slice(2)); continue; }
+        if (a.startsWith("-")) { known = false; bad ||= a; continue; }
+      }
+      if (known) {
+        // Each -C is relative to the one before it, so every directory on the way is judged, not only the first or the last.
+        let here = ".";
+        if (!dirs.length) target(here, st, "holds", env);
+        for (const dir of dirs) {
+          here = dir.startsWith("/") ? dir : path.posix.join(here, dir);
+          target(here, st, "holds", env);
+        }
+        return;
+      }
+      denyArchive(verb, bad);
+    } else if (verb === "unzip") {
+      // No list-only skip. Every list of "letters that write nothing" was wrong in some round: options take values (-P, -O, -I), negate each
+      // other (--l), and member patterns after the zipfile look like options. Only the allowlist below decides, and it refuses what it
+      // cannot read. The cost is that `unzip -l a.zip` is refused too (ARCH-SAFETY-05, safety.md).
+      // The same allowlist: clusters of argument-free letters, `-d DIR` / `-dDIR`, and operands. Anything else leaves the destination
+      // unknown, and the command is refused.
+      const dirs = [];
+      let known = true, bad = "";
+      for (let i = 0; i < rest.length; i++) {
+        const a = rest[i];
+        if (/^-[oqnjufaLVb]+$/.test(a)) continue;
+        if (a === "-d") { if (rest[i + 1] === undefined) { known = false; bad ||= a; } else dirs.push(rest[++i]); continue; }
+        if (/^-d./.test(a)) { dirs.push(a.slice(2)); continue; }
+        if (a.startsWith("-")) { known = false; bad ||= a; }
+      }
+      if (known) { for (const dir of dirs.length ? dirs : ["."]) target(dir, st, "holds", env); return; }
+      denyArchive(verb, bad);
+    }
+    for (const f of files) if (f && f !== "-") target(f, st, verb, env);
+  }
+  // The files a writer other than a removal word writes (self-protection scan only): the words are already
+  // de-quoted, so `o""ff` is `off`, and the working directories come from the `cd` tracking above.
+  function writeTargets(verb, rest, st, env) {
+    const args = targetsOf(rest);
+    let files = [];
+    if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
+    else if (verb === "ln") {
+      const { sources, placed } = placements(rest, st);
+      files = placed;
+      // What each link points at is a path a later write can reach under another name, so it is judged like a write to it.
+      sources.forEach((source, i) => {
+        for (const cwd of st.cwds || []) {
+          const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
+          const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
+          target(aimed, { cwds: [cwd] }, "write", env);
+        }
+      });
+      // A link into the state directory would let a later Write reach it under another name.
+      for (const a of args) for (const cwd of st.cwds || []) {
+        const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
+        if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
+      }
+    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env);
+    else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
+    else if (verb === "sed" || verb === "perl") {
+      if (!rest.some((a) => /^-[A-Za-z]*i/.test(a) || /^--in-place(?:=|$)/.test(a))) return; // without -i or --in-place neither writes a named file
+      let script = false;
+      const operands = [];
+      for (let i = 0; i < rest.length; i++) {
+        if (/^-[A-Za-z]*[ef]$/.test(rest[i])) { script = true; i++; } else if (!rest[i].startsWith("-")) operands.push(rest[i]);
+      }
+      files = script ? operands : operands.slice(1);
+    }
+    for (const f of files) if (f && f !== "-") target(f, st, verb, env);
+  }
   const noteRemoval = (verb, rest, env) => {
     if (!env.exec) return;
     env.exec.removal = true;
@@ -546,20 +796,29 @@ function removedDocs(cmd, docPaths) {
     let e = s; while (e < rest.length && !rest[e].startsWith("-") && rest[e] !== "(" && rest[e] !== "!") e++;
     const starts = rest.slice(s, e), exprs = rest.slice(e);
     if (!exprs.some((x) => FIND_ACTION.test(x))) return; // selects only: removes nothing
-    const names = []; let kind = null, execdir = false, execCmd = [];
+    const names = [], pathRes = []; let kind = null, execdir = false, execCmd = [];
     for (let i = 0; i < exprs.length && kind === null;) {
       const t = exprs[i];
       if (FIND_ARG.has(t)) {
         const a = exprs[i + 1];
         if (a === undefined || DYNAMIC.test(a)) return unsafe("find " + t + " argument");
         if (t === "-name" || t === "-iname") { try { names.push(segmentRe(a, t === "-iname" ? "i" : "")); } catch { return unsafe("find pattern " + a); } }
+        // -path selects by the whole path, where `*` also crosses `/`.
+        if (t === "-path" || t === "-ipath" || t === "-wholename") {
+          pathRes.push(new RegExp("^" + a.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", t === "-ipath" ? "i" : ""));
+        }
         i += 2;
       } else if (FIND_FLAG.has(t)) i++;
+      else if (writes && ["!", "-not", "-o", "-or", "(", ")"].includes(t)) i++; // self-protection: the selection is then read as "everything"
       else if (t === "-delete" && i === exprs.length - 1) kind = "delete";
+      else if (writes && t === "-delete") { names.length = 0; pathRes.length = 0; kind = "delete"; } // not last: it acts before later tests, so it selects everything
       else if (t === "-exec" || t === "-execdir") {
         let m = i + 1;
         while (m < exprs.length && exprs[m] !== ";" && !(exprs[m] === "+" && exprs[m - 1] === "{}")) m++;
-        if (m !== exprs.length - 1) return unsafe("find " + t + " not ending the expression");
+        if (m !== exprs.length - 1) {
+          if (!writes || m >= exprs.length) return unsafe("find " + t + " not ending the expression"); // no terminator at all: malformed
+          names.length = 0; pathRes.length = 0; // self-protection: later tests cannot be relied on, so everything is selected
+        }
         kind = "exec"; execdir = t === "-execdir"; execCmd = exprs.slice(i + 1, m);
       } else return unsafe("find expression " + t + " outside the -name/-type ... -delete|-exec form");
     }
@@ -578,7 +837,39 @@ function removedDocs(cmd, docPaths) {
     if (deletes) for (const r of roots) for (const cwd of st.cwds) {
       const h = touchesGuarded(r, cwd, docPaths);
       if (h && !findNamesMiss(names, r, cwd, docPaths)) hits.push(h);
+      // Self-protection: every existing protected file under this start root that the -name tests select goes with it.
+      if (writes) {
+        const rootRel = path.relative(realRoot(), realResolve(cwd, r)).split(path.sep).join("/");
+        for (const f of existingProtectedFiles()) {
+          const under = rootRel === "" || f === rootRel || f.startsWith(rootRel + "/");
+          // A negation or an alternative (`!`, `-not`, `-o`) makes the selection unreadable: assume it selects everything.
+          const selectsAll = exprs.some((x) => x === "!" || x === "-not" || x === "-o" || x === "-or");
+          const selected = selectsAll || ((!names.length || names.some((re) => re.test(path.basename(f)))) && (!pathRes.length || pathRes.some((re) => re.test("./" + f))));
+          if (under && selected) hits.push("remove:" + f);
+        }
+      }
     }
+  }
+  // The protected files that exist now (relative to the project root): the self-scoped ones, and the never-written
+  // ones under .craftsman and .git/hooks, found by walking them (bounded).
+  function existingProtectedFiles() {
+    const base = realRoot(), out = [];
+    for (const name of SELF_SCOPED) if (fs.existsSync(path.join(base, name))) out.push(name);
+    for (const rel of [".git/config", ".git/config.worktree"]) if (fs.existsSync(path.join(base, rel))) out.push(rel);
+    let budget = 3000;
+    const walk = (dirRel, depth) => {
+      let entries;
+      try { entries = fs.readdirSync(path.join(base, dirRel), { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (--budget < 0 || depth > 6) return;
+        const rel = dirRel + "/" + e.name;
+        if (e.isDirectory() && !e.isSymbolicLink()) walk(rel, depth + 1);
+        else if (heldNever(rel)) out.push(rel);
+      }
+    };
+    walk(".craftsman", 0);
+    walk(".git/hooks", 0);
+    return out;
   }
 
   // Every word that may be the command is examined: leading wrappers, their
@@ -589,7 +880,7 @@ function removedDocs(cmd, docPaths) {
   function dispatch(words, c, prev, st, depth, env) {
     for (let i = 0; i < words.length; i++) {
       const w = words[i], b = path.basename(w), afterOption = i > 0 && words[i - 1].startsWith("-");
-      if (CANDIDATES.has(b)) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
+      if (CANDIDATES.has(b) || (writes && (WRITE_VERBS.has(b) || OTHER_WRITERS.has(b)))) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
       if (WRAPPERS.has(b) || w.startsWith("-") || ASSIGNMENT.test(w) || afterOption || /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
       const args = words.slice(i + 1);
       const safe = SAFE_HEADS.has(b) || (b === "node" && args.length > 0 && /(?:^|\/)scripts\/[\w.-]+\.mjs$/.test(args[0]));
@@ -604,8 +895,12 @@ function removedDocs(cmd, docPaths) {
     if (RM_LIKE.has(verb)) {
       noteRemoval(verb, rest, env);
       if (env.unseen) return unsafe(verb + " with input the parser cannot see");
+      if (writes && verb === "mv") return moveTargets(rest, st, env);
+      if (writes && verb === "rsync") return copyTargets(rest, st, env, true);
       for (const t of targetsOf(rest)) target(t, st, verb, env);
-    } else if (verb === "git") git(rest, st, env);
+    } else if (writes && WRITE_VERBS.has(verb)) writeTargets(verb, rest, st, env);
+    else if (writes && OTHER_WRITERS.has(verb)) otherWriters(verb, rest, st, env);
+    else if (verb === "git") git(rest, st, env);
     else if (verb === "find") find(rest, st, depth);
     else if (verb === "xargs") {
       let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += XARGS_ARG.has(rest[i]) ? 2 : 1;
@@ -626,12 +921,10 @@ function removedDocs(cmd, docPaths) {
       let body;
       if (verb === "eval") body = rest.join(" ");
       else {
-        const at = rest.findIndex((w) => /^-[a-z]*c[a-z]*$/.test(w));
-        if (at === -1) return unsafe("a shell running a script or input the parser cannot see");
-        let j = at + 1; while (j < rest.length && rest[j].startsWith("-") && rest[j] !== "--") j++;
-        if (rest[j] === "--") j++;
-        body = rest[j];
-        if (body === undefined) return unsafe("a shell -c without a command");
+        const found = shellBodyAfter(rest);
+        if (!found.c) return unsafe("a shell running a script or input the parser cannot see");
+        body = found.body;
+        if (body === null) return unsafe("a shell -c without a command");
       }
       analyze(body, fork(st), depth + 1, { exec: env.exec, execdir: env.execdir, roots: env.roots });
     }
@@ -732,11 +1025,11 @@ function rollupTarget(absolute) {
   } catch { return null; }
 }
 
-// The file as it would read after this Write/Edit/MultiEdit, or null when the
+// The file as it would read after this Write/Edit, or null when the
 // edit can't apply (the tool then fails on its own; nothing to guard).
 function afterEdit(current) {
   if (tool === "Write") return typeof toolInput.content === "string" ? toolInput.content : null;
-  const edits = tool === "MultiEdit" ? toolInput.edits || [] : [toolInput];
+  const edits = [toolInput];
   let text = current;
   for (const edit of edits) {
     if (typeof edit?.old_string !== "string" || typeof edit?.new_string !== "string" || !text.includes(edit.old_string)) return null;
@@ -788,14 +1081,18 @@ const binding = readWorktreeBinding(input, activeScope?.project_root
 const activeRoot = activeScope?.project_root || PROJECT_ROOT;
 const activeContext = { root: activeRoot, stateDir: path.join(activeRoot, ".craftsman"), offFlag: path.join(activeRoot, ".craftsman", "off") };
 const cfg = loadConfig(activeContext);
-if (!enabled(cfg, activeContext)) process.exit(0);
+if (!safetyEnabled()) process.exit(0); // ARCH-SAFETY-05: CRAFTSMAN_SAFETY=off in the user's environment only
+// The doc-write authority and tracker checks belong to the doc side, which follows enabled(): off for
+// CRAFTSMAN=off, .craftsman/off, enabled:false, and outside a git repo (ARCH-SAFETY-08). Everything else
+// in this file is safety and runs whatever enabled() says.
+const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
   }
-  const bucket = ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool) ? "write" : "read";
+  const bucket = ["Write", "Edit", "NotebookEdit"].includes(tool) ? "write" : "read";
   const candidates = [];
   if (tool === "Read" || bucket === "write") {
     if (file) candidates.push(path.relative(activeRoot, file).split(path.sep).join("/"));
@@ -826,7 +1123,7 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Noteb
 // orchestrate-scope-guard.mjs writes the marker at this same (sid) path.
 // It runs before every other Bash check, so none can stall it past the timeout.
 if (tool === "Bash" && autoForceBlock(sidOf(input))) {
-  const destructive = await forceBlocked(command);
+  const destructive = await forceBlocked(command, { ownBranches: ownBranchesOf(binding, activeScope) });
   if (destructive) {
     logEvent({ ms: Date.now() - T0, ev: "auto_force_blocked", sid: sidOf(input), command });
     process.stderr.write(
@@ -837,15 +1134,176 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
   }
 }
 
+// The same rule read by token (shell-words, no new parser): `commit -n` and clustered short flags (`-an`,
+// `-nm msg`), abbreviated long flags git accepts (`--no-ver`), `-ccore.hooksPath=...`, `--config-env=`, any
+// case of the config key, and every falsy spelling of commit.gpgsign. Only `git [wrappers] [globals] commit|push`
+// at command position counts, so a message or an argument that merely holds `-n` does not. A command the lexer
+// cannot read with certainty returns false here and meets the text check above and below.
+// Options of a wrapper that take a value: the next word is that value, not the wrapped command.
+const WRAPPER_VALUE_SHORT = { env: "uCS", sudo: "ugCDhprtUTR", doas: "uC", nice: "n", timeout: "sk", stdbuf: "ioe", ionice: "cnpt", time: "fo" };
+const WRAPPER_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--chroot", "--signal", "--kill-after"]);
+const COMMIT_VALUE_SHORT = new Set(["m", "F", "C", "c", "t"]); // value: the rest of the cluster, else the next word
+const COMMIT_ATTACHED_SHORT = new Set(["S", "u"]); // value is attached or absent
+const COMMIT_VALUE_LONG = new Set(["--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message", "--template", "--cleanup", "--fixup", "--squash", "--pathspec-from-file", "--trailer"]);
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
+// The index of the first word that is one of `targets`, looking through assignments and the shared WRAPPERS
+// (with their options, and the values of those that take one).
+function commandWordIndex(words, targets) {
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    if (ASSIGNMENT_WORD.test(word)) continue;
+    const base = word.split("/").pop();
+    if (targets.has(base)) return i;
+    if (!WRAPPERS.has(base)) return -1;
+    const valued = WRAPPER_VALUE_SHORT[base] || "";
+    while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) {
+      i++;
+      const opt = words[i];
+      if ((/^-[A-Za-z]$/.test(opt) && valued.includes(opt[1])) || WRAPPER_VALUE_LONG.has(opt)) i++;
+    }
+  }
+  return -1;
+}
+const GIT_ONLY = new Set(["git"]);
+const gitWordIndex = (words) => commandWordIndex(words, GIT_ONLY);
+// The one extractor of a shell's command string, from the words AFTER the shell: `sh|bash|zsh|dash|ksh
+// [options] -c [options] [--] <body>`. A cluster holding c (-c, -lc, -ec) sets `c`; -o/+o/-O/+O take a value;
+// the first operand is the body when -c was given, else a script the parser cannot see. Both the bypass
+// check and the removal analysis read shell bodies through here.
+function shellBodyAfter(rest) {
+  let c = false;
+  for (let j = 0; j < rest.length; j++) {
+    const word = rest[j];
+    if (word === "--") return { c, body: c ? rest[j + 1] ?? null : null };
+    if (!/^[-+]/.test(word)) return { c, body: c ? word : null };
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(word)) c = true;
+    if (word === "-o" || word === "+o" || word === "-O" || word === "+O") j++;
+  }
+  return { c, body: null };
+}
+// The body of `sh -c '<body>'` (any wrapper before the shell), else null.
+function shellBody(words) {
+  const at = commandWordIndex(words, SHELLS);
+  return at < 0 ? null : shellBodyAfter(words.slice(at + 1)).body;
+}
+const SKIP_SUBCOMMANDS = new Set(["commit", "push", "merge", "rebase", "am", "cherry-pick"]);
+const HOOK_ENV = /\bGIT_CONFIG_(?:KEY_\d+|PARAMETERS)=\S*?(?:core\.hookspath|commit\.gpgsign|include\.path|includeif\.\S*?\.path)/i;
+// A config file git is told to read instead of (or besides) the usual ones can set core.hooksPath without the command
+// naming it. /dev/null (or nothing) reads as an empty file, which sets nothing.
+const HOME_ASSIGN = /^(?:HOME|XDG_CONFIG_HOME)=(?!\/dev\/null$)(?=.)/;
+// `read HOME`, `printf -v HOME x`, `mapfile HOME`, `getopts o HOME` set a variable without any `NAME=` word. The value is not known,
+// so it counts as set (a `read` of /dev/null is refused too).
+const HOME_SETTER = /^(?:read|mapfile|readarray|getopts|printf)$/;
+const setsHomeByName = (words) => HOME_SETTER.test(words[0]) && (words[0] !== "printf" || words.includes("-v")) && words.some((w) => w === "HOME" || w === "XDG_CONFIG_HOME");
+// The names the authority scripts and the state paths trust. A command sets one by assignment (`NAME=`, `${NAME:=}`), by a builtin
+// that takes the name (`read NAME`, `printf -v NAME`, `declare/export NAME`, `env NAME=`), or by naming it in a variable for a later
+// `"$X=value"`. A `$NAME` or `${NAME}` expansion, `printenv NAME` and a comparison set nothing.
+const SAFETY_VARS = "CLAUDE_CODE_SESSION_ID|CLAUDE_PROJECT_DIR|CRAFTSMAN_SAFETY";
+const SETS_SAFETY_VAR = [
+  new RegExp(`(?<![\\w$])(?:${SAFETY_VARS})\\+?=`),
+  new RegExp(`\\$\\{(?:${SAFETY_VARS}):?=`),
+  new RegExp(`(?:^|[\\s;&|(])\\w+\\+?=(?:${SAFETY_VARS})(?!\\w)`),
+  new RegExp(`\\b(?:read|mapfile|readarray|getopts|declare|typeset|export|readonly|local|env|printf\\s+-v)\\b[^;&|\\n]*(?<![\\w\${])(?:${SAFETY_VARS})\\b`),
+];
+const CONFIG_FILE_ENV = /\bGIT_CONFIG(?:_GLOBAL|_SYSTEM)?=(?!\/dev\/null(?:[\s"';&|)]|$))(?=\S)/;
+// `include.path` and `includeIf.<condition>.path` pull in another config file (key lowercased).
+const isIncludeKey = (key) => key === "include.path" || /^includeif\..*\.path$/.test(key);
+// `git config` that points hooks elsewhere, or defines an alias that itself skips them.
+function configBypasses(args) {
+  if (args.some((a) => /^(?:--get\S*|--unset\S*|--list|-l|--remove-section|--rename-section)$/.test(a))) return false;
+  const operands = [];
+  for (let k = 0; k < args.length; k++) {
+    if (["-f", "--file", "--blob", "--type", "--default"].includes(args[k])) k++;
+    else if (!args[k].startsWith("-")) operands.push(args[k]);
+  }
+  // git 2.46+ subcommands: `git config set <key> <value>` writes like the old form; get, unset, list and edit do not set one.
+  // (A config key always holds a dot, so these words are never a key.)
+  if (["get", "unset", "list", "edit", "rename-section", "remove-section"].includes(operands[0])) return false;
+  if (operands[0] === "set") operands.shift();
+  const key = (operands[0] ?? "").toLowerCase();
+  const value = operands.slice(1).join(" ");
+  if (key === "core.hookspath" || isIncludeKey(key)) return true;
+  if (key.startsWith("alias.") && value) return bypassesHooks("git " + value, 1) || bypassesHooks(value.replace(/^!/, ""), 1);
+  return false;
+}
+function bypassesHooks(text, depth = 0) {
+  if (depth > 3) return true; // nesting this deep is not a commit
+  // The key text can be quote-split (`core.hoo""ksPath`), so the regex also reads the text with its quotes removed.
+  if (HOOK_ENV.test(text) || HOOK_ENV.test(text.replace(/['"\\]/g, ""))) return true;
+  const configFileEnv = CONFIG_FILE_ENV.test(text);
+  let segments;
+  try { segments = shellSegments(text); } catch { return false; }
+  let homeSet = false; // HOME or XDG_CONFIG_HOME set (exported or assigned) earlier in this command
+  for (const words of segments) {
+    if (words.includes(UNEXPANDED)) continue;
+    const body = shellBody(words);
+    if (body !== null && bypassesHooks(body, depth + 1)) return true;
+    if ((words.length && words.every((w) => ASSIGNMENT_WORD.test(w)) || ["export", "declare", "typeset", "readonly"].includes(words[0])) && words.some((w) => HOME_ASSIGN.test(w)) || setsHomeByName(words)) homeSet = true;
+    const at = gitWordIndex(words);
+    if (at < 0) continue;
+    const configs = [];
+    let i = at + 1;
+    for (; i < words.length; i++) {
+      const word = words[i];
+      if (word === "-c" || word === "--config-env") configs.push(words[++i] ?? "");
+      else if (word.startsWith("--config-env=")) configs.push(word.slice("--config-env=".length));
+      else if (word.startsWith("-c") && !word.startsWith("--")) configs.push(word.slice(2));
+      else if (["-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix"].includes(word)) i++;
+      else if (!word.startsWith("-")) break;
+    }
+    const sub = words[i];
+    if (sub === "config" && configBypasses(words.slice(i + 1))) return true;
+    // `-c alias.X=<value>` defines the alias for this one command, like `git config alias.X <value>`.
+    for (const config of configs) {
+      const eq = config.indexOf("=");
+      if (eq > 0 && /^alias\./i.test(config) && config.length > eq + 1) {
+        const value = config.slice(eq + 1);
+        if (bypassesHooks("git " + value, depth + 1) || bypassesHooks(value.replace(/^!/, ""), depth + 1)) return true;
+      }
+    }
+    // The subcommands that run commit-msg, pre-commit-style hooks and take the skip flag.
+    if (!SKIP_SUBCOMMANDS.has(sub)) continue;
+    if (configFileEnv) return true; // GIT_CONFIG[_GLOBAL|_SYSTEM]=<file> with a hook-running subcommand
+    // HOME / XDG_CONFIG_HOME pointing anywhere but /dev/null makes git read a config the command (or an earlier one) can write.
+    if (homeSet || words.slice(0, at).some((w) => HOME_ASSIGN.test(w))) return true;
+    for (const config of configs) {
+      const eq = config.indexOf("=");
+      const key = (eq < 0 ? config : config.slice(0, eq)).toLowerCase();
+      const value = eq < 0 ? "" : config.slice(eq + 1).toLowerCase();
+      if (key === "core.hookspath" || isIncludeKey(key) || (key === "commit.gpgsign" && ["false", "no", "off", "0"].includes(value))) return true;
+    }
+    const rest = words.slice(i + 1);
+    for (let j = 0; j < rest.length; j++) {
+      const word = rest[j];
+      if (word === "--") break;
+      if (word.startsWith("--")) {
+        const name = word.split("=")[0];
+        if (name.length >= 6 && "--no-verify".startsWith(name)) return true;
+        if (name.length >= 6 && "--no-gpg-sign".startsWith(name)) return true;
+        if (COMMIT_VALUE_LONG.has(word)) j++;
+      } else if (sub === "commit" && /^-[A-Za-z]/.test(word)) {
+        const cluster = word.slice(1);
+        for (let k = 0; k < cluster.length; k++) {
+          if (cluster[k] === "n") return true;
+          if (COMMIT_VALUE_SHORT.has(cluster[k])) { if (k === cluster.length - 1) j++; break; }
+          if (COMMIT_ATTACHED_SHORT.has(cluster[k])) break;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // A hook rejection is fixed, never bypassed (--no-verify is forbidden):
 // unconditional, for every commit/push with or without a worktree binding.
 // The flag test is linear; the commit/push one retries per `git`, so only a
 // command under 16 KB reaches it — a larger one with a bypass flag is blocked.
-if (tool === "Bash" && /--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
-    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command))) {
+if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(bypassView(command))
+    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(bypassView(command))))
+    || (command.length <= 16384 && bypassesHooks(bypassView(command))))) {
   logEvent({ ms: Date.now() - T0, ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
-    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify / --no-gpg-sign / gpgsign=false / ` +
+    `craftsman: Git commit/push hook bypass BLOCKED (--no-verify, commit -n, --no-gpg-sign, gpgsign=false / ` +
     `core.hooksPath override). Fix the underlying hook failure instead of skipping it — this is a ` +
     `hard rule, not a suggestion.\n`
   );
@@ -876,7 +1334,7 @@ if (tool === "Bash" && binding && mutatesGit(command)) {
 }
 
 const pluginReadOnly = ["Read", "Glob", "Grep"].includes(tool) && insidePluginRoot(tool === "Read" ? file : path.resolve(activeRoot, toolInput.path || "."), activeRoot);
-if (!activeScope && !pluginReadOnly && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool)) {
+if (!activeScope && !pluginReadOnly && scopeRequired(input) && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
   process.stderr.write(
     `craftsman: ${tool} blocked because this session requires an active unit scope. ` +
     `Re-analyse the unit boundary, activate scripts/scope.mjs with the exact read/docs/write ` +
@@ -885,8 +1343,96 @@ if (!activeScope && !pluginReadOnly && scopeRequired(input) && ["Read", "Glob", 
   process.exit(2);
 }
 
+// ARCH-SAFETY-05: a tool call cannot switch the guards off. Token matching only; anything the parser
+// cannot read stays with the sandbox. "never" paths are written by craftsman's own scripts, never by a
+// tool call. "scoped" paths can be edited by a unit whose scope manifest (made by /orchestrate) names them.
+const selfKind = (relPath) => {
+  const r = String(relPath).replace(/^\.\//, "");
+  const lower = r.toLowerCase(); // a case-insensitive filesystem reaches `.Claude` as `.claude`
+  if (SELF_NEVER.some((p) => globToRe(p.toLowerCase()).test(lower))) return "never";
+  return SELF_SCOPED.some((p) => lower === p || lower.endsWith("/" + p)) ? "scoped" : null;
+};
+const scopeNames = (relPath) => (activeScope?.scope?.write || []).some((entry) => allowed(entry, String(relPath).replace(/^\.\//, "")));
+function safetyKeysChanged(current, next, relPath) {
+  // An edit that cannot be computed fails on its own, except a notebook edit: it has no after-state to compare.
+  if (next === null) return tool === "NotebookEdit";
+  let after;
+  try { after = JSON.parse(next); } catch { return true; } // a result that is not JSON cannot be shown safe
+  let before = {};
+  try { before = JSON.parse(current); } catch { /* an unreadable current file counts as empty */ }
+  return JSON.stringify(safetyProjection(relPath, before)) !== JSON.stringify(safetyProjection(relPath, after));
+}
+function denySelfDisable(what, advice) {
+  logEvent({ ms: Date.now() - T0, ev: "selfguard", sid: sidOf(input), what, result: "blocked" });
+  process.stderr.write(
+    `craftsman: ${what} is blocked: ` +
+    (advice || `craftsman's own guards cannot be switched off or rewritten by a tool call. ` +
+    `Ask the user to make this change themselves, or run the craftsman command that owns it.`) + `\n`
+  );
+  process.exit(2);
+}
+if (tool === "Bash" && command) {
+  // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
+  const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
+  const never = NEVER_TEXT.test(command);
+  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
+  const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });
+  const concrete = allHits.filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
+  // A "(...)" hit means the parser gave up on part of the command (a subshell, a construct it cannot read): what it
+  // writes is unknown. Fail closed when such a command can write and also names craftsman state.
+  if (allHits.some((h) => h.startsWith("(")) && (command.includes(">") || WRITE_TEXT.test(command.replace(/['"\\]/g, ""))) && namesProtected(command)) {
+    denySelfDisable("a command the guard cannot read that writes and names craftsman state");
+  }
+  if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
+  // A link into the state directory would let a later Write reach it under another name.
+  if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
+  for (const hit of concrete) {
+    if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
+    if (hit.startsWith("remove:")) {
+      // A removed or moved path takes everything under it along: a directory that holds craftsman state is as
+      // protected as the state. Scoped files (hooks.json, the config, the settings) may go when a unit scope names them.
+      const gone = hit.slice(7);
+      if (heldNever(gone)) denySelfDisable(`a command that removes or moves ${gone}, which holds craftsman state`);
+      const unscoped = heldScoped(gone).filter((name) => !scopeNames(name));
+      if (unscoped.length) denySelfDisable(`a command that removes or moves ${gone}, which holds ${unscoped.join(", ")}`);
+      continue;
+    }
+    const kind = selfKind(hit);
+    if (kind === "never") denySelfDisable(`a command that writes ${hit}`);
+    if (kind === "scoped" && !scopeNames(hit)) denySelfDisable(`a command that writes ${hit}`);
+  }
+  if (verb) for (const name of scopedMentioned) if (!scopeNames(name)) denySelfDisable(`a command that writes ${name}`);
+  // The scripts that grant doc authority or flip the gates run only after the command that owns them.
+  // Every `node … <name>.mjs` invocation counts, whatever node options precede it; `node --check` only parses.
+  // Read from the text with its quotes removed, so `tog""gle.mjs` is `toggle.mjs`.
+  const unquoted = command.replace(/['"\\]/g, "");
+  const invocations = (name) => [...unquoted.matchAll(new RegExp(`\\bnode\\b([^;&|\\n]*?)[^\\s;&|]*\\b${name}\\.mjs(?:[ \\t]+([^\\s;&|)]*))?`, "g"))]
+    .filter((m) => !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]))
+    .map((m) => m[2] || "");
+  // The authority scripts trust CLAUDE_CODE_SESSION_ID (and the state paths CLAUDE_PROJECT_DIR) from the environment, so a
+  // command that sets either could borrow another session's record or point the state somewhere else.
+  // CRAFTSMAN_SAFETY is read by SessionStart from the user's environment, so a command that sets it gains nothing there; it is
+  // refused anyway so no script ever sees a spoofed one. A plain mention (`"$NAME"`, `printenv NAME`, a comparison) sets nothing.
+  if (SETS_SAFETY_VAR.some((re) => re.test(unquoted))) {
+    denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
+  }
+  if (invocations("goal-token").length && !commandInvoked(sidOf(input), ["instruction", "auto"], { context: { stateDir: STATE_DIR } })) {
+    denySelfDisable("goal-token.mjs outside /instruction or /auto");
+  }
+  if (invocations("doc-write").some((arg) => arg !== "off") && !commandInvoked(sidOf(input), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
+    denySelfDisable("doc-write.mjs on outside /plan, /orchestrate, /sync-docs, /idea, /architect or /builtin-check");
+  }
+  if (invocations("toggle").some((arg) => arg !== "on") && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
+    denySelfDisable("toggle.mjs off unless the user typed /craftsman:toggle");
+  }
+  // Allowed so far; each script the command runs gets its one-shot nonce, but only once every later check has passed.
+  if (invocations("goal-token").length) pendingNonces.push("goal-token");
+  if (invocations("doc-write").some((arg) => arg !== "off")) pendingNonces.push("doc-write");
+  if (invocations("toggle").some((arg) => arg !== "on")) pendingNonces.push("toggle");
+}
+
 // Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.
-if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
+if (tool === "Bash" && command && docSide && cfg.docWriteGuard?.enabled !== false) {
   const docPaths = cfg.docWriteGuard?.docPaths || ["docs/**"];
   const hit = removedDocs(command, docPaths);
   if (hit.length && !hasDocWriteGrant({ sid: sidOf(input), claim: true }, { ...activeContext, grantStateDir: STATE_DIR })) {
@@ -909,11 +1455,28 @@ if (tool === "Bash" && command && cfg.docWriteGuard?.enabled !== false) {
   }
 }
 
+// The permission prompt that can still follow is not covered; the nonce expires after 60 seconds.
+for (const name of pendingNonces) mintNonce(sidOf(input), name, { context: { stateDir: STATE_DIR } });
 if (!file) process.exit(0); // no file: nothing to time or log
+
+if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
+  // The target by its real path too: a symlinked directory (`cs -> .craftsman/sessions`) is the same file.
+  const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
+  const kinds = [selfKind(rel), selfKind(realTarget), mainStateRel(realResolve(activeRoot, file)) ? "never" : null];
+  if (kinds.includes("never")) denySelfDisable(`writing ${rel}`);
+  // The exemption is for a scope that names the file itself (by its real path); a name that only reaches it through a
+  // symlink the session made does not count. hooks.json is judged by both spellings of its path.
+  if (kinds.includes("scoped") && !scopeNames(realTarget)) {
+    if ([rel, realTarget].some((p) => p.toLowerCase().endsWith("hooks/hooks.json"))) denySelfDisable(`editing ${rel}`);
+    let current = "";
+    try { current = fs.readFileSync(path.resolve(activeRoot, file), "utf8"); } catch {}
+    if (safetyKeysChanged(current, afterEdit(current), realTarget)) denySelfDisable(`editing the safety settings of ${rel}`);
+  }
+}
 
 // 0) One tracker, in the main checkout: a worktree's TRACKER.md is never
 //    written, and the root's generated ledger block is never hand-edited.
-const tracker = ["Write", "Edit", "MultiEdit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
+const tracker = docSide && ["Write", "Edit", "NotebookEdit"].includes(tool) ? trackerTarget(path.resolve(activeRoot, file)) : null;
 if (tracker) {
   if (path.resolve(tracker.main) !== path.resolve(tracker.root)) {
     const rootDoc = path.join(tracker.main, "docs", "plans", "TRACKER.md");
@@ -943,7 +1506,7 @@ if (tracker) {
   }
 }
 
-const rollup = ["Write", "Edit", "MultiEdit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
+const rollup = docSide && ["Write", "Edit", "NotebookEdit"].includes(tool) ? rollupTarget(path.resolve(activeRoot, file)) : null;
 if (rollup) {
   let current = "";
   try { current = fs.readFileSync(rollup.real, "utf8"); } catch {}
@@ -973,8 +1536,8 @@ if (hit) {
 
 // 2) Doc-write authority — session-scoped.
 const g = cfg.docWriteGuard || {};
-const writeTool = ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(tool);
-if (g.enabled !== false && writeTool) {
+const writeTool = ["Write", "Edit", "NotebookEdit"].includes(tool);
+if (g.enabled !== false && writeTool && docSide) {
   const docPaths = g.docPaths || ["docs/**"];
   // The root tracker counts as a doc even when edited from a linked worktree,
   // where its worktree-relative path ("../../docs/…") matches no doc glob.
@@ -998,5 +1561,13 @@ if (g.enabled !== false && writeTool) {
   }
 }
 
-logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), file: rel, result: "allowed" });
+logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);
+
+// Heredoc bodies are prose, not flags (ARCH-STATE-12).
+function bypassView(command) {
+  if (!command.includes("<<") || command.length > 16384) return command;
+  // A heredoc fed to a shell or interpreter runs its body: keep it in view.
+  if (/\b(?:ba|z|da|k|c|fi)?sh\b|\b(?:eval|source|python[\d.]*|node|perl|ruby|php|awk|env|xargs|exec)\b/.test(command)) return command;
+  return stripHeredocs(command);
+}

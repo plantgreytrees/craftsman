@@ -74,3 +74,10 @@ ARCH-ENGINE-16/17 supersede ARCH-ENGINE-09: sequential inside the feature worktr
 
 ## Plan-hierarchy amendments (2026-10-18)
 ARCH-ENGINE-14 is superseded by ARCH-ENGINE-18 (implicit feature). See [plan](./plan.md).
+
+## Tool-adapter amendments (2026-10-23)
+ARCH-ENGINE-20: craftsman calls a repo's own tools through config slots and never scaffolds them. The slots are `just check` when a justfile exists, gitleaks with the built-in fallback, markdownlint-cli2 and `lychee --offline` for docs, and `pre-commit run --all-files` once at the verification point. ARCH-ENGINE-21: code units follow red-green, and the reviewer refuses a new test that never failed. See [approval](./approval.md).
+
+## Amendments (2026-10-23, owner-approved)
+
+- **ARCH-ENGINE-22** replaces 20: `docs.checks` is empty by default and runs at the verification point only; pre-commit still runs once there.

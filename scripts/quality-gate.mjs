@@ -6,16 +6,15 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
-  filterAttributed, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
-  readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership,
-} from "./lib/core.mjs";
+  filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
+  readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { acceptanceNotice, reconcileAcceptance } from "./tracker.mjs";
 
 const t0 = Date.now();
 
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+try { input = JSON.parse(await readStdin() || "{}"); } catch { advisorySkipped("quality-gate", "bad input"); process.exit(0); }
 const active = readScope(input);
 if (active?.scope_ambiguous) {
   process.stderr.write("craftsman: quality gate blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n");
@@ -44,24 +43,50 @@ if (rel0.endsWith(".craftsman/acceptance.md")) {
   process.exit(0);
 }
 
-// Mark this session dirty for the Stop gate: any real edit means the
-// session-start test snapshot can no longer be trusted as still-current, so
-// Stop must re-verify. Set unconditionally (before any language/ignore
-// filtering) so a false negative here — silently skipping a real regression
-// check — can't happen; the cost of an occasional unnecessary re-run is cheap
-// by comparison.
-try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
-
+// Mark this session dirty for the Stop gate: an edit to something a test could
+// regress on means the session-start test snapshot can no longer be trusted, so
+// Stop must re-verify. A denylist: only markdown, the guarded doc paths,
+// craftsman's own state and ignored paths leave nothing a test could regress
+// on, so a fixture, a tsconfig or an env file still counts. The exception is
+// markdown a test reads: stopGate.markdownTests names it (default none, so a
+// docs-only turn runs no tests). Bash-made edits are NOT caught by this marker:
+// the Stop gate's `git status` (treeDirty) only gates the secrets scan, and the
+// test re-run depends on this marker alone.
 const lang = detectLang(file, cfg, context);
+const docPaths = cfg.docWriteGuard?.docPaths || [];
+const named = (p) => globToRe(p).test(rel0) || globToRe(p).test("./" + rel0);
+const testsRead = (Array.isArray(cfg.stopGate?.markdownTests) ? cfg.stopGate.markdownTests : []).some(named);
+const isDocOrState = rel0.startsWith(".craftsman/") || (!testsRead && (rel0.endsWith(".md") || docPaths.some(named)));
+if (!isDocOrState && !isIgnored(file, cfg, lang, context)) {
+  try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
+}
+
 if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 
 // Content-hash cache: unchanged file + unchanged check set => skip entirely.
 const key = cacheKey(file, lang, cfg);
 if (cacheHit(key, context)) { logEvent({ ev: "gate", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
 
-const { failures, timedOut, skipped, ms } = await runChecks(file, lang, cfg, context);
+// A tool that crashed is unavailable, never a finding: say so once per session
+// and do not run it again (a marker in session state is the cache).
+const unavailableMarker = (bin) => path.join(sessionDir(sidOf(input), context), `tool-unavailable-${bin.replace(/[^A-Za-z0-9_.-]/g, "_")}`);
+const skipBins = (lang.check || []).map((c) => c.split(/\s+/)[0]).filter((bin) => fs.existsSync(unavailableMarker(bin)));
+
+const { failures, timedOut, skipped, unavailable = [], ms } = await runChecks(file, lang, cfg, context, { skipBins });
+
+const newlyUnavailable = unavailable.filter((bin) => !fs.existsSync(unavailableMarker(bin)));
+for (const bin of newlyUnavailable) {
+  try { atomicWrite(unavailableMarker(bin), String(Date.now())); } catch {}
+}
+if (newlyUnavailable.length) {
+  logEvent({ ev: "gate", file, lang: lang.name, result: "tool-unavailable", tools: newlyUnavailable });
+  process.stdout.write(JSON.stringify({
+    systemMessage: `craftsman: ${newlyUnavailable.join(", ")} crashed and is unavailable, so its check is skipped for the rest of this session (not a finding in your code).`,
+  }));
+}
 
 if (failures.length === 0) {
+  if (unavailable.length || skipBins.length) process.exit(0); // an unchecked file is not a pass: never cached
   cacheStore(key, context);
   logEvent({ ev: "gate", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
   process.exit(0); // a timeout is never a finding you wrote — never blocks, never shown

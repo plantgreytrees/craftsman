@@ -8,6 +8,8 @@ import {
   mainCheckoutRoot,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
+import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
+import { droppedKeys } from "./lib/ledger-keys.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 
@@ -82,12 +84,9 @@ function validateParkInput(input, status) {
   return null;
 }
 
-// A unit is not done while its own acceptance criteria are unticked. This is
-// the one mechanical "you are done / you are not" signal a unit gets before
-// its hand-off: the transition fails and names what is left, instead of the
-// model deciding it is finished and the Stop gate objecting a session later.
-// Only `[unit:<id>]`-tagged lines count here; untagged whole-plan criteria
-// stay with the Stop gate.
+// A unit is not done while its own acceptance criteria are unticked: the
+// transition fails and names what is left, before the Stop gate objects.
+// Only `[unit:<id>]`-tagged lines count; untagged ones stay with the Stop gate.
 function assertUnitAcceptance(input, status, context) {
   if (!["MERGED", "FEATURE_MERGED", "COMPLETE"].includes(status)) return;
   const cfg = loadConfig(context);
@@ -183,15 +182,17 @@ export function spliceBlock(text, block) {
   return `${base ? `${base}\n\n` : "# Execution tracker\n\n"}## Live ledger\n\n${block}\n`;
 }
 
-// Re-render the root TRACKER.md's generated block from the ledger. Writes
-// only on a real change; an empty ledger with no block yet is a no-op, so a
-// repo that never used the ledger never grows the section.
+// Re-render TRACKER.md's block from the ledger; writes only on change, refuses to drop committed keys.
 export function syncTrackerDoc(context = projectContext(".")) {
   const rows = renderState(context);
   const file = trackerDocPath(context);
   let text = "";
   try { text = fs.readFileSync(file, "utf8"); } catch { /* not created yet */ }
   if (!rows.length && generatedBlock(text) === null) return { file, changed: false };
+  let committed = "";
+  try { committed = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { /* none */ }
+  const dropped = droppedKeys(rows, text, committed, context);
+  if (dropped.length) { logEvent({ ev: "tracker_publish_refused", dropped }, context); return { file, changed: false, refused: `refusing to drop ${dropped.length} committed tracker row(s)` }; }
   const next = spliceBlock(text, renderBlock(rows));
   if (next === text) return { file, changed: false };
   atomicWrite(file, next);
@@ -205,11 +206,10 @@ export function trackerJsonlPath(context = projectContext(".")) {
   return path.join(trackerRoot(context), "docs", "plans", "TRACKER.jsonl");
 }
 
-// Ledger text for `init` when no local ledger exists: the committed
-// TRACKER.jsonl rows (ARCH-TRACKER-12), else empty. Malformed lines are dropped.
-function rehydrateText(context) {
+// Valid rows of the committed TRACKER.jsonl.
+function jsonlRows(context) {
   let text = "";
-  try { text = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { return ""; }
+  try { text = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { return []; }
   const rows = [];
   for (const line of text.split("\n").filter(Boolean)) {
     try {
@@ -217,7 +217,54 @@ function rehydrateText(context) {
       if (row && typeof row.key === "string" && STATUSES.includes(row.status)) rows.push(row);
     } catch { /* skip */ }
   }
+  return rows;
+}
+
+function rehydrateText(context) {
+  const rows = jsonlRows(context);
   return rows.length ? rows.map((row) => JSON.stringify(row)).join("\n") + "\n" : "";
+}
+
+function blockRows(context) {
+  try { return parseBlockRows(generatedBlock(fs.readFileSync(trackerDocPath(context), "utf8")), STATUSES); } catch { return []; }
+}
+
+function archivedSlugs(context) {
+  try { return archivedSlugsOf(fs.readFileSync(archivePath(context), "utf8"), parseArchiveHeading); } catch { return new Set(); }
+}
+
+// `init` (ARCH-TRACKER-13/14): rehydrate an absent ledger; `merge` adds jsonl rows of unarchived
+// plans, `from_block` adds the committed block rows; neither overwrites a held key.
+export function initLedger(input, context = projectContext(".")) {
+  const file = ledgerPath(context);
+  const fromBlock = input.from_block === true || input["from-block"] === true;
+  const merge = input.merge === true;
+  if (!fromBlock && !merge) {
+    if (!fs.existsSync(file)) atomicWrite(file, rehydrateText(context));
+    return { ledger: file };
+  }
+  const added = withLock(file, () => {
+    const held = new Set(readEvents(file).flatMap((e) => [e.key, slugKey(e.plan, e.unit)]));
+    const archived = merge ? archivedSlugs(context) : new Set();
+    const candidates = fromBlock
+      ? blockRows(context).map((r) => ({
+        key: keyOf(r), project: r.project, plan: r.plan, unit: r.unit, scope_id: null, goal: null,
+        module: r.module, status: r.status, evidence: "rehydrated from TRACKER.md block",
+        session_id: null, updated_at: new Date().toISOString(), decision: null, autonomous: false, criteria: null,
+      }))
+      : jsonlRows(context).filter((r) => !archived.has(planSlug(r.plan)));
+    const out = [];
+    for (const row of candidates) {
+      if (held.has(row.key) || held.has(slugKey(row.plan, row.unit))) continue;
+      held.add(row.key); held.add(slugKey(row.plan, row.unit));
+      out.push(row);
+    }
+    if (out.length) fs.appendFileSync(file, out.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+    else if (!fs.existsSync(file)) atomicWrite(file, "");
+    return out;
+  });
+  logEvent({ ev: "tracker_init", mode: fromBlock ? "from-block" : "merge", added: added.length }, context);
+  return { ledger: file, added: added.length };
 }
 
 // Re-render the epic/story rollups (ARCH-TRACKER-10) from the ledger. Never
@@ -499,17 +546,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (input.action === "status" || input.action === "list") output = renderState(context);
     else if (input.action === "transition") output = transition(input, context);
     else if (input.action === "init") {
-      const file = ledgerPath(context);
-      if (!fs.existsSync(file)) atomicWrite(file, rehydrateText(context));
-      output = { ledger: file };
+      output = initLedger(input, context);
     } else if (input.action === "compact") output = compactLedger(context);
     else if (input.action === "rollup") output = syncRollups(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
     else if (input.action === "archive") output = archivePlan(input, context);
     else if (input.action === "lookup") output = lookupArchive(input, context);
-    else if (input.action === "publish") output = await (await import("./tracker-publish.mjs")).publishTracker(input, context);
+    else if (input.action === "publish") import("./tracker-publish.mjs").then((m) => process.stdout.write(JSON.stringify(m.publishTracker(input, context)) + "\n")).catch((e) => { process.stderr.write(`craftsman: tracker failed: ${e.message}\n`); process.exitCode = 2; });
     else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, lookup, or publish");
-    process.stdout.write(JSON.stringify(output) + "\n");
+    if (input.action !== "publish") process.stdout.write(JSON.stringify(output ?? null) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
   } catch (error) {

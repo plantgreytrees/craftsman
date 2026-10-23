@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
-import { grantValid, retire } from "./doc-retire.mjs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { grantValid, retire, retireCheck } from "./doc-retire.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
 
@@ -73,6 +74,35 @@ test("doc-retire: no doc-write grant refuses and changes no file and no ledger r
   assert.match(out.reason, /no doc-write grant/);
   assert.deepEqual(snapshot(context), before);
   assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: always requires the grant, whatever CRAFTSMAN_SAFETY says in its own environment, and under safety off it says why (47.1)", () => {
+  const was = process.env.CRAFTSMAN_SAFETY;
+  try {
+    process.env.CRAFTSMAN_SAFETY = "off";
+    const off = repo({ grant: false });
+    const refused = retire({ plan: PLAN }, off);
+    assert.equal(refused.refused, true, "a variable a child process can set grants nothing");
+    assert.match(refused.reason, /CRAFTSMAN_SAFETY=off/);
+    assert.match(refused.reason, /session with safety on/);
+    assert.doesNotMatch(refused.reason, /run doc-write\.mjs first/, "doc-write.mjs grants nothing there, so it must not be suggested");
+    assert.ok(fs.existsSync(path.join(off.root, PLAN)), "the plan doc is still there");
+    delete process.env.CRAFTSMAN_SAFETY;
+    const on = retire({ plan: PLAN }, repo({ grant: false }));
+    assert.equal(on.refused, true);
+    assert.match(on.reason, /no doc-write grant \(run doc-write\.mjs first\)/);
+  } finally { if (was === undefined) delete process.env.CRAFTSMAN_SAFETY; else process.env.CRAFTSMAN_SAFETY = was; }
+});
+
+test("doc-retire: run as the loop form runs it (the variable exported to the child), the command line still refuses and deletes nothing (47.2)", () => {
+  const context = repo({ grant: false });
+  const env = { ...process.env, CRAFTSMAN_SAFETY: "off", CLAUDE_PROJECT_DIR: context.root, CLAUDE_CODE_SESSION_ID: "loop" };
+  const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "doc-retire.mjs")], {
+    cwd: context.root, env, input: JSON.stringify({ plan: PLAN }), encoding: "utf8" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stdout, /refused/);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)), "the plan doc is untouched");
+  assert.equal(run(context.root, "log", "--oneline").split("\n").filter(Boolean).length, 1, "and nothing was committed");
 });
 
 test("doc-retire: the session marker is accepted as the grant when sid is given", () => {
@@ -623,4 +653,21 @@ test("doc-retire 16.2: a sibling that has rows archives under its own goal", () 
   assert.equal(out.retired, PLAN, JSON.stringify(out));
   assert.equal(lookupArchive({ plan: SIB }, context).goal, "Shared goal");
   assert.equal(lookupArchive({ plan: PLAN }, context).goal, "Explicit plan goal");
+});
+
+test("retireCheck lists referrers for a cited plan and none for an uncited one, without mutating", () => {
+  const root = repo({ files: { "docs/plans/beta.md": "# beta\n", "docs/guide.md": "see docs/plans/alpha.md\n" } }).root;
+  const before = run(root, "status", "--porcelain");
+  const result = retireCheck([PLAN, "docs/plans/beta.md"], root);
+  assert.deepEqual(result.find((r) => r.plan === PLAN).referrers.includes("docs/guide.md"), true);
+  assert.deepEqual(result.find((r) => r.plan === "docs/plans/beta.md").referrers, []);
+  assert.equal(run(root, "status", "--porcelain"), before);
+  assert.ok(fs.existsSync(path.join(root, PLAN)));
+});
+
+test("retireCheck never throws: an unreadable root returns an empty list and a reason", () => {
+  const result = retireCheck([PLAN], path.join(os.tmpdir(), "craftsman-no-such-root-xyz"));
+  assert.deepEqual(result[0].referrers, []);
+  assert.match(result[0].reason, /scan failed/);
+  assert.doesNotThrow(() => retireCheck(null, undefined));
 });

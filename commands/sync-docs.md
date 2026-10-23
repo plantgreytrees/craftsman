@@ -1,19 +1,19 @@
 ---
-description: Maintain — reconcile docs/ with live code: check architecture and feature docs still match, fix drift (or flag undocumented divergence), and reconcile tracker status. Keeps docs truthful.
+description: Maintain: reconcile docs/ with live code, fix drift, reconcile tracker status.
 argument-hint: "[plan-slug | module | git range | doc path] [--tracker | --arch (default) | --all | --archive | --prune]"
 model: sonnet
-allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TodoWrite, SlashCommand
+allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate, Skill, AskUserQuestion
 ---
 
 # Sync-docs — the reconciler
 
 > Doc authority: /sync-docs is a doc writer (prose docs and tracker chips; never `docs/ideas/` or a paired architecture area). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
-You keep `docs/` **truthful against the code**. Where shipped reality has drifted from a doc, you **update the doc**; where a divergence looks intentional but undocumented, you **flag it** rather than silently rewriting. Modes: **`--arch`** (default — architecture/feature docs), **`--tracker`** (TRACKER status chips), **`--all`** (both, then `/architect --update` via SlashCommand when `docs/architecture/*.rules.md` exists — then `/craftsman:merge` closes the loop). **A plan slug** (`docs/plans/<slug>.md`) targets that plan: `--arch` → its merged units' ranges, `--tracker` → its own rows, `--all` → both, plus `/architect --update` for the rules docs `arch-check.mjs governs` returns for its changed files. **Paired architecture areas are not yours:** an `<area>.rules.md` and its human `<area>.md` belong to `/architect --update`, since drift from a decision is usually a violation to fix. Unpaired prose there (`arch-check.mjs unmanaged`) is yours.
+You keep `docs/` **truthful against the code**. Where shipped reality has drifted from a doc, you **update the doc**; where a divergence looks intentional but undocumented, you **flag it**, never silently rewrite. Modes: **`--arch`** (default — architecture/feature docs), **`--tracker`** (TRACKER status chips), **`--all`** (both, then `/architect --update` via Skill when `docs/architecture/*.rules.md` exists — then `/craftsman:merge` closes the loop). **A plan slug** (`docs/plans/<slug>.md`) targets that plan: `--arch` → its merged units' ranges, `--tracker` → its own rows, `--all` → both, plus `/architect --update` for the rules docs `arch-check.mjs governs` returns for its changed files. **Paired architecture areas are not yours:** an `<area>.rules.md` and its human `<area>.md` belong to `/architect --update`, since drift from a decision is usually a violation to fix. Unpaired prose there (`arch-check.mjs unmanaged`) is yours.
 
 Target: `$ARGUMENTS`. Under `--archive`/`--prune` read `${CLAUDE_PLUGIN_ROOT}/commands/_sync-docs-prune.md` (never pre-approved by `/goal`) and skip the modes below. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-machinery.md` → **Standing constraints** + **optional-MCP conventions**.
 
-**Governing standard:** the doc standard in `docs/` (if the repo ships one) is authoritative; `docs/README.md` is the authority map. Treat the architecture docs + feature docs + the tracker as the truth source; `archive/` is history, out of scope.
+**Governing standard:** the repo's doc standard in `docs/` (if any) is authoritative; `docs/README.md` is the authority map. Treat the architecture docs, feature docs and tracker as the truth source; `archive/` is out of scope.
 
 ## `--arch` (default) — architecture & feature docs
 
@@ -29,9 +29,9 @@ Target: `$ARGUMENTS`. Under `--archive`/`--prune` read `${CLAUDE_PLUGIN_ROOT}/co
 
 ## `--tracker` — TRACKER reconciliation
 
-The human-readable tracker is deliberately concise: keep one direct relative Markdown plan link, one short status, and terse evidence per row. Move implementation prose and review history to the linked plan or archive so the goal and next action remain easy to scan.
+The human-readable tracker is deliberately concise: keep one direct relative Markdown plan link, one short status, and terse evidence per row. Move prose and history to the plan or archive.
 
-Use the **main checkout's** `TRACKER.md`; its generated ledger block changes only via an evidenced `tracker.mjs` transition.
+Use the **main checkout's** `TRACKER.md`; its generated ledger block changes only via an evidenced `tracker.mjs` transition. After the owner confirms, run `tracker.mjs publish` with `{manual:true}`.
 
 The known failure mode: rows already built but still chipped open — trusting the chip wastes a session re-implementing shipped work. Evidence beats chips.
 1. Parse in-scope rows (default: every open row; `$ARGUMENTS` may narrow to a bucket/id): id, claimed status, area, plan link. The linked plan's `[ ]`/`[x]` marks are claims too. Recall only the linked plan's bounded memory entries, when present, and use them to identify decisions, unresolved risks, and prior evidence that the row verifier should check.
@@ -43,4 +43,4 @@ The known failure mode: rows already built but still chipped open — trusting t
 
 ## Apply (both modes) — confirmed only
 
-`docs/` is shared with concurrent sessions. **Present the report and STOP for confirmation** (`--arch` doc edits and `--tracker` chip edits alike) — unless the user pre-approved this class of fix (e.g. an active `/goal` from `/instruction`), in which case apply and report; flagged divergences and code regressions still stop. Then apply the confirmed changes row-by-row or as an approved batch — never reformat/prune foreign rows or docs outside the audited set. Bump the doc's/tracker's last-updated line **by replacing it**, per step 5. When a memory item is verified against shipped code and the docs are updated, record the reconciliation as `acceptance-result` or `decision`; when it is stale, record it as `superseded` with the replacing source commit. Summary: docs updated / chips corrected, rows archived this pass (count + bucket), memory entries verified/superseded/deferred, intentional divergences flagged for the user, code-regressions routed to `/investigate`, unverifiable items awaiting a rewrite; next step **`/craftsman:merge`**.
+`docs/` is shared with concurrent sessions. **Present the report and STOP: confirm with `AskUserQuestion`** (`--arch` doc edits and `--tracker` chip edits alike) — unless the user pre-approved this class of fix (e.g. an active `/goal` from `/instruction`), in which case apply and report; flagged divergences and code regressions still stop. Then apply the confirmed changes row by row or as an approved batch — never touch foreign rows or docs outside the audited set. Bump the doc's/tracker's last-updated line **by replacing it**, per step 5. When a memory item is verified against shipped code and the docs are updated, record the reconciliation as `acceptance-result` or `decision`; when it is stale, record it as `superseded` with the replacing source commit. Summary: docs updated / chips corrected, rows archived this pass (count + bucket), memory entries verified/superseded/deferred, intentional divergences flagged for the user, code-regressions routed to `/investigate`, unverifiable items awaiting a rewrite; next step **`/craftsman:merge`**.

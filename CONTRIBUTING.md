@@ -61,7 +61,6 @@ Please run `claude plugin validate .` and confirm it passes before opening a PR.
   `.claude-plugin/marketplace.json`.** Without one, installs track the git
   commit, so every merge to `main` ships on the next `/craftsman:upgrade` (or
   auto-update). A pinned version freezes every install until someone bumps it.
-  Bump `metadata.release` in `plugin.json` when you cut a CHANGELOG release;
-  plans record that release as `craftsman_version`.
+  The release is derived from the changelog: `metadata.release` in `plugin.json` equals the newest `## [x.y.z]` heading of CHANGELOG.md, and `scripts/changelog.test.mjs` fails on drift. Plans record that release as `craftsman_version`.
 - By contributing you agree your contributions are licensed under the project's
   [MIT License](LICENSE).

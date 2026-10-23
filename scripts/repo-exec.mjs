@@ -8,6 +8,8 @@ import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
+import { afterLand, afterUnitLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
+import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
 function run(root, args, options = {}) {
@@ -66,10 +68,9 @@ function requireOnline(root, input, info, label) {
   throw new NeedsNetwork(`${label} talks to the host API and this process cannot reach origin`, retryAs(input));
 }
 
-// A superproject checks its submodules out detached. When HEAD is exactly origin/<base> and
-// local <base> is missing or an ancestor of HEAD, attaching is safe: the ref moves forward to
-// HEAD (compare-and-swap, never backwards) and HEAD is checked out on it, so no file changes.
-// Returns "" once attached, else the reason it was left detached. Off via repoExec.attachDetached: false.
+// Submodules are checked out detached. When HEAD is origin/<base> and local <base> is missing or
+// an ancestor of HEAD, attach: the ref moves forward only (compare-and-swap), no file changes.
+// Returns "" once attached, else why it stayed detached. Off via repoExec.attachDetached: false.
 function attachDetached(context, base) {
   const root = context.root;
   if (loadConfig(context).repoExec?.attachDetached === false) return "repoExec.attachDetached is false";
@@ -200,7 +201,7 @@ function heartbeat(lock) {
 
 // Plan files the feature must find on origin/<base> before its worktree exists:
 // the plan doc and each parent ancestor (from the plan index). Generated rollups
-// (docs/plans/<slug>/TRACKER.md) are excluded: every tracker transition rewrites them locally.
+// (docs/plans/<slug>/TRACKER.md) are excluded: transitions rewrite them locally.
 function planGateFiles(root, planSlug) {
   let index;
   try { index = loadIndex(root); } catch (error) { throw new Error(`plan gate: plan index failed: ${error.message}`); }
@@ -309,21 +310,7 @@ function sync(context, input, info) {
   return { ...info, worktree_path: worktree, base_ref: baseRef };
 }
 
-// The project's test command, by stop-gate's cfg.stopGate.commands (marker
-// file → command); null when nothing is detected.
-function findGateCommand(worktree, cfg) {
-  for (const [marker, command] of Object.entries(cfg.stopGate?.commands || {})) {
-    if (marker.includes("*")) {
-      let entries = [];
-      try { entries = fs.readdirSync(worktree); } catch { continue; }
-      const re = new RegExp(`^${marker.replaceAll(".", "\\.").replaceAll("*", ".*")}$`);
-      if (entries.some((entry) => re.test(entry))) return command;
-    } else if (fs.existsSync(path.join(worktree, marker))) {
-      return command;
-    }
-  }
-  return null;
-}
+export { findGateCommand };
 
 // Re-runs the tests in the worktree before merging; only config
 // (`repoExec.verifyTestsBeforeMerge` / `stopGate.enabled` false) skips it.
@@ -350,13 +337,18 @@ function landMode(cfg) {
   return land;
 }
 
-// `deps.runner` replaces the host CLI runner in tests; the stdin entry point
-// never passes it.
+// `deps.runner` replaces the host CLI runner in tests only.
+// ARCH-LAND-26: a unit landing also logs retire candidates.
 function merge(context, input, info, deps = {}) {
+  return afterUnitLand(mergeOnly(context, input, info, deps), input, context, deps.retireCheck);
+}
+
+function mergeOnly(context, input, info, deps = {}) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
   const cfg = loadConfig(context);
   const land = landMode(cfg);
+  noteUnenforced(cfg, context);
   if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
@@ -369,8 +361,7 @@ function merge(context, input, info, deps = {}) {
   if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
   if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
-  // Otherwise the merge lands in the checkout that has base: this root, or
-  // the other worktree holding it — never a dirty or mid-merge one.
+  // Else merge where base is checked out (this root or another worktree), never dirty.
   const at = holder || context.root;
   if (holder && (run(holder, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })
     || run(holder, ["status", "--porcelain", "--untracked-files=no"]))) {
@@ -559,12 +550,9 @@ function isLastFeature(slug, feature, root) {
   }
 }
 
-// ARCH-LAND-18: a finished feature lands on base. Refused unless
-// planning.featureBranches and every row of the feature is FEATURE_MERGED.
-// In a detached temp worktree: base merged into the feature, gate re-run, then
-// the result merged --no-ff onto origin/<base> and pushed. Locks: feature, then
-// base. Conflict / ff-only / rejected push PARK the feature's last unit
-// (ARCH-LAND-06); nothing is ever forced (ARCH-LAND-05).
+// ARCH-LAND-18: a finished feature (every row FEATURE_MERGED) lands on base: detached temp
+// worktree at the approved head, base merged in, gate re-run, --no-ff, push; feature lock
+// then base. Conflict, ff-only, red gate, rejected push PARK; never forced.
 function landFeature(context, input, info, deps = {}) {
   if (input.feature !== undefined && input.feature !== null) assertFeatureId(input.feature);
   const config = loadConfig(context);
@@ -576,7 +564,7 @@ function landFeature(context, input, info, deps = {}) {
   if (!rows.length) throw new Error(`land-feature: no tracker rows for feature ${input.feature} of ${input.plan}`);
   const open = rows.filter((row) => row.status !== "FEATURE_MERGED");
   if (open.length) throw new Error(`land-feature refused: ${open.map((row) => `${row.unit} is ${row.status}`).join(", ")}; every unit must be FEATURE_MERGED`);
-  // ARCH-TRACKER-08: open [feature:<id>] criteria (and, for the plan's last feature, untagged ones) refuse the landing.
+  // ARCH-TRACKER-08: open [feature:<id>] criteria (plus untagged ones on the last feature) refuse landing.
   const main = mainCheckoutRoot(context.root);
   const acceptanceFile = path.join(main, ".craftsman", "acceptance.md");
   if (fs.existsSync(acceptanceFile)) {
@@ -597,24 +585,33 @@ function landFeature(context, input, info, deps = {}) {
   }
   const lastUnit = rows[rows.length - 1].unit;
   requireOnline(context.root, input, info, "land-feature");
-  if (landMode(config) === "pr") return landFeaturePullRequest(context, input, info, { feature, config, runner: deps.runner, units: rows.map((row) => row.unit), lastUnit });
-  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units: rows.map((row) => row.unit) };
+  const units = rows.map((row) => row.unit);
+  // lock first, then gate
   const featureLock = acquireLock(featureLockInfo(info, feature), input);
   let baseLock = null;
   let added = false;
   let step = null;
   const temp = path.join(info.common_git_dir, ".craftsman", "land", `feature-${slug}-${process.pid}`);
+  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units };
+  const tip = () => run(context.root, ["rev-parse", `refs/heads/${feature}`]);
+  let gate, head;
   try {
+    gate = gateFeature({ config, context, input, branch: feature });
+    if (gate.park) return { ...result, ...gate.park };
+    head = gate.head || tip();
+    deps.afterGate?.();
+    if ((gate.mode || landMode(config)) === "pr") return afterLand({ gate, mode: "open-pr", context }, landFeaturePullRequest(context, input, info, { feature, head, config, runner: deps.runner, units, lastUnit }));
     fetchBase(context, context.root, { ...input, fetch: undefined }, info);
     baseLock = acquireLock(info, input);
     fs.mkdirSync(path.dirname(temp), { recursive: true });
-    run(context.root, ["worktree", "add", "--detach", temp, `refs/heads/${feature}`]);
+    run(context.root, ["worktree", "add", "--detach", temp, head]);
     added = true;
     heartbeat(baseLock);
     step = "conflict";
     run(temp, ["merge", "--no-edit", `origin/${info.base_branch}`]);
-    step = null;
+    step = "gate";
     verifyGateBeforeMerge(context, temp);
+    step = null;
     const ready = run(temp, ["rev-parse", "HEAD"]);
     step = "ff-only";
     run(temp, ["merge-base", "--is-ancestor", `origin/${info.base_branch}`, ready]);
@@ -649,7 +646,7 @@ function landFeature(context, input, info, deps = {}) {
   }
   let cleaned = false;
   let remoteDeleted = false;
-  if (input.cleanup !== false) {
+  if (input.cleanup !== false && tip() === head) {
     const worktree = path.join(mainCheckoutRoot(context.root), ".worktrees", slug);
     try {
       if (fs.existsSync(worktree)) {
@@ -663,12 +660,12 @@ function landFeature(context, input, info, deps = {}) {
     } catch (error) { result.cleanup_error = String(error.stderr || error.message).trim(); }
   }
   logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: true, sha: result.merge_sha }, context);
+  afterLand({ gate, sha: result.merge_sha, rows, context, retire: deps.retireCheck });
   return { ...result, merged: true, merged_locally: true, pushed: true, promoted, promote_errors, cleaned, remote_branch_deleted: remoteDeleted };
 }
 
-// ARCH-LAND-12: in "pr" mode one feature PR targets base. The feature branch is
-// pushed and its PR opened or reused; nothing merges and no row is promoted.
-function landFeaturePullRequest(context, input, info, { feature, config, runner, units, lastUnit }) {
+// ARCH-LAND-12: "pr" mode pushes the feature, opens or reuses its PR; nothing merges.
+function landFeaturePullRequest(context, input, info, { feature, head, config, runner, units, lastUnit }) {
   const host = detectHost(info.origin, config.repoExec?.host);
   if (!host) throw new Error(`cannot tell which host ${info.origin} is on; set repoExec.host to github, gitlab or azure`);
   const options = {
@@ -678,7 +675,7 @@ function landFeaturePullRequest(context, input, info, { feature, config, runner,
   };
   preflightHost(options, runner);
   const result = { ...info, branch: feature, feature_branch: feature, land: "pr", merged: false, merged_locally: false, park_unit: lastUnit, units };
-  try { remote(context.root, ["push", "-u", "origin", feature]); }
+  try { remote(context.root, ["push", "-u", "origin", `${head}:refs/heads/${feature}`]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
     return landingPark("rejected-push", { ...result, pushed: false }, error);
@@ -693,8 +690,7 @@ function landFeaturePullRequest(context, input, info, { feature, config, runner,
   return { ...result, pushed: true, pr: request, auto_merge };
 }
 
-// The four landing failures that PARK (ARCH-LAND-06): {parked:true, decision},
-// worktree and branch kept, recorded as tracker PARKED with the decision.
+// Landing failures that PARK (ARCH-LAND-06): {parked:true, decision}, branch kept.
 const PARK_DECISIONS = {
   "conflict": (r) => ({
     question: `Merging ${r.branch} into ${r.base_branch} conflicts (the merge was aborted; nothing landed). How should it be resolved?`,
@@ -713,6 +709,7 @@ const PARK_DECISIONS = {
     options: ["Fix the remote's refusal (permissions, hooks, protection) and push again", "Land through a pull request instead (repoExec.land: \"pr\")", "Leave it unpushed for the user"],
     recommended: "Land through a pull request instead (repoExec.land: \"pr\")",
   }),
+  gate: gatePark,
   "auto-merge": (r) => ({
     question: `${r.pr?.url || "The pull request"} for ${r.branch} is open, but the host refused auto-merge. How should it be merged?`,
     options: ["Merge the pull request by hand on the host", "Enable auto-merge for the repository and retry", "Leave the pull request open for review"],

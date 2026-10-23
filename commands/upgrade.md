@@ -1,5 +1,5 @@
 ---
-description: Update every install of craftsman (user scope and each project) to the latest pushed commit, then load it and refresh this project. The one command to run after the plugin changes.
+description: Update every craftsman install to the latest pushed commit, then refresh this project.
 argument-hint: "[--dry-run]"
 allowed-tools: Bash, Read
 ---

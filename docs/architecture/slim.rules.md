@@ -3,8 +3,8 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: 9c4f8f4658784069efa875aad4d010d2e92376a2
-updated: 2026-10-18
+verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
+updated: 2026-10-23
 ---
 # ARCH slim — enforced rules
 
@@ -17,3 +17,8 @@ updated: 2026-10-18
 - **ARCH-SLIM-07** [decided] Scripts have no hard byte cap: CI warns when the scripts/ source total grows, and hook latency (quality gate, pre-guard, stop-gate p50/p95 in stats.mjs) is the hard budget under hooks.json timeouts — check: stats latency section — cite: scripts/stats.mjs:34-51
 - **ARCH-SLIM-08** [decided] CHANGELOG.md [Unreleased] stays under 8 KB; a release is cut before it grows past that — check: changelog size test — cite: CHANGELOG.md:6
 - **ARCH-SLIM-09** [decided] New behaviour is a role in an existing agent, not a new agent, unless its description fits the descriptions.test total without raising it — check: descriptions.test.mjs — cite: scripts/descriptions.test.mjs:13-16
+- **ARCH-SLIM-10** [decided] Always-loaded bytes are budgeted and measured: SessionStart additionalContext has a byte cap in a test beside the descriptions total (target 3 KB); telemetry records one context sample with phase "baseline" from the session's first assistant usage and stats.mjs reports baseline, peak and growth per session; prose cuts beyond ARCH-SLIM-12 wait for a week of baseline data — check: session-context.test.mjs cap, telemetry.test.mjs baseline, stats.test.mjs — cite: scripts/telemetry.mjs:63-71
+- **ARCH-SLIM-11** [superseded by ARCH-SLIM-13]
+- **ARCH-SLIM-12** [superseded by ARCH-SLIM-14]
+- **ARCH-SLIM-13** [decided] No third-party workflow plugin (Superpowers or any other) is a dependency or co-install assumption; borrowed patterns (test-driven development, systematic debugging, verification before completion) are vendored as craftsman skills with MIT attribution inside the descriptions budget and load only when their step runs — check: descriptions.test.mjs, skills/*/SKILL.md attribution line — cite: skills/test-driven-development/SKILL.md:1-6
+- **ARCH-SLIM-14** [decided] The documented entry points are /idea, /architect, /auto, /investigate, /sync-docs, /merge, /init, /upgrade, /stats and /digest; the loop commands /auto drives through the Skill tool (/plan, /orchestrate, /scrutinise) stay model-invocable; a command carries disable-model-invocation only when it is user-only and no command, agent, workflow or hook invokes it (toggle, builtin-check and account-switch today), and further flags are added only after entry-surface.test.mjs proves nothing calls the command; a command is deleted only after 30 days with no invocation in telemetry; the reviewer agents listed in entry-surface.test.mjs carry maxTurns — check: entry-surface.test.mjs flagged-set and no-invoker checks — cite: scripts/entry-surface.test.mjs:1-45

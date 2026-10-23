@@ -1,6 +1,6 @@
 ---
 name: phase-tracker
-description: Reconciles the progress of a multi-step run against what the plan or tracker claims, reporting each item's true status from repository evidence.
+description: Reports each plan or tracker item's true status from repository evidence.
 tools: Read, Grep, Glob, Edit
 model: haiku
 ---

@@ -11,9 +11,10 @@ import { fileURLToPath } from "node:url";
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MAX_EACH = 200;
+const MAX_ROUTING = 90; // a command or agent description is a routing sentence, not a manual
 const MAX_SHARED = 80;
 const BEFORE_TOTAL = 9156;
-const MAX_TOTAL = 8500;
+const MAX_TOTAL = 4500; // 4,463 after the routing-sentence rewrite; was 8,500
 
 function frontmatter(file) {
   const text = fs.readFileSync(path.join(PLUGIN_ROOT, file), "utf8");
@@ -32,12 +33,21 @@ const files = [
     .filter((f) => fs.existsSync(path.join(PLUGIN_ROOT, f))),
 ];
 const shared = files.filter((f) => path.basename(f).startsWith("_"));
+const routed = files.filter((f) => /^(commands|agents)\//.test(f));
 
 test("every command, agent and skill has a description of at most 200 chars", () => {
   const over = files.flatMap((f) => {
     const d = frontmatter(f)?.description;
     if (!d) return [`${f}: no description`];
     return d.length > MAX_EACH ? [`${f}: ${d.length} chars`] : [];
+  });
+  assert.deepEqual(over, []);
+});
+
+test("every command and agent description is a routing sentence of at most 90 chars", () => {
+  const over = routed.flatMap((f) => {
+    const d = frontmatter(f)?.description ?? "";
+    return d.length > MAX_ROUTING ? [`${f}: ${d.length} chars`] : [];
   });
   assert.deepEqual(over, []);
 });
