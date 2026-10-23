@@ -28,6 +28,7 @@ coverage:
   round9:        unzip-leading-options | prune-confirm-wording | rules-cites-round9 # the smallest fix of the unzip skip list I widened in step 48.1; the quality-gate CRAFTSMAN=off item waits for the user's decision
   round10:       unzip-plain-clusters | rules-cites-round10 # the unzip skip made total (anything but a plain letter cluster falls to the refusing allowlist); the last guard-form round the user will be asked for
   round11:       unzip-leading-and-plain | rules-cites-round11 # a regression of my own step 53: combine round 9's leading-words rule with round 10's plain-cluster rule
+  round12:       unzip-argument-free-letters | rules-cites-round12 # the skip's letters become a whitelist, replacing the blacklist that failed four times
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -758,6 +759,32 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: unzip-argument-free-letters
+    scope_id: unzip-argument-free-letters
+    project: .
+    depends_on: [rules-cites-round11]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs, scripts/safety-cites.test.mjs, docs/architecture/safety.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-cites-round12
+    scope_id: rules-cites-round12
+    project: .
+    depends_on: [unzip-argument-free-letters]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: []
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -966,6 +993,14 @@ Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tra
 | 3 | `safety.md:48` states the hole as a guarantee | Correctness / Warning | rules-cites-round11 |
 | 4 | `safety.rules.md:15` omits where the list flag must sit | Architecture / Suggestion | rules-cites-round11 |
 | 5 | the cost test asserted the hole and no CLAIMS row covered a pattern-borne list letter with a protected cwd | Test-coverage / Warning | unzip-leading-and-plain |
+
+### Round 12 findings (isolated review of e73e842..29e8c72: 1 Critical, 0 Warning, 3 Suggestion; the root re-ran the Critical; the round 11 regression itself is fixed and confirmed)
+| # | Finding | Class / severity | Unit |
+|---|---|---|---|
+| 1 | the unzip list-only skip treats any cluster holding `l t p Z v c z h` as a list flag, but `-P` (password) and, in this build, `-O`/`-I` (charsets) take the REST of their cluster as a value, so the letter after them is a value: `cd .craftsman && unzip -Pl ../stage/off.zip`, `cd .claude && unzip -oPl ../stage/s.zip` and `cd .claude && unzip -qoOv ../stage/s.zip` get guard exit 0 and write protected state. The reviewer's 1050-form matrix found exactly 21 such forms, all `-P/-O/-I` + a list letter, allowed by 5e34ab0, e73e842 and 29e8c72 as well (`pre-guard.mjs:677`). Not a regression; meets clause (b) | Security / Critical | unzip-argument-free-letters |
+| 2 | none of ARCH-SAFETY-05's cites lands on the unzip code | Architecture / Suggestion | unzip-argument-free-letters, rules-cites-round12 |
+| 3 | steps 55.0-55.2 still say "four rows"; only three exist (the hooks row was not real) | Correctness / Suggestion | rules-cites-round12 |
+| 4 | no CLAIMS row covered a value-taking letter hiding the list letter | Test-coverage / Suggestion | unzip-argument-free-letters |
 
 ## Scope Steps (executable core)
 
@@ -1421,6 +1456,22 @@ Closes findings 2, 3 and 4.
 - [x] 56.1 ARCH-SAFETY-05 and `safety.md` say the skip needs a list letter in a word before the zipfile AND every dash-word a plain cluster without `d` or `x`; `unzip a.zip -l` is listed among the refused harmless examples; the false sentences ("a list letter in a pattern or a negated one can no longer switch the destination check off" as a guarantee, "`unzip a.zip -l` stays allowed") are removed; `verified_at` bumped → accept: `safety-cites.test`, `safety-docs.test`, `arch-check lint --root <worktree>` green
 - [x] 56.2 The round 10 status note is corrected: `unzip a.zip -l` is refused (it was refused at 5e34ab0 and 53.1 said so); my reasoning that it was harmless ignored that the current directory can be protected, and the cost test I wrote asserted the hole; `[unit:unzip-plain-clusters]` and `[unit:rules-cites-round10]` were ticked too early and stay open until the next review confirms → accept: the note says so
 - [x] 56.3 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 11`
+
+### Step 57 — unzip-argument-free-letters (., javascript, high) — round 12
+Depends on: rules-cites-round11
+Closes findings 1, 2 (code side) and 4. **A whitelist instead of the blacklist that has now failed four times** (round 8 widened the letters, round 9 missed patterns, round 10 missed negation, round 11 widened the list-letter search, round 12 value-taking letters). The skip's dash-words must consist only of letters KNOWN to be argument-free: `/^-[ltpZvczhoqnjufaLVb]+$/` (the allowlist loop's argument-free set `oqnjufaLVb` plus the list letters), replacing `/^-[A-Za-z]+$/` with `!/[dx]/`. A letter not on the list (`P`, `O`, `I`, `d`, `x`, `T`, `M`, `U`, or one added to unzip later) can never take the skip; the refusing allowlist decides. The leading-word rule for the list letter stays. Each row is run unguarded first in a throwaway project (HOME and USERPROFILE temp, asserted).
+- [ ] 57.0 Failing tests first → accept: red on 29e8c72: `cd .craftsman && unzip -Pl ../stage/off.zip`, `cd .claude && unzip -oPl ../stage/s.zip` and `cd .claude && unzip -qoOv ../stage/s.zip` each change protected state unguarded and are allowed by the guard
+- [ ] 57.1 The skip condition becomes: every dash-word matches `/^-[ltpZvczhoqnjufaLVb]+$/` and a leading word holds one of `ltpZvczh` → accept: the three rows are blocked and nothing changes; `unzip -l/-v/-c/-z/-t/-Z a.zip`, `unzip -hh`, `unzip -lv -o a.zip` and `unzip -o a.zip -d out` stay allowed; `unzip a.zip -l`, `unzip -l -d DIR a.zip`, the eight negation forms and `unzip -l -P pw a.zip` (the stated cost) are refused
+- [ ] 57.2 The three forms are CLAIMS rows; ARCH-SAFETY-05 gains a cite on the unzip branch of `otherWriters`, pinned in `safety-cites.test.mjs` by an identifier from that block (`dashWords`); the other cites are re-pointed in this commit → accept: `safety-cites.test` green
+- [ ] 57.3 Full CI set (`arch-check lint --root <worktree>`), tick, commit `fix(guard): unzip's list-only skip takes only letters known to be argument-free`
+
+### Step 58 — rules-cites-round12 (., markdown, normal) — round 12
+Depends on: unzip-argument-free-letters
+Closes finding 3 and the doc side of 1 and 2.
+- [ ] 58.0 Failing tests first: a needle for "known to be argument-free" in ARCH-SAFETY-05 and `safety.md` → accept: red until the text is updated
+- [ ] 58.1 ARCH-SAFETY-05 and `safety.md` say the skip takes only option clusters made solely of letters known to be argument-free (and a leading word holds the list letter); `unzip -l -P pw a.zip` and any cluster with a letter off the list are listed among the refused harmless examples; `verified_at` bumped → accept: `safety-cites.test`, `safety-docs.test`, `arch-check lint --root <worktree>` green
+- [ ] 58.2 Steps 55.0-55.2 are edited to say three rows, "(the hooks row was not real, see the status note)"; the round 11 note records that `[unit:rules-cites-round8]` to `[unit:rules-cites-round11]` stay open until the next review confirms them, and that the reviewer's limits are recorded (`-tt`, `-lT`, `-lf`, `-lu`, `-c -o`, `-p -o`, `-Z -o`, `-q -l`, `-lO` write nothing; `-M` hangs on /dev/tty; a zipfile operand of `-` is refused; `-O`/`-I` come from a distro iconv patch, `-P` is standard; encrypted archives untested) → accept: the notes say so
+- [ ] 58.3 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 12`
 
 ## Status 2026-10-23 (round 11)
 Round 11 (steps 55-56) was built as planned: 4ac46aa (55, the unzip list letter counts only in a leading option word and only in plain clusters) and this step 56 (rules text, the plan's record). Each step's tests were seen red on the previous code (55: three claims rows that really overwrote `.claude/settings.json` unguarded and were allowed, plus the cost test; 56: the needle test), then green with the full CI set: 802 node tests, model-policy, doc-size-policy, `arch-check lint --root <worktree>`, `claude plugin validate .`, `claude plugin test .` (12), `git diff --check`.
