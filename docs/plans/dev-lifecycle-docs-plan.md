@@ -281,6 +281,32 @@ units:
       write: [.claude-plugin/plugin.json, craftsman.config.json, scripts/lib/core.mjs, scripts/lib/user-config.mjs, scripts/lib/user-config.test.mjs, scripts/release-identity.test.mjs, EXTENDING.md]
     arch: [ARCH-PLAN-07, ARCH-MOD-06, ARCH-DOCS-15, ARCH-ENGINE-22, ARCH-STATE-01]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-bypass-allowlist
+    scope_id: fix-bypass-allowlist
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/shell-words.mjs, scripts/lib/force-block.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-narrow.test.mjs]
+    arch: [ARCH-STATE-14, ARCH-STATE-13, ARCH-LAND-23, ARCH-SAFETY-03, ARCH-SAFETY-05, ARCH-DOCS-07]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-reviewer-red
+    scope_id: fix-reviewer-red
+    project: .
+    depends_on: []
+    module: agents/code-reviewer.md
+    language: markdown
+    security: normal
+    scope:
+      read: [agents/code-reviewer.md, agents/unit-runner.md, scripts/doc-size-policy.mjs]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [agents/code-reviewer.md, scripts/unit-runner-tdd.test.mjs]
+    arch: [ARCH-ENGINE-21, ARCH-ENGINE-04, ARCH-SLIM-02]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -352,7 +378,7 @@ Depends on: none
 ### Step 9 — docs-budgets (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: tool-slots
-- [ ] 9.1 Add `docs.budgets {planBytes, scrutiniseBytes, claudeMdLines, openPlans, enforce}` to the config with `enforce` following the budgetsEnforce setting (default true) → accept: config parses
+- [ ] 9.1 Add `docs.budgets {planBytes, scrutiniseBytes, claudeMdLines, openPlans, enforce}`: the plugin defaults keep the three keys (`arch-check.test.mjs` 9.1 pins them) and `enforce` follows the budgetsEnforce setting (default true); this repo sets `claudeMdLines` and `openPlans` in its own `craftsman.project.json` → accept: config parses
 - [ ] 9.2 Make `arch-check lint` enforce the budgets: existing files cap at their size on first run, a new plan defaults to 60 KB and a new scrutinise doc to 30 KB, caps ratchet against the merge-base value → accept: `arch-check.test.mjs` growth case fails lint, shrink case passes, `enforce:false` only reports
 - [ ] 9.3 `/sync-docs` reports budget state every pass → accept: the output of lint lists each file's bytes against its cap
 
@@ -434,11 +460,28 @@ Owner decision (2026-10-23): map three knobs, `modelTier` reserved. Platform fac
 - [ ] 20.1 Add `scripts/lib/user-config.test.mjs` first: `applyUserConfig(defaults, env)` maps `AUTONOMYLEVEL` attended|standard|unattended to `repoExec.approval.prLines` 100|400|1000, `REVIEWDEPTH` light|standard|deep to `planning.blindRederivation` never|auto|always, `BUDGETSENFORCE` "true"|"false" to `docs.budgets.enforce`; `MODELTIER` is accepted and changes nothing (reserved); an unset variable leaves the default; an unknown value is ignored and never throws; `loadConfig` over a temp project that sets the same key wins over the machine-wide value → accept: red before the lib exists
 - [ ] 20.2 Implement the pure `applyUserConfig` in `scripts/lib/user-config.mjs` and call it in `loadConfig` between the plugin defaults and the project files (project config overrides), reading only `CLAUDE_PLUGIN_OPTION_*` variables, so nothing changes when the platform exports none → accept: tests green, the full suite unchanged
 - [ ] 20.3 Declare `userConfig` in `.claude-plugin/plugin.json` with exactly `autonomyLevel`, `reviewDepth`, `modelTier` (string options with a default) and `budgetsEnforce` (boolean, default true), each with only `type`, `title`, `description`, `default`; no `options`, no `version` → accept: `release-identity.test.mjs` asserts the four keys, the allowed field names and that `version` and `options` are absent
-- [ ] 20.4 Add `claudeMdLines: 200` and `openPlans: 30` beside `enforce: true` in `docs.budgets` in `craftsman.config.json` (generous, so other repos keep linting clean; this repo has 14 open plans and no CLAUDE.md) → accept: config parses, `arch-check lint` PASS on this repo
+- [ ] 20.4 Add `claudeMdLines: 200` and `openPlans: 30` under `docs.budgets` in this repo's `craftsman.project.json` (not the plugin defaults: `arch-check.test.mjs` 9.1 pins those to three keys) (generous, so other repos keep linting clean; this repo has 14 open plans and no CLAUDE.md) → accept: config parses, `arch-check lint` PASS on this repo
 - [ ] 20.5 Document the four machine-wide settings, their mapping and that a project config wins, in one short `EXTENDING.md` section within its cap → accept: the section exists, `doc-size-policy` green
+
+### Step 21 — fix-bypass-allowlist (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+`pre-guard.mjs` (93 KB) is write-listed, not read-listed: read it in parts. Finding (round 6, Warning): `bypassView` strips heredoc bodies from the hook-bypass check unless the text holds a listed shell or interpreter word, so an unlisted consumer (tcsh, mksh, ash, deno, bun, lua, pwsh, `nodejs`, `perl5.36`, or a heredoc written to a file that the same command then runs) now hides its body; main refused those.
+- [ ] 21.1 Add tests first in `scripts/pre-guard-narrow.test.mjs` (spell the flag in two parts so the file never trips the hook): a heredoc fed to each of tcsh, mksh, ash, busybox sh, deno, bun, lua, pwsh, nodejs, perl5.36 is refused; a heredoc written to a file with `cat > x <<EOF` and then run in the same command (`sh x`, `./x`, `source x`, `bash x`) is refused; `git -c alias.x='!sh' x <<EOF` is refused; the allowed cases stay allowed: `git commit -F - <<EOF` prose, `cat <<EOF`, `cat > notes.txt <<EOF`, `tee f <<EOF` → accept: the new refusals fail on the current `bypassView`
+- [ ] 21.2 Replace the denylist in `bypassView` with an allowlist: strip heredoc bodies only when every command head left in the command (after removing the bodies) is one of `cat`, `tee`, `git commit|tag|notes` without `-c`, `echo`, `printf`, `true`, `wc`, `sort`, `uniq`, `head`, `tail`; any other head, a pipe into an unlisted head, or a head that runs a file keeps the bodies in view (fail closed) → accept: tests green, `pre-guard.test.mjs` unchanged and green
+- [ ] 21.3 The comment above `bypassView` cites ARCH-STATE-14, not the superseded ARCH-STATE-12 → accept: grep shows no ARCH-STATE-12 in `pre-guard.mjs`
+
+### Step 22 — fix-reviewer-red (., markdown, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+Finding (round 6, Warning): ARCH-ENGINE-21 says the reviewer refuses a unit whose new test never failed, but the sentence exists only in `agents/implementer.md`.
+- [ ] 22.1 Add to `scripts/unit-runner-tdd.test.mjs` first: `agents/code-reviewer.md` carries the refusal sentence (the unit's evidence names the failing run of each new test, else the review returns a Critical finding) → accept: red before the change
+- [ ] 22.2 Add that sentence to `agents/code-reviewer.md` by trading bytes inside the file so its `FILE_CAPS` entry (2564) does not rise → accept: the test and `doc-size-policy` green
 
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
+
+Round 6 units (fix-bypass-allowlist, fix-reviewer-red) touch disjoint files and run in parallel. The `craftsman.project.json` edit of 9.1/20.4 waits for the owner to run /craftsman:upgrade and /reload-plugins (the installed hook is older than scripts/scope.mjs on main, so no session can record /orchestrate, and both config files are self-protected).
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
