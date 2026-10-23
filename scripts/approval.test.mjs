@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { prepare, attachUrl, check, landed, pending, fallback } from "./approval.mjs";
 
 const LATER = new Date(Date.now() + 60000).toISOString();
@@ -146,4 +147,40 @@ test("fallback writes the markdown twin and returns the one question", () => {
   assert.deepEqual(out.options, ["Merge now", "Open PR"]);
   assert.equal(fs.readFileSync(path.join(s.root, ".craftsman/approvals/p-f.md"), "utf8"), p.markdown);
   assert.equal(fallback({ run: "nope", markdown: "x" }, { root: s.root }).refused, true);
+});
+
+const git = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8" }).trim();
+
+test("prepare scans the feature head in a detached worktree, not the main checkout", () => {
+  const s = setup();
+  git(s.root, "init", "-q", "-b", "main");
+  git(s.root, "config", "user.email", "t@t");
+  git(s.root, "config", "user.name", "t");
+  fs.writeFileSync(path.join(s.root, "a.txt"), "ok\n");
+  fs.writeFileSync(path.join(s.root, "craftsman.config.json"), JSON.stringify({ security: { check: [] } }));
+  git(s.root, "add", "."); git(s.root, "commit", "-qm", "base");
+  git(s.root, "checkout", "-qb", "feat");
+  fs.writeFileSync(path.join(s.root, "leak.txt"), `key = ${"AKIA"}${"ABCDEFGHIJKLMNOP"}\n`);
+  git(s.root, "add", "."); git(s.root, "commit", "-qm", "leak");
+  const head = git(s.root, "rev-parse", "HEAD");
+  git(s.root, "checkout", "-q", "main");
+  assert.ok(!fs.existsSync(path.join(s.root, "leak.txt")));
+  const out = prepare({ ...s.input, head_sha: head }, { root: s.root });
+  assert.equal(out.refused, true);
+  assert.equal(out.findings[0].file, "leak.txt");
+  assert.ok(!JSON.stringify(out).includes("ABCDEFGHIJKLMNOP"));
+  assert.ok(!fs.existsSync(path.join(s.root, ".craftsman/approvals/p-f.json")));
+  assert.equal(git(s.root, "worktree", "list").split("\n").length, 1);
+  assert.equal(git(s.root, "status", "--porcelain").replace(/.*\.craftsman.*\n?/g, ""), "");
+});
+
+test("prepare refuses a secret-shaped risk string in the rendered page without echoing it", () => {
+  const s = setup();
+  const secret = `${"AKIA"}${"ZYXWVUTSRQPONMLK"}`;
+  const out = prepare({ ...s.input, risk: `rotate ${secret} soon` }, { root: s.root, runners: s.runners });
+  assert.equal(out.refused, true);
+  assert.ok(out.findings.length > 0);
+  assert.ok(out.findings.every((f) => f.file && f.line && f.rule && Object.keys(f).length === 3));
+  assert.ok(!JSON.stringify(out).includes(secret));
+  assert.ok(!fs.existsSync(path.join(s.root, ".craftsman/approvals/p-f.json")));
 });

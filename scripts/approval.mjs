@@ -5,11 +5,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { atomicWrite, logEvent, loadConfig, mainCheckoutRoot, projectContext } from "./lib/core.mjs";
+import { atomicWrite, logEvent, loadConfig, mainCheckoutRoot, projectContext, splitCmd } from "./lib/core.mjs";
 import { CHOICES, recommend, renderApproval } from "./lib/approval-page.mjs";
 import { runIdFor } from "./lib/approval-gate.mjs";
-import { scanTree } from "./secrets-scan.mjs";
-import { runDocChecks } from "./doc-checks.mjs";
+import os from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
+import { scanTree, scanContent } from "./secrets-scan.mjs";
+import { runDocChecks, onPath } from "./doc-checks.mjs";
 
 const QUESTION = { question: "Merge now or Open PR?", options: ["Merge now", "Open PR"] };
 
@@ -45,28 +47,67 @@ function withLock(root, run, action) {
   try { return action(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
 
-// Default runners; tests inject stubs. Secret findings carry file:line:rule only, never the value.
+// Default runners take the directory to inspect (the detached worktree at head_sha).
+// Secret findings carry file:line:rule only, never the value.
 export function defaultRunners(root) {
   return {
-    secrets: () => scanTree(root).map((f) => ({ file: f.file, line: f.line, rule: f.rule })),
-    docChecks: () => {
-      const cfg = loadConfig(projectContext(root));
-      return runDocChecks({ root, checks: cfg.docs?.checks || [], verify: true, timeoutMs: cfg.stopGate?.testTimeoutMs });
+    secrets: (dir = root) => {
+      const cfg = loadConfig({ root });
+      const out = [];
+      let ran = 0;
+      for (const cmd of cfg.security?.check || []) {
+        const [bin, ...args] = splitCmd(cmd);
+        if (!bin || !onPath(bin, process.env, dir)) continue;
+        ran++;
+        const r = spawnSync(bin, args, { cwd: dir, encoding: "utf8", timeout: cfg.stopGate?.testTimeoutMs });
+        if (r.status !== 0) out.push({ file: "(security.check)", line: 0, rule: `${path.basename(bin)} exit ${r.status ?? "timeout"}` });
+      }
+      if (!ran) return scanTree(dir).map((f) => ({ file: f.file, line: f.line, rule: f.rule }));
+      return out;
+    },
+    docChecks: (dir = root) => {
+      const cfg = loadConfig({ root });
+      return runDocChecks({ root: dir, checks: cfg.docs?.checks || [], verify: true, timeoutMs: cfg.stopGate?.testTimeoutMs });
     },
   };
 }
 
-export function prepare(input, { root = ".", runners = defaultRunners(root), now = () => new Date().toISOString() } = {}) {
+// Run fn in a detached temp worktree at sha; the main checkout is never touched.
+function inDetachedTree(root, sha, fn) {
+  const main = mainCheckoutRoot(root);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "approval-tree-"));
+  const dir = path.join(tmp, "tree");
+  try {
+    execFileSync("git", ["-C", main, "worktree", "add", "--detach", dir, String(sha)], { stdio: "pipe" });
+  } catch {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    return { error: `cannot check out head_sha ${sha} to scan` };
+  }
+  try { return { value: fn(dir) }; } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    try { execFileSync("git", ["-C", main, "worktree", "prune"], { stdio: "pipe" }); } catch { /* best effort */ }
+  }
+}
+
+export function prepare(input, { root = ".", runners, now = () => new Date().toISOString() } = {}) {
   if (!input.plan || !input.feature) return refuse("plan and feature are required");
   const runId = runIdFor(input.plan, input.feature);
   if (input.run !== undefined && input.run !== runId) return refuse(`run must be ${runId}`);
   let file;
   try { file = fileFor(root, runId); } catch (e) { return refuse(e.message); }
-  const findings = runners.secrets();
+  const scanned = runners
+    ? { value: { findings: runners.secrets(), docs: null } }
+    : inDetachedTree(root, input.head_sha, (dir) => {
+      const r = defaultRunners(root);
+      const findings = r.secrets(dir);
+      return { findings, docs: findings.length ? null : r.docChecks(dir) };
+    });
+  if (scanned.error) return refuse(scanned.error);
+  const findings = scanned.value.findings;
   if (findings.length) {
     return { ok: false, refused: true, reason: "secrets scan found findings; no approval page", findings: findings.map((f) => ({ file: f.file, line: f.line, rule: f.rule })) };
   }
-  const docs = runners.docChecks();
+  const docs = scanned.value.docs || runners.docChecks();
   const pre = (docs.checks || []).find((c) => /pre-commit/.test(c.cmd));
   const others = (docs.checks || []).filter((c) => c !== pre);
   const ev = input.evidence || {};
@@ -79,6 +120,9 @@ export function prepare(input, { root = ".", runners = defaultRunners(root), now
   const run = { ...input, run: runId, evidence, prLines: cfgLines ?? input.prLines };
   const recommendation = recommend(run);
   const { html, markdown } = renderApproval(run);
+  const leaks = [["approval.md", markdown], ["approval.html", html]]
+    .flatMap(([file, text]) => scanContent(String(text)).map((f) => ({ file, line: f.line, rule: f.rule })));
+  if (leaks.length) return { ok: false, refused: true, reason: "rendered approval page contains secret-shaped text; no approval page", findings: leaks };
   const refused = withLock(root, runId, () => {
     const prev = load(root, runId);
     if (prev?.status === "landed") return refuse("record is already landed; start a new run");
