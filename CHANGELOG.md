@@ -16,6 +16,8 @@ All notable changes to craftsman are documented here. Format loosely follows
   New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only for an
   approved run whose record is landed, once per run, or a `manual:true` `/sync-docs --tracker`; older installs treat it as off). With feature branches off there is no
   verification point and units still merge straight to base.
+- **Dashboard, notes and archive** (ARCH-DOCS-14, ARCH-ARCHIVE-05/07): a dashboard archive tab, a notes folder, and
+  `/sync-docs --archive` / `--prune --archive` to retire closed plans; all off without an archive project.
 - **Ledger guard** (ARCH-TRACKER-13/14): publish refuses to drop a committed row unless an archive event names
   its plan; `tracker.mjs init --merge` and `--from-block` repair a partial or missing ledger.
 - **Measurement** (ARCH-SLIM-10): a per-session `context{phase:"baseline"}` sample; `stats.mjs` reports
