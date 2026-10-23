@@ -43,7 +43,7 @@ export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE
   return { name, mtimeMs, sha256: tokens[name].sha256 };
 }
 
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(new URL(import.meta.url))) {
   try {
     const file = process.argv[2];
     if (!file) throw new Error("usage: goal-token.mjs <path to .craftsman/instructions/<slug>.goal.txt>");
