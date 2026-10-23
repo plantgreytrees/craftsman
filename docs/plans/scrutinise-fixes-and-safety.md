@@ -4,7 +4,7 @@ goal: The self-protection layer holds, so a tool call cannot forge a grant, mark
 level: feature
 priority: P0
 classification: in-scope # twelve isolated /scrutinise rounds of fixes-and-safety (PR #1); this doc keeps a rolling summary plus the latest round (ARCH-DOCS-10), older rounds are in git history
-tracker_rows: [followup-quality-switch-env] # PENDING, waits for the user's decision; no other row is registered (the main checkout's TRACKER.md carries an uncommitted user change)
+tracker_rows: [] # none registered (the main checkout's TRACKER.md carries an uncommitted user change)
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -104,6 +104,6 @@ A review whose only findings are spelling-level items in the stated limit class 
 - Residual risk: tests were run on Fedora's UnZip 6.00 and GNU tar only (bsdtar and busybox differ); `-O`/`-I` come from a distro iconv patch; encrypted archives are untested; a permission prompt can follow a minted nonce (it expires after 60 seconds); tools run with `CLAUDE_CODE_SESSION_ID` set and no `CLAUDE_PROJECT_DIR` can reach the real repo through the session pin (it happened once, in round 8's review).
 
 ## Out of scope (flagged, not driven)
-- `followup-quality-switch-env` (decided: record as a stated limit): the tracker's MERGED acceptance gate honours `CRAFTSMAN=off` in a script's own environment (`tracker.mjs`); `CRAFTSMAN=off` is the user's documented switch for the quality side, so the quality gates are not a security boundary. To record in `safety.md` and pin with a ledger test.
+- Recorded as a stated limit, on the user's decision (2026-10-23): the tracker's MERGED acceptance gate, `baseline` and `snapshot` honour `CRAFTSMAN=off` in a script's own environment; it is the user's documented switch for the quality side, so the quality gates are not a security boundary. Stated in ARCH-SAFETY-05 and `safety.md`, pinned by a `tracker.test.mjs` case. No authority check reads that variable.
 - The stray ledger lines the round 8 reviewer wrote into the main checkout (three `docs/plans/p.md` lines in `.craftsman/tracker/events.jsonl`, `.craftsman/runs/p.json`, possibly a regenerated `docs/plans/TRACKER.md`) are for the user to remove; nothing should `git checkout` that file, which also holds the user's own uncommitted change.
 - Moving the `failClosed` block, duplicated in three guards, into `core.mjs`; the interpreter, run-time-built-text and archive-contents limits `safety.md` names; runtime-only facts about Claude Code (mid-session settings reload, `--resume` keeping `session_id`).
