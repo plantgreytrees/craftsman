@@ -382,3 +382,27 @@ test("wiring: unattended paths still PARK instead of asking mid-run", () => {
   assert.match(read("commands/_shared-execution.md"), /PARK/);
   assert.match(read("commands/_shared-execution.md"), /Max 2 retries[^.]*PARK/);
 });
+
+// ARCH-PLAN-07: no fourth profile file.
+export const PROFILE_FILE = /^(?:craftsman\.profile\.[^/]*|\.claude\/profile\.[^/]*|(?:docs\/)?profile\.(?:json|md|yaml))$/;
+
+test("no fourth profile file is tracked (ARCH-PLAN-07)", () => {
+  const ls = spawnSync("git", ["ls-files"], { cwd: PLUGIN_ROOT, encoding: "utf8" });
+  assert.equal(ls.status, 0);
+  assert.deepEqual(ls.stdout.split("\n").filter((f) => PROFILE_FILE.test(f)), []);
+});
+
+test("the profile-file check fails on a temp repo holding one", () => {
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "prof-"));
+  const git = (...a) => spawnSync("git", a, { cwd: dir, encoding: "utf8" });
+  git("init", "-q");
+  for (const f of ["craftsman.profile.json", ".claude/profile.md", "profile.yaml", "docs/profile.json"]) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), "x");
+  }
+  fs.writeFileSync(path.join(dir, "README.md"), "x");
+  git("add", "-A");
+  const hits = git("ls-files").stdout.split("\n").filter((f) => PROFILE_FILE.test(f));
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(hits.length, 4);
+});
