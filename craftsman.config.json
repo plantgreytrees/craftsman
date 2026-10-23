@@ -94,14 +94,18 @@
   },
   "tracker": {
     "nudgeLines": 300,
-    "publish": "push"
+    "publish": "on-approve"
   },
   "repoExec": {
     "verifyTestsBeforeMerge": true,
     "land": "direct",
     "host": "auto",
     "autoMerge": true,
-    "mergeMethod": "merge"
+    "mergeMethod": "merge",
+    "approval": {
+      "required": true,
+      "prLines": 400
+    }
   },
   "baseline": {
     "errorsDoc": "docs/errors/KNOWN_ISSUES.md"

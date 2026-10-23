@@ -505,7 +505,7 @@ test("config: hierarchy key defaults, and project config overrides them", () => 
   const c = JSON.parse(fs.readFileSync(CFG, "utf8"));
   assert.deepEqual(
     [c.planning.featureBranches, c.planning.featureUnitCap, c.tracker.publish, c.execution.maxSubagents, c.execution.maxSessions],
-    [false, 8, "push", 0, 1]); // maxSubagents 0 = root-only
+    [false, 8, "on-approve", 0, 1]); // maxSubagents 0 = root-only
   const m = deepMerge(c, { planning: { featureBranches: true, featureUnitCap: 3 }, tracker: { publish: "pr" },
     execution: { maxSubagents: 2, maxSessions: 4 } });
   assert.deepEqual(

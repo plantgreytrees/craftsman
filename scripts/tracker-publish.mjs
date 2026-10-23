@@ -106,7 +106,7 @@ function render(temp, rows, context, input) {
 // `deps.beforePush(attempt)` is a test seam for a competing push.
 export function publishTracker(input = {}, context = projectContext(input.project || "."), deps = {}) {
   const mode = loadConfig(context).tracker?.publish ?? "push";
-  if (mode !== "push") return { published: false, mode };
+  if (mode === "on-approve" ? input.approved !== true && input.manual !== true : mode !== "push") return { published: false, mode };
   let lock = null;
   let temp = null;
   let added = false;

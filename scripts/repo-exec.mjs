@@ -8,6 +8,7 @@ import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
+import { afterLand, gateFeature } from "./lib/approval-gate.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
 function run(root, args, options = {}) {
@@ -311,7 +312,7 @@ function sync(context, input, info) {
 
 // The project's test command, by stop-gate's cfg.stopGate.commands (marker
 // file → command); null when nothing is detected.
-function findGateCommand(worktree, cfg) {
+export function findGateCommand(worktree, cfg) {
   for (const [marker, command] of Object.entries(cfg.stopGate?.commands || {})) {
     if (marker.includes("*")) {
       let entries = [];
@@ -559,12 +560,9 @@ function isLastFeature(slug, feature, root) {
   }
 }
 
-// ARCH-LAND-18: a finished feature lands on base. Refused unless
-// planning.featureBranches and every row of the feature is FEATURE_MERGED.
-// In a detached temp worktree: base merged into the feature, gate re-run, then
-// the result merged --no-ff onto origin/<base> and pushed. Locks: feature, then
-// base. Conflict / ff-only / rejected push PARK the feature's last unit
-// (ARCH-LAND-06); nothing is ever forced (ARCH-LAND-05).
+// ARCH-LAND-18: a finished feature lands on base (needs planning.featureBranches, every row
+// FEATURE_MERGED). Detached temp worktree: base merged in, gate re-run, --no-ff, push; locks
+// feature then base. Conflict / ff-only / rejected push PARK (ARCH-LAND-06); never forced.
 function landFeature(context, input, info, deps = {}) {
   if (input.feature !== undefined && input.feature !== null) assertFeatureId(input.feature);
   const config = loadConfig(context);
@@ -597,8 +595,11 @@ function landFeature(context, input, info, deps = {}) {
   }
   const lastUnit = rows[rows.length - 1].unit;
   requireOnline(context.root, input, info, "land-feature");
-  if (landMode(config) === "pr") return landFeaturePullRequest(context, input, info, { feature, config, runner: deps.runner, units: rows.map((row) => row.unit), lastUnit });
-  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units: rows.map((row) => row.unit) };
+  const units = rows.map((row) => row.unit);
+  const gate = gateFeature({ config, context, input, branch: feature });
+  const result = { ...info, branch: feature, feature_branch: feature, land: "feature", merged: false, merged_locally: false, park_unit: lastUnit, units };
+  if (gate.park) return { ...result, ...gate.park };
+  if ((gate.mode || landMode(config)) === "pr") return afterLand({ gate, mode: "open-pr", context }, landFeaturePullRequest(context, input, info, { feature, config, runner: deps.runner, units, lastUnit }));
   const featureLock = acquireLock(featureLockInfo(info, feature), input);
   let baseLock = null;
   let added = false;
@@ -663,11 +664,11 @@ function landFeature(context, input, info, deps = {}) {
     } catch (error) { result.cleanup_error = String(error.stderr || error.message).trim(); }
   }
   logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: true, sha: result.merge_sha }, context);
+  afterLand({ gate, sha: result.merge_sha, rows, context, retire: deps.retireCheck });
   return { ...result, merged: true, merged_locally: true, pushed: true, promoted, promote_errors, cleaned, remote_branch_deleted: remoteDeleted };
 }
 
-// ARCH-LAND-12: in "pr" mode one feature PR targets base. The feature branch is
-// pushed and its PR opened or reused; nothing merges and no row is promoted.
+// ARCH-LAND-12: "pr" mode pushes the feature, opens or reuses its PR; nothing merges.
 function landFeaturePullRequest(context, input, info, { feature, config, runner, units, lastUnit }) {
   const host = detectHost(info.origin, config.repoExec?.host);
   if (!host) throw new Error(`cannot tell which host ${info.origin} is on; set repoExec.host to github, gitlab or azure`);
@@ -693,8 +694,7 @@ function landFeaturePullRequest(context, input, info, { feature, config, runner,
   return { ...result, pushed: true, pr: request, auto_merge };
 }
 
-// The four landing failures that PARK (ARCH-LAND-06): {parked:true, decision},
-// worktree and branch kept, recorded as tracker PARKED with the decision.
+// Landing failures that PARK (ARCH-LAND-06): {parked:true, decision}, branch kept.
 const PARK_DECISIONS = {
   "conflict": (r) => ({
     question: `Merging ${r.branch} into ${r.base_branch} conflicts (the merge was aborted; nothing landed). How should it be resolved?`,
