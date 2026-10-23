@@ -60,7 +60,10 @@ export function gateFeature({ config, context, input, branch }) {
 // After a landing: mark the record landed, then log retire candidates (ARCH-LAND-26). Never throws.
 export function afterLand({ gate, sha = gate.head, mode = "merge", rows = [], closing = [], context, retire }, pr) {
   if (pr?.parked) return pr;
-  try { if (gate.needed) approvalLanded({ run: gate.runId, sha, mode }, { root: context.root }); } catch { /* record only */ }
+  try {
+    const r = gate.needed ? approvalLanded({ run: gate.runId, sha, mode }, { root: context.root }) : { ok: true };
+    if (!r.ok) logEvent({ ev: "approval_landed_refused", run: gate.runId, reason: r.reason }, context);
+  } catch { /* record only */ }
   try {
     const closed = (r) => r.status === "COMPLETE" || r.status === "CANCELLED" || closing.some((c) => c.plan === r.plan && c.unit === r.unit);
     const state = currentState(context);

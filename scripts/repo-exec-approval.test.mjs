@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { inspectRepo, landFeature, merge, prepare } from "./repo-exec.mjs";
-import { approvalRequired, evaluateApproval, runIdFor } from "./lib/approval-gate.mjs";
+import { afterLand, approvalRequired, evaluateApproval, runIdFor } from "./lib/approval-gate.mjs";
 import { publishTracker } from "./tracker-publish.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { prepare as prepareApproval, check as checkApproval } from "./approval.mjs";
@@ -260,4 +260,16 @@ test("tracker.publish: off, push and on-approve modes", () => {
       assert.notDeepEqual(out, { published: false, mode });
     }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("afterLand logs approval_landed_refused when the record cannot be marked landed", () => {
+  const t = setup({ required: true });
+  try {
+    const context = { root: t.root, stateDir: path.join(t.root, ".craftsman") };
+    afterLand({ gate: { needed: true, runId: "p-nope", head: "abc" }, context, retire: () => [] }, { merged: true });
+    const ev = fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const e = ev.find((x) => x.ev === "approval_landed_refused");
+    assert.equal(e.run, "p-nope");
+    assert.match(e.reason, /no approval record/);
+  } finally { done(t); }
 });
