@@ -43,5 +43,26 @@ test("unit-runner review role returns CHANGES when evidence lacks the failing ru
 });
 
 test("workflow review prompt carries the implementer's evidence", () => {
-  assert.match(read("workflows/run.js"), /'Review',\s*`worktree_path: \$\{head\.worktree_path\}\\nevidence: \$\{head\.evidence\}`/);
+  assert.match(read("workflows/run.js"), /'Review',\s*`worktree_path: \$\{head\.worktree_path\}\\nevidence: \$\{done\.evidence\}/);
+});
+
+test("fix-round review prompt still carries the original evidence", () => {
+  assert.match(read("workflows/run.js"), /evidence: \$\{done\.evidence\}/);
+});
+
+test("unit-runner implement step makes evidence name each new test's failing run", () => {
+  const impl = read("agents/unit-runner.md").split("## review")[0];
+  assert.match(impl, /evidence names[^.\n]*failing run of each new test/);
+});
+
+test("implementer Return list names the failing run of each new test", () => {
+  assert.match(read("agents/implementer.md").split("**Return**")[1], /failing run of each new test/);
+});
+
+test("_shared-execution step 8 SKIP route checks the failing run", () => {
+  assert.match(read("commands/_shared-execution.md"), /by you on SKIP[^.\n]*failing runs/);
+});
+
+test("code-reviewer excludes integration and scrutinise reviews from the failing-run refusal", () => {
+  assert.match(read("agents/code-reviewer.md"), /[Ii]ntegration and scrutinise reviews are not subject/);
 });
