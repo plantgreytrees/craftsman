@@ -46,3 +46,6 @@ The mod draws nothing in `-p`, VS Code or cloud sessions, and
 - **Band**: a strip drawn above the prompt.
 - **session.usage**: the mods API call that returns context tokens and
   percent.
+
+## Release amendments (2026-10-23)
+ARCH-MOD-06: no `version` key. Installs track commits, `metadata.release` follows the CHANGELOG, and `/craftsman:upgrade` updates. Gleam installs `craftsman#stable`, a branch the owner fast-forwards after the plugin's own loop passes; this repo tracks main. Rollback moves `stable` back. A `version` field was rejected because it pins every machine until bumped and reverses CHANGELOG 2.2.0. See [approval](./approval.md).

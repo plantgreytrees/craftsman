@@ -71,3 +71,6 @@ Terminology: its "feature" is the hierarchy's feature; the idea doc's "plan doc 
 
 ## Glossary
 **Wave**: units of one feature running together. **Rollup**: the generated tracker of an epic or story. **Publish**: the locked commit of generated progress files to base.
+
+## Profile amendment (2026-10-23)
+ARCH-PLAN-07: "how the owner wants Claude to work" lives in three places that already have loading and enforcement. Mechanism goes in config keys, judgement in `.claude/rules/craftsman-loop.md`, and invariants in ARCH rules. Four machine-wide plugin settings sit on top: autonomy level, review depth, model tier and budgets enforcement. A separate profile file was rejected as a fourth place to drift. See [approval](./approval.md).
