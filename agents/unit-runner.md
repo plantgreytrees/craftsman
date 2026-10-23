@@ -11,11 +11,11 @@ Prompt gives `role`, root `session_id`, `plugin_root`, `project_root`, `project`
 1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner", session_id}` (+`feature`, `feature_branch`).
 2. `S repo-exec` `{action:"prepare", session_id, project, unit, slug:unit}`.
 3. `S scope` `{session_id, plan, unit, project, worktree_path, arch, scope}`, then `{action:"require", session_id, project, worktree_path}`; refused → `BLOCKED`.
-4. Smoke gate first (ARCH-TRACKER-05): repo test command before any edit; red → `BLOCKED`.
-5. Open decision only the user can make → no edit, no default: `PARKED` with `parked:[{question, options[], recommended?}]`.
-6. Implement as `agents/implementer.md`: scope.read/docs and scope.write only, every cited `[decided]` rule, tests for every criterion. A rule you cannot honour → `BLOCKED` with its id.
-7. Gate with the repo's commands; must be green.
-8. Commit in `<worktree_path>` (the implementer never commits); return `IMPLEMENTED` with `sha`, `worktree_path`.
+4. Smoke gate (ARCH-TRACKER-05): repo tests; red → `BLOCKED`.
+5. User-only decision → no edit, no default: `PARKED` with `parked:[{question, options[], recommended?}]`.
+6. Implement as `agents/implementer.md`: scope.read/docs and scope.write only, every cited `[decided]` rule; write each testable criterion's test first and run it red before the change (ARCH-ENGINE-21). Unhonourable rule → `BLOCKED`.
+7. Gate with the repo's commands; green; evidence names fresh gate output.
+8. Commit in `<worktree_path>` (implementer never commits); return `IMPLEMENTED` with `sha`, `worktree_path`.
 
 Fix round (`worktree_path`, findings): fix only those, then 7–8.
 
@@ -39,7 +39,7 @@ Any `BLOCKED` return from implement, review or land → root runs `block` (ARCH-
 3. `S claim` `{action:"release", session_id, plan, unit}`. Return `BLOCKED`.
 
 ## Network (ARCH-LAND-19)
-No credentials: never seek any (`gh auth`, tokens, `~/.config/gh`). `repo-exec` exit 3 `{needs_network,action}`: no tracker write; return `NEEDS_NETWORK`, `network_action` = `action` (JSON string). `network_pending` → "push pending" in evidence.
+No credentials: never seek any (`gh auth`, tokens, `~/.config/gh`). `repo-exec` exit 3 `{needs_network,action}`: no tracker write; return `NEEDS_NETWORK`, `network_action` = `action`. `network_pending` → "push pending" in evidence.
 
 Prompt has `feature:` or role `land-feature` → follow `commands/_features.md`.
 
