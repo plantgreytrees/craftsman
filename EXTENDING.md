@@ -380,6 +380,22 @@ Detail belongs in skills (loaded on demand), not in CLAUDE.md. Run `/context` to
 see the footprint, and `/craftsman:stats` to delete gates that don't earn their
 tokens. That discipline is the whole point of the reliability-per-token design.
 
+## A second config file: `craftsman.project.json`
+
+`craftsman.config.json` in a project root deep-merges over the plugin's defaults. A repository whose
+`craftsman.config.json` *is* the shipped default (the craftsman plugin's own repository) has nowhere to put values that
+are only for that project. For that case `craftsman.project.json`, also in the project root, is merged after
+`craftsman.config.json`. It is optional: absent changes nothing, and a malformed one is ignored with a warning. It
+holds the same keys, and it is protected exactly like `craftsman.config.json` (a tool call cannot change its safety
+keys; only a unit scope from `/orchestrate` that names it can). This repository uses it for `stopGate.markdownTests`,
+the markdown its own tests read:
+
+```json
+{ "stopGate": { "markdownTests": ["README.md", "commands/*.md"] } }
+```
+
+An ordinary project does not need it: put the same keys in `craftsman.config.json`.
+
 ## Update channel and CI lint
 
 Installs track commits: the manifests carry no `version` key (CHANGELOG 2.2.0), so every push to the default branch is an update. To hold a project on tested code, add the marketplace as `plantgreytrees/craftsman#stable`, a branch the owner fast-forwards after the plugin's own loop passes. Rollback is moving `stable` back. `/craftsman:upgrade` is the update path.

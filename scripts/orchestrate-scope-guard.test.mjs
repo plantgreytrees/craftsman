@@ -35,7 +35,7 @@ function requiredFile(dir, input) {
 
 test("orchestrate-scope-guard: invoking /orchestrate marks scope required, even if the command forgets to", () => {
   const dir = tmpProject();
-  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/orchestrate docs/plans/example.md" } };
+  const input = { session_id: "s1", tool_name: "Skill", tool_input: { skill: "orchestrate", args: "docs/plans/example.md" } };
   try {
     const result = run(dir, input);
     assert.equal(result.status, 0);
@@ -47,7 +47,7 @@ test("orchestrate-scope-guard: invoking /orchestrate marks scope required, even 
 
 test("orchestrate-scope-guard: the craftsman: namespaced form also marks scope required", () => {
   const dir = tmpProject();
-  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/craftsman:orchestrate docs/plans/example.md" } };
+  const input = { session_id: "s1", tool_name: "Skill", tool_input: { skill: "craftsman:orchestrate", args: "docs/plans/example.md" } };
   try {
     run(dir, input);
     assert.equal(fs.existsSync(requiredFile(dir, input)), true);
@@ -82,7 +82,7 @@ test("orchestrate-scope-guard: a prompt that merely mentions /orchestrate does n
 
 test("orchestrate-scope-guard: an unrelated slash command never touches the scope-required marker", () => {
   const dir = tmpProject();
-  const input = { session_id: "s1", tool_name: "SlashCommand", tool_input: { command: "/plan add a feature" } };
+  const input = { session_id: "s1", tool_name: "Skill", tool_input: { skill: "plan", args: "add a feature" } };
   try {
     const result = run(dir, input);
     assert.equal(result.status, 0);
@@ -153,7 +153,7 @@ const autoPayloads = {
   typed: { session_id: "auto-typed", prompt: "/auto autonomous-e2e-loop" },
   namespaced: { session_id: "auto-ns", prompt: "/craftsman:auto autonomous-e2e-loop" },
   skill: { session_id: "auto-skill", tool_name: "Skill", tool_input: { skill: "craftsman:auto", args: "autonomous-e2e-loop" } },
-  slash: { session_id: "auto-slash", tool_name: "SlashCommand", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
+  "skill-command-field": { session_id: "auto-command", tool_name: "Skill", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
 };
 for (const [shape, input] of Object.entries(autoPayloads)) {
   test(`orchestrate-scope-guard: /auto (${shape}) arms scope-required, acceptance ownership and auto-active`, () => {
@@ -237,4 +237,100 @@ test("orchestrate-scope-guard: --feature narrows the grant; a bare slug is uncha
     run(dir, { session_id: "bare", prompt: "/auto big-epic" });
     assert.equal(grantOf(dir, "bare"), 16);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error used to exit 1,
+// which Claude Code treats as a non-blocking failure, so the guard was silently off.
+function failClosedCases(guard, script, dir) {
+  const plugin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-badplugin-"));
+  fs.writeFileSync(path.join(plugin, "craftsman.config.json"), "{ not json");
+  const manifest = path.join(plugin, "workspace.json");
+  fs.writeFileSync(manifest, "{ bad");
+  // an invocation, so the guard goes on to read its config
+  const payload = JSON.stringify({ session_id: "fail-closed", prompt: "/orchestrate docs/plans/example.md" });
+  const cases = [
+    ["bad JSON on stdin", "not json", {}],
+    ["empty stdin", "", {}],
+    ["a thrown error inside the guard", payload, { CRAFTSMAN_TEST_THROW: guard }],
+    ["an unreadable default config", payload, { CLAUDE_PLUGIN_ROOT: plugin }],
+    // projectContext() throws on a broken workspace manifest (ARCH-SAFETY-03); it used to exit 1 silently
+    ["an invalid workspace manifest", payload, { CRAFTSMAN_WORKSPACE_MANIFEST: manifest }],
+  ];
+  try {
+    for (const [label, input, env] of cases) {
+      const r = spawnSync(process.execPath, [script], {
+        cwd: dir, input, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env },
+      });
+      assert.equal(r.status, 2, `${guard} denies on ${label}: ${r.stderr}`);
+      assert.match(r.stderr, new RegExp(`craftsman: ${guard}`), `${guard} names itself on ${label}`);
+    }
+    // the throw hook only ever denies: another guard's name does nothing
+    const other = spawnSync(process.execPath, [script], {
+      cwd: dir, input: payload, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN_TEST_THROW: "someone-else" },
+    });
+    assert.notEqual(other.status, 2, "the test hook is scoped to one guard");
+  } finally {
+    fs.rmSync(plugin, { recursive: true, force: true });
+  }
+}
+
+test("orchestrate-scope-guard: bad input, an exception or a broken default config denies and names the guard (6.1, 6.2)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-failclosed-osg-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    failClosedCases("orchestrate-scope-guard", path.join(path.dirname(fileURLToPath(import.meta.url)), "orchestrate-scope-guard.mjs"), dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// 8.1: the guard records which craftsman command ran and by which route, so pre-guard can tell
+// /plan's doc-write call, and a user-typed /craftsman:toggle, from a model switching guards off.
+function commandsFile(dir, sid) {
+  const file = path.join(dir, ".craftsman", "sessions", sidOf({ session_id: sid }), "commands.json");
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+}
+
+test("orchestrate-scope-guard: records a doc-writing or toggle command with its route (typed prompt vs Skill)", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(run(dir, { session_id: "cmd-1", prompt: "/craftsman:plan add a feature" }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-1").plan.via, "prompt");
+    assert.equal(run(dir, { session_id: "cmd-1", tool_name: "Skill", tool_input: { skill: "craftsman:sync-docs", args: "--all" } }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-1")["sync-docs"].via, "skill");
+    assert.equal(commandsFile(dir, "cmd-1").plan.via, "prompt", "an earlier record is kept");
+    assert.equal(run(dir, { session_id: "cmd-2", prompt: "/toggle off" }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-2").toggle.via, "prompt");
+    for (const prompt of ["/craftsman:merge", "explain /plan to me", "/planning", "/automate"]) {
+      run(dir, { session_id: "cmd-3", prompt });
+    }
+    assert.equal(commandsFile(dir, "cmd-3"), null, "only the named commands, and only as an invocation");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: CRAFTSMAN=off does not stop it arming scope-required (8.2)", () => {
+  const dir = tmpProject();
+  try {
+    const input = { session_id: "cmd-4", prompt: "/orchestrate docs/plans/example.md" };
+    const r = spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify(input), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN: "off" } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.existsSync(requiredFile(dir, input)), true);
+    const off = spawnSync(process.execPath, [GUARD], { cwd: dir, input: JSON.stringify({ ...input, session_id: "cmd-5" }), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir, CRAFTSMAN_SAFETY: "off" } });
+    assert.equal(off.status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, { session_id: "cmd-5" })), false, "CRAFTSMAN_SAFETY=off does");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("orchestrate-scope-guard: /instruction is recorded too, which is what lets goal-token.mjs mint (ARCH-SAFETY-09)", () => {
+  const dir = tmpProject();
+  try {
+    assert.equal(run(dir, { session_id: "cmd-6", prompt: "/craftsman:instruction some-slug" }).status, 0);
+    assert.equal(commandsFile(dir, "cmd-6").instruction.via, "prompt");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

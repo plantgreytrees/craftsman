@@ -1,6 +1,6 @@
 ---
 name: performance-reviewer
-description: Design review of a DIFF for algorithmic and resource-usage regressions — N+1 queries, unbounded work, missing pagination/caching; max 5 findings.
+description: Design review of a DIFF for N+1, unbounded work and missing caching. At most 5 findings.
 tools: Read, Grep, Glob, Bash
 model: haiku
 maxTurns: 12

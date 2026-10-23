@@ -1,6 +1,7 @@
 ---
-description: Approval page and landing protocol for /auto. Not invoked.
+description: Approval page and landing for /auto.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Approval protocol (ARCH-APPROVAL-01..07)
 

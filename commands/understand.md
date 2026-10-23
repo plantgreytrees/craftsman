@@ -1,7 +1,7 @@
 ---
-description: Comprehend — read-only deep trace of a feature or area (paths, layers, contracts, dependencies, gaps) into a brief that informs the next plan. Writes NO code and NO docs.
+description: Comprehend: read-only deep trace of a feature into a brief for the next plan.
 argument-hint: "<feature, file, subsystem, or question to understand>"
-allowed-tools: Task, Bash, Read, Glob, Grep, TodoWrite, SlashCommand
+allowed-tools: Task, Bash, Read, Glob, Grep, TaskCreate, TaskUpdate, Skill
 ---
 
 # Understand — the comprehension pass
@@ -47,4 +47,4 @@ Reconcile the traces into one coherent model (skip the ceremony for a small sing
 
 ## Phase 3 — Hand off
 
-Do **not** plan or fix. **Persistence auto-delegates to `/plan`:** invoke `/plan` (SlashCommand tool) with a concise request plus your full understanding brief (the model, the blast-radius list, the coverage checklist) — `/plan` owns writing the plan doc and tracker rows; this command writes nothing under `docs/`. Then print a 3–5 bullet executive summary, the blast-radius list, and the next step — **`/plan`** (now invoked) to persist and plan the feature, or **`/investigate`** if what you surfaced is actually a bug. If the owning doc was stale, also recommend **`/sync-docs`**.
+Do **not** plan or fix. **Persistence auto-delegates to `/plan`:** invoke `/plan` (Skill tool) with a concise request plus your full understanding brief (the model, the blast-radius list, the coverage checklist) — `/plan` owns writing the plan doc and tracker rows; this command writes nothing under `docs/`. Then print a 3–5 bullet executive summary, the blast-radius list, and the next step — **`/plan`** (now invoked) to persist and plan the feature, or **`/investigate`** if what you surfaced is actually a bug. If the owning doc was stale, also recommend **`/sync-docs`**.

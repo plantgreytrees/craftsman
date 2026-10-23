@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
 import { descendantSlugs, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
@@ -87,8 +87,12 @@ export function retire(input, context = projectContext(".")) {
   if (fs.realpathSync(trackerRoot(context)) !== fs.realpathSync(context.root)) {
     return refuse("retire refused: run doc-retire from the main checkout");
   }
+  // The grant is always required. CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which
+  // any child process can set, so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
   if (!hasGrant(input.sid, context)) {
-    return refuse("retire refused: no doc-write grant (run doc-write.mjs first)");
+    return refuse(safetyEnabled()
+      ? "retire refused: no doc-write grant (run doc-write.mjs first)"
+      : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
   }
   const dir = path.posix.dirname(plan);
   const slug = path.posix.basename(plan, ".md");

@@ -1,5 +1,5 @@
 ---
-description: One key to launch the newest /craftsman:auto goal — the craftsman mod answers it with the goal itself.
+description: One key to launch the newest /craftsman:auto goal.
 model: sonnet
 allowed-tools: Bash, Read
 ---

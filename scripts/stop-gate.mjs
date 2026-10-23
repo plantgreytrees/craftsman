@@ -7,22 +7,32 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, acceptancePath, ownsAcceptance, uncheckedAcceptance } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, uncheckedAcceptance, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
+import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
+import { isCraftsmanStateLine } from "./lib/craftsman-state.mjs";
+import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 
 const T0 = Date.now();
 const pexec = promisify(execFile);
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+try { input = JSON.parse(await readStdin() || "{}"); } catch { advisorySkipped("stop-gate", "bad input"); process.exit(0); }
 const active = readScope(input);
 const context = active?.project_root
   ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) process.exit(0);
+if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) {
+  // The quality machinery is off, the safety report is not (ARCH-SAFETY-06): only the user's own switch silences it.
+  try {
+    const lines = safetyEnabled() ? formatReport(unpushedReport(context.root).lines) : "";
+    if (lines) process.stdout.write(JSON.stringify({ systemMessage: lines }));
+  } catch { /* a broken report never blocks */ }
+  process.exit(0);
+}
 const sid = sidOf(input);
 const sdir = sessionDir(sid, context);
 
@@ -39,8 +49,40 @@ try {
   if (swept.removed.length) logEvent({ ev: "stop-worktree-swept", sid, worktrees: swept.removed.map((e) => e.path) }, context);
 } catch { /* not a git repo or git absent — nothing to sweep */ }
 
-// Loop guard: we already blocked once this turn — let it end.
-if (input.stop_hook_active === true) process.exit(0);
+// The two reports Stop owes the user whenever the safety side is on, from local state only: unpushed work
+// (ARCH-SAFETY-06) and guarded docs that changed without passing the doc guard (ARCH-SAFETY-10, compared with
+// the snapshot SessionStart took; informational, the guard is not replaced by it). A broken report never blocks.
+function stopReports() {
+  const reports = { unpushed: "", unseenDocs: "" };
+  if (!safetyEnabled()) return reports;
+  try { reports.unpushed = formatReport(unpushedReport(context.root).lines); } catch { /* a broken report never blocks */ }
+  try {
+    // SessionStart took the snapshot at the project ROOT, and pre-guard logs its decisions there, so the comparison reads
+    // the root even while a unit scope has pointed `context` at that unit's worktree.
+    const rootContext = projectContext(input.project || ".");
+    const rootCfg = loadConfig(rootContext);
+    const before = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, rootContext), "doc-snapshot.json"), "utf8"));
+    const drift = docDrift(before, snapshotDocs(rootContext.root, rootCfg.docWriteGuard?.docPaths || ["docs/**"]));
+    if (drift.length) {
+      let events = [];
+      try {
+        events = fs.readFileSync(path.join(rootContext.stateDir, "events.jsonl"), "utf8").split("\n").slice(-20000)
+          .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      } catch { /* no event log: every change counts as unseen */ }
+      reports.unseenDocs = formatDocDrift(unseenDocChanges(drift, events, sid));
+    }
+  } catch { /* no snapshot, or unreadable: nothing to compare */ }
+  return reports;
+}
+
+// Loop guard: we already blocked once this turn — let it end. The reports are still owed, so the turn that
+// ends here is not the one that hides them; it never blocks.
+if (input.stop_hook_active === true) {
+  const { unpushed, unseenDocs } = stopReports();
+  const text = [unpushed, unseenDocs].filter(Boolean).join("\n");
+  if (text) process.stdout.write(JSON.stringify({ systemMessage: text }));
+  process.exit(0);
+}
 
 // Clear THIS session's doc-write authority (never touch another session's).
 try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
@@ -96,10 +138,6 @@ if (ownedWorktrees.size > 0) {
 // marker misses Bash-created files). `--ignored` also catches a freshly
 // created `.env`; `.craftsman/` itself is excluded since it's gitignored
 // state touched on every hook call. Errors fail safe to treeDirty=true.
-function isCraftsmanStateLine(line) {
-  const p = line.slice(3); // porcelain v1: "XY PATH" — strip the "XY " prefix
-  return p === ".craftsman" || p.startsWith(".craftsman/");
-}
 let treeDirty = true;
 try {
   const { stdout } = await pexec("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: context.root });
@@ -351,10 +389,21 @@ if (!inFlight.length) {
   } catch { /* no tracker ledger or unreadable — nothing to enforce */ }
 }
 
-if (!problems.length) { logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 }); process.exit(0); }
+// 5. The reports (stopReports above): unpushed work is reported at every Stop and blocks only when
+//    stopGate.blockOnUnpushed is true; doc drift is informational.
+const { unpushed, unseenDocs } = stopReports();
+if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
+const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs].filter(Boolean).join("\n");
+
+if (!problems.length) {
+  logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 });
+  if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice }));
+  process.exit(0);
+}
 
 logEvent({ ev: "stop", sid, result: "block", count: problems.length, ms: Date.now() - T0 });
 process.stdout.write(JSON.stringify({
   decision: "block",
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
+  ...(notice ? { systemMessage: notice } : {}),
 }));

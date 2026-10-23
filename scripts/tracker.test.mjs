@@ -73,6 +73,22 @@ test("tracker: criteria tagged with the unit's scope_id also gate MERGED; PARKED
   assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PARKED", evidence: "gate failed twice" }, selected).status, "PARKED");
 });
 
+// Stated limit (ARCH-SAFETY-05, safety.md): CRAFTSMAN=off is the user's switch for the quality side, so the quality gates honour it in a
+// script's own environment, where any command can set it for one script. They are not a security boundary; this pins today's behaviour.
+test("tracker: the MERGED acceptance gate honours CRAFTSMAN=off in its own environment (a stated limit of the quality side)", () => {
+  const selected = context();
+  fs.mkdirSync(selected.stateDir, { recursive: true });
+  fs.writeFileSync(path.join(selected.stateDir, "acceptance.md"), "- [ ] [unit:unit-1] still open\n");
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
+  transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
+  assert.throws(() => transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc" }, selected), /MERGED refused/);
+  const was = process.env.CRAFTSMAN;
+  try {
+    process.env.CRAFTSMAN = "off";
+    assert.equal(transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc" }, selected).status, "MERGED");
+  } finally { if (was === undefined) delete process.env.CRAFTSMAN; else process.env.CRAFTSMAN = was; }
+});
+
 function status(selected, unit) {
   return currentState(selected).find((row) => row.unit === unit)?.status;
 }

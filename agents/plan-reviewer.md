@@ -1,6 +1,6 @@
 ---
 name: plan-reviewer
-description: Reviews an implementation PLAN before code exists for language fit, abstraction budget, illegal states and test seams, emitting 3-7 checkable acceptance criteria. Plans only, not UI.
+description: Reviews a PLAN before code exists; emits 3-7 checkable acceptance criteria. Not for UI.
 tools: Read, Grep, Glob
 model: haiku
 ---

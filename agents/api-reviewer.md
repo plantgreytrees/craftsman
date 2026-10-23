@@ -1,6 +1,6 @@
 ---
 name: api-reviewer
-description: Design review of a DIFF introducing or changing a public API/contract (REST, GraphQL, gRPC, RPC schema) for consistency, versioning, and misuse-resistance; max 5 findings.
+description: Design review of a DIFF that adds or changes a public API or contract. At most 5 findings.
 tools: Read, Grep, Glob, Bash
 model: haiku
 maxTurns: 12

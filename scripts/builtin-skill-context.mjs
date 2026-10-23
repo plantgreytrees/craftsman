@@ -7,7 +7,7 @@
 // still decide. Advisory only: it never blocks, and any failure is silent.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, acceptancePath, uncheckedAcceptance } from "./lib/core.mjs";
+import { loadConfig, enabled, projectContext, readStdin, acceptancePath, uncheckedAcceptance, advisorySkipped } from "./lib/core.mjs";
 
 const WRAPPED = {
   "code-review": "Treat every finding as a candidate: craftsman's code-reviewer verdict (step 8) confirms or drops it against the docs below, and a broken `decided` ARCH rule is a REJECT even if this review missed it.",
@@ -16,7 +16,7 @@ const WRAPPED = {
 };
 
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
+try { input = JSON.parse(await readStdin() || "{}"); } catch { advisorySkipped("builtin-skill-context", "bad input"); process.exit(0); }
 const skill = String(input?.tool_input?.skill || "").replace(/^\//, "");
 if (!Object.hasOwn(WRAPPED, skill)) process.exit(0);
 

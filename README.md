@@ -1,6 +1,6 @@
 # craftsman
 
-**v2.1.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
+**v2.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 A Claude Code plugin that makes code better automatically — in **any language**.
 It runs your formatters, linters, and type-checkers on every edit (flagging only
@@ -119,7 +119,7 @@ you're changing. Common tweaks (full guide in **[EXTENDING.md](EXTENDING.md)**):
 }
 ```
 
-Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
+Turn the quality, doc and tracker gates off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`; the safety guards stay on (see [Safety](#safety)).
 
 ---
 
@@ -240,6 +240,54 @@ Turn everything off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`.
   same way — by a hook or a CI check, not by remembering to do it.
 
 ---
+
+## Safety
+
+The Claude Code **sandbox** owns writes and deletes outside the project and reads of credentials; craftsman adds no guard for those. Craftsman guards what the sandbox cannot see: protected paths, unit scope, the doc and tracker rules, hook-bypass flags, agent dispatch and git landing.
+
+| Concern | Enforced by |
+|---|---|
+| writes and deletes outside the project, credential reads | the Claude Code sandbox |
+| protected paths, unit scope, guarded docs and tracker, hook-bypass flags | craftsman's `pre-guard` |
+| subagent dispatch | `agent-mode-guard` (root-only by default) |
+| lint and type gates, the Stop gate | craftsman's advisory hooks |
+
+`/craftsman:init --settings-diff` previews and `--settings-write` merges `sandbox.enabled: true` and ask rules for `rm -r`/`-rf`, `sudo`, `git push --force`, `git reset --hard` and `git clean` into the project's `.claude/settings.json`. It never overwrites a key, backs the old file up, and writes nothing until you say so. SessionStart notes when no settings scope enables the sandbox.
+
+**Off switches.**
+- `CRAFTSMAN_SAFETY=off` in **your own environment** is the only switch that turns the safety guards off; SessionStart says so when it is set.
+- `CRAFTSMAN=off`, `.craftsman/off`, `enabled: false` and `/craftsman:toggle off` switch off the quality, doc and tracker machinery only; the safety guards stay on. Outside a git repository the same machinery is off and the safety guards stay on, and nothing is written to disk.
+- A tool call cannot create `.craftsman/off`, a grant, marker, goal token or scope file (by write, `mkdir`, `ln`, or through a symlinked directory), edit `hooks/hooks.json`, the keys of `craftsman.config.json` that switch a guard off (`enabled`, `protectedPaths`, `docWriteGuard`, `execution.agentMode`, `execution.engine`, `stopGate`, `worktrees`), `.git/config`, `.git/hooks/**`, or the keys of `.claude/settings.json` and `.claude/settings.local.json` that stop the hooks from running (`disableAllHooks`, `hooks`, `sandbox`, `permissions.defaultMode`, craftsman's `enabledPlugins` entry, and the `CRAFTSMAN*`, `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `CLAUDE_PROJECT_DIR`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_ROOT` env keys; paths compare case-folded), or run `toggle.mjs off` or `doc-write.mjs on` (any invocation in a command, with or without node options) outside the command that owns it. A unit scope from `/orchestrate` may name the config and settings files. This reads command text; what it cannot read (an interpreter writing a file) stays with the sandbox. This is token matching: what it cannot read stays with the sandbox.
+
+**Fails closed, and loudly.**
+- Every hook runs through `hooks/run.sh`. If node is missing, a safety hook (`pre-guard`, `agent-mode-guard`, `orchestrate-scope-guard`) blocks the call with "node not found, guards cannot run", and the other hooks warn once per session that craftsman is off.
+- Bad JSON, empty input, an uncaught error or a failed config load makes a safety hook deny and name itself. The advisory hooks (`quality-gate`, `stop-gate`, `builtin-skill-context`) still fail open on bad input, but say so once per session. SessionStart reports "craftsman guards: on", or off and why.
+- For Read, Glob and Grep the launcher skips `pre-guard` only when no unit scope exists, nothing in the call looks protected and the project does not set its own `protectedPaths`: about 0.5 ms instead of starting node (about 25 ms).
+
+**Reports, not blocks, by default.** Stop and SessionEnd list unpushed work in the main checkout and every worktree (uncommitted changes, stashes, branches ahead of or without an upstream, detached commits) from local refs only; `stopGate.blockOnUnpushed: true` makes Stop block on it. Stop also reports guarded docs that changed without passing the doc guard.
+
+**The worktree sweep** counts a branch as merged only into a remote-tracking ref such as `origin/main`, never a local `main`; with no remote nothing is swept. A worktree holding ignored files outside `worktrees.disposable` (build dirs and caches by default) is kept, and so is anything under `.claude/worktrees/` unless `worktrees.sweepClaudeWorktrees` is true. Every deleted branch is logged first in `.craftsman/sweep-log.jsonl` (`branch`, `sha`, `reason`, `time`); recover it with `git branch <name> <sha>`.
+
+**Goals the mod launches.** The mod submits a `.craftsman/instructions/*.goal.txt` as you only if `/instruction` or `/auto` recorded it this session (`scripts/goal-token.mjs`). Any other goal file is named in the band and left for you to launch with `/craftsman:auto-go`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `stopGate.blockOnUnpushed` | `false` | block Stop on unpushed work |
+| `stopGate.markdownTests` | `[]` | markdown globs your tests read (README, `commands/*.md`); an edit of one marks the session dirty so Stop re-runs the suite. By default a docs-only turn runs no tests. A repo whose `craftsman.config.json` is the shipped default (this plugin's own) sets it in an optional `craftsman.project.json`, merged after the config and protected the same way (see [EXTENDING.md](EXTENDING.md)) |
+| `worktrees.disposable` | build dirs and caches | ignored globs a sweep may delete |
+| `worktrees.sweepClaudeWorktrees` | `false` | let the sweep touch `.claude/worktrees/*` |
+
+`CRAFTSMAN_SAFETY` is the one environment variable to know. `CRAFTSMAN_TEST_THROW` and `CRAFTSMAN_MANAGED_SETTINGS_DIR` exist for the test suite; the first can only make a guard deny.
+
+**Minimum Claude Code versions.**
+
+| Feature | What it does here | Minimum |
+|---|---|---|
+| `onFailure` hook field | second layer on `pre-guard` and `agent-mode-guard`: block if the hook itself fails | 2.1.295 |
+| SessionEnd hook | unpushed-work report and hand-off, to stderr (no decision control) | none documented |
+| hook `if`, exec-form `args`, `user-invocable` | the launcher uses the sh form, and `user-invocable: false` hides the internal partials | none documented |
+
+Features without a documented minimum are proved with `claude plugin test .` and a headless run on 2.1.306, then feature-detected, never version-matched. Whether a SessionEnd `systemMessage` is shown to the user is unconfirmed; the report uses stderr, and Stop carries the same report every turn. Details and rationale: [docs/architecture/safety.md](docs/architecture/safety.md).
 
 ## Layout
 

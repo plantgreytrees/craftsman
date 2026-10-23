@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Find the root cause before fixing: reproduce, trace, hypothesise, verify. Use on any bug or failing test.
+description: Find the root cause before fixing: reproduce, trace, verify. Use on any bug.
 ---
 
 Adapted from obra/superpowers (MIT License). Standalone: needs no other plugin.

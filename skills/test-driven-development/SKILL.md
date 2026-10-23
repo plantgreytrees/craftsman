@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Write the failing test first, then the minimum code to pass it. Use before implementing behaviour.
+description: Write the failing test first, then the minimum code. Use before new behaviour.
 ---
 
 Adapted from obra/superpowers (MIT License). Standalone: needs no other plugin.

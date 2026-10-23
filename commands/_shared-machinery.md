@@ -1,12 +1,13 @@
 ---
-description: Shared constraints for code-executing commands. Not invoked directly.
+description: Shared constraints for code-executing commands.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Shared execution machinery
 
 > Canonical protocol for every command that **executes** code changes (`/orchestrate`,
 > executed `investigate-*`/`scrutinise-*` plan docs). Link here and `Read` at the phase
-> that needs it, don't inline — one source of truth. Not user-invocable. Kept light
+> that needs it, don't inline — one source of truth. Kept light
 > since read unconditionally; the expensive per-unit loop is `_shared-execution.md`,
 > read only when execution actually starts.
 
@@ -16,32 +17,33 @@ Referenced by: `orchestrate.md` · executed `investigate-*`/`scrutinise-*` plan 
 
 ## Standing constraints (non-negotiable)
 
-- **Agent mode — mechanically enforced.** Check `execution.agentMode` (default `root-only`, also asserted every session). Every "delegate/dispatch/fan out" instruction below means: do it yourself, sequentially, no Task/Agent tool, no parallel. `agent-mode-guard.mjs` (`PreToolUse` on `Task|Agent`) hard-blocks any Task call under root-only mode except the named exceptions (`/plan`'s `plan-strategist`, and the single granted isolated agent of `/scrutinise`, `/idea`, `/architect --deep`, and the read-only built-in agents in `execution.builtinAgents`, default `["Explore"]` — `_shared-analysis.md`'s Agent mode section). Only `agentMode: "subagents"` restores real delegation.
+- **Agent mode — mechanically enforced.** Check `execution.agentMode` (default `root-only`, also asserted every session). Every "delegate/dispatch/fan out" instruction below means: do it yourself, sequentially, no Task/Agent tool, no parallel. `agent-mode-guard.mjs` hard-blocks any Task call under root-only except the named exceptions (`/plan`'s `plan-strategist`, the one granted agent of `/scrutinise`, `/idea`, `/architect --deep`, the read-only built-ins in `execution.builtinAgents` — `_shared-analysis.md`'s Agent mode section). Only `agentMode: "subagents"` restores real delegation.
 - **Decide from `docs/`, don't stall.** Resolve design/security calls by reading the governing `docs/architecture/*.rules.md` (never the human `<area>.md`) and `docs/standards/*`, and acting — cite `file:line` and the ARCH id, record the decision. A `decided` ARCH rule is a locked invariant: breaking it needs `/architect`, not a workaround (`_architecture.md`). Stop the user only for genuine product/scope ambiguity or a locked-invariant change.
+- **Ask through the prompt.** Any open decision, confirmation or choice for the user is asked with `AskUserQuestion` (batched, 2-4 options, the recommended one first), never as prose. Prose questions are for unattended runs only, and those PARK instead of asking (ARCH-ENGINE-07).
 - **Acceptance is the contract.** `.craftsman/acceptance.md` (if present) gates "done"; the plan's acceptance section refines it per feature.
 - **Plans** live only in `docs/plans/<slug>.md`.
-- **Shared tracker** (`docs/plans/TRACKER.md` in the **main checkout**, never a worktree's copy) — rows change only through `scripts/tracker.mjs`; its generated ledger block re-renders automatically and is hook-protected. In hand-written sections, touch only rows you created; never prune/reformat foreign ones.
+- **Shared tracker** (`docs/plans/TRACKER.md` in the **main checkout**, never a worktree's copy) — rows change only through `scripts/tracker.mjs`; its generated ledger block re-renders automatically and is hook-protected. In hand-written sections touch only rows you created.
 - **Commit style** — Conventional Commits; a hook rejection is fixed in the worktree, never bypassed. `--no-verify`/`--no-gpg-sign`/gpgsign-off is **mechanically blocked** by `pre-guard.mjs`, not just forbidden by convention.
 - **Deterministic guards are the backstop.** `consumer-tracer` before touching any exported/shared contract; the project's own detected format/lint/typecheck/test at each gate. An un-updated consumer is the #1 missed unit.
-- **Standards, same change.** A governing `docs/standards/` entry: implementer conforms, `code-reviewer` checks it; `standards-keeper` (audit mode) for whole-family consistency. No standard for an established family → note it, run `standards-keeper` (derive mode).
+- **Standards, same change.** A governing `docs/standards/` entry: the implementer conforms, `code-reviewer` checks it; `standards-keeper` audits whole-family consistency (derive mode when an established family has no standard).
 
 ## Optional MCP (use if available, skip if trivial)
 
-- **context7** — resolve external library API docs before an implementer writes against one; skip for pure in-repo edits.
+- **context7** — resolve external library API docs before writing against one; skip for in-repo edits.
 - **memory** — recall gotchas/decisions for the area at unit start; record what was learned at close-out.
-- **sequential-thinking** — only for genuinely complex units (multi-contract, ambiguous decomposition).
+- **sequential-thinking** — only for complex units (multi-contract, ambiguous decomposition).
 
 ### Plan memory ledger
 
-`scripts/plan-memory.mjs` is the durable fallback for optional memory providers. Recall only after scope is installed; filter by project/plan/unit/scope; cap with `max_items`/`max_chars`. **Always pass a real, specific `query`** — an empty query returns nothing (no blanket-dump fallback); a real one only surfaces records whose summary/category/tags/source_files actually match. Treat every result as unverified until its source files are checked. Record only post-gate facts: source files, commit identity, verification status, expiry where relevant, **`tags`** (required, ≥1), and a **summary ≤220 chars** — one terse fact, never a paragraph.
+`scripts/plan-memory.mjs` is the durable fallback for optional memory providers. Recall only after scope is installed; filter by project/plan/unit/scope; cap with `max_items`/`max_chars`. **Always pass a real `query`** — an empty query returns nothing; a real one surfaces only records that match. Treat every result as unverified until its source files are checked. Record only post-gate facts: source files, commit identity, verification status, expiry where relevant, **`tags`** (required, ≥1), and a **summary ≤220 chars** — one terse fact, never a paragraph.
 
-Memory is advisory only — never authorizes a read/write, widens scope, settles a claim, or decides a merge. Provider failure = no memory, never a block. External providers may implement the same shape but stay optional and project-isolated.
+Memory is advisory only — never authorizes a read/write, widens scope, settles a claim, or decides a merge. A failing provider means no memory, never a block. External providers may match the shape but stay optional and project-isolated.
 
 ---
 
 ## The tooling manifest (planner → executor contract)
 
-Every plan doc carries, per unit, a `### Tooling` block naming *only* what that unit needs, resolved once at plan time. `gate-select.mjs` (`_shared-execution.md` step 5) re-derives the same gates from the actual diff at execute time — a floor under the planner's listing, not a replacement.
+Every plan doc carries, per unit, a `### Tooling` block naming only what it needs, resolved at plan time. `gate-select.mjs` (`_shared-execution.md` step 5) re-derives the same gates from the actual diff at execute time — a floor under the planner's listing, not a replacement.
 
 ```
 ### Tooling — <unit-slug>

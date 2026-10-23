@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PostToolUse (SlashCommand|Skill) and UserPromptSubmit: the moment
+// PostToolUse (Skill) and UserPromptSubmit: the moment
 // /orchestrate, /auto or /scrutinise (bare or craftsman:-namespaced) is invoked — by
 // the model as a tool call, or typed straight into the prompt by the user,
 // which never reaches a tool hook at all.
@@ -20,7 +20,7 @@
 // bottom of this file).
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, enabled, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
+import { loadConfig, orchestrationEnabled, RECORDED_COMMANDS, recordCommand, STATE_DIR, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { loadIndex, resolve } from "./lib/plan-index.mjs";
 
@@ -69,13 +69,27 @@ function featurePlan(slug, context, { level, feature } = {}) {
   } catch { return { slug, units: null }; }
 }
 
+// ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
+// top-level await would otherwise exit 1, which Claude Code treats as a non-blocking failure.
+const GUARD = "orchestrate-scope-guard";
+function failClosed(why) {
+  process.stderr.write(`craftsman: ${GUARD} could not decide (${why}), so the call is denied.\n`);
+  process.exit(2);
+}
+process.on("uncaughtException", (error) => failClosed(error?.message || String(error)));
+process.on("unhandledRejection", (error) => failClosed(error?.message || String(error)));
+
 let input = {};
-try { input = JSON.parse(await readStdin() || "{}"); } catch { process.exit(0); }
-// Three payload shapes, one meaning: SlashCommand carries tool_input.command,
-// Skill carries tool_input.skill (the model's usual route to a plugin
-// command), UserPromptSubmit carries the raw prompt. Every write below is
-// idempotent, so a user-typed command that also produces a tool call simply
-// arms it twice.
+const rawInput = await readStdin();
+try { input = JSON.parse(rawInput); } catch { failClosed(rawInput.trim() ? "bad JSON on stdin" : "empty stdin"); }
+if (!input || typeof input !== "object" || Array.isArray(input)) failClosed("stdin is not a JSON object");
+// Test-only: lets the suite prove an exception denies. It can only ever deny.
+if (process.env.CRAFTSMAN_TEST_THROW === GUARD) throw new Error("forced by CRAFTSMAN_TEST_THROW");
+// Three payload shapes, one meaning: Skill carries tool_input.skill (the
+// model's route to a plugin command; a tool_input.command is still read, for
+// a Skill call that carries one), UserPromptSubmit carries the raw prompt.
+// Every write below is idempotent, so a user-typed command that also produces
+// a tool call simply arms it twice.
 const toolInput = input?.tool_input || {};
 const command = typeof toolInput.command === "string" ? toolInput.command
   : typeof toolInput.skill === "string"
@@ -87,12 +101,17 @@ const command = typeof toolInput.command === "string" ? toolInput.command
 // text and hard-locked sessions that had merely talked about the script.
 const invocation = /^\/(?:craftsman:)?(orchestrate|auto|scrutinise|idea|architect)(?=\s|$)(.*)/s.exec(command.trim());
 const invoked = invocation?.[1];
-if (!invoked) process.exit(0);
-const args = invocation[2] || "";
+// The commands pre-guard looks for before it lets doc-write.mjs or toggle.mjs run (ARCH-SAFETY-05).
+const recorded = new RegExp(`^/(?:craftsman:)?(${RECORDED_COMMANDS.join("|")})(?=\\s|$)`).exec(command.trim())?.[1];
+if (!invoked && !recorded) process.exit(0);
+const args = invocation?.[2] || "";
 
 const context = projectContext(input.project || ".");
 const cfg = loadConfig(context);
-if (!enabled(cfg, context)) process.exit(0);
+if (!orchestrationEnabled()) process.exit(0);
+// Root session dir, as every grant (ARCH-STATE-06): pre-guard reads it from the same place.
+if (recorded) recordCommand(sidOf(input), recorded, typeof input?.prompt === "string" ? "prompt" : "skill", { stateDir: STATE_DIR });
+if (!invoked) process.exit(0);
 
 // /auto executes a plan exactly as /orchestrate does (ARCH-AUTO-06).
 if (invoked === "orchestrate" || invoked === "auto") {

@@ -1,6 +1,6 @@
 ---
 name: consumer-tracer
-description: Given a changed public API, exported type or shared contract, returns the exhaustive, evidence-backed list of consumers that must change with it, incl. wire/transport consumers.
+description: Lists, with evidence, every consumer that must change with a changed public API/contract.
 tools: Read, Grep, Glob, Bash
 model: haiku
 maxTurns: 12

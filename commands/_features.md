@@ -1,6 +1,7 @@
 ---
-description: Feature worktree protocol for unit-runner. Not invoked directly.
+description: Feature worktree protocol for unit-runner.
 disable-model-invocation: true
+user-invocable: false
 ---
 # Feature protocol (unit-runner roles with `feature: <id>`, and role `land-feature`)
 
