@@ -3,7 +3,9 @@
 // ledger orchestrate/scrutinise already write to (scripts/tracker.mjs) and
 // renders four things only: what shipped, what needs a human decision, what's
 // next, and how far each plan is from COMPLETE. No new state to maintain.
-import { projectContext } from "./lib/core.mjs";
+import { loadConfig, projectContext } from "./lib/core.mjs";
+import { writeDashboard } from "./lib/dashboard.mjs";
+import { writeNotes } from "./lib/export-notes.mjs";
 import { currentState } from "./tracker.mjs";
 
 const DONE_STATUSES = new Set(["COMPLETE", "MERGED"]);
@@ -75,9 +77,26 @@ function render(digest) {
   return lines.join("\n");
 }
 
+// --html: writes dashboard.html and the notes folder under the export root and
+// returns the lines to print. --publish only adds a final `publish: <path>` line
+// for the command to act on; this script never publishes (ARCH-VIEWS-08).
+export function htmlOutput(context, { publish = false } = {}) {
+  if (loadConfig(context).export?.enabled === false) {
+    return ["export disabled (export.enabled is false in config); nothing written."];
+  }
+  const file = writeDashboard(context);
+  writeNotes(context);
+  return publish ? [file, `publish: ${file}`] : [file];
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
-    process.stdout.write(render(buildDigest()) + "\n");
+    const args = process.argv.slice(2);
+    if (args.includes("--html")) {
+      process.stdout.write(htmlOutput(projectContext("."), { publish: args.includes("--publish") }).join("\n") + "\n");
+    } else {
+      process.stdout.write(render(buildDigest()) + "\n");
+    }
   } catch (error) {
     process.stderr.write(`craftsman: digest failed: ${error.message}\n`);
     process.exitCode = 2;
