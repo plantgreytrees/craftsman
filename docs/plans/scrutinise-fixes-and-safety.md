@@ -26,6 +26,7 @@ coverage:
   round7:        archive-deny | safety-off-consumers | rules-cites-round7 # the smallest fix; per the user's agreement after round 6, NO further guard-form rounds are planned after this one
   round8:        doc-retire-revert | archive-nits | rules-cites-round8 # the smallest fix of one regression of my own (step 45.1); no new guard parsing; the plan again recommends no further rounds
   round9:        unzip-leading-options | prune-confirm-wording | rules-cites-round9 # the smallest fix of the unzip skip list I widened in step 48.1; the quality-gate CRAFTSMAN=off item waits for the user's decision
+  round10:       unzip-plain-clusters | rules-cites-round10 # the unzip skip made total (anything but a plain letter cluster falls to the refusing allowlist); the last guard-form round the user will be asked for
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -704,6 +705,32 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: unzip-plain-clusters
+    scope_id: unzip-plain-clusters
+    project: .
+    depends_on: [rules-cites-round9]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs, docs/architecture/safety.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-cites-round10
+    scope_id: rules-cites-round10
+    project: .
+    depends_on: [unzip-plain-clusters]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: []
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -894,6 +921,15 @@ Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tra
 | 2 | the tracker's MERGED acceptance gate is skipped when `CRAFTSMAN=off` is in the script's own environment (`tracker.mjs:94,337` via `enabled()`); a quality gate, not an authority grant, and pre-existing | Security / Warning | decision for the user (below), not built |
 | 3 | `_sync-docs-prune.md` lost "the user's" in "every round needs the user's explicit confirmation" to fit the size cap | Correctness / Suggestion | prune-confirm-wording |
 | 4 | no refused counterpart in the claims tests for a list letter after the zipfile or `-x` | Test-coverage / Suggestion | unzip-leading-options |
+
+### Round 10 findings (isolated review of 49009f0..5e34ab0: 1 Critical, 1 Warning, 3 Suggestion; the root re-ran finding 1)
+| # | Finding | Class / severity | Unit |
+|---|---|---|---|
+| 1 | the unzip list-only skip still returns before the destination check when a leading word negates the list flag (Info-ZIP reads an inner `-` as "negate the next option"): `unzip -l --l -d .craftsman stage/off.zip`, `unzip -l -o-l -d .craftsman stage/off.zip`, `unzip -c --c -o -d .craftsman stage/off.zip` get guard exit 0 and create `.craftsman/off`; the reviewer overwrote `.claude/settings.json` (`pre-guard.mjs:670-672`). Not a regression: 49009f0 allowed them. Third round in a row the unzip skip list is the hole | Security / Critical | unzip-plain-clusters |
+| 2 | step 50.1 says a separate leading `-d`/`-x` word leaves the skip off; the code only excluded clusters containing `d`, and the round 9 note said "built as planned" | Correctness / Warning | unzip-plain-clusters, rules-cites-round10 |
+| 3 | `safety.md:48` and `safety.rules.md:15` say words after the zipfile are never read as options; `-d DIR` is read there | Correctness / Suggestion | rules-cites-round10 |
+| 4 | `unzip a.zip -l` (a pattern, no destination) is now refused; it was allowed | Correctness / Suggestion | rules-cites-round10 (documented cost) |
+| 5 | `_sync-docs-prune.md` is at its size cap with zero headroom | Test-coverage / Suggestion | recorded, no change |
 
 ## Scope Steps (executable core)
 
@@ -1317,6 +1353,22 @@ Depends on: unzip-leading-options, prune-confirm-wording
 - [x] 52.2 The round 8 status note is corrected: the sentence "nothing grants, skips or relaxes anything on the strength of a variable a child process can set" holds for the authority scripts and `doc-retire`, not for the quality gates (the tracker's MERGED gate honours `CRAFTSMAN=off`); round 8's `[unit:rules-cites-round8]` stays unmet until step 50 lands, then is ticked → accept: the note says so
 - [x] 52.3 The incident and the residual risk below are recorded in the plan → accept: they are there
 - [x] 52.4 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 9`
+
+### Step 53 — unzip-plain-clusters (., javascript, high) — round 10
+Depends on: rules-cites-round9
+Closes findings 1 and 2. **The structural fix: make the skip total.** Rounds 8, 9 and 10 each found the same skip returning before the destination check, with a different spelling that defeated its premise. The skip is now taken only when it is certain: every dash-word anywhere in the command is a plain letter cluster (`/^-[A-Za-z]+$/`: no inner or doubled dash, so no negation) that holds no `d` and no `x`, and at least one holds a list letter (`l t p Z v c z h`). Any other dash-word (negated, `-d`, `-x`, `--`, a long option, a pattern that starts with `-`) means the skip is not taken, and the allowlist loop decides; it refuses what it cannot read. Each row is run unguarded first in a throwaway project (HOME and USERPROFILE temp, asserted).
+- [ ] 53.0 Failing tests first → accept: red on 5e34ab0: `unzip -l --l -d .craftsman stage/off.zip`, `unzip -l -d .craftsman --l stage/off.zip`, `unzip -l -o-l -d .craftsman stage/off.zip`, `unzip -t --t -o -d .craftsman stage/off.zip`, `unzip -c --c -o -d .craftsman stage/off.zip`, `unzip -z --z -o -d .craftsman stage/off.zip`, `unzip -l --l -o stage/off.zip -d .craftsman` and `unzip -l --l -o stage/s.zip -d .claude` each change protected state unguarded and are allowed by the guard
+- [ ] 53.1 In the `unzip` branch of `otherWriters` the skip becomes: all dash-words of `rest` match `/^-[A-Za-z]+$/` and none holds `d` or `x`, and at least one holds a list letter → accept: the eight rows above are blocked and nothing changes; `unzip -l a.zip`, `-v`, `-c`, `-z`, `-t`, `-Z`, `unzip -hh`, `unzip -lv -o a.zip` and `unzip -o a.zip -d out` stay allowed; `unzip -o a.zip -d .craftsman` stays refused; `unzip a.zip -l` and `unzip -l -d .craftsman a.zip` become refused (the stated cost)
+- [ ] 53.2 The eight forms are CLAIMS rows and the cost examples are checked by a test (`unzip a.zip -l` refused; `unzip -l -d .craftsman a.zip` refused); the ARCH-SAFETY-05 cites are re-pointed in this commit → accept: `safety-cites.test` green
+- [ ] 53.3 Full CI set (`arch-check lint --root <worktree>`), tick, commit `fix(guard): unzip's list-only skip is taken only when every option is a plain letter cluster`
+
+### Step 54 — rules-cites-round10 (., markdown, normal) — round 10
+Depends on: unzip-plain-clusters
+- [ ] 54.0 Failing tests first: needles in `safety-claims.test.mjs` for "plain letter cluster" in ARCH-SAFETY-05 and `safety.md`, and for the environment-option limit (`UNZIP`, `TAR_OPTIONS`) in the limits clause → accept: red until the text is updated
+- [ ] 54.1 ARCH-SAFETY-05 and `safety.md` are reworded: the list-only skip is taken only when no dash-word in the command is anything but a plain letter cluster without `d` or `x`; "what follows the zipfile is member patterns" is corrected (only `-d` and `-x` are read there); `unzip a.zip -l` and a list flag next to `-d` are listed among the refused harmless examples; the limits clause and `safety.md` name options taken from the environment (`UNZIP`, `UNZIPOPT`, `TAR_OPTIONS`), which the guard does not see, with the alternative (refuse such an assignment before an extraction) left as the user's choice; `verified_at` bumped → accept: `safety-cites.test`, `safety-docs.test`, `arch-check lint --root <worktree>` green
+- [ ] 54.2 The round 9 status note is corrected: step 50.1 was NOT built as specified (a separate `-d`/`-x` leading word did not leave the skip off; the lookahead only excluded clusters holding `d`), and round 9's acceptance lines were ticked too early; step 53 builds it → accept: the note says so
+- [ ] 54.3 The process note is recorded: the round 9 reviewer was told not to run repo scripts without a `/tmp` `CLAUDE_PROJECT_DIR` and complied; the stray `p.md` ledger lines in the main checkout from round 8's review are still the user's to remove; `followup-quality-switch-env` still waits for the user's decision → accept: the plan says so
+- [ ] 54.4 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 10`
 
 ## Status 2026-10-23 (round 9)
 Round 9 (steps 50-52) was built as planned: e3d4812 (50, the unzip list-only skip reads only the leading options), 0c895dd (51, "the user's explicit confirmation" restored in `_sync-docs-prune.md` within its unchanged cap, pinned by `wiring.test`) and this step 52 (rules text, cites, the plan's record). Each step's tests were seen red on the previous code (50: four claims rows that really wrote `.craftsman/off` or `.claude/settings.json` unguarded and were allowed; 51: the wiring pin; 52: the needle test), then green with the full CI set: 801 node tests, model-policy, doc-size-policy, `arch-check lint --root <worktree>`, `claude plugin validate .`, `claude plugin test .` (12), `git diff --check`.
