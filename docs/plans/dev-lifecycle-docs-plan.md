@@ -333,6 +333,32 @@ units:
       write: [agents/code-reviewer.md, agents/unit-runner.md, workflows/run.js, commands/_shared-execution.md, scripts/unit-runner-tdd.test.mjs, scripts/wiring.test.mjs]
     arch: [ARCH-ENGINE-21, ARCH-ENGINE-04, ARCH-ENGINE-12, ARCH-SLIM-02, ARCH-PLAN-07]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: revert-heredoc-prose
+    scope_id: revert-heredoc-prose
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/heredoc-allow.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-narrow.test.mjs, scripts/lib/heredoc-allow.mjs]
+    arch: [ARCH-STATE-14, ARCH-STATE-13, ARCH-LAND-23, ARCH-SAFETY-03, ARCH-SAFETY-05, ARCH-DOCS-07]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-evidence-flow
+    scope_id: fix-evidence-flow
+    project: .
+    depends_on: []
+    module: workflows/run.js
+    language: javascript
+    security: normal
+    scope:
+      read: [workflows/run.js, agents/unit-runner.md, agents/implementer.md, agents/code-reviewer.md, commands/_shared-execution.md, scripts/doc-size-policy.mjs, scripts/unit-runner-tdd.test.mjs]
+      docs: [docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [workflows/run.js, agents/unit-runner.md, agents/implementer.md, agents/code-reviewer.md, commands/_shared-execution.md, scripts/unit-runner-tdd.test.mjs]
+    arch: [ARCH-ENGINE-21, ARCH-ENGINE-04, ARCH-ENGINE-12, ARCH-SLIM-02]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -520,12 +546,29 @@ Findings (round 7, Warning): the `agents/code-reviewer.md` refusal expects red-r
 - [ ] 24.2 Make those four edits, trading bytes inside each `.md` so no `FILE_CAPS` entry rises (`_shared-execution.md` is 12764 of 12769) → accept: the tests and `doc-size-policy` green
 - [ ] 24.3 Add to `scripts/wiring.test.mjs` the ARCH-PLAN-07 assertion that no fourth profile file exists: no tracked file named `craftsman.profile.*`, `.claude/profile.*` or a root or `docs/` `profile.json|md|yaml` → accept: the test passes and fails when such a file is added to a temp repo fixture
 
+### Step 25 — revert-heredoc-prose (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+Owner decision (2026-10-23, after round 8): the heredoc-prose allowance rests on a hand-written bash lexer in a safety hook and keeps meeting shapes where it and bash disagree (a quoted or escaped `}` in `${...}`, a backslash-newline before a terminator, `$'...'` strings). Drop it: the hook-bypass check reads the whole command again, exactly as PR #1 had it. Keep the own-branch lease allowance. Root runs this unit by hand (a mechanical revert verified against a92c915).
+- [ ] 25.1 Add to `scripts/pre-guard-narrow.test.mjs` first: a heredoc body that mentions the bypass flag (flag spelled in two parts) is refused again, for `git commit -F - <<EOF`, `cat <<EOF` and `tee f <<EOF`; the lease tests stay → accept: the new refusals fail on the current `bypassView`
+- [ ] 25.2 Remove `bypassView`, `scripts/lib/heredoc-allow.mjs`, `braceEnd` and the `${` handling added to `arithmeticEnd`/`stripHeredocs`; the hook-bypass check tests `command` as in a92c915; keep `ownBranchesOf` wiring → accept: `pre-guard.mjs` differs from a92c915 only in the `ownBranchesOf` import and call; `pre-guard.test.mjs` unchanged and green
+- [ ] 25.3 ARCH-STATE-14 is superseded by ARCH-STATE-16 (lease allowance only; heredoc prose stays refused), and the plan and acceptance wording of 4.1/4.2 and of units fix-bypass-allowlist and fix-heredoc-strict follow it → accept: `arch-check lint` PASS
+
+### Step 26 — fix-evidence-flow (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+Findings (round 8, Warning): (a) after a fix round `workflows/run.js` hands the reviewer only the fix round's evidence, so the red-run check fails again and the unit PARKs; (b) the producer is never told to put the failing run into its returned evidence (`agents/unit-runner.md` steps 6-8, `agents/implementer.md` Return list); (c) on the root path a router SKIP runs no `code-reviewer`, so nobody checks the red run; (d) `agents/code-reviewer.md` does not say which modes "per-unit review" excludes.
+- [ ] 26.1 Add tests first to `scripts/unit-runner-tdd.test.mjs`: the review prompt in `workflows/run.js` carries the original evidence on every round; `agents/unit-runner.md` step 7 or 8 says evidence names the failing run of each new test; `agents/implementer.md` Return list names it; `commands/_shared-execution.md` step 8 makes the SKIP route check it; `agents/code-reviewer.md` names integration and scrutinise reviews as not subject to it → accept: red before the change
+- [ ] 26.2 Make those edits, trading bytes inside each `.md` so no `FILE_CAPS` entry rises (`unit-runner.md` 3605/3605, `implementer.md` 2222/2224, `code-reviewer.md` 2563/2564, `_shared-execution.md` 12764/12769) → accept: the tests and `doc-size-policy` green
+
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
 
 Round 6 units (fix-bypass-allowlist, fix-reviewer-red) touch disjoint files and run in parallel. The `craftsman.project.json` edit of 9.1/20.4 waits for the owner to run /craftsman:upgrade and /reload-plugins (the installed hook is older than scripts/scope.mjs on main, so no session can record /orchestrate, and both config files are self-protected).
 
 Round 7 units (fix-heredoc-strict, fix-red-run-evidence) touch disjoint files and run in parallel.
+
+Round 8: revert-heredoc-prose (root, by hand) and fix-evidence-flow (runner) touch disjoint files.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
