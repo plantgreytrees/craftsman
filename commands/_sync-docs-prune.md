@@ -9,7 +9,7 @@ Read only under `--archive`/`--prune` (ARCH-DOCS-04/05). Grant as in `sync-docs.
 
 ## `--archive`
 
-Retire each COMPLETE plan (confirm via `tracker.mjs` action `status`, not `lookup`) with `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-retire.mjs"`, stdin `{"plan":"docs/plans/<slug>.md","sid":"<session>"}`. It removes the plan, closed siblings and ledger rows. A refusal is final: report the referrer, never force. Not with `CRAFTSMAN_SAFETY=off`.
+Retire each COMPLETE plan (confirm via `tracker.mjs` action `status`, not `lookup`) with `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-retire.mjs"`, stdin `{"plan":"docs/plans/<slug>.md","sid":"<session>"}`. It removes the plan, closed siblings, ledger rows. A refusal is final: report the referrer, never force. Not with `CRAFTSMAN_SAFETY=off`.
 
 ## `--prune`
 
@@ -22,4 +22,4 @@ Retire each COMPLETE plan (confirm via `tracker.mjs` action `status`, not `looku
 
 ## Never pre-approved
 
-An active `/goal` or any pre-approval does **not** cover `--archive` or `--prune`: every round needs explicit confirmation.
+An active `/goal` or any pre-approval does **not** cover `--archive` or `--prune`: every round needs the user's explicit confirmation.

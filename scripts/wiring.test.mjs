@@ -177,6 +177,7 @@ test("wiring: sync-docs points at _sync-docs-prune, which keeps the archive/prun
   assert.match(prune, /only when the user names it/);
   assert.match(prune, /index heading/);
   assert.match(prune, /`\/goal` or any pre-approval does \*\*not\*\* cover/);
+  assert.match(prune, /every round needs the user's explicit confirmation/, "who confirms is part of the safeguard (ARCH-DOCS-04)");
 });
 
 test("wiring: trimmed loadable docs stay at or below 95% of their size cap (ARCH-SLIM-06)", () => {
