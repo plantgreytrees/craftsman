@@ -25,6 +25,7 @@ coverage:
   round6:        drop-marker-skip | archive-clusters | limits-round6 | rules-cites-round6 # narrowed on the user go: remove the marker skip, make archive extraction an allowlist, document the for/brace/awk-path forms as limits
   round7:        archive-deny | safety-off-consumers | rules-cites-round7 # the smallest fix; per the user's agreement after round 6, NO further guard-form rounds are planned after this one
   round8:        doc-retire-revert | archive-nits | rules-cites-round8 # the smallest fix of one regression of my own (step 45.1); no new guard parsing; the plan again recommends no further rounds
+  round9:        unzip-leading-options | prune-confirm-wording | rules-cites-round9 # the smallest fix of the unzip skip list I widened in step 48.1; the quality-gate CRAFTSMAN=off item waits for the user's decision
   rollback:      every unit is one commit; revert it
 units:
   - id: core-isfile
@@ -664,6 +665,45 @@ units:
       write: [docs/architecture/safety.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
     arch: [ARCH-SAFETY-05, ARCH-DOCS-09]
     tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: unzip-leading-options
+    scope_id: unzip-leading-options
+    project: .
+    depends_on: [rules-cites-round8]
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/safety-claims.test.mjs, docs/architecture/safety.rules.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05, ARCH-STATE-06]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: prune-confirm-wording
+    scope_id: prune-confirm-wording
+    project: .
+    depends_on: [rules-cites-round8]
+    module: commands/_sync-docs-prune.md
+    language: markdown
+    security: normal
+    scope:
+      read: [commands/_sync-docs-prune.md]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/_sync-docs-prune.md, .craftsman/acceptance.md]
+    arch: [ARCH-DOCS-09, ARCH-SLIM-01]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
+  - id: rules-cites-round9
+    scope_id: rules-cites-round9
+    project: .
+    depends_on: [unzip-leading-options, prune-confirm-wording]
+    module: docs/architecture/safety.rules.md
+    language: markdown
+    security: normal
+    scope:
+      read: []
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [docs/architecture/safety.rules.md, docs/architecture/safety.md, scripts/safety-claims.test.mjs, docs/plans/scrutinise-fixes-and-safety.md, .craftsman/acceptance.md]
+    arch: [ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [docs-curator], skills: [], guards: [arch-check], mcp: [] }
   - id: followup-skill-record
     scope_id: followup-skill-record
     project: .
@@ -846,6 +886,14 @@ Isolated (one `scrutineer`; lenses code-reviewer, security-auditor, consumer-tra
 | 4 | `denyArchive` repeats `denySelfDisable` (`pre-guard.mjs:615-621` vs `1340-1347`) | Cross-unit / Suggestion | archive-nits |
 | 5 | ARCH-DOCS-07's cite points at a sibling loop (`doc-retire.mjs:85-87`), not the grant check | Architecture / Warning | rules-cites-round8 |
 | 6 | no test shows a session with safety on cannot reach the skip through the guard | Test-coverage / Suggestion | doc-retire-revert |
+
+### Round 9 findings (isolated review of 25facc9..49009f0: 1 Critical, 1 Warning, 2 Suggestion; acceptance `[unit:rules-cites-round8]` judged UNMET; the root re-ran finding 1)
+| # | Finding | Class / severity | Unit |
+|---|---|---|---|
+| 1 | the `unzip` "writes nothing" skip returns before the destination is judged if ANY word matches the list letters, including words after the zipfile (member patterns) and after `-x`: `unzip -o stage/off.zip off -l -d .craftsman` and `unzip -o a.zip -d .craftsman -x -c` get guard exit 0 and create `.craftsman/off`; the reviewer also overwrote `.claude/settings.json` (`pre-guard.mjs:668`). The `l t p Z` part is older; step 48.1 added `v c z h` | Security / Critical | unzip-leading-options |
+| 2 | the tracker's MERGED acceptance gate is skipped when `CRAFTSMAN=off` is in the script's own environment (`tracker.mjs:94,337` via `enabled()`); a quality gate, not an authority grant, and pre-existing | Security / Warning | decision for the user (below), not built |
+| 3 | `_sync-docs-prune.md` lost "the user's" in "every round needs the user's explicit confirmation" to fit the size cap | Correctness / Suggestion | prune-confirm-wording |
+| 4 | no refused counterpart in the claims tests for a list letter after the zipfile or `-x` | Test-coverage / Suggestion | unzip-leading-options |
 
 ## Scope Steps (executable core)
 
@@ -1248,6 +1296,28 @@ Depends on: doc-retire-revert, archive-nits
 - [x] 49.2 The round 7 status note and its CONSUMERS block are corrected (45.1 was wrong: a spoofed variable only matters for a script no guard protects is false for doc-retire) → accept: the note says what was wrong and that step 47 reverts it
 - [x] 49.3 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 8`
 
+### Step 50 — unzip-leading-options (., javascript, high) — round 9
+Depends on: rules-cites-round8
+Closes findings 1 and 4. **The smallest fix: the skip looks only at the leading run of option words** (those before the first non-option word, the zipfile), and not at all when a `-d` or `-x` word is present there. Words after the zipfile are member patterns, and words after `-x` are exclusion patterns; unzip does not read them as options, so they must not switch the destination check off. Each row below is run unguarded first in a throwaway project (HOME and USERPROFILE temp, asserted).
+- [ ] 50.0 Failing tests first → accept: red on 49009f0: `unzip -o stage/off.zip off -l -d .craftsman`, `unzip -o stage/off.zip -d .craftsman -x -c`, `unzip -o stage/off.zip -d .craftsman -x -h` and `unzip -o stage/s.zip settings.json -v -d .claude` each change protected state unguarded and are allowed by the guard
+- [ ] 50.1 In the `unzip` branch of `otherWriters`, the "writes nothing" test reads only the leading dash-words; a leading `-d`/`-x` word (or a cluster holding `d`) leaves it off → accept: the four rows above are blocked and nothing changes; `unzip -l a.zip`, `unzip -v a.zip`, `unzip -c a.zip`, `unzip -z a.zip`, `unzip -hh`, `unzip -lv a.zip` and `unzip -o a.zip -d out` stay allowed; `unzip -o stage/off.zip -d .craftsman` stays refused
+- [ ] 50.2 The four forms are CLAIMS rows and the leading-option spellings are in the allowed list of `safety-claims.test.mjs`; the ARCH-SAFETY-05 cites are re-pointed in this commit → accept: `safety-cites.test` green
+- [ ] 50.3 Full CI set (`arch-check lint --root <worktree>`), tick, commit `fix(guard): unzip's list-only skip reads only the leading options`
+
+### Step 51 — prune-confirm-wording (., markdown, normal) — round 9
+Depends on: rules-cites-round8. Independent of step 50.
+- [ ] 51.0 Failing tests first → accept: red on 49009f0: `wiring.test` gains a pin on "the user's explicit confirmation" in `_sync-docs-prune.md`
+- [ ] 51.1 "every round needs the user's explicit confirmation" is restored in `commands/_sync-docs-prune.md`, and the bytes are found elsewhere without raising the cap (shorten wording that no `wiring.test` phrase pins: the pinned ones are "action `status`, not `lookup`", "only when the user names it", "Dry run first", "at most 15 docs", "Skip list.*ledger row, a claim or a hand-off", "index heading" and the `/goal` sentence) → accept: `doc-size-policy` green with the cap unchanged; the wiring tests green
+- [ ] 51.2 Full CI set, tick, commit `docs(prune): the user confirms every round, in words`
+
+### Step 52 — rules-cites-round9 (., markdown, normal) — round 9
+Depends on: unzip-leading-options, prune-confirm-wording
+- [ ] 52.0 Failing tests first: a needle in `safety-claims.test.mjs` for "leading options" in ARCH-SAFETY-05 and `safety.md` → accept: red until the text is updated
+- [ ] 52.1 ARCH-SAFETY-05 and `safety.md` say the unzip list-only skip applies to the leading options only; `verified_at` bumped → accept: `safety-cites.test`, `safety-docs.test` and `arch-check lint --root <worktree>` green
+- [ ] 52.2 The round 8 status note is corrected: the sentence "nothing grants, skips or relaxes anything on the strength of a variable a child process can set" holds for the authority scripts and `doc-retire`, not for the quality gates (the tracker's MERGED gate honours `CRAFTSMAN=off`); round 8's `[unit:rules-cites-round8]` stays unmet until step 50 lands, then is ticked → accept: the note says so
+- [ ] 52.3 The incident and the residual risk below are recorded in the plan → accept: they are there
+- [ ] 52.4 Full CI set, tick, commit `docs(arch): safety rules and the plan's record follow round 9`
+
 ## Status 2026-10-23 (round 8)
 Round 8 (steps 47-49) was built as planned: 4a6b7d1 (47, `doc-retire` always requires its grant again), 26bc0a4 (48, `unzip` commands that extract nothing are allowed; one denial path that names the unreadable word) and this step 49 (rules, the ARCH-DOCS-07 cite, the plan's record). Each step's tests were seen red on the previous code (47: two tests; the CLI test ran `doc-retire.mjs` the way the loop form does, in a real temp repo with a ledger, and it RETIRED the plan with no grant at 25facc9, which the reviewer could not show; 48: two; 49: the needle test), then green with the full CI set: 801 node tests, model-policy, doc-size-policy, `arch-check lint --root <worktree>`, `claude plugin validate .`, `claude plugin test .` (12), `git diff --check`.
 
@@ -1408,6 +1478,11 @@ Round 6 runs 42 → 40 → 41 → 43: step 42 (`core.mjs`, `session-context.mjs`
 - **Round 8 came from my own step 45**, not from a new bypass of the guard: the regression was reading `CRAFTSMAN_SAFETY` in a script's own environment, the mistake step 42 had just removed from the nonce. The lesson is recorded so it is not repeated: no script grants, skips or relaxes anything on the strength of a variable a child process can set. After round 8 the plan again recommends no further rounds: the sandbox, not the guard, is the boundary the user designed around.
 - Step 47's cost: `/sync-docs --archive` needs a session with `CRAFTSMAN_SAFETY` on (nothing may grant through the variable). Step 48's cost: harmless extractions with an option off the allowlist are refused (listed in `safety.md`).
 - Round 8 residual risk: `doc-retire` was not run end to end on a real repo with a ledger by the reviewer; unzip builds other than Info-ZIP on Fedora are untested; `select NAME in` is recorded with the loop limit.
+
+- **Round 9 is again my own widening:** the unzip skip list is the one step 48.1 extended (`v c z h`); the older `l t p Z` letters had the same hole. After round 9 the plan recommends no more guard-form rounds.
+- **Decision for the user, not built (finding 2):** `CRAFTSMAN=off` in a script's own environment skips the tracker's MERGED acceptance gate (`tracker.mjs:94,337` via `enabled()`), and `echo … | CRAFTSMAN=off node …/tracker.mjs` is allowed by the guard. It is a quality gate, not an authority grant, and `CRAFTSMAN=off` is documented as the user's switch for the quality side. (a) Recommended: record it as a stated limit ("the quality gates are not a security boundary: a command can set the switch for one script") and pin the current behaviour with a ledger test. (b) Make model-run scripts ignore `process.env.CRAFTSMAN` and honour only the protected `.craftsman/off` / `enabled:false`: changes a documented user feature. PENDING row `followup-quality-switch-env`.
+- **Incident (recorded for the user):** during the round 8 review the isolated reviewer ran `tracker.mjs transition` from a temp cwd with `CLAUDE_CODE_SESSION_ID` set, so `resolveProjectRoot` (`lib/core.mjs:74-83`) followed the session root pin and wrote to the MAIN checkout (`/var/home/plant_grey_trees/Repositories/Craftsman/craftsman`): three ledger lines in `.craftsman/tracker/events.jsonl` (lines 43-45; plan `docs/plans/p.md`, unit `u1`), a new `.craftsman/runs/p.json`, and possibly a regenerated `docs/plans/TRACKER.md`. That file also holds the user's own uncommitted change (the removed rows), so nothing should `git checkout` it. This session could not inspect the main checkout (the harness refuses git there); the user should look at `git status` / `git diff docs/plans/TRACKER.md` there and remove the three `p.md` lines and `runs/p.json`.
+- Round 9 residual risk: tools and tests run with `CLAUDE_CODE_SESSION_ID` set and no `CLAUDE_PROJECT_DIR` can reach the real repo through the session pin; unzip behaviour was checked only on Info-ZIP (Fedora); the tracker bypass was shown at the guard and in-process, not through a live Claude Code session.
 
 ## Out of scope (flagged, not driven)
 - Round 4 follow-ups, PENDING: `followup-authority-session-binding` (finding 2's stronger fix: a one-shot nonce minted by pre-guard that the scripts consume; step 25 closes the inline-assignment route only), `followup-writer-operand` (the writer-verb-anywhere false positive, finding 13 of round 3), `followup-skill-record` (a model Skill call counts as a typed command).
