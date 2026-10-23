@@ -1,0 +1,18 @@
+---
+area: archive
+governs: ["scripts/lib/archive.mjs", "scripts/archive.test.mjs"]
+human: docs/architecture/archive.md
+source: docs/ideas/external-project-board.md
+verified_at: 7dc6c597f14eaf7e2edb045abde8118f9eb67906
+updated: 2026-10-23
+---
+# ARCH archive — enforced rules
+
+- **ARCH-ARCHIVE-01** [decided] The archive is a Git repository registered as a project in craftsman.workspace.json under the id in config archive.project (default "archive"); with no manifest, no such id or an uninitialised checkout, archiving is off and retirement behaves exactly as ARCH-DOCS-09 — check: archive.test.mjs no-manifest, unknown-id and uninitialised-submodule cases — cite: scripts/lib/core.mjs:104-129
+- **ARCH-ARCHIVE-02** [decided] Archived files live at <product-id>/<kind>/<slug>/<repo-relative path> with kind plans or ideas, where product-id is the product repo's manifest id (else its directory name), and are never edited after the commit that added them — check: archive.test.mjs layout and re-run idempotency cases — cite: docs/architecture/archive.rules.md:12
+- **ARCH-ARCHIVE-03** [decided] doc-retire copies the plan and its closed scrutinise-/investigate- siblings into the archive tree, verifies each copy byte for byte, and makes one local commit in the archive repo before its existing git rm and archivePlan commit; a failed copy, verification or archive commit refuses the retirement with nothing removed, and a failure after the archive commit leaves it in place and the re-run idempotent — check: archive.test.mjs copy-failure aborts and rerun cases; doc-retire.test.mjs order — cite: scripts/doc-retire.mjs:187-196
+- **ARCH-ARCHIVE-04** [decided] The TRACKER-archive.md heading gains an optional `archive <sha>` (the archive repo commit) after `landed <sha>`; parseArchiveHeading and lookupArchive return it, a heading without it parses unchanged (ARCH-TRACKER-09), and `tracker.mjs lookup` prints the `git -C <archive> show <sha>:<path>` command that restores the doc — check: tracker.test.mjs lookup with and without archive sha — cite: scripts/tracker.mjs:425-448
+- **ARCH-ARCHIVE-05** [decided] The archive repo's base is pushed (plain push, never forced) only by an owner-run /sync-docs --archive or inside a landing the owner approved; an unattended retirement commits locally and logs archive_push_pending {commit}, the next owner-run --archive pushes it, and a rejected push PARKs (ARCH-LAND-06) — check: archive.test.mjs no push from retire; repo-exec.test.mjs push-rejected park — cite: scripts/lib/force-block.mjs:1
+- **ARCH-ARCHIVE-06** [decided] What is archived: finished plans with their closed siblings (ARCH-DOCS-09) and rejected or deferred ideas pruned under ARCH-DOCS-05; architecture rules docs and their human pairs are never archived, they are superseded through /architect — check: archive.test.mjs rules docs refused — cite: commands/_sync-docs-prune.md:20
+- **ARCH-ARCHIVE-07** [decided] Decluttering the archive itself is an owner-run /sync-docs --prune --archive: dry run first, rounds of at most 15 docs, explicit confirmation each round, never covered by /goal pre-approval, and a pruned doc keeps its TRACKER-archive.md heading and archive sha so lookup still resolves to git history — check: sync-docs.md modes; archive.test.mjs prune round cap — cite: commands/_sync-docs-prune.md:10-18
+- **ARCH-ARCHIVE-08** [decided] Events go to .craftsman/events.jsonl: archive_copied {plan, archive_sha, files}, archive_push_pending {commit}, archive_rewrite {file, plan} and archive_refused {plan, reason}; no new stats section — check: archive.test.mjs events — cite: scripts/doc-retire.mjs:239
