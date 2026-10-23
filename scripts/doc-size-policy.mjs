@@ -39,6 +39,7 @@ export const FILE_CAPS = {
   "agents/standards-keeper.md": 2608,
   "agents/ui-ux-reviewer.md": 2762,
   "agents/unit-runner.md": 3605,
+  "commands/_approval.md": 2130,
   "commands/_architect-backfill.md": 4582,
   "commands/_architect-maintain.md": 5810,
   "commands/_architecture.md": 3643,
