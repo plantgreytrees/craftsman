@@ -4,10 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { inspectRepo, landFeature, prepare } from "./repo-exec.mjs";
+import { inspectRepo, landFeature, merge, prepare } from "./repo-exec.mjs";
 import { approvalRequired, evaluateApproval, runIdFor } from "./lib/approval-gate.mjs";
 import { publishTracker } from "./tracker-publish.mjs";
 import { ledgerPath } from "./tracker.mjs";
+import { prepare as prepareApproval, check as checkApproval } from "./approval.mjs";
 import { projectContext } from "./lib/core.mjs";
 
 const ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", LC_ALL: "C" };
@@ -148,6 +149,93 @@ test("land-feature: a thrown retire scan leaves the landing successful; candidat
     assert.equal(r.merged, true);
     assert.match(events(u), /doc_retire_candidate/);
   } finally { done(u); }
+});
+
+test("land-feature: a head that moves after the gate is not merged (race)", () => {
+  const t = setup();
+  try {
+    t.record();
+    const approved = t.head();
+    const r = t.land({ afterGate: () => {
+      fs.writeFileSync(path.join(t.feature.worktree_path, "late.txt"), "late\n");
+      git(t.feature.worktree_path, "add", "late.txt"); git(t.feature.worktree_path, "commit", "-q", "-m", "late");
+    } });
+    assert.equal(r.merged, true);
+    assert.equal(r.cleaned, false);
+    assert.equal(t.head() === approved, false);
+    assert.equal(git(path.join(t.ws, "origin.git"), "show", "main:a.txt"), "a");
+    assert.throws(() => git(path.join(t.ws, "origin.git"), "show", "main:late.txt"));
+  } finally { done(t); }
+});
+
+test("land-feature: an approved open-pr choice routes to the PR path and records landed_mode", () => {
+  const t = setup({ required: true }, { repoExec: { approval: { required: true }, land: "direct", host: "github" } });
+  try {
+    t.record({ choice: "open-pr" });
+    const calls = [];
+    const runner = (bin, args) => { calls.push([bin, ...args].join(" ")); return { status: 0, stdout: JSON.stringify([{ url: "https://x/pr/1", number: 1 }]), stderr: "" }; };
+    const before = t.baseHead();
+    let r;
+    try { r = t.land({ runner }); } catch (e) { r = { threw: e.message }; }
+    assert.equal(r.land, "pr");
+    assert.equal(r.merged, false);
+    assert.equal(t.baseHead(), before);
+    assert.equal(git(path.join(t.ws, "origin.git"), "rev-parse", "feature/p-f1"), t.head());
+    const rec = JSON.parse(fs.readFileSync(path.join(t.root, ".craftsman", "approvals", "p-f1.json"), "utf8"));
+    if (!r.parked) { assert.equal(rec.status, "landed"); assert.equal(rec.landed_mode, "open-pr"); }
+  } finally { done(t); }
+});
+
+test("land-feature: the approved merge choice overrides repoExec.land pr", () => {
+  const t = setup({ required: true }, { repoExec: { approval: { required: true }, land: "pr" } });
+  try {
+    t.record({ choice: "merge" });
+    const r = t.land();
+    assert.equal(r.merged, true);
+    assert.equal(t.baseHead(), r.merge_sha);
+  } finally { done(t); }
+});
+
+test("land-feature: a red gate after the base moved PARKs and lands nothing", () => {
+  const t = setup();
+  try {
+    t.record();
+    fs.writeFileSync(path.join(t.root, "package.json"), JSON.stringify({ scripts: { test: "exit 1" } }));
+    fs.writeFileSync(path.join(t.root, "craftsman.config.json"), JSON.stringify({ planning: { featureBranches: true }, repoExec: { approval: { required: true } }, stopGate: { testCommand: "false" } }));
+    git(t.root, "add", "."); git(t.root, "commit", "-q", "-m", "red base");
+    git(t.root, "push", "-q", "origin", "main");
+    const before = t.baseHead();
+    const r = t.land();
+    assert.equal(r.parked, true);
+    assert.equal(r.reason, "gate");
+    assert.equal(t.baseHead(), before);
+  } finally { done(t); }
+});
+
+test("approval.mjs: prepare, check and land end to end", () => {
+  const t = setup();
+  try {
+    const root = t.root;
+    const p = prepareApproval({ run: "p-f1", feature: "f1", plan: "p", head_sha: t.head(), summary: "s" }, { root });
+    assert.notEqual(p.ok, false, JSON.stringify(p));
+    const c = checkApproval({ run: "p-f1", writer_is_owner: true, row: { choice: "merge", head_sha: t.head(), decided_at: new Date(Date.now() + 1000).toISOString() } }, { root });
+    assert.equal(c.ok, true, JSON.stringify(c));
+    const r = t.land();
+    assert.equal(r.merged, true);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, ".craftsman", "approvals", "p-f1.json"), "utf8")).status, "landed");
+  } finally { done(t); }
+});
+
+test("merge: approval required with featureBranches off logs approval_unenforced once", () => {
+  const t = setup({ required: true }, { planning: { featureBranches: false } });
+  try {
+    const wt = prepare(t.context, { unit: "u9", slug: "u9" }, t.info);
+    fs.writeFileSync(path.join(wt.worktree_path, "z.txt"), "z\n");
+    git(wt.worktree_path, "add", "z.txt"); git(wt.worktree_path, "commit", "-q", "-m", "z");
+    const r = merge(t.context, { unit: "u9", slug: "u9", worktree_path: wt.worktree_path, push: false }, t.info);
+    assert.equal(r.merged, true);
+    assert.equal((events(t).match(/approval_unenforced/g) || []).length, 1);
+  } finally { done(t); }
 });
 
 test("tracker.publish: off, push and on-approve modes", () => {

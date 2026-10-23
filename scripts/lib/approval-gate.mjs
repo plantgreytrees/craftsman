@@ -14,6 +14,17 @@ export function approvalRequired(cfg) {
 }
 export const approvalUnenforced = (cfg) => cfg?.repoExec?.approval?.required === true && cfg?.planning?.featureBranches !== true;
 
+export function noteUnenforced(cfg, context) {
+  if (approvalUnenforced(cfg)) logEvent({ ev: "approval_unenforced", reason: "featureBranches off" }, context);
+}
+
+// A red gate after base moved in PARKs (ARCH-LAND-27).
+export const gatePark = (r) => ({
+  question: `The gate failed on ${r.branch} merged with the moved ${r.base_branch}; nothing landed. How should it proceed?`,
+  options: ["Fix the feature, then request a new approval page", "Leave the feature unlanded"],
+  recommended: "Fix the feature, then request a new approval page",
+});
+
 export const runIdFor = (plan, feature) => `${path.basename(String(plan), ".md")}-${feature}`;
 
 // The record must be decided with a known choice, and head_sha must equal the feature head
@@ -35,7 +46,7 @@ export const approvalPark = (reason, feature) => ({
 // land-feature entry: {park} for the caller to return, {mode} when approved, {needed:false} when not required.
 export function gateFeature({ config, context, input, branch }) {
   const log = (ev) => logEvent(ev, context);
-  if (approvalUnenforced(config)) log({ ev: "approval_unenforced", reason: "featureBranches off" });
+  noteUnenforced(config, context);
   if (!approvalRequired(config)) return { needed: false };
   const runId = runIdFor(input.plan, input.feature);
   let record = null;
