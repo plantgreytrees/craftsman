@@ -9,6 +9,8 @@ import { loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin } fro
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 import { acquireLock, releaseLock, heartbeat, inspectRepo, run } from "./repo-exec.mjs";
+import { approvalRequired } from "./lib/approval-gate.mjs";
+import { markPublished } from "./approval.mjs";
 import { droppedKeys } from "./lib/ledger-keys.mjs";
 import { generatedBlock, renderBlock, renderState, spliceBlock, trackerRoot } from "./tracker.mjs";
 
@@ -25,12 +27,12 @@ export function jsonlText(rows) {
 }
 
 // Render into `temp`; returns the pathspecs to stage, or a refusal.
-function render(temp, rows, context, input) {
+function render(temp, rows, context) {
   const docFile = path.join(temp, DOC);
   const jsonlFile = path.join(temp, JSONL);
   const doc = read(docFile);
   const committedJsonl = read(jsonlFile);
-  const dropped = droppedKeys(rows, doc, committedJsonl, context, input.archived === true);
+  const dropped = droppedKeys(rows, doc, committedJsonl, context);
   if (dropped.length) {
     logEvent({ ev: "tracker_publish_refused", dropped }, context);
     const what = rows.length ? "shrink" : "blank";
@@ -56,14 +58,17 @@ function render(temp, rows, context, input) {
 function runLanded(context, run) {
   if (typeof run !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(run)) return false;
   const file = path.join(mainCheckoutRoot(context.root), ".craftsman", "approvals", `${run}.json`);
-  try { return JSON.parse(fs.readFileSync(file, "utf8")).status === "landed"; } catch { return false; }
+  try { const rec = JSON.parse(fs.readFileSync(file, "utf8")); return rec.status === "landed" && !rec.published_at; } catch { return false; }
 }
 
 // `deps.beforePush(attempt)` is a test seam for a competing push.
 export function publishTracker(input = {}, context = projectContext(input.project || "."), deps = {}) {
-  const mode = loadConfig(context).tracker?.publish ?? "push";
+  const cfg = loadConfig(context);
+  let mode = cfg.tracker?.publish ?? "push";
+  if (mode === "push" && approvalRequired(cfg)) mode = "on-approve";
   if (mode === "on-approve" ? !(input.manual === true || (input.approved === true && runLanded(context, input.run))) : mode !== "push") return { published: false, mode };
   if (mode === "push") logEvent({ ev: "tracker_publish_unapproved", mode }, context);
+  if (mode === "on-approve" && input.manual === true) logEvent({ ev: "tracker_publish_manual" }, context);
   let lock = null;
   let temp = null;
   let added = false;
@@ -83,7 +88,7 @@ export function publishTracker(input = {}, context = projectContext(input.projec
       run(root, ["worktree", "prune"], { allowFailure: true });
       run(root, ["worktree", "add", "--detach", temp, `origin/${base}`]);
       added = true;
-      const rendered = render(temp, rows, context, input);
+      const rendered = render(temp, rows, context);
       if (rendered.refused) return { published: false, mode, refused: rendered.refused };
       if (rendered.paths.length) run(temp, ["add", "--", ...rendered.paths]);
       if (!rendered.paths.length || !run(temp, ["diff", "--cached", "--name-only"])) return { published: false, mode, unchanged: true };
@@ -93,6 +98,7 @@ export function publishTracker(input = {}, context = projectContext(input.projec
         run(temp, ["push", "origin", `HEAD:${base}`]);
         const sha = run(temp, ["rev-parse", "HEAD"]);
         logEvent({ ev: "tracker_published", base, rows: rows.length, sha, attempt }, context);
+        if (mode === "on-approve" && input.manual !== true) markPublished(input.run, { root: context.root });
         return { published: true, mode, base, sha, attempt };
       } catch (error) {
         reason = String(error.stderr || error.message).trim().split("\n")[0];
