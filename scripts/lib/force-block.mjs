@@ -82,6 +82,12 @@ export function leaseToOwnBranch(rest, ownBranches = []) {
   });
 }
 
+// The branches this run owns: its bound unit branch and `feature/<plan>-*` for its plan.
+export function ownBranchesOf(binding, scope) {
+  const slug = typeof scope?.plan === "string" ? scope.plan.replace(/^.*\//, "").replace(/\.md$/, "") : "";
+  return [binding?.branch, slug && `feature/${slug}-*`].filter((b) => typeof b === "string" && b && !/^(?:main|master)$/.test(b));
+}
+
 // The destructive git forms /auto must never run (ARCH-LAND-05), or null.
 // Every quoted string is checked as a command (`bash -c`, `python3 -c`, …)
 // except a commit/tag message operand without $( ) or a backtick. Alias
@@ -118,10 +124,10 @@ export function destructiveGit(value, ownBranches = []) {
 // heap limit; anything but a clean answer in time — a throw, a crash, a miss —
 // blocks, as does a command too large to read in time. `source` (worker code
 // to eval) is the test seam for a stalled or exhausted check.
-export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS } = {}) {
+export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS, ownBranches = [] } = {}) {
   if (Buffer.byteLength(value) > MAX_COMMAND_BYTES) return Promise.resolve(`a command over ${MAX_COMMAND_BYTES} bytes (split it into smaller commands)`);
   return new Promise((resolve) => {
-    const options = { workerData: { forceBlock: value }, execArgv: [], resourceLimits: { maxOldGenerationSizeMb: HEAP_MB } };
+    const options = { workerData: { forceBlock: value, ownBranches }, execArgv: [], resourceLimits: { maxOldGenerationSizeMb: HEAP_MB } };
     const worker = source ? new Worker(source, { ...options, eval: true }) : new Worker(new URL(import.meta.url), options);
     const settle = (verdict) => {
       clearTimeout(timer);
@@ -138,7 +144,7 @@ export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS } = {}) {
 if (!isMainThread && typeof workerData?.forceBlock === "string") {
   let message;
   try {
-    message = { ok: true, verdict: destructiveGit(workerData.forceBlock) };
+    message = { ok: true, verdict: destructiveGit(workerData.forceBlock, workerData.ownBranches) };
   } catch {
     message = { ok: false };
   }

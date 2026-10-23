@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, mintNonce, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
-import { forceBlocked } from "./lib/force-block.mjs";
+import { forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
 import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
 import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
@@ -1123,7 +1123,7 @@ if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].inc
 // orchestrate-scope-guard.mjs writes the marker at this same (sid) path.
 // It runs before every other Bash check, so none can stall it past the timeout.
 if (tool === "Bash" && autoForceBlock(sidOf(input))) {
-  const destructive = await forceBlocked(command);
+  const destructive = await forceBlocked(command, { ownBranches: ownBranchesOf(binding, activeScope) });
   if (destructive) {
     logEvent({ ms: Date.now() - T0, ev: "auto_force_blocked", sid: sidOf(input), command });
     process.stderr.write(
@@ -1298,9 +1298,9 @@ function bypassesHooks(text, depth = 0) {
 // unconditional, for every commit/push with or without a worktree binding.
 // The flag test is linear; the commit/push one retries per `git`, so only a
 // command under 16 KB reaches it — a larger one with a bypass flag is blocked.
-if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
-    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command)))
-    || (command.length <= 16384 && bypassesHooks(command)))) {
+if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(bypassView(command))
+    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(bypassView(command))))
+    || (command.length <= 16384 && bypassesHooks(bypassView(command))))) {
   logEvent({ ms: Date.now() - T0, ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
     `craftsman: Git commit/push hook bypass BLOCKED (--no-verify, commit -n, --no-gpg-sign, gpgsign=false / ` +
@@ -1563,3 +1563,11 @@ if (g.enabled !== false && writeTool && docSide) {
 
 logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);
+
+// Heredoc bodies are prose, not flags (ARCH-STATE-12).
+function bypassView(command) {
+  if (!command.includes("<<") || command.length > 16384) return command;
+  // A heredoc fed to a shell or interpreter runs its body: keep it in view.
+  if (/\b(?:ba|z|da|k|c|fi)?sh\b|\b(?:eval|source|python[\d.]*|node|perl|ruby|php|awk|env|xargs|exec)\b/.test(command)) return command;
+  return stripHeredocs(command);
+}
