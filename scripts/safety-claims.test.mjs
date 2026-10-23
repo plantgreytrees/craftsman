@@ -114,6 +114,8 @@ const CLAIMS = [
   // round 11: a list letter in a member pattern after the zipfile is not an option, and the current directory (here made protected by cd) is the destination
   ...(have("unzip") && have("zip") ? ["cd .claude && unzip -o ../stage/s.zip settings.json -l", "cd .claude && unzip -qo ../stage/s.zip settings.json -hh",
     "cd .claude && unzip -o ../stage/s.zip '*' -l"] : []),
+  // round 12: -P/-O/-I take the rest of their cluster as a value, so the list letter after them is not a list flag
+  ...(have("unzip") && have("zip") ? ["cd .craftsman && unzip -Pl ../stage/off.zip", "cd .claude && unzip -oPl ../stage/s.zip", "cd .claude && unzip -qoOv ../stage/s.zip"] : []),
   // round 9: words after the zipfile or after -x are patterns, not options, so they must not switch the destination check off
   ...(have("unzip") && have("zip") ? ["unzip -o stage/off.zip off -l -d .craftsman", "unzip -o stage/off.zip -d .craftsman -x -c", "unzip -o stage/off.zip -d .craftsman -x -h",
     "unzip -o stage/s.zip settings.json -v -d .claude"] : []),
@@ -140,7 +142,7 @@ test("ARCH-SAFETY-05 claims: every form changes protected state when run unguard
 test("the archive and awk spellings that write nothing protected are allowed (36.x)", { skip }, () => {
   const allowed = [
     "tar -xf stage/x.tar -C src", "tar -xvf stage/x.tar -C src", "tar -xzf stage/x.tar --directory=src", "tar xf stage/x.tar -C src", "tar -tf stage/off.tar --directory=.craftsman", "tar -tf stage/off.tar -C.craftsman", "tar -xf stage/x.tar -C src -C ..",
-    ...(have("unzip") ? ["unzip -v stage/off.zip", "unzip -c stage/off.zip", "unzip -z stage/off.zip", "unzip -hh", "unzip -l stage/off.zip", "unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
+    ...(have("unzip") ? ["unzip -o stage/off.zip -d out", "unzip -o stage/off.zip -dout", "unzip -o stage/off.zip -dtest"] : []),
     ...(have("gawk") ? ["gawk -i ordchr 1 src/a.txt", "awk 1 .claude/settings.json", "gawk -v x=1 '{print}' src/a.txt"] : []),
   ];
   const denied = allowed.filter((command) => verdictOf(command) !== 0);
@@ -177,11 +179,11 @@ test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
   const human = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.md"), "utf8");
   const rule = (id) => rules.split("\n").find((l) => l.includes(`**${id}**`)) || "";
-  for (const needle of ["never skipped", "no-op", "permission prompt", "read, printf -v", "allowlist", "refused outright", "select NAME in", "always requires", "plain letter cluster", "TAR_OPTIONS", "before the zipfile"]) {
+  for (const needle of ["never skipped", "no-op", "permission prompt", "read, printf -v", "allowlist", "refused outright", "select NAME in", "always requires", "no list-only skip", "TAR_OPTIONS", "best-effort"]) {
     assert.ok(rule("ARCH-SAFETY-05").includes(needle), `ARCH-SAFETY-05 names: ${needle}`);
   }
   for (const needle of ["craftsman.project.json", "PROJECT_CONFIG_FILES"]) assert.ok(rule("ARCH-SAFETY-11").includes(needle), `ARCH-SAFETY-11 names: ${needle}`);
-  for (const needle of ["no-op", "permission prompt", "allowlist", "refused outright", "doc-retire", "select NAME in", "plain letter cluster", "TAR_OPTIONS", "before the zipfile"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
+  for (const needle of ["no-op", "permission prompt", "allowlist", "refused outright", "doc-retire", "select NAME in", "no list-only skip", "TAR_OPTIONS", "best-effort"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
 });
 
 // Round 7 (44.x): an extraction with an option the allowlist cannot read is refused outright, whatever it names, and says why.
@@ -198,9 +200,9 @@ test("an extraction with an unreadable option is refused outright with a message
 });
 
 // Round 10 (53.x): the list-only skip is total: anything but a plain letter cluster falls to the refusing allowlist. The cost is stated.
-test("the stated cost of the total skip: a list flag next to a destination, or after the zipfile where it is a pattern, is refused (53.1, 55.2)", { skip }, () => {
-  for (const command of ["unzip -l -d .craftsman stage/off.zip", "unzip stage/off.zip -d .craftsman -l", "unzip stage/off.zip -l"]) assert.equal(verdictOf(command), 2, `refused: ${command}`);
-  for (const ok of ["unzip -l stage/off.zip", "unzip -lv -o stage/off.zip", "unzip -Z stage/off.zip", "unzip -o stage/off.zip -d out"]) assert.equal(verdictOf(ok), 0, `allowed: ${ok}`);
+test("the stated cost of having no list-only skip: every unzip that is not a plain -d DIR extraction is refused, list flags included (57)", { skip }, () => {
+  for (const command of ["unzip -l -d .craftsman stage/off.zip", "unzip stage/off.zip -d .craftsman -l", "unzip stage/off.zip -l", "unzip -l stage/off.zip", "unzip -v stage/off.zip", "unzip -c stage/off.zip", "unzip -z stage/off.zip", "unzip -lv -o stage/off.zip", "unzip -Z stage/off.zip", "unzip -hh", "unzip -l -P pw stage/off.zip"]) assert.equal(verdictOf(command), 2, `refused: ${command}`);
+  for (const ok of ["unzip -o stage/off.zip -d out"]) assert.equal(verdictOf(ok), 0, `allowed: ${ok}`);
 });
 
 // Round 6 (41.x): variable setters the guard does not read stay with the sandbox. A loop variable or a brace-built name sets the

@@ -19,7 +19,7 @@ const HOLDS = {
   "ARCH-SAFETY-04": { "scripts/lib/core.mjs": ["advisorySkipped", "guardState"], "scripts/session-context.mjs": ["guardState"] },
   "ARCH-SAFETY-05": {
     "scripts/lib/core.mjs": ["safetyEnabled"],
-    "scripts/pre-guard.mjs": ["selfKind", "denySelfDisable", "heldNever", "safetyKeysChanged", "hooks/hooks.json", "CLAUDE_CODE_SESSION_ID"],
+    "scripts/pre-guard.mjs": ["selfKind", "denySelfDisable", "heldNever", "safetyKeysChanged", "hooks/hooks.json", "CLAUDE_CODE_SESSION_ID", "No list-only skip"],
     "scripts/scope.mjs": ["namesSelfScoped"],
   },
   "ARCH-SAFETY-06": {

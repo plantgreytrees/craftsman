@@ -1902,7 +1902,7 @@ test("pre-guard: recursive copies, in-place edits, archives and find -delete tha
   const allowed = [
     "cp -r src copy", "cp -r stage/.claude /tmp/craftsman-nowhere-out", "cp -r a b", "sed -n 1p .claude/settings.json", "sed --in-place s/a/b/ src/a.txt", "gawk '{print}' .claude/settings.json",
     "find src -name x -print", "find . -name '*.log' -delete", "find build -delete", "find src -type f -delete", "tar -tf stage/x.tar", "tar -xf stage/x.tar -C src",
-    "unzip -l stage/x.zip", "patch --dry-run -p0 .claude/settings.json < stage/x.patch", "ed -V",
+    "patch --dry-run -p0 .claude/settings.json < stage/x.patch", "ed -V",
   ];
   for (const command of allowed) assertAllowed(command);
 });
