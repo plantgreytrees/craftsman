@@ -41,8 +41,9 @@ test("auto.md Phase B ends at the verification point and names _approval.md; cap
   assert.ok(Buffer.byteLength(auto) <= 4561);
 });
 
-test("_features.md publish passes approved:true after land-feature", () => {
-  assert.match(read("commands/_features.md"), /After land-feature pass `approved:true`/);
+test("_features.md publish passes approved and run after a merged or pushed land-feature", () => {
+  assert.match(read("commands/_features.md"), /After a land-feature that returned merged or pushed \(not parked\) pass `\{approved:true, run\}`/);
+  assert.match(read("commands/sync-docs.md"), /run `tracker\.mjs publish` with `\{manual:true\}`/);
 });
 
 test("_approval.md is capped at its size", () => {

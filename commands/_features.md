@@ -22,7 +22,7 @@ Every feature-mode `S tracker` transition (IN_PROGRESS, FEATURE_MERGED, PARKED, 
 First `S scope` release (`{action:"release", session_id, project, worktree_path}`). Park/block keep the unit branch, leave the feature worktree clean on the feature branch (ARCH-LAND-14); then publish.
 
 ## publish
-After each unit lands (`FEATURE_MERGED`), park, block and land-feature: `S tracker` `{action:"publish", project}`. Pushes only generated tracker files; honours `tracker.publish`; ignore `published:false`. After land-feature pass `approved:true`.
+After each unit lands (`FEATURE_MERGED`), park, block and land-feature: `S tracker` `{action:"publish", project}`. Ignore `published:false`. After a land-feature that returned merged or pushed (not parked) pass `{approved:true, run}`.
 
 ## levels and flags
 Read only when `--level`, `--feature` or `level:` applies. Slugs resolve through plan-index (ARCH-PLAN-06); a parent expands to `children:` order, else priority then slug.

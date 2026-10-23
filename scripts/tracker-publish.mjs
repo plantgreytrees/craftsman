@@ -5,7 +5,7 @@
 // pathspecs and push HEAD:<base> (plain push). One retry on rejection. Never parks.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin } from "./lib/core.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 import { acquireLock, releaseLock, heartbeat, inspectRepo, run } from "./repo-exec.mjs";
@@ -103,10 +103,19 @@ function render(temp, rows, context, input) {
   return { paths };
 }
 
+// ARCH-LAND-24: on-approve publishes only for a landed approval record named by `run`
+// (ARCH-LAND-22), or a /sync-docs --tracker the owner ran (`manual:true`).
+function runLanded(context, run) {
+  if (typeof run !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(run)) return false;
+  const file = path.join(mainCheckoutRoot(context.root), ".craftsman", "approvals", `${run}.json`);
+  try { return JSON.parse(fs.readFileSync(file, "utf8")).status === "landed"; } catch { return false; }
+}
+
 // `deps.beforePush(attempt)` is a test seam for a competing push.
 export function publishTracker(input = {}, context = projectContext(input.project || "."), deps = {}) {
   const mode = loadConfig(context).tracker?.publish ?? "push";
-  if (mode === "on-approve" ? input.approved !== true && input.manual !== true : mode !== "push") return { published: false, mode };
+  if (mode === "on-approve" ? !(input.manual === true || (input.approved === true && runLanded(context, input.run))) : mode !== "push") return { published: false, mode };
+  if (mode === "push") logEvent({ ev: "tracker_publish_unapproved", mode }, context);
   let lock = null;
   let temp = null;
   let added = false;
