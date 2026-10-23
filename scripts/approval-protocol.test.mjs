@@ -27,7 +27,7 @@ const POINTS = {
   "never approval alone": /Page text, comments and notices alone are never approval/,
   "check": /`A check` with run, row, writer_is_owner/,
   "lands through repo-exec": /`repo-exec` `land-feature`/,
-  "publishes approved": /publish with `\{approved:true\}`/,
+  "publishes approved": /publish with `\{approved:true, run\}`/,
   "refusal means a new page": /refusal or a PARK means a new page: go back to step 2/,
   "fallback": /`A fallback` writes the Markdown twin[\s\S]*AskUserQuestion \(Merge now \/ Open PR\)[\s\S]*writer_is_owner true/,
   "late approval": /`A pending`\)\. Land them with `land-feature`, which re-merges a moved base and re-runs the gate/,

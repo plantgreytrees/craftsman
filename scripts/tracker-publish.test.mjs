@@ -116,6 +116,36 @@ test("publish: on-approve publishes for a landed run record or manual:true", () 
   assert.equal(publishTracker({ manual: true }, b).published, true);
 });
 
+test("publish: a landed run publishes once; a second publish with the same run is refused", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a); onApprove(a); record(a, "r1", "landed");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, true);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(a.root, ".craftsman", "approvals", "r1.json"), "utf8")).published_at);
+  const before = git(bare, "rev-parse", "main");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+});
+
+test("publish: push mode with repoExec.approval.required behaves as on-approve", () => {
+  const { bare } = remote();
+  const a = clone(bare);
+  seedLedger(a);
+  fs.writeFileSync(path.join(a.root, "craftsman.config.json"), JSON.stringify({ tracker: { publish: "push" }, repoExec: { approval: { required: true } }, planning: { featureBranches: true } }));
+  const before = git(bare, "rev-parse", "main");
+  assert.equal(publishTracker({}, a).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
+  record(a, "r1", "landed");
+  assert.equal(publishTracker({ approved: true, run: "r1" }, a).published, true);
+});
+
+test("publish: manual:true logs tracker_publish_manual", () => {
+  const a = clone(remote().bare);
+  seedLedger(a); onApprove(a);
+  assert.equal(publishTracker({ manual: true }, a).published, true);
+  assert.match(fs.readFileSync(path.join(a.stateDir, "events.jsonl"), "utf8"), /tracker_publish_manual/);
+});
+
 test("publish: legacy push mode logs tracker_publish_unapproved", () => {
   const { bare } = remote();
   const a = clone(bare);
@@ -147,8 +177,8 @@ test("publish: refuses to blank a committed non-empty block without an archive e
   assert.equal(refused.published, false);
   assert.match(refused.refused, /blank/);
   assert.equal(git(bare, "rev-parse", "main"), before);
-  assert.equal(publishTracker({ archived: true }, fresh).published, true);
-  assert.equal(git(bare, "show", "main:docs/plans/TRACKER.jsonl"), "");
+  assert.equal(publishTracker({ archived: true }, fresh).published, false);
+  assert.equal(git(bare, "rev-parse", "main"), before);
 });
 
 test("publish: a checkout merely behind origin cannot blank the block; a real archive event can", () => {
@@ -314,9 +344,9 @@ test("publish guard: an archive event for another plan does not excuse the dropp
   assert.equal(publishTracker({}, same.fresh).published, true);
 });
 
-test("publish guard: archived:true or a later archive event lets the shrink through", () => {
+test("publish guard: archived:true is refused; a later archive event lets the shrink through", () => {
   const { fresh } = shrunkFixture();
-  assert.equal(publishTracker({ archived: true }, fresh).published, true);
+  assert.equal(publishTracker({ archived: true }, fresh).published, false);
   const second = shrunkFixture();
   writeLog(second.fresh, "tracker_archived");
   assert.equal(publishTracker({}, second.fresh).published, true);

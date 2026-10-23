@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { prepare, attachUrl, check, landed, pending, fallback } from "./approval.mjs";
+import { prepare, attachUrl, check, landed, markPublished, pending, fallback } from "./approval.mjs";
 
 const LATER = new Date(Date.now() + 60000).toISOString();
 
@@ -222,4 +222,18 @@ test("fallback writes the markdown prepare rendered and scanned, ignoring caller
   const text = fs.readFileSync(out.file, "utf8");
   assert.equal(text, p.markdown);
   assert.ok(!text.includes(secret));
+});
+
+test("markPublished sets published_at once, only on a landed record", () => {
+  const s = setup();
+  const o = { root: s.root };
+  prepare(s.input, { root: s.root, runners: s.runners });
+  assert.equal(markPublished("p-f", o).refused, true);
+  check({ run: "p-f", row: { choice: "merge", head_sha: s.A, decided_at: LATER }, writer_is_owner: true }, o);
+  landed({ run: "p-f", sha: "s", mode: "merge" }, o);
+  assert.equal(markPublished("p-f", o).ok, true);
+  const at = s.rec().published_at;
+  assert.ok(at);
+  assert.equal(markPublished("p-f", o).refused, true);
+  assert.equal(s.rec().published_at, at);
 });

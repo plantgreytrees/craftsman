@@ -187,6 +187,20 @@ function landedLocked({ run, sha, mode }, { root }) {
   return { ok: true };
 }
 
+// Single-use publish (ARCH-LAND-24): a landed record may authorise one tracker publish.
+export function markPublished(run, { root = ".", lockTries } = {}) {
+  try {
+    return withLock(root, run, () => {
+      const rec = load(root, run);
+      if (!rec) return refuse("no approval record");
+      if (rec.status !== "landed") return refuse(`record status is ${rec.status}, not landed`);
+      if (rec.published_at) return refuse("record already published");
+      save(root, { ...rec, published_at: new Date().toISOString() });
+      return { ok: true };
+    }, lockTries);
+  } catch (e) { return refuse(e.message); }
+}
+
 export function pending(_input, { root = "." } = {}) {
   const d = dirs(root).approvals;
   let names = [];
