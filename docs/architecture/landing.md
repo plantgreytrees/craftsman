@@ -70,3 +70,6 @@ ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and ext
 
 - **ARCH-LAND-28** replaces 22: adds that with `planning.featureBranches` off, units merge to base without a verification point.
 - **ARCH-LAND-29** replaces 24: `tracker.publish` is `off|on-approve` (default on-approve). The legacy `push` value acts as on-approve when approval is required. An approved publish names a landed, unpublished approval record, is spent once and is re-checked under the base lock; `manual:true` is logged.
+
+## Scoped pre-merge gate (2026-10-23)
+ARCH-LAND-30 lets the pre-merge gate use the same `{changed}` and `{changedDirs}` placeholders as Stop (ARCH-STATE-18), filled from `git diff --name-only <base>...HEAD` in the worktree being landed. An empty diff skips the gate and logs it; a diff that cannot be computed fails the gate as before. Rejected: running the whole-superproject gate on every land, which Gleam had to turn off. See [state](./state.md#service-scoped-gates-2026-10-23) and [service-scoped-gates](../ideas/service-scoped-gates.md).

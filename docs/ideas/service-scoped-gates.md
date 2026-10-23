@@ -1,6 +1,6 @@
 ---
 slug: service-scoped-gates
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: deep
@@ -79,6 +79,15 @@ None. Checked against code: stop-gate emits no event for a dirty stop with no co
 ## Open questions
 - Will Gleam register all 61 submodules (or should `workspace-init` discover gitlinks)? Unanswered.
 - Is a root-session interactive edit of a submodule a normal path in Gleam, or is everything via `/orchestrate`? Unanswered (Gleam rule says never edit the superproject for a unit).
+
+## Corrections found by /architect (2026-10-23, isolated analyst, checked against code)
+- **Mechanism of the "disabled" gate was wrong.** `stopGate.commands: {}` does not drop the defaults (`deepMerge`, `scripts/lib/core.mjs:588-596`), so Gleam's whole-solution `dotnet test` still runs at every session start and is red, and Stop skips it (`scripts/stop-gate.mjs:185-186`). The Problem section's "set `stopGate.commands: {}` ... after a whole-solution failure" describes intent, not effect.
+- **The frequency was measurable and is high.** Gleam root `events.jsonl` 2026-10-21..23: 836 stops, 770 clean skips, so about 65 dirty stops in 3 days, none running a test. The A1 kill criterion ("<5/week") is not met.
+- **Manifest count:** 18 entries including the root `.`, so 17 of 61 submodules.
+- **"Do nothing" is weaker than stated:** units read the submodule's root, which has no config, so they get plugin defaults (`dotnet format`, no `extraChecks`); config layering fixes that.
+- **Recommendation 1 is about 10 lines, not one,** across `stop-gate.mjs` and `quality-gate.mjs`; the skip taxonomy also needs `red-at-start` and `snapshot-pending`.
+- **Hidden cost found:** `loadWorkspaceManifest` already runs 17 `git rev-parse` per hook in Gleam (`core.mjs:152,157`); a cached manifest is a separate fix.
+- **Decisions taken with the owner:** inherit workspace config by default with `{workspaceRoot}`; `nearest:<marker>` downward cwd; session change list as the Stop source; scoped failures block; `extraChecks` get the placeholders; a budget kill is said once. Rules: ARCH-STATE-16 to 19, ARCH-LAND-30.
 
 ## Next step
 `/architect service-scoped-gates` (add `--deep`: it touches STATE/LAND/ENGINE rules if the owner lookup is revived). Start with recommendation 1 — a one-line telemetry change needs no architecture pass.
