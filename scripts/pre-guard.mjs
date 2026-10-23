@@ -17,7 +17,6 @@ import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScope
 import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
-import { proseOnly } from "./lib/heredoc-allow.mjs";
 
 const T0 = Date.now();
 // Authority scripts this command invokes; their nonces are left only when the whole command is allowed (ARCH-SAFETY-05).
@@ -96,7 +95,7 @@ function heredocSubstitutions(body) {
 // parsed as shell. Quote-aware: a `<<` inside single quotes is not a heredoc,
 // while one inside `"$( ... )"` is. Unterminated bodies run to the end, as in sh.
 function arithmeticEnd(text, i) { // index of the `)` / `]` closing arithmetic opened at i, else text.length
-  if (text[i + 1] === "{") return braceEnd(text, i);  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
+  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
   let j = i + 1, depth = 0;
   for (; j < text.length; j++) { if (text[j] === "(") depth++; else if (text[j] === ")" && --depth === 0) break; }
   return j;
@@ -131,7 +130,7 @@ function stripHeredocs(text) {
     if (sq) { out += c; if (c === "'") sq = false; continue; }
     if (c === "\\" && i + 1 < text.length) { out += c + text[++i]; continue; }
     if (top === "dq") {
-      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[" || text[i + 1] === "{")) { // arithmetic: a shift, never a heredoc
+      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { // arithmetic: a shift, never a heredoc
         const j = arithmeticEnd(text, i); out += text.slice(i, j + 1); i = j; continue;
       }
       if (c === '"') stack.pop();
@@ -141,7 +140,7 @@ function stripHeredocs(text) {
     if (c === "'") { sq = true; out += c; continue; }
     if (c === '"') { stack.push("dq"); out += c; continue; }
     // Arithmetic `$(( ))` / `(( ))`: its `<<` is a shift, never a heredoc.
-    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[" || text[i + 1] === "{")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
       const j = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1);
       out += text.slice(i, j + 1); i = j; continue;
     }
@@ -1299,9 +1298,9 @@ function bypassesHooks(text, depth = 0) {
 // unconditional, for every commit/push with or without a worktree binding.
 // The flag test is linear; the commit/push one retries per `git`, so only a
 // command under 16 KB reaches it — a larger one with a bypass flag is blocked.
-if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(bypassView(command))
-    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(bypassView(command))))
-    || (command.length <= 16384 && bypassesHooks(bypassView(command))))) {
+if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
+    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command)))
+    || (command.length <= 16384 && bypassesHooks(command)))) {
   logEvent({ ms: Date.now() - T0, ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
     `craftsman: Git commit/push hook bypass BLOCKED (--no-verify, commit -n, --no-gpg-sign, gpgsign=false / ` +
@@ -1564,15 +1563,3 @@ if (g.enabled !== false && writeTool && docSide) {
 
 logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);
-
-// Heredoc bodies are prose, not flags (ARCH-STATE-14), only when every remaining head is a listed prose consumer.
-function bypassView(command) {
-  if (!command.includes("<<") || command.length > 16384) return command;
-  const stripped = stripHeredocs(command);
-  return proseOnly(stripped) ? stripped : command;
-}
-
-function braceEnd(text, i) { // index of the `}` closing `${` at i (nesting-aware), else text.length: unterminated stays in view
-  for (let j = i + 2, d = 1; j < text.length; j++) { if (text[j] === "{") d++; else if (text[j] === "}" && --d === 0) return j; }
-  return text.length;
-}
