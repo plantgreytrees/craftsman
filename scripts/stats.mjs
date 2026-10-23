@@ -116,6 +116,22 @@ export function rootContextSection(events) {
   return lines.join("\n");
 }
 
+// Time-to-approve (ARCH-APPROVAL-06): approval_requested paired with
+// approval_decided by run; lines are indented under the Stop gate line.
+export function approvalSection(events) {
+  const asked = new Map();
+  const secs = [];
+  for (const e of events) {
+    if (e.ev === "approval_requested") asked.set(e.run, e.ts);
+    else if (e.ev === "approval_decided" && asked.has(e.run) && typeof e.ts === "number" && typeof asked.get(e.run) === "number") {
+      secs.push(Math.max(0, (e.ts - asked.get(e.run)) / 1000));
+      asked.delete(e.run);
+    }
+  }
+  if (!secs.length) return "  approvals: none decided yet";
+  return `  approvals: ${secs.length} decided · p50 ${pct(secs, 50)}s · p95 ${pct(secs, 95)}s`;
+}
+
 function main() {
   const cfg = loadConfig();
   const events = readEvents();
@@ -148,6 +164,7 @@ function main() {
   console.log(`PreToolUse protected-path blocks: ${pre.length}`);
   console.log(guardReasonsSection(events));
   console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);
+  console.log(approvalSection(events));
   console.log(`SessionStart injections: ${ss.length}`);
 
   const router = events.filter((e) => e.ev === "router");
