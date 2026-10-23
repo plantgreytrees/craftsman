@@ -8,6 +8,7 @@ import {
   mainCheckoutRoot,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
+import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 
@@ -205,11 +206,10 @@ export function trackerJsonlPath(context = projectContext(".")) {
   return path.join(trackerRoot(context), "docs", "plans", "TRACKER.jsonl");
 }
 
-// Ledger text for `init` when no local ledger exists: the committed
-// TRACKER.jsonl rows (ARCH-TRACKER-12), else empty. Malformed lines are dropped.
-function rehydrateText(context) {
+// Valid rows of the committed TRACKER.jsonl.
+function jsonlRows(context) {
   let text = "";
-  try { text = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { return ""; }
+  try { text = fs.readFileSync(trackerJsonlPath(context), "utf8"); } catch { return []; }
   const rows = [];
   for (const line of text.split("\n").filter(Boolean)) {
     try {
@@ -217,7 +217,54 @@ function rehydrateText(context) {
       if (row && typeof row.key === "string" && STATUSES.includes(row.status)) rows.push(row);
     } catch { /* skip */ }
   }
+  return rows;
+}
+
+function rehydrateText(context) {
+  const rows = jsonlRows(context);
   return rows.length ? rows.map((row) => JSON.stringify(row)).join("\n") + "\n" : "";
+}
+
+function blockRows(context) {
+  try { return parseBlockRows(generatedBlock(fs.readFileSync(trackerDocPath(context), "utf8")), STATUSES); } catch { return []; }
+}
+
+function archivedSlugs(context) {
+  try { return archivedSlugsOf(fs.readFileSync(archivePath(context), "utf8"), parseArchiveHeading); } catch { return new Set(); }
+}
+
+// `init` (ARCH-TRACKER-13/14): rehydrate an absent ledger; `merge` adds jsonl rows of unarchived
+// plans, `from_block` adds the committed block rows; neither overwrites a held key.
+export function initLedger(input, context = projectContext(".")) {
+  const file = ledgerPath(context);
+  const fromBlock = input.from_block === true || input["from-block"] === true;
+  const merge = input.merge === true;
+  if (!fromBlock && !merge) {
+    if (!fs.existsSync(file)) atomicWrite(file, rehydrateText(context));
+    return { ledger: file };
+  }
+  const added = withLock(file, () => {
+    const held = new Set(readEvents(file).flatMap((e) => [e.key, slugKey(e.plan, e.unit)]));
+    const archived = merge ? archivedSlugs(context) : new Set();
+    const candidates = fromBlock
+      ? blockRows(context).map((r) => ({
+        key: keyOf(r), project: r.project, plan: r.plan, unit: r.unit, scope_id: null, goal: null,
+        module: r.module, status: r.status, evidence: "rehydrated from TRACKER.md block",
+        session_id: null, updated_at: new Date().toISOString(), decision: null, autonomous: false, criteria: null,
+      }))
+      : jsonlRows(context).filter((r) => !archived.has(planSlug(r.plan)));
+    const out = [];
+    for (const row of candidates) {
+      if (held.has(row.key) || held.has(slugKey(row.plan, row.unit))) continue;
+      held.add(row.key); held.add(slugKey(row.plan, row.unit));
+      out.push(row);
+    }
+    if (out.length) fs.appendFileSync(file, out.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
+    else if (!fs.existsSync(file)) atomicWrite(file, "");
+    return out;
+  });
+  logEvent({ ev: "tracker_init", mode: fromBlock ? "from-block" : "merge", added: added.length }, context);
+  return { ledger: file, added: added.length };
 }
 
 // Re-render the epic/story rollups (ARCH-TRACKER-10) from the ledger. Never
@@ -499,9 +546,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (input.action === "status" || input.action === "list") output = renderState(context);
     else if (input.action === "transition") output = transition(input, context);
     else if (input.action === "init") {
-      const file = ledgerPath(context);
-      if (!fs.existsSync(file)) atomicWrite(file, rehydrateText(context));
-      output = { ledger: file };
+      output = initLedger(input, context);
     } else if (input.action === "compact") output = compactLedger(context);
     else if (input.action === "rollup") output = syncRollups(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
