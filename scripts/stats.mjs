@@ -56,6 +56,36 @@ export function preguardBlocks(events) {
   return events.filter((e) => e.ev === "preguard" && e.result === "blocked");
 }
 
+// Blocks by reason (indented under the existing PreToolUse block line, so no
+// new top-level section): count per reason, most frequent first.
+export function blocksByReason(events) {
+  const m = new Map();
+  for (const e of events) {
+    const blocked = e.result === "blocked" || e.result === "block";
+    let r = null;
+    if (e.ev === "preguard") { if (blocked) r = e.reason || e.pattern || "preguard"; }
+    else if (e.ev === "docguard") { if (blocked) r = String(e.file || "docguard").replace(/^\(|\)$/g, "").slice(0, 90); }
+    else if (/_blocked$/.test(String(e.ev))) r = e.ev;
+    if (r) m.set(r, (m.get(r) || 0) + 1);
+  }
+  return [...m.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);
+}
+
+// guard_unparsed events from the last 7 days (ARCH-STATE-12).
+export function guardUnparsedRecent(events, now = Date.now()) {
+  const cutoff = now - 7 * 24 * 3600 * 1000;
+  return events.filter((e) => e.ev === "guard_unparsed" && typeof e.ts === "number" && e.ts >= cutoff);
+}
+
+export function guardReasonsSection(events, now = Date.now()) {
+  const lines = [];
+  for (const { reason, count } of blocksByReason(events)) lines.push(`  by reason: ${reason.padEnd(24)} ${count}`);
+  const un = guardUnparsedRecent(events, now);
+  lines.push(`  guard_unparsed (last 7 days): ${un.length}`);
+  for (const e of un) lines.push(`    ${new Date(e.ts).toISOString().slice(0, 10)} ${e.reason || "unspecified"}: ${String(e.command || "").slice(0, 120)}`);
+  return lines.join("\n");
+}
+
 // Root context per run (ARCH-MOD-03): one row per session from its
 // {ev:"context"} samples, in first-seen order.
 export function rootContextRows(events) {
@@ -114,6 +144,7 @@ function main() {
   console.log(`${latencySection(events)}\n`);
 
   console.log(`PreToolUse protected-path blocks: ${pre.length}`);
+  console.log(guardReasonsSection(events));
   console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);
   console.log(`SessionStart injections: ${ss.length}`);
 

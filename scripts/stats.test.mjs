@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { rootContextRows, rootContextSection, latencySection, preguardBlocks } from "./stats.mjs";
+import { rootContextRows, rootContextSection, latencySection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection } from "./stats.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = (sid, tokens, percent, unit = null) => ({ ts: 1, ev: "context", sid, phase: "orchestrate", unit, tokens, percent, cost: null });
@@ -68,4 +68,41 @@ test("stats: an allowed preguard event is not a block but is in the ms percentil
   assert.deepEqual(preguardBlocks(events), [events[1]]);
   assert.equal(events.filter((e) => e.ev === "preguard").length, 2); // old count treated both as blocks
   assert.match(latencySection(events, TIMEOUTS), /preguard\s+n=2 · p50 30ms · p95 30ms/);
+});
+
+test("stats: docguard and *_blocked events are ranked by reason too", () => {
+  const ev = [
+    { ev: "docguard", result: "blocked", file: "(command the parser cannot prove safe: the shell keyword while)" },
+    { ev: "docguard", result: "blocked", file: "(command the parser cannot prove safe: the shell keyword while)" },
+    { ev: "docguard", result: "allowed", file: "docs/plans/x.md" },
+    { ev: "scope_blocked", tool: "Read" },
+    { ev: "git_guard_blocked", command: "git commit" },
+    { ev: "tracker_doc_synced" },
+  ];
+  assert.deepEqual(blocksByReason(ev), [
+    { reason: "command the parser cannot prove safe: the shell keyword while", count: 2 },
+    { reason: "scope_blocked", count: 1 },
+    { reason: "git_guard_blocked", count: 1 },
+  ]);
+});
+
+test("stats: blocks-by-reason table and last-7-days guard_unparsed list", () => {
+  const now = 10 * 24 * 3600 * 1000;
+  const ev = [
+    { ts: now - 1000, ev: "preguard", result: "blocked", reason: "secrets" },
+    { ts: now - 2000, ev: "preguard", result: "blocked", reason: "secrets" },
+    { ts: now - 3000, ev: "preguard", result: "blocked", pattern: ".env" },
+    { ts: now, ev: "preguard", result: "allowed" },
+    { ts: now - 1000, ev: "guard_unparsed", reason: "subshell", command: "echo $(x)" },
+    { ts: now - 8 * 24 * 3600 * 1000, ev: "guard_unparsed", reason: "old", command: "old" },
+  ];
+  assert.deepEqual(blocksByReason(ev), [{ reason: "secrets", count: 2 }, { reason: ".env", count: 1 }]);
+  assert.equal(guardUnparsedRecent(ev, now).length, 1);
+  const out = guardReasonsSection(ev, now);
+  assert.match(out, /by reason: secrets\s+2/);
+  assert.match(out, /guard_unparsed \(last 7 days\): 1/);
+  assert.match(out, /subshell: echo \$\(x\)/);
+  assert.doesNotMatch(out, /old/);
+  // 5.2: every line is indented, so no new top-level section name appears
+  assert.ok(out.split("\n").every((l) => l.startsWith("  ")));
 });
