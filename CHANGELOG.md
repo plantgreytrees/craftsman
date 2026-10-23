@@ -13,8 +13,8 @@ All notable changes to craftsman are documented here. Format loosely follows
   (`scripts/approval.mjs`, `scripts/lib/approval-page.mjs`, `commands/_approval.md`): Merge now or Open PR,
   with the recommendation, the attention list (env keys, migrations, CI), evidence, risk and rollback. The
   record's `head_sha` must equal the feature head; a moved base re-merges and re-gates, a mismatch PARKs.
-  New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only with
-  `approved:true` or `manual:true`; older installs treat it as off). With feature branches off there is no
+  New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only for an
+  approved run whose record is landed, once per run, or a `manual:true` `/sync-docs --tracker`; older installs treat it as off). With feature branches off there is no
   verification point and units still merge straight to base.
 - **Ledger guard** (ARCH-TRACKER-13/14): publish refuses to drop a committed row unless an archive event names
   its plan; `tracker.mjs init --merge` and `--from-block` repair a partial or missing ledger.
@@ -34,6 +34,12 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **Review fixes for the approval flow and ledger guards.** `tracker.mjs publish` no longer exits 13 on its own
+  import; the merge gate skips a `stopGate.commands` marker whose tool or recipe is missing (a project sets a
+  marker to `null` to drop it); `tracker.mjs sync` refuses to drop committed ledger rows; `land-feature` takes
+  the feature lock before the approval gate and lands the approved head; the approval scan reads the approved
+  head in a detached tree; existing plans may grow up to the `docs.budgets` default; `stats.mjs` reports
+  time-to-approve; a unit `merge` logs retire candidates.
 - **Sandboxed unit runners can build in repos whose remote needs auth** (ARCH-LAND-19).
   Runners hold no credentials and the sandbox is unchanged. `repo-exec` now works
   offline from the `origin/<base>` that root fetched (`{"action":"network","step":"fetch"}`),
