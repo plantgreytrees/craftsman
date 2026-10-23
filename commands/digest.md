@@ -3,17 +3,17 @@ description: Progress digest: what shipped, what needs a decision, what is next.
 allowed-tools: Bash
 ---
 
-Run the digest:
+Run the digest (`--html` writes the dashboard):
 
 ```
 node "${CLAUDE_PLUGIN_ROOT}/scripts/digest.mjs"
 ```
 
-Show the output verbatim, then end with one line naming the single next
-action (the first row under "Next", or — if "Decisions needed" is non-empty —
-the decision to resolve first, since a BLOCKED row usually gates everything
-behind it).
+Show the output verbatim, then one line with the next action: the first
+"Decisions needed" item, else the first "Next" row.
 
-No preamble, no recap of what the digest already shows. This command only
-reads the tracker ledger (`scripts/tracker.mjs`); it never writes to it or to
-`docs/`.
+Only on `--publish` (with `--html`): publish the file as a private claude.ai
+Artifact, keeping its URL in `.craftsman/export/dashboard.url`, republish to it.
+Never from a hook, `/auto` or `/goal`.
+
+No preamble. Ledger-only; never writes `docs/`.
