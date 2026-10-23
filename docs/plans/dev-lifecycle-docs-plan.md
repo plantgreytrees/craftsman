@@ -359,6 +359,19 @@ units:
       write: [workflows/run.js, agents/unit-runner.md, agents/implementer.md, agents/code-reviewer.md, commands/_shared-execution.md, scripts/unit-runner-tdd.test.mjs]
     arch: [ARCH-ENGINE-21, ARCH-ENGINE-04, ARCH-ENGINE-12, ARCH-SLIM-02]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-lease-expansion
+    scope_id: fix-lease-expansion
+    project: .
+    depends_on: []
+    module: scripts/lib/force-block.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, workflows/run.js, commands/_shared-execution.md, scripts/unit-runner-tdd.test.mjs, scripts/doc-size-policy.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs, workflows/run.js, commands/_shared-execution.md, scripts/unit-runner-tdd.test.mjs]
+    arch: [ARCH-LAND-23, ARCH-STATE-16, ARCH-SAFETY-03, ARCH-ENGINE-21, ARCH-ENGINE-12, ARCH-SLIM-02]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -561,6 +574,15 @@ Findings (round 8, Warning): (a) after a fix round `workflows/run.js` hands the 
 - [ ] 26.1 Add tests first to `scripts/unit-runner-tdd.test.mjs`: the review prompt in `workflows/run.js` carries the original evidence on every round; `agents/unit-runner.md` step 7 or 8 says evidence names the failing run of each new test; `agents/implementer.md` Return list names it; `commands/_shared-execution.md` step 8 makes the SKIP route check it; `agents/code-reviewer.md` names integration and scrutinise reviews as not subject to it → accept: red before the change
 - [ ] 26.2 Make those edits, trading bytes inside each `.md` so no `FILE_CAPS` entry rises (`unit-runner.md` 3605/3605, `implementer.md` 2222/2224, `code-reviewer.md` 2563/2564, `_shared-execution.md` 12764/12769) → accept: the tests and `doc-size-policy` green
 
+### Step 27 — fix-lease-expansion (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+Root runs this unit by hand. Findings (round 9): (Critical) the lease allowance reads the refspec text before the shell expands it, so `feature/<plan>-$X` with `X=x:main`, a backtick or `$( )` substitution, `$'\x3a'`, or `HEAD:feature/p-x:main` (git splits at the last colon, the code at the first) reaches main; `ownBranchesOf` turns the bound branch into a glob, so a branch of `*` allows `HEAD:main`; (Warning) a fix round's evidence replaces the earlier fix round's, so the round-2 review can lack a new test's failing run; (Suggestion) the byte trades dropped the `(_architecture.md)` pointer in `_shared-execution.md` step 8.
+- [ ] 27.1 Add tests first in `scripts/lib/force-block.test.mjs` and `scripts/pre-guard-narrow.test.mjs`: a lease push is refused when its command text holds `$`, a backtick or a backslash anywhere, for a refspec word with `{`, `}`, `*`, `?`, `[`, `(`, a quote or a second colon (`HEAD:feature/p-x:main`), and for a binding branch of `*`; the existing allowed cases (plain names, `HEAD:feat/unit-a`, `refs/heads/` form, `--force-with-lease=name:sha`) stay allowed → accept: the expansion and double-colon cases fail on the current code
+- [ ] 27.2 In `leaseToOwnBranch` require every word to match `^[A-Za-z0-9._/:=-]+$`, every ref to be `name` or `src:dst` with exactly one colon at most and both sides `^[A-Za-z0-9._/-]+$`, and no `$`, backtick or backslash anywhere in the command text; make `ownBranchesOf` return the bound branch only when it matches `^[A-Za-z0-9._/-]+$` and compile the `feature/<plan>-*` glob so `*` means `[A-Za-z0-9._-]+` → accept: tests green
+- [ ] 27.3 `workflows/run.js` collects every fix round's evidence and sends all of it with the original on each review round; a behavioural test drives the loop through two fix rounds (or asserts the accumulation) → accept: test green
+- [ ] 27.4 Restore the `(_architecture.md)` pointer in `commands/_shared-execution.md` step 8 within its `FILE_CAPS` entry; pin it in `scripts/unit-runner-tdd.test.mjs` → accept: `doc-size-policy` green
+
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
 
@@ -569,6 +591,8 @@ Round 6 units (fix-bypass-allowlist, fix-reviewer-red) touch disjoint files and 
 Round 7 units (fix-heredoc-strict, fix-red-run-evidence) touch disjoint files and run in parallel.
 
 Round 8: revert-heredoc-prose (root, by hand) and fix-evidence-flow (runner) touch disjoint files.
+
+Round 9: fix-lease-expansion (root, by hand).
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
