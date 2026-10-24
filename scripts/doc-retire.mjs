@@ -10,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { grantValid, hasDocWriteGrant, isMain, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
 import { classifyArchive, copyAndCommit, productIdFor, resolveArchive } from "./lib/archive.mjs";
 import { parseNext } from "./lib/next-queue.mjs";
-import { descendantSlugs, docGoal, loadIndex, removeChild, TRACKER_FILE } from "./lib/plan-index.mjs";
+import { descendantSlugs, docGoal, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
 const CLOSED = ["COMPLETE", "CANCELLED"];
@@ -77,9 +77,10 @@ export function retireCheck(plans, root) {
     try {
       if (typeof plan !== "string" || !plan.trim()) return { plan, referrers: [], reason: "invalid plan path" };
       const slug = path.posix.basename(plan, ".md");
-      const hits = scanReferrers({ root: path.resolve(String(root)) }, plan, slug)?.filter((f) => f !== NEXT_DOC) ?? null;
-      if (hits === null) return { plan, referrers: [], reason: "referrer scan failed" };
-      const referrers = hits.filter((f) => f !== plan && !TRACKER_FILE.test(f)).sort();
+      // The same verdict the dashboard uses (ARCH-VIEWS-15): the plan's own rollup and siblings are not referrers.
+      const verdict = classifyArchive({ root: path.resolve(String(root)) }, plan, { slug, archive: {} });
+      if (verdict.scanFailed) return { plan, referrers: [], reason: "referrer scan failed" };
+      const referrers = verdict.hits;
       return { plan, referrers };
     } catch (error) {
       return { plan, referrers: [], reason: `referrer scan failed: ${error?.message ?? error}` };

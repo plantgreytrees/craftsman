@@ -8,6 +8,9 @@ import { resolveArchive, archivePathFor, productIdFor, restoreCommand } from "..
 
 // The path helpers live in tracker.mjs so it needs no import of this module (no tracker -> archive -> doc-retire -> tracker cycle).
 export { resolveArchive, archivePathFor, productIdFor, restoreCommand };
+// Accepted two-way edge (ARCH-ARCHIVE-03): doc-retire.mjs imports classifyArchive from here, this file imports findReferrers/retire
+// back. Both are hoisted function declarations used only at call time, never at module load, so the cycle is inert; the
+// views-wiring guard allows exactly this pair and nothing else.
 import { findReferrers, retire as docRetire } from "../doc-retire.mjs";
 import { currentState } from "../tracker.mjs";
 import { buildIndex, descendantSlugs, loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";

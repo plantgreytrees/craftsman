@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { findReferrers, grantValid, retire, retireCheck } from "./doc-retire.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
+import { classifyArchive } from "./lib/archive.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
 
 const fixtures = new Set();
@@ -664,6 +665,15 @@ test("retireCheck lists referrers for a cited plan and none for an uncited one, 
   assert.deepEqual(result.find((r) => r.plan === "docs/plans/beta.md").referrers, []);
   assert.equal(run(root, "status", "--porcelain"), before);
   assert.ok(fs.existsSync(path.join(root, PLAN)));
+});
+
+test("retireCheck agrees with classifyArchive: the plan's own rollup and sibling are not referrers (ARCH-VIEWS-15)", () => {
+  const root = repo({ files: { "docs/plans/alpha/TRACKER.md": "rollup docs/plans/alpha.md\n", "docs/guide.md": "see docs/plans/alpha.md\n" } }).root;
+  const { referrers } = retireCheck([PLAN], root)[0];
+  assert.ok(referrers.includes("docs/guide.md"));
+  assert.ok(!referrers.includes("docs/plans/alpha/TRACKER.md"));
+  assert.ok(!referrers.includes(SIB));
+  assert.deepEqual(referrers, classifyArchive({ root }, PLAN, { slug: "alpha", archive: {} }).hits);
 });
 
 test("retireCheck never throws: an unreadable root returns an empty list and a reason", () => {

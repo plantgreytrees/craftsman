@@ -58,7 +58,33 @@ test("stopRefresh: export.enabled false clears generated notes only", async () =
 
 test("tracker.mjs imports alone and has no static edge into archive/doc-retire (no cycle)", () => {
   const src = read("scripts/tracker.mjs");
-  assert.doesNotMatch(src, /^import[^\n]*from "[^"]*\/(archive|doc-retire|dashboard|export-notes)\.mjs";/m);
+  assert.doesNotMatch(src, /\bfrom\s+"[^"]*\/(archive|doc-retire|dashboard|export-notes)\.mjs"/);
   const r = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(path.join(ROOT, "scripts/tracker.mjs"))}).then((m) => { if (typeof m.currentState !== "function") process.exit(3); })`], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
+});
+
+// Static import graph over scripts/ (multi-line imports included, no line anchor).
+function importGraph() {
+  const graph = new Map();
+  const visit = (rel) => {
+    if (graph.has(rel)) return;
+    const src = read(rel);
+    const deps = [...src.matchAll(/\b(?:import|export)\b[^;"']*?\bfrom\s+"(\.[^"]+\.mjs)"|^import\s+"(\.[^"]+\.mjs)"/gm)]
+      .map((m) => path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[1] ?? m[2])));
+    graph.set(rel, deps);
+    deps.forEach(visit);
+  };
+  visit("scripts/tracker.mjs");
+  visit("scripts/lib/archive.mjs");
+  return graph;
+}
+const reaches = (graph, from, to, seen = new Set()) => (graph.get(from) ?? []).some((d) => d === to || (!seen.has(d) && seen.add(d) && reaches(graph, d, to, seen)));
+
+test("no static import cycle through tracker.mjs; ledger-keys has no edge back; archive<->doc-retire is the one accepted pair", () => {
+  const graph = importGraph();
+  assert.ok(!reaches(graph, "scripts/tracker.mjs", "scripts/tracker.mjs"), "tracker.mjs reaches itself");
+  assert.ok(!graph.get("scripts/lib/ledger-keys.mjs").includes("scripts/tracker.mjs"), "ledger-keys.mjs imports tracker.mjs");
+  assert.ok(!reaches(graph, "scripts/lib/ledger-keys.mjs", "scripts/tracker.mjs"));
+  const cyclic = [...graph.keys()].filter((f) => reaches(graph, f, f)).sort();
+  assert.deepEqual(cyclic, ["scripts/doc-retire.mjs", "scripts/lib/archive.mjs"]);
 });
