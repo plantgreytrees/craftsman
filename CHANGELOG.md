@@ -13,8 +13,7 @@ All notable changes to craftsman are documented here. Format loosely follows
   `scripts/lib/approval-page.mjs`, `commands/_approval.md`): Merge now or Open PR, with the recommendation, attention list
   (env keys, migrations, CI), evidence, risk and rollback. The record's `head_sha` must equal the feature head; a moved base
   re-merges and re-gates. New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only
-  for an approved run whose record is landed, once, or a `manual:true` `/sync-docs --tracker`). With feature branches off,
-  units still merge straight to base with no verification point.
+  for an approved run whose record is landed, once, or a `manual:true` `/sync-docs --tracker`). With feature branches off, units merge straight to base.
 - **Dashboard, notes and archive** (ARCH-DOCS-14, ARCH-ARCHIVE-05/07): the dashboard (with an archive tab) and a
   notes folder render at Stop by default, or on demand with `/digest --html`; a `NEXT.md` queue; local auto-archive
   of a finished plan at `land-feature`; and `/sync-docs --archive` / `--prune --archive` to retire closed plans.
