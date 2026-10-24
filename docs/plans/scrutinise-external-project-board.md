@@ -55,6 +55,32 @@ units:
       write: [scripts/tracker.mjs, scripts/lib/ledger-keys.mjs, scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/tracker-sync.mjs, scripts/views-wiring.test.mjs, scripts/doc-retire.test.mjs, scripts/tracker.test.mjs]
     arch: [ARCH-VIEWS-15, ARCH-DOCS-14, ARCH-TRACKER-02, ARCH-TRACKER-09]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: amend-rules-token-and-views
+    scope_id: amend-rules-token-and-views
+    project: .
+    depends_on: []
+    module: docs/architecture
+    language: markdown
+    security: normal
+    scope:
+      read: [docs/architecture/docs.rules.md, docs/architecture/landing.rules.md, docs/architecture/archive.rules.md, docs/architecture/safety.rules.md, scripts/lib/archive.mjs, scripts/doc-retire.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/landing.rules.md]
+      write: [docs/architecture/docs.rules.md, docs/architecture/docs.md, docs/architecture/landing.rules.md, docs/architecture/landing.md]
+    arch: [ARCH-DOCS-14, ARCH-LAND-30, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: impl-landing-token
+    scope_id: impl-landing-token
+    project: .
+    depends_on: [amend-rules-token-and-views]
+    module: scripts/doc-retire.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/repo-exec.mjs, scripts/doc-retire.test.mjs, scripts/auto-archive.test.mjs, scripts/archive.test.mjs, scripts/repo-exec.test.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/landing.rules.md, docs/architecture/archive.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/doc-retire.test.mjs, scripts/auto-archive.test.mjs, scripts/archive.test.mjs]
+    arch: [ARCH-DOCS-14, ARCH-LAND-30, ARCH-ARCHIVE-03, ARCH-ARCHIVE-09, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: scrutinise external-project-board
@@ -98,6 +124,23 @@ Depends on: fix-clear-notes-and-auto-event
 - [ ] 3.4 Make the `archive.mjs`/`doc-retire.mjs` import edge one-way by moving the shared piece, or record it as accepted in a code comment with the reason → accept: the guard in 3.1 covers the chosen result
 - [ ] 3.5 Run the full suite and `node scripts/arch-check.mjs lint` → accept: both pass
 
+### Step 4 — amend-rules-token-and-views (., markdown, normal)
+Tooling: implementer implementer · gates code-reviewer
+Depends on: none
+Already landed, not redone: the D2 amendments (ARCH-VIEWS-16/17/18, ARCH-ARCHIVE-09/10, commit 5a11d86) and the ARCH-TRACKER-13 cite (9889409).
+- [ ] 4.1 Via `/architect --update`, state the landing-token rule in `docs.rules.md` (supersede ARCH-DOCS-14) and `landing.rules.md` (supersede ARCH-LAND-30): the automatic archive is the only path that skips the doc-write grant, and only for a call carrying an in-process capability that `doc-retire.mjs` does not export and no stdin field, argument or CLI flag can supply; `auto: true` alone is ignored and a manual retire is never logged as automatic → accept: `node scripts/arch-check.mjs lint` passes; each new rule has a `check:` naming a test in Step 5 and a `cite:` that resolves (D1, owner chose the in-process capability)
+- [ ] 4.2 Word the rule against ARCH-SAFETY-05 (grants are unforgeable from a tool call; no new protected path or file state is introduced) → accept: the rule text adds no file, nonce or env key and edits no safety rule
+
+### Step 5 — impl-landing-token (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor
+Depends on: amend-rules-token-and-views
+- [ ] 5.1 In `scripts/doc-retire.mjs` add a module-private capability (not exported as a value; `autoArchive` obtains it through one narrow exported function) and let `retire` skip `hasGrant` only when the call carries it; stdin `auto: true` without it keeps the grant requirement and is not logged `auto` → accept: a test passing `auto: true` through the CLI path without a grant is refused and logs no `doc_retired` with `auto`
+- [ ] 5.2 Make `autoArchiveEligible` (`scripts/lib/archive.mjs`) refuse without the capability, before `holdsLanding`, so the main checkout never moves for a retire that would refuse → accept: a case with no capability leaves main HEAD and working tree untouched (ARCH-LAND-30)
+- [ ] 5.3 Share one `liveBlockers` check (open `scrutinise-`/`investigate-` siblings, live descendants) between eligibility and `retire` → accept: a table case per blocker; one function, two callers
+- [ ] 5.4 Add the end-to-end test with a real archive repo and no `retire` stub: a landed, referrer-free plan is copied, committed locally in the archive repo, retired, logs one `doc_retired` with `auto: true` and `archive_push_pending`, never pushes → accept: the test fails on the previous code (ARCH-ARCHIVE-03, ARCH-ARCHIVE-09)
+- [ ] 5.5 Fold in the round-3 Suggestions: one hoisted git runner; `indexAt` via `git cat-file --batch` and `ls-tree -z`; a minimum age before the temp sweep deletes a dead-pid file; a `scrutinise-a.md` case in the `--output=x` heading test; the live-pid branch of the sweep test; a backtick-tolerant no-force regex → accept: each has a test or an edited assertion named in the commit message
+- [ ] 5.6 Run the full suite and `node scripts/arch-check.mjs lint` → accept: both pass
+
 ## Round 3 (review clean of Critical; owner decisions applied)
 The third isolated review found 0 Critical and one Warning: `autoArchive` fast-forwards the main checkout before a retire that is certain to refuse for lack of the doc-write grant (`archive.mjs:227-233`), so every unit criterion is ticked but the auto path is inert until D1 is built. The owner answered D1 and D2 in `/auto` Phase C; the follow-up work is queued as two PENDING rows for the next `/craftsman:auto external-project-board` pass:
 - **amend-rules-token-and-views.** `/architect` adds a landing-token rule (D1: `land-feature` passes an explicit landing-approval token that `retire` accepts for the auto path only; a stdin `auto: true` alone is not enough; check ARCH-SAFETY-05 before wording it) and amends ARCH-VIEWS-04/08/11 and ARCH-ARCHIVE-05/07 to the shipped design (D2: export-tree `dashboard.url`, referrer scan allowed, add the prune-round test and a scripted archive push that PARKs on rejection). Also refresh the `ARCH-TRACKER-13` cite (`ledger-keys.mjs:15-75`).
@@ -105,7 +148,7 @@ The third isolated review found 0 Critical and one Warning: `autoArchive` fast-f
 The archive repo is a sibling project with id `archive`; archiving stays off until it is registered in the workspace manifest.
 
 ## Owner decisions (answered; recorded here)
-- **D1 decide-auto-archive-authority.** `retire()` (`doc-retire.mjs:113`) ignores `auto: true` and still needs the session doc-write grant, which a landing session does not hold; the automatic archive probably always refuses, and every `auto-archive.test.mjs` case stubs `retire`. Options: (a) `land-feature` passes an explicit landing-approval token that `retire` accepts for the auto path only; (b) require and document the doc-write grant; (c) drop the automatic path. Recommended: (a). After the decision, add an end-to-end test with a real archive repo. Round 2 adds that any caller can pass `auto: true` on stdin, so a manual retire can be logged as automatic; the token in (a) would also fix that.
+- **D1 decide-auto-archive-authority (answered 2026-10-24: option a, mechanism = in-process capability).** `retire()` (`doc-retire.mjs:113`) ignores `auto: true` and still needs the session doc-write grant, which a landing session does not hold; the automatic archive probably always refuses, and every `auto-archive.test.mjs` case stubs `retire`. Options: (a) `land-feature` passes an explicit landing-approval token that `retire` accepts for the auto path only; (b) require and document the doc-write grant; (c) drop the automatic path. Recommended: (a). After the decision, add an end-to-end test with a real archive repo. Round 2 adds that any caller can pass `auto: true` on stdin, so a manual retire can be logged as automatic; the token in (a) would also fix that.
 - **D2 decide-rule-mismatches.** (i) ARCH-VIEWS-04 says the workspace manifest is not read and ARCH-VIEWS-11 omits repo-wide content, but ARCH-VIEWS-15 needs referrer data: amend VIEWS-04/11 via `/architect`, or derive candidates without the manifest. (ii) ARCH-VIEWS-08 names `.craftsman/dashboard.url`, `commands/digest.md:16` uses `.craftsman/export/dashboard.url`: amend the rule to the export tree (recommended), then tighten `views-wiring.test.mjs:17`. (iii) ARCH-ARCHIVE-07's check names a prune-round-cap case in `archive.test.mjs` that does not exist, and ARCH-ARCHIVE-05 requires a rejected archive push to PARK though the push is prose only (`commands/_sync-docs-prune.md:14`): add the test and a scripted push with park handling, or amend the checks.
 
 ## Verification background
