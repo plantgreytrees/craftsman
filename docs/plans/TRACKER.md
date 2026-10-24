@@ -54,8 +54,6 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | 26 | [scrutinise-engine-hardening](./scrutinise-engine-hardening.md) | stop-gate budget truncation | JS | normal | MERGED | eda9173 + review correction | 2026-08-28 |
 | 27 | [scrutinise-engine-hardening](./scrutinise-engine-hardening.md) | core, session-context, tests | JS | normal | MERGED | 6ceb8a4 + review | 2026-08-28 |
 | 28 | [scrutinise-engine-hardening](./scrutinise-engine-hardening.md) | stop-gate comment compression | Markdown | normal | MERGED | 586a78a + router skip | 2026-08-28 |
-| follow-up-1 | [scrutinise-engine-hardening](./scrutinise-engine-hardening.md) | dirty-gate and marker runtime fixtures | JS | normal | PENDING | partly shipped — the process/hook harness now exists (`stop-gate.test.mjs` spawns real processes over tmp fixtures) and covers the dirty-gate/`shouldScan` decision and the `secrets-scanned` marker state machine; the acceptance-criteria ownership path (`acceptance.ref` hash) remains untested | 2026-09-14 |
-| follow-up-2 | [scrutinise-engine-hardening](./scrutinise-engine-hardening.md) | test/extra own-timeout classification | JS | normal | PENDING | no plan yet; investigate timeout semantics | 2026-08-28 |
 | follow-up-3 | [scrutinise-engine-hardening](./scrutinise-engine-hardening.md) | missing secrets scanner signal | JS | normal | COMPLETE | shipped — `secrets-scan.mjs`'s `scanTree` is the built-in fallback when the configured scanner is absent, opt-out via `security.builtinFallback: false` (`stop-gate.mjs:199-216`); covered by three `stop-gate.test.mjs` cases: fallback-disabled blocks visibly without marking the session scanned, fallback passes a clean tree, fallback blocks on a real finding | 2026-09-14 |
 
 ## Live ledger
@@ -185,6 +183,8 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [fixes-and-safety](../../fixes-and-safety) | sweep-safety | sweep-safety | MERGED | commit 4b5648a on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | tool-names | tool-names | MERGED | commit 44cd3ed on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | unpushed-report | unpushed-report | MERGED | commit 2408b0e on feat/fixes-and-safety; CI set green | 2026-10-21 |
+| [scrutinise-engine-hardening](../../scrutinise-engine-hardening) | follow-up-1 | scripts/stop-gate.mjs | COMPLETE | acceptance.ref ownership covered by stop-gate.test.mjs:577-625 (ownership survi… | 2026-10-24 |
+| [scrutinise-engine-hardening](../../scrutinise-engine-hardening) | follow-up-2 | scripts/stop-gate.mjs | COMPLETE | own-timeout classified at scripts/stop-gate.mjs:255-280: a kill under the share… | 2026-10-24 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-2 | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 295ba6c on feat/scrutinise-fixes-and-s… | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-3 | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | config-keys-protected | scripts/pre-guard.mjs | COMPLETE | SAFETY_CONFIG_KEYS in scripts/lib/self-protect.mjs:43-48; approval keys added i… | 2026-10-24 |
