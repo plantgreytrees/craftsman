@@ -4,7 +4,7 @@
 // tokens. This is the empirical answer to "which tools pay for themselves?".
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loadConfig, readEvents, topRules } from "./lib/core.mjs";
+import { isMain, loadConfig, readEvents, topRules } from "./lib/core.mjs";
 
 // Event type -> hook script whose hooks.json timeout bounds it (ARCH-SLIM-07).
 const EV_SCRIPT = { gate: "quality-gate.mjs", preguard: "pre-guard.mjs", stop: "stop-gate.mjs" };
@@ -231,4 +231,4 @@ function main() {
   console.log(`\nRead: a layer with ~0% block rate but non-trivial latency is a candidate to cut.`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (isMain(import.meta.url)) main();

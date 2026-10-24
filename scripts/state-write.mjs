@@ -6,7 +6,7 @@
 //   out: {"written":"<path>","bytes":n}
 import fs from "node:fs";
 import path from "node:path";
-import { atomicWrite, mainCheckoutRoot, projectContext, readStdin } from "./lib/core.mjs";
+import { isMain, atomicWrite, mainCheckoutRoot, projectContext, readStdin } from "./lib/core.mjs";
 
 const ALLOWED = [/^acceptance\.md$/, /^instructions\/[A-Za-z0-9._-]+\.goal\.txt$/];
 
@@ -22,7 +22,7 @@ export function writeState(input, context = projectContext(input.project || ".")
   return { written: dest, bytes: Buffer.byteLength(input.content) };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     process.stdout.write(JSON.stringify(writeState(JSON.parse(await readStdin() || "{}"))) + "\n");
   } catch (error) {

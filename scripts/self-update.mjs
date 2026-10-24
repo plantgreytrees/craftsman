@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
+import { isMain } from "./lib/core.mjs";
 
 const NAME = "craftsman";
 
@@ -69,7 +70,7 @@ function render({ marketplaces, results, dryRun }) {
   return lines.join("\n");
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const args = new Set(process.argv.slice(2));
   try {
     const outcome = selfUpdate({ dryRun: args.has("--dry-run") });

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  atomicWrite, logEvent, projectContext, readStdin, sidOf,
+  isMain, atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
   mainCheckoutRoot, loadWorkspaceManifest, isMain,
 } from "./lib/core.mjs";
