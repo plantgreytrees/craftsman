@@ -18,8 +18,7 @@ All notable changes to craftsman are documented here. Format loosely follows
 - **Dashboard, notes and archive** (ARCH-DOCS-14, ARCH-ARCHIVE-05/07): the dashboard (with an archive tab) and a
   notes folder render at Stop by default, or on demand with `/digest --html`; a `NEXT.md` queue; local auto-archive
   of a finished plan at `land-feature`; and `/sync-docs --archive` / `--prune --archive` to retire closed plans.
-- **Ledger guard** (ARCH-TRACKER-13/14): publish refuses to drop a committed row unless an archive event names
-  its plan; `tracker.mjs init --merge` and `--from-block` repair a partial or missing ledger.
+- **Ledger guard** (ARCH-TRACKER-13/14): publish and sync refuse to drop a committed row unless an archive event names its plan; `tracker.mjs init --merge`/`--from-block` repair the ledger.
 - **Measurement** (ARCH-SLIM-10): a per-session baseline context sample; `stats.mjs` reports baseline, peak, growth and blocks
   by reason; the SessionStart context has a 3 KB cap test. **Docs budgets** (ARCH-DOCS-11/15): the `docs.budgets` ratchet is
   enforced by `arch-check lint`; scrutinise docs keep one rolling summary; `retireCheck` logs `doc_retire_candidate` (nothing is deleted).
