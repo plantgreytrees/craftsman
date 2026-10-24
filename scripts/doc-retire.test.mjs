@@ -20,9 +20,10 @@ const PLAN = "docs/plans/alpha.md";
 const SIB = "docs/plans/scrutinise-alpha.md";
 
 // A real temp git repo: a plan, a closed sibling citing it, and COMPLETE ledger rows.
-function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", files = {}, goal = "Ship alpha" } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-"));
+function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", files = {}, goal = "Ship alpha", dirName = null } = {}) {
+  let root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-"));
   fixtures.add(root);
+  if (dirName) { root = path.join(root, dirName); fs.mkdirSync(root); }
   run(root, "init", "-q");
   run(root, "config", "user.email", "t@example.com");
   run(root, "config", "user.name", "t");
@@ -718,18 +719,18 @@ test("findReferrers: classifies by referrer kind, with and without an archive pr
 });
 
 test("doc-retire: NEXT.md is never a referrer and the retired plan line leaves in the retire commit", () => {
-  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n- docs/plans/alpha.md first\n- docs/plans/beta.md second\n" } }));
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n\n1. alpha — first\n2. scrutinise-alpha — sibling\n3. beta — second\n\nnotes about alpha stay\n" } }));
   const out = noManifest(() => retire({ plan: PLAN }, context));
   assert.equal(out.retired, PLAN, out.reason);
-  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n- docs/plans/beta.md second\n");
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n\n3. beta — second\n\nnotes about alpha stay\n");
   assert.ok(run(context.root, "show", "--name-only", "--format=", "HEAD").includes("docs/plans/NEXT.md"));
 });
 
 test("doc-retire: a NEXT.md line that only mentions the slug as a word is kept", () => {
-  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n- docs/plans/alpha.md first\n- docs/plans/beta.md after alpha\n" } }));
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n1. alpha — first\n2. beta — after alpha\n" } }));
   const out = noManifest(() => retire({ plan: PLAN }, context));
   assert.equal(out.retired, PLAN, out.reason);
-  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n- docs/plans/beta.md after alpha\n");
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n2. beta — after alpha\n");
 });
 
 test("doc-retire: with an archive project the docs are copied first, the heading carries archive <sha>, the event too", () => {
@@ -867,5 +868,30 @@ test("doc-retire rewrite: a failing commit restores every rewritten file", () =>
     assert.deepEqual(tree(context), PROSE);
     assert.ok(fs.existsSync(path.join(context.root, PLAN)));
     assert.equal(events(context).some((e) => e.ev === "archive_rewrite"), false);
+  });
+});
+
+test("doc-retire rewrite: a product id equal to the slug yields one pointer, not a pointer rewritten again", () => {
+  const context = repo({ files: PROSE, dirName: "alpha" });
+  withArchive((archive) => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    const asha = run(archive, "rev-parse", "HEAD").trim();
+    assert.match(tree(context)["docs/plans/other.md"], new RegExp(`^see archive:alpha/plans/alpha@${asha} here$`, "m"));
+    assert.equal((tree(context)["docs/plans/other.md"].match(/archive:/g) ?? []).length, 1);
+  });
+});
+
+test("doc-retire: a NEXT.md line for a retired sibling is removed and lookup of the sibling prints its archived path", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "1. scrutinise-alpha — look\n2. beta — keep\n" } }));
+  withArchive((archive) => {
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "2. beta — keep\n");
+    const hit = lookupArchive({ plan: "scrutinise-alpha" }, context);
+    const slugDir = fs.readdirSync(archive).find((d) => !d.startsWith("."));
+    assert.ok(hit.restoreCommand.endsWith(`show ${hit.archive}:${slugDir}/plans/alpha/${SIB}`), hit.restoreCommand);
+    assert.ok(fs.existsSync(path.join(archive, slugDir, "plans/alpha", SIB)));
   });
 });
