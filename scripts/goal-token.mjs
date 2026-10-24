@@ -7,7 +7,7 @@
 //   node goal-token.mjs .craftsman/instructions/<slug>.goal.txt
 //
 // Refuses unless /instruction or /auto ran in this session (the command marker orchestrate-scope-guard
-// writes), the file is a *.goal.txt directly under the main checkout's .craftsman/instructions, and a session id is known
+// writes), the file is a *.goal.txt directly under this checkout's or the main checkout's .craftsman/instructions, and a session id is known
 // (Bash-run scripts get it as CLAUDE_CODE_SESSION_ID). pre-guard never lets a tool call write the token file.
 import fs from "node:fs";
 import path from "node:path";
@@ -24,14 +24,18 @@ export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE
   if (nonce && !consumeNonce(sidOf({ session_id: sid }), "goal-token", { context: { stateDir } })) {
     throw new Error("no nonce from pre-guard for this session: run it as a plain `node …/goal-token.mjs <file>` Bash command, not through another program");
   }
-  // state-write.mjs saves the goal file in the MAIN checkout's .craftsman, so from a linked worktree that is where it lives.
+  // state-write.mjs saves the goal file in the MAIN checkout's .craftsman, the Write tool at the relative path lands in this
+  // root's own; from a linked worktree both are accepted, each checked against its own directory's realpath.
   const main = mainCheckoutRoot(root);
-  const instructions = fs.realpathSync(path.join(main, ".craftsman", "instructions"));
+  const instructionDirs = new Set();
+  for (const base of [root, main]) {
+    try { instructionDirs.add(fs.realpathSync(path.join(base, ".craftsman", "instructions"))); } catch { /* that checkout has none */ }
+  }
   let absolute = path.resolve(root, file);
   if (!fs.existsSync(absolute)) absolute = path.resolve(main, file);
   let real;
   try { real = fs.realpathSync(absolute); } catch { throw new Error(`no such goal file: ${file}`); }
-  if (path.dirname(real) !== instructions || !/\.goal\.txt$/.test(real)) {
+  if (!instructionDirs.has(path.dirname(real)) || !/\.goal\.txt$/.test(real)) {
     throw new Error(`${file} is not a *.goal.txt directly under .craftsman/instructions`);
   }
   const name = path.basename(real);
