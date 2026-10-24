@@ -3,56 +3,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { loadConfig, loadWorkspaceManifest, logEvent } from "./core.mjs";
+import { logEvent } from "./core.mjs";
+import { resolveArchive, archivePathFor, productIdFor, restoreCommand } from "../tracker.mjs";
+
+// The path helpers live in tracker.mjs so it needs no import of this module (no tracker -> archive -> doc-retire -> tracker cycle).
+export { resolveArchive, archivePathFor, productIdFor, restoreCommand };
 import { findReferrers, retire as docRetire } from "../doc-retire.mjs";
-import { currentState, trackerRoot } from "../tracker.mjs";
+import { currentState } from "../tracker.mjs";
 import { loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";
 import { mainCheckoutRoot } from "./core.mjs";
-
-const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const KINDS = ["plans", "ideas"];
-
-// ARCH-ARCHIVE-01: any missing prerequisite switches archiving off (retirement then behaves as ARCH-DOCS-09).
-export function resolveArchive(context = null) {
-  const id = loadConfig(context).archive?.project || "archive";
-  let manifest;
-  try { manifest = loadWorkspaceManifest(); }
-  catch (error) { return { off: `workspace manifest unusable: ${error.message}` }; }
-  if (!manifest) return { off: "no workspace manifest" };
-  if (!Object.hasOwn(manifest.projects, id)) return { off: `archive project "${id}" is not registered in the workspace manifest` };
-  const project = manifest.projects[id];
-  if (project.initialized === false) return { off: `archive project "${id}" is not checked out (uninitialised)` };
-  return { id, root: project.root };
-}
-
-// ARCH-ARCHIVE-02/06: <productId>/<kind>/<slug>/<file>; rules docs and traversal are refused.
-export function archivePathFor({ productId, kind, slug, file }) {
-  if (!KINDS.includes(kind)) throw new Error(`archive kind must be one of ${KINDS.join(", ")}: ${kind}`);
-  for (const [name, value] of [["productId", productId], ["slug", slug]]) {
-    if (typeof value !== "string" || !SEGMENT.test(value) || value.includes("..")) throw new Error(`invalid archive ${name}: ${value}`);
-  }
-  if (typeof file !== "string" || !file.trim()) throw new Error("archive file is required");
-  const raw = file.replaceAll("\\", "/");
-  if (raw.startsWith("/") || /^[A-Za-z]:/.test(raw)) throw new Error(`archive file must be repo-relative: ${file}`);
-  const parts = raw.split("/");
-  if (parts.includes("..")) throw new Error(`archive file must not traverse: ${file}`);
-  const clean = path.posix.normalize(raw).replace(/^(\.\/)+/, "");
-  if (!clean || clean === "." || clean.startsWith("../") || clean.split("/").includes(".git")) throw new Error(`invalid archive file: ${file}`);
-  if (clean === "docs/architecture" || clean.startsWith("docs/architecture/")) {
-    throw new Error(`architecture rules docs are never archived (ARCH-ARCHIVE-06): ${file}`);
-  }
-  return `${productId}/${kind}/${slug}/${clean}`;
-}
-
-// One product id for archive paths and pointers (ARCH-ARCHIVE-02): the workspace project whose root is this checkout's
-// real tracker root, else the directory name.
-export function productIdFor(context) {
-  const root = fs.realpathSync(trackerRoot(context));
-  try {
-    const projects = loadWorkspaceManifest()?.projects ?? {};
-    return Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? path.basename(root);
-  } catch { return path.basename(root); }
-}
 
 // ARCH-VIEWS-15 / ARCH-DOCS-14: the one archive verdict for a plan doc, used by the dashboard, autoArchiveEligible and retire.
 // class: blocked (a rule/test/top-level doc refers to it, or the scan failed; names the file), not-archivable (no archive
@@ -88,11 +47,6 @@ export function classifyArchive(context, plan, opts = {}) {
   const blocking = (scan.blocking ?? scan.hits ?? []).filter(keep).filter((f) => !rewritable.includes(f)).sort();
   const cls = blocking.length ? "blocked" : !archive?.root ? "not-archivable" : rewritable.length ? "rewrite" : "auto";
   return { class: cls, blocking, rewritable, hits, reason: cls === "not-archivable" ? `no archive project: ${archive?.off ?? "unresolved"}` : undefined };
-}
-
-export function restoreCommand(archiveRoot, sha, file) {
-  const q = (s) => (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(s) ? s : `'${String(s).replaceAll("'", "'\\''")}'`);
-  return `git -C ${q(archiveRoot)} show ${q(`${sha}:${file}`)}`;
 }
 
 const defaultGit = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

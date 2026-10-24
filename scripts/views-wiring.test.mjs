@@ -55,3 +55,10 @@ test("stopRefresh: export.enabled false clears generated notes only", async () =
   assert.ok(!fs.existsSync(path.join(notes, "gen.md")));
   assert.ok(fs.existsSync(path.join(notes, "mine.md")));
 });
+
+test("tracker.mjs imports alone and has no static edge into archive/doc-retire (no cycle)", () => {
+  const src = read("scripts/tracker.mjs");
+  assert.doesNotMatch(src, /^import[^\n]*from "[^"]*\/(archive|doc-retire|dashboard|export-notes)\.mjs";/m);
+  const r = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(path.join(ROOT, "scripts/tracker.mjs"))}).then((m) => { if (typeof m.currentState !== "function") process.exit(3); })`], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+});
