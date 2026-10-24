@@ -31,9 +31,13 @@ All notable changes to craftsman are documented here. Format loosely follows
 - Skills `test-driven-development`, `systematic-debugging`, `verification-before-completion` (adapted from
   obra/superpowers, MIT); `maxTurns` on reviewer agents; `toggle` and `builtin-check` hidden from the model;
   `/init --update` scaffolds an empty `.claude/rules/craftsman-loop.md`; `craftsman#stable` documented.
-- `scripts/lib/force-block.mjs` can allow `--force-with-lease` to a run's own branches (ARCH-LAND-23).
-- Not yet: guard narrowing (ARCH-STATE-12), the TDD step in `unit-runner` (ARCH-ENGINE-21) and the `userConfig`
-  knobs wait for PR #1; `pre-guard` does not use the lease exception until then.
+- **Own-branch lease** (ARCH-LAND-31): `scripts/lib/force-block.mjs` allows `--force-with-lease` only as an unquoted top-level
+  `src:refs/heads/<own>` push to a named remote, for the bound unit branch or a feature branch of the plan. The Bash-tool
+  force block is a best-effort text scan, not a proof; the structural rewrite is a tracked follow-up (`force-block-wordlevel`).
+- **Plugin settings** (ARCH-PLAN-07): `userConfig` `autonomyLevel`, `reviewDepth`, `modelTier` (reserved) and `budgetsEnforce`
+  set machine-wide defaults that a project config overrides. `claudeMdLines` and `openPlans` budgets are set per repo in
+  `craftsman.project.json`. The TDD step (red run before the change, named in the unit's evidence) is in `unit-runner` and
+  the reviewers (ARCH-ENGINE-21). `.gitleaks.toml` allowlists craftsman state and sibling checkouts only.
 - Stop and SessionEnd report **unpushed** work in the main checkout and every worktree, from local refs only; `stopGate.blockOnUnpushed` (default `false`) makes Stop block on it. Stop also reports guarded docs that changed without passing the doc guard.
 - SessionStart says whether the guards are on, or off and why, and notes when no settings scope enables the **sandbox**. `/craftsman:init --settings-diff` and `--settings-write` merge `sandbox.enabled` and ask rules into `.claude/settings.json` without overwriting anything.
 - The launcher skips node for Read, Glob and Grep when `pre-guard` cannot act (about 0.5 ms instead of about 25 ms), with a parity table pinning every verdict.
