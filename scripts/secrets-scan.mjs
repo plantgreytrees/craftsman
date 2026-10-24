@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { isMain } from "./lib/core.mjs";
 
 export const PATTERNS = [
   { name: "AWS access key", re: /AKIA[0-9A-Z]{16}/g },
@@ -80,7 +81,7 @@ export function scanTree(root) {
   return findings;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const root = process.argv[2] || ".";
   const findings = scanTree(root);
   if (findings.length) {
