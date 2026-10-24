@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import {
   isMain, atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
-  mainCheckoutRoot, loadWorkspaceManifest, isMain,
+  mainCheckoutRoot, loadWorkspaceManifest,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
