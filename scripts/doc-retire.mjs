@@ -9,6 +9,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { grantValid, hasDocWriteGrant, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
 import { copyAndCommit, resolveArchive } from "./lib/archive.mjs";
+import { parseNext } from "./lib/next-queue.mjs";
 import { descendantSlugs, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
@@ -232,7 +233,7 @@ export function retire(input, context = projectContext(".")) {
     let out = line;
     for (const d of rewriteDocs) {
       const pointer = `archive:${productId}/plans/${d.slug}@${shaOf(d.plan)}`;
-      for (const t of [d.plan, d.slug]) out = out.replace(new RegExp(`(?<![\\w/.-])${esc(t)}(?![\\w-])`, "g"), () => pointer);
+      out = out.replace(new RegExp(`(?<![\\w/.-])(?:${esc(d.plan)}|${esc(d.slug)})(?![\\w-])`, "g"), () => pointer);
     }
     return out;
   };
@@ -265,10 +266,11 @@ export function retire(input, context = projectContext(".")) {
   if (tryGit(context, ["ls-files", "--error-unmatch", "--", NEXT_DOC]) !== null) {
     try {
       const old = fs.readFileSync(path.join(context.root, NEXT_DOC), "utf8");
-      const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const res = [plan, ...siblings, ...descendants.map((d) => d.plan)].map((p) => new RegExp(`(?<![\\w/.-])${esc(p)}(?![\\w-])`));
-      const kept = old.split("\n").filter((line) => !res.some((re) => re.test(line)));
-      if (kept.length !== old.split("\n").length) {
+      const gone = new Set([plan, ...siblings, ...descendants.map((d) => d.plan)].map((p) => path.posix.basename(p, ".md")));
+      const canonical = new Set(parseNext(old).filter((e) => gone.has(e.slug)).map((e) => e.slug));
+      const lines = old.split("\n");
+      const kept = lines.filter((line) => { const m = parseNext(line)[0]; return !(m && canonical.has(m.slug)); });
+      if (kept.length !== lines.length) {
         if (git(context, ["status", "--porcelain", "--", NEXT_DOC]).trim()) return refuse(`retire refused: uncommitted changes in ${NEXT_DOC}`);
         nextEdit = kept.join("\n");
       }

@@ -2,6 +2,7 @@
 // Structured tracker ledger. TRACKER.md remains the human-readable projection.
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import {
   atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
@@ -525,8 +526,18 @@ function restoreCommandFor(rec, context) {
       const projects = loadWorkspaceManifest()?.projects ?? {};
       productId = Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? productId;
     } catch { /* fall back to the directory name */ }
-    const slug = path.posix.basename(rec.plan, ".md");
-    return restoreCommand(archive.root, rec.archive, archivePathFor({ productId, kind: "plans", slug, file: rec.plan }));
+    const own = path.posix.basename(rec.plan, ".md");
+    // A sibling (scrutinise-/investigate-) is archived under its owning plan's folder (doc-retire).
+    const owner = own.replace(/^(?:scrutinise|investigate)-/, "");
+    const at = (slug) => archivePathFor({ productId, kind: "plans", slug, file: rec.plan });
+    let slug = owner;
+    if (owner !== own) {
+      try { // a plan that is itself named scrutinise-*: the archive tree says which folder holds it
+        const tree = execFileSync("git", ["-C", archive.root, "ls-tree", "-r", "--name-only", rec.archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n");
+        if (!tree.includes(at(owner)) && tree.includes(at(own))) slug = own;
+      } catch { /* sha not resolvable: keep the owner */ }
+    }
+    return restoreCommand(archive.root, rec.archive, at(slug));
   } catch { return null; }
 }
 
