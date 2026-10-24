@@ -69,13 +69,14 @@ const MESSAGE_OPERAND = /\bgit\b[^;&|\n()`$]*\s(?:commit|tag)\b[^;&|\n()`$]*\s(?
 // unit branches). Another flag, a `+` refspec, no refspec or an unexpanded
 // word is no exception.
 const LEASE_OK = new Set(["-u", "--set-upstream", "-q", "--quiet", "--force-if-includes"]);
+const CONFIG_CARRIER = /(?:^|[\s;&|(])(?:-c|--config-env\S*|--git-dir\S*|--work-tree\S*|--exec-path\S*|--namespace\S*)(?=[\s=]|$)|\bGIT_[A-Z_]+=|(?:^|[\s;&|(])env(?:\s|$)/;
 const SAFE_WORD = /^[A-Za-z0-9._\/:=-]+$/; // nothing the shell could expand, split or glob
 const SAFE_NAME = /^[A-Za-z0-9._\/-]+$/;
 export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
   // The words were read before the shell expands them: any expansion character in the command, or in a word, is no exception.
   if (/[$`\\]/.test(text) || rest.some((w) => !SAFE_WORD.test(w))) return false;
   // Git config can remap a push (remote.<n>.push, push.default): refuse any config-carrying global option, GIT_* variable or env prefix.
-  if (/(?:^|[\s;&|(])(?:-c|--config-env\S*|--git-dir\S*|--work-tree\S*|--exec-path\S*)(?=[\s=]|$)|\bGIT_[A-Z_]+=|(?:^|[\s;&|(])env(?:\s|$)/.test(text)) return false;
+  if (CONFIG_CARRIER.test(text)) return false;
   const own = ownBranches.filter((b) => SAFE_NAME.test(b.replace(/\*/g, "x"))).map((glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[A-Za-z0-9._-]+")}$`));
   const isLease = (w) => w.startsWith("--force-w") && "--force-with-lease".startsWith(w.split("=")[0]);
   const flags = rest.filter((w) => w.startsWith("-"));
@@ -96,7 +97,7 @@ export function ownBranchesOf(binding, scope) {
   // A safe name that git cannot read as another ref: not HEAD, not an option, not refs/ or heads/ qualified, never a main or master segment.
   const named = (b) => typeof b === "string" && /^[A-Za-z0-9._\/-]+$/.test(b) && !/^(?:HEAD$|-|refs\/|heads\/)/i.test(b) && !/(?:^|\/)(?:main|master)$/i.test(b);
   const own = [];
-  if (named(binding?.branch)) own.push(binding.branch); // exact name, never a pattern
+  if (named(binding?.branch) && /^(?:feat|feature)\//.test(binding.branch)) own.push(binding.branch); // exact name, never a pattern; run-created branches only
   if (named(slug)) own.push(`feature/${slug}-*`);
   return own;
 }
@@ -120,10 +121,15 @@ export function destructiveGit(value, ownBranches = []) {
     const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`, ownBranches);
     if (found) return found;
   }
+  // Arguments supplied at run time (xargs, parallel) cannot be read: fail closed.
+  if (/\b(?:xargs|parallel)\b[^;&|\n]*\bgit\b/.test(value)) return "git run through xargs or parallel";
   for (let words of gitInvocations(value)) {
     for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++) words = [...aliases.get(words[0]), ...words.slice(1)];
     const [sub, ...rest] = words;
     if (sub === "push" && leaseToOwnBranch(rest, ownBranches, value)) continue;
+    // Config in the same command can make a plain push forced or a mirror (remote.<n>.push=+..., remote.<n>.mirror).
+    if (sub === "push" && CONFIG_CARRIER.test(value)) return "git push with a config override";
+    if (sub === "config" && rest.some((w) => /^(?:remote\.[^.]+\.(?:push|mirror)|alias\..+)$/.test(w))) return "git config remote push, mirror or alias";
     if (sub === "push" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force-with-lease", "--force-if-includes", "--mirror") || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--hard"))) return "git reset --hard";
     if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git worktree remove --force";

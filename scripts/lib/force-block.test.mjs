@@ -90,3 +90,30 @@ test("ownBranchesOf rejects names that resolve to a protected ref (round 10)", a
   for (const odd of ["HEAD", "-x", "refs/heads/main", "refs/heads/feat/a", "heads/main", "heads/feat/a", "Main", "MASTER", "a/main", "a/Master"]) assert.deepEqual(ownBranchesOf({ branch: odd }, null), [], odd);
   assert.deepEqual(ownBranchesOf({ branch: "feat/unit-a" }, null), ["feat/unit-a"]);
 });
+
+test("a push is blocked when git config in the same command can turn it into a forced or mirror push (round 11)", () => {
+  for (const cmd of [
+    "git -c remote.origin.push=+HEAD:refs/heads/main git push origin",
+    "git -c remote.origin.push=+HEAD:refs/heads/main git push",
+    "git -c remote.origin.mirror=true git push origin",
+    "git --config-env=remote.origin.mirror=X git push origin",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=+HEAD:refs/heads/main git push origin",
+    "git --namespace=x git push origin HEAD:refs/heads/feat/unit-a",
+    "git config remote.origin.push +HEAD:refs/heads/main; git push origin",
+    "git config remote.origin.mirror true && git push origin",
+    "git config alias.p '!git push -f'",
+  ]) assert.ok(blocked(cmd), cmd);
+  for (const ok of ["git push origin HEAD:main", "git -C /tmp/w git push origin HEAD:refs/heads/feat/unit-a", "git config user.name x", "git config --get remote.origin.url"]) assert.equal(destructiveGit(ok, own), null, ok);
+});
+
+test("git run through xargs or parallel is blocked, its arguments being invisible (round 11)", () => {
+  for (const cmd of ["echo git push -f origin main | xargs git", "echo -f | xargs git git push origin HEAD:main", "echo --hard | xargs git reset", "xargs -a /tmp/args git", "parallel git git push ::: x"]) assert.ok(blocked(cmd), cmd);
+  assert.equal(destructiveGit("echo hi | xargs echo", own), null);
+});
+
+test("ownBranchesOf trusts only feat/ and feature/ bound branches (round 11)", async () => {
+  const { ownBranchesOf } = await import("./force-block.mjs");
+  for (const odd of ["develop", "trunk", "dev", "release/1", "hotfix/x", "Main"]) assert.deepEqual(ownBranchesOf({ branch: odd }, null), [], odd);
+  assert.deepEqual(ownBranchesOf({ branch: "feat/unit-a" }, null), ["feat/unit-a"]);
+  assert.deepEqual(ownBranchesOf({ branch: "feature/p-u1" }, null), ["feature/p-u1"]);
+});
