@@ -84,7 +84,7 @@ The follow-ups left after PR #1 and #3 are validated and ordered by value, each 
 ### Step 1 — approval-keys-protected (., javascript, high) — DO FIRST
 Tooling: implementer implementer · gates security-auditor · skills test-driven-development · guards arch-check
 Depends on: none
-- [ ] 1.1 Add `repoExec.approval.required` and `planning.featureBranches` to `SAFETY_CONFIG_KEYS` (`scripts/lib/self-protect.mjs:56-59`), tests first in `self-protect.test.mjs` (`safetyProjection` of a config that flips each key differs) and `pre-guard.test.mjs` (a scoped edit that flips either key is refused, one that changes an unrelated key passes) → accept: both red on main, green after
+- [ ] 1.1 Add `repoExec.approval.required` and `planning.featureBranches` to `SAFETY_CONFIG_KEYS` (`scripts/lib/self-protect.mjs:56-59`), tests first in `self-protect.test.mjs` (`safetyProjection` of a config that flips each key differs) and `pre-guard.test.mjs` (an edit that flips either key is refused with no scope and allowed only under `/orchestrate`; one that changes an unrelated key passes) → accept: both red on main, green after
 - [ ] 1.2 Prove the keys exist: assert each dotted name resolves in the shipped `craftsman.config.json` (the list's own contract) → accept: test fails if a name is mistyped
 - [ ] 1.3 Name both keys in ARCH-SAFETY-05 and `safety.md`, re-point the cites, bump `verified_at` → accept: `safety-cites`, `safety-docs` and `arch-check lint` pass
 Why first: `scripts/lib/approval-gate.mjs:13` enables the approval gate only when both keys are true, so editing either switches a human approval off without any safety key changing.

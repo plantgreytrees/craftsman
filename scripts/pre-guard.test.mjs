@@ -1810,6 +1810,15 @@ test("pre-guard: the approval gate keys cannot be flipped by a tool call", () =>
     assert.equal(write((c) => { c.repoExec.approval.required = false; }).status, 2, "approval.required off");
     assert.equal(write((c) => { c.planning.featureBranches = false; }).status, 2, "featureBranches off");
     assert.equal(write((c) => { c.repoExec.approval.prLines = 10; }).status, 0, "unrelated key passes");
+    const projectCfg = path.join(dir, "craftsman.project.json");
+    fs.writeFileSync(projectCfg, JSON.stringify(base, null, 2) + "\n");
+    const writeProject = (mutate) => {
+      const next = JSON.parse(JSON.stringify(base)); mutate(next);
+      return run(GUARD, dir, { session_id: "ak-3", tool_name: "Write", tool_input: { file_path: projectCfg, content: JSON.stringify(next) } });
+    };
+    assert.equal(writeProject((c) => { c.repoExec.approval.required = false; }).status, 2, "craftsman.project.json: approval.required off");
+    assert.equal(writeProject((c) => { c.planning.featureBranches = false; }).status, 2, "craftsman.project.json: featureBranches off");
+    assert.equal(writeProject((c) => { c.repoExec.approval.prLines = 10; }).status, 0, "craftsman.project.json: unrelated key passes");
     assert.equal(typed(dir, "ak-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
     assert.equal(run(SCOPE, dir, { session_id: "ak-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["craftsman.config.json"], docs: [], write: ["craftsman.config.json"] } }).status, 0);
     assert.equal(run(GUARD, dir, { session_id: "ak-2", tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify({ ...base, planning: { featureBranches: false } }) } }).status, 0, "a scope naming the file may flip it");

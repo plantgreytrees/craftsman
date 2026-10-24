@@ -1023,7 +1023,10 @@ test("isMain: matches a plain path, a path with a space, a %, and a symlink; fal
     const link = path.join(dir, "link.mjs");
     fs.symlinkSync(real, link);
     assert.equal(coreNs.isMain(pathToFileURL(real).href, link), true);
-    assert.equal(coreNs.isMain(pathToFileURL(real).href, undefined), false);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, null), false);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, ""), false);
+    // "" resolves to the cwd: with metaUrl at the cwd only the `!argv1` early return yields false.
+    assert.equal(coreNs.isMain(pathToFileURL(process.cwd()).href, ""), false);
     assert.equal(coreNs.isMain(pathToFileURL(real).href, path.join(dir, "missing.mjs")), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
