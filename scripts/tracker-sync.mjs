@@ -19,7 +19,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { loadConfig, enabled, projectContext, readStdin } from "./lib/core.mjs";
+import { loadConfig, enabled, isMain, projectContext, readStdin } from "./lib/core.mjs";
 import { syncTrackerDoc, renderState } from "./tracker.mjs";
 import { clearNotes, exportRoot, writeExportFile } from "./lib/export-notes.mjs";
 import { logRender } from "./lib/dashboard.mjs";
@@ -68,12 +68,7 @@ export function stopRefresh(context, { budgetMs = RENDER_BUDGET_MS, script = DIG
   } catch { return "failed"; }
 }
 
-const isMain = () => {
-  if (!process.argv[1]) return false;
-  try { return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(path.resolve(process.argv[1])); } catch { return false; }
-};
-
-if (isMain()) {
+if (isMain(import.meta.url)) {
   try {
     const raw = await readStdin();
     let event = "";
