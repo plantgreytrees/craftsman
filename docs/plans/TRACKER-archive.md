@@ -43,3 +43,5 @@ Rows retired from the live ledger by `tracker.mjs archive`.
 - 2026-10-09 **scrutinise-autonomous-e2e-loop#runner-block-trigger** COMPLETE — all 1 acceptance criteria ticked; ad2ce10 on origin/main; suite 309/309
 - 2026-10-09 **scrutinise-autonomous-e2e-loop#scope-release** COMPLETE — all 1 acceptance criteria ticked; d28b399 on main: release unlinks unit scope files; stale worktree scopes ignored; scope.test regression fails on old code; su…
 - 2026-10-09 **scrutinise-autonomous-e2e-loop#verify-bypass-bounded** COMPLETE — all 1 acceptance criteria ticked; a8ced0d on origin/main; full suite 331/331; 315 KB flagged command SIGTERM at 10 s on ebcf89f, exit 2 in 38 ms on a8ced0d
+- 2026-10-24 **scrutinise-engine-hardening#follow-up-1** COMPLETE — acceptance.ref ownership covered by stop-gate.test.mjs:577-625 and orchestrate-scope-guard.test.mjs:105-167; suite 892/892 (33e292d)
+- 2026-10-24 **scrutinise-engine-hardening#follow-up-2** COMPLETE — own-timeout classified at scripts/stop-gate.mjs:255-280 (budget kill = no finding, own limit = INCOMPLETE); suite 892/892 (33e292d)
