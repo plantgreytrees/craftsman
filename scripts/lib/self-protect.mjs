@@ -43,6 +43,7 @@ function reaches(entry, name) {
 export const SAFETY_CONFIG_KEYS = Object.freeze([
   "enabled", "protectedPaths", "docWriteGuard", "execution.agentMode", "execution.engine", "stopGate",
   "worktrees", // what the Stop and SessionStart sweep may remove (ARCH-SAFETY-07)
+  "repoExec.approval.required", "planning.featureBranches", // the approval gate runs only when both are true (approval-gate.mjs approvalRequired)
 ]);
 
 // Environment keys in the harness settings that decide whether node runs craftsman's hooks, or which code it loads.

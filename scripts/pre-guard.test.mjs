@@ -1797,6 +1797,27 @@ test("pre-guard: hooks.json and the scope exemption are judged by real path thro
   }
 });
 
+test("pre-guard: the approval gate keys cannot be flipped by a tool call", () => {
+  const dir = selfDisableProject();
+  try {
+    const base = { maxFeedbackLines: 40, stopGate: { enabled: true }, repoExec: { approval: { required: true, prLines: 400 } }, planning: { featureBranches: true } };
+    const cfg = path.join(dir, "craftsman.config.json");
+    fs.writeFileSync(cfg, JSON.stringify(base, null, 2) + "\n");
+    const write = (mutate) => {
+      const next = JSON.parse(JSON.stringify(base)); mutate(next);
+      return run(GUARD, dir, { session_id: "ak-1", tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify(next) } });
+    };
+    assert.equal(write((c) => { c.repoExec.approval.required = false; }).status, 2, "approval.required off");
+    assert.equal(write((c) => { c.planning.featureBranches = false; }).status, 2, "featureBranches off");
+    assert.equal(write((c) => { c.repoExec.approval.prLines = 10; }).status, 0, "unrelated key passes");
+    assert.equal(typed(dir, "ak-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    assert.equal(run(SCOPE, dir, { session_id: "ak-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["craftsman.config.json"], docs: [], write: ["craftsman.config.json"] } }).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: "ak-2", tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify({ ...base, planning: { featureBranches: false } }) } }).status, 0, "a scope naming the file may flip it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Round 3 (21.x): the worktree sweep controls decide what the sweep may remove, so they are safety keys.
 test("pre-guard: the worktree sweep config keys cannot be loosened by a tool call (21.1)", () => {
   const dir = selfDisableProject();
