@@ -547,11 +547,11 @@ export function restoreCommand(archiveRoot, sha, file) {
   return `git -C ${q(archiveRoot)} show ${q(`${sha}:${file}`)}`;
 }
 
-// ARCH-ARCHIVE-04: the command that restores the archived plan doc, or null when no archive project resolves.
+// ARCH-ARCHIVE-04: restore command for the archived doc; null without an archive or a sha.
 function restoreCommandFor(rec, context) {
   try {
     const archive = resolveArchive(context);
-    if (!archive.root) return null;
+    if (!archive.root || !/^[0-9a-f]{7,40}$/.test(rec.archive)) return null;
     const productId = productIdFor(context);
     const own = path.posix.basename(rec.plan, ".md");
     // A sibling (scrutinise-/investigate-) is archived under its owning plan's folder (doc-retire).

@@ -79,6 +79,14 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
     for (const p of plans) {
       // ARCH-ARCHIVE-03: no symlink as the source or as any component under the archive root.
       if (isLink(p.from)) throw new Error(`source is a symlink: ${p.file}`);
+      const fromRel = path.relative(path.resolve(sourceRoot), p.from);
+      if (fromRel && !fromRel.startsWith("..") && !path.isAbsolute(fromRel)) {
+        let up = path.resolve(sourceRoot);
+        for (const part of fromRel.split(path.sep)) {
+          up = path.join(up, part);
+          if (isLink(up)) throw new Error(`source path contains a symlink: ${p.file}`);
+        }
+      }
       let walk = archiveRoot;
       for (const part of path.relative(archiveRoot, p.to).split(path.sep)) {
         walk = path.join(walk, part);
