@@ -7,12 +7,12 @@
 //   node goal-token.mjs .craftsman/instructions/<slug>.goal.txt
 //
 // Refuses unless /instruction or /auto ran in this session (the command marker orchestrate-scope-guard
-// writes), the file is a *.goal.txt directly under .craftsman/instructions, and a session id is known
+// writes), the file is a *.goal.txt directly under the main checkout's .craftsman/instructions, and a session id is known
 // (Bash-run scripts get it as CLAUDE_CODE_SESSION_ID). pre-guard never lets a tool call write the token file.
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, consumeNonce, safetyEnabled, sessionDir, sidOf } from "./lib/core.mjs";
+import { PROJECT_ROOT, STATE_DIR, atomicWrite, commandInvoked, consumeNonce, mainCheckoutRoot, safetyEnabled, sessionDir, sidOf } from "./lib/core.mjs";
 
 export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE_DIR, nonce = false }) {
   if (nonce && !safetyEnabled()) throw new Error("CRAFTSMAN_SAFETY=off: no guard is running, so a goal token needs a session with safety on");
@@ -24,8 +24,11 @@ export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE
   if (nonce && !consumeNonce(sidOf({ session_id: sid }), "goal-token", { context: { stateDir } })) {
     throw new Error("no nonce from pre-guard for this session: run it as a plain `node …/goal-token.mjs <file>` Bash command, not through another program");
   }
-  const instructions = fs.realpathSync(path.join(root, ".craftsman", "instructions"));
-  const absolute = path.resolve(root, file);
+  // state-write.mjs saves the goal file in the MAIN checkout's .craftsman, so from a linked worktree that is where it lives.
+  const main = mainCheckoutRoot(root);
+  const instructions = fs.realpathSync(path.join(main, ".craftsman", "instructions"));
+  let absolute = path.resolve(root, file);
+  if (!fs.existsSync(absolute)) absolute = path.resolve(main, file);
   let real;
   try { real = fs.realpathSync(absolute); } catch { throw new Error(`no such goal file: ${file}`); }
   if (path.dirname(real) !== instructions || !/\.goal\.txt$/.test(real)) {
