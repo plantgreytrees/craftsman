@@ -7,7 +7,7 @@
 //   node scripts/telemetry.mjs --transcript <path> [--phase <p>] [--unit <u>] [--sid <id>]
 //   node scripts/telemetry.mjs --sid <id> --tokens <n> --percent <p> [--cost <usd>] [--phase <p>] [--unit <u>]
 import fs from "node:fs";
-import { loadConfig, enabled, logEvent, readEvents, readStdin, sidOf } from "./lib/core.mjs";
+import { isMain, loadConfig, enabled, logEvent, readEvents, readStdin, sidOf } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 
 export const TAIL_BYTES = 256 * 1024;
@@ -88,7 +88,7 @@ function parseArgs(argv) {
   return args;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const args = parseArgs(process.argv.slice(2));
     const direct = args.tokens !== undefined;

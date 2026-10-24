@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  atomicWrite, logEvent, projectContext, readStdin, sidOf,
+  isMain, atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
   mainCheckoutRoot, loadWorkspaceManifest,
 } from "./lib/core.mjs";
@@ -599,7 +599,7 @@ export function archivePlan(input, context = projectContext(".")) {
   return { plan: input.plan, archived, archive: archivePath(context) };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");
