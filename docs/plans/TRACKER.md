@@ -138,9 +138,9 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | decide-auto-archive-authority | docs/architecture/docs.rules.md | PARKED | retire() ignores auto:true and still needs the doc-write grant (doc-retire.mjs:… | 2026-10-23 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | decide-rule-mismatches | docs/architecture | PARKED | decided rules VIEWS-04/08/11 and ARCHIVE-05/07 disagree with the shipped code a… | 2026-10-23 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-dashboard-queue | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main 4c828fb; criterion ticked | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-export-write-safety | scripts/lib/export-notes.mjs | IN_PROGRESS | unit-runner | 2026-10-24 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-export-write-safety | scripts/lib/export-notes.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main | 2026-10-24 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-landing-side-effects | scripts/lib/archive.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main c874e7b4d10214110560bc49… | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-one-classifier | scripts/lib/archive.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-one-classifier | scripts/lib/archive.mjs | IN_PROGRESS | unit-runner | 2026-10-24 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-retire-next-and-restore | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main; criteria ticked | 2026-10-24 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-suggestions | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-23 |
 | [fixes-and-safety](../../fixes-and-safety) | ask-via-prompt | ask-via-prompt | MERGED | commit b862187 on feat/fixes-and-safety; CI set green | 2026-10-21 |
