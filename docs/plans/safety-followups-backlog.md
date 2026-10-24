@@ -97,7 +97,7 @@ Depends on: approval-keys-protected
 - [ ] 2.3 Update ARCH-SAFETY-09's text and cite lines → accept: `safety-cites` passes
 Impact: `/instruction` in a linked worktree falls back to the paste path today (fails closed, UX only).
 
-### Step 3 — ismain-helper (., javascript, normal) — OPTIONAL, P3
+### Step 3 — ismain-helper (., javascript, normal) — OPTIONAL, P3 — INCLUDED (user decision, 2026-10-24)
 Tooling: implementer implementer · gates code-reviewer · skills test-driven-development · guards arch-check
 Depends on: goal-file-main-checkout
 - [ ] 3.1 Count the idioms first: `grep -rn "import.meta.url ===" scripts` and the `realpathSync` / `pathToFileURL` / `fileURLToPath` variants; record the list in the commit message → accept: the count matches the plan's ~25
