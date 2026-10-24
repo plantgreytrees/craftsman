@@ -385,6 +385,19 @@ units:
       write: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs, docs/architecture/landing.rules.md]
     arch: [ARCH-LAND-23, ARCH-STATE-16, ARCH-SAFETY-03]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-force-config-xargs
+    scope_id: fix-force-config-xargs
+    project: .
+    depends_on: []
+    module: scripts/lib/force-block.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs]
+    arch: [ARCH-LAND-23, ARCH-STATE-16, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -603,6 +616,14 @@ Root runs this unit by hand. Round 10 (Critical): a colon-less ref lets git appl
 - [ ] 28.1 Add tests first in `scripts/lib/force-block.test.mjs` and `scripts/pre-guard-narrow.test.mjs`: a lease push is refused for a colon-less ref, for a destination not written as `refs/heads/<own>`, with `-c`, `--config-env`, `--git-dir`, `--work-tree` before `push`, with a `GIT_*=` or `env` prefix, and for bound branches `HEAD`, `-x`, `refs/heads/main`, `heads/main`, `Main`, `a/main`; allowed: `HEAD:refs/heads/feat/unit-a`, `feat/unit-a:refs/heads/feat/unit-a`, `-C dir push` with those refs, `-u`, `--force-if-includes` → accept: the config-remap and `heads/main` cases fail on the current code
 - [ ] 28.2 In `leaseToOwnBranch` require every ref to be exactly `src:refs/heads/<own>` (one colon, `src` a safe name, no `+`); refuse the allowance when the command text holds a global config option, `GIT_*=` or `env`; in `ownBranchesOf` reject `HEAD`, names starting with `-`, `refs/` or `heads/`, and any name ending in a `main` or `master` segment, case-insensitively → accept: tests green
 - [ ] 28.3 Refresh the ARCH-LAND-23 cite to the file's real line count and word the rule's lease clause as `src:refs/heads/<own>` only → accept: `arch-check lint` PASS
+
+### Step 29 — fix-force-config-xargs (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+Root runs this unit by hand. Round 11 findings in the general force block (older than the lease work): (Critical) a config option or `git config` write in the same command turns a plain push into a forced one (`remote.<n>.push=+HEAD:refs/heads/main`, `remote.<n>.mirror`), and the block only looks at the push words; (Critical) force flags supplied at run time through `xargs`/`parallel` are invisible; (Warning) `ownBranchesOf` trusts the bound branch as run-created, so a base other than main/master (develop, trunk) bound by a scope on the main checkout passes; (Suggestion) `--namespace` is not refused.
+- [ ] 29.1 Add tests first in `scripts/lib/force-block.test.mjs`: each of these is blocked: a push under `-c remote.<n>.push=+…`, `-c remote.<n>.mirror=…`, `--config-env=…`, `GIT_CONFIG_COUNT=…`, `--namespace=…`; `git config remote.<n>.push +…` and `git config remote.<n>.mirror …` writes; `xargs git …`, `xargs -a f git`, `parallel git …`; and `ownBranchesOf` returns no binding branch unless it starts with `feat/` or `feature/`; plain pushes, `-C dir push`, and the lease cases of 28.1 stay as they are → accept: the config and xargs shapes fail on the current code
+- [ ] 29.2 In `destructiveGit` block any `git push` whose command text carries `-c`, `--config-env`, `--namespace`, `--git-dir`, `--work-tree`, a `GIT_*=` variable or `env`, block `git config` writes of `remote.*.push`, `remote.*.mirror` and `alias.*`, and block any command where `xargs` or `parallel` runs `git`; limit `ownBranchesOf` to bound branches matching `^(?:feat|feature)/` → accept: tests green
+- [ ] 29.3 Pin the same shapes through the real guard in `scripts/pre-guard-narrow.test.mjs` (plain push with `-c` remote push override, `xargs git push`) → accept: tests green
 
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
