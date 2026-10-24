@@ -73,6 +73,7 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-evidence-flow | workflows/run.js | COMPLETE | all 2 acceptance criteria ticked; landed; suite green; caps held | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-force-config-xargs | scripts/lib/force-block.mjs | COMPLETE | all 3 acceptance criteria ticked; landed; suite green | 2026-10-24 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-heredoc-strict | scripts/lib/heredoc-allow.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite 981 pass 0 fail | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-lease-alias | scripts/lib/force-block.mjs | COMPLETE | landed; suite 1109 green | 2026-10-24 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-lease-expansion | scripts/lib/force-block.mjs | COMPLETE | all 4 acceptance criteria ticked; landed; suite green; lease refuses expansions | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-lease-qualified | scripts/lib/force-block.mjs | COMPLETE | all 3 acceptance criteria ticked; landed; suite green | 2026-10-24 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-lease-toplevel | scripts/lib/force-block.mjs | COMPLETE | all 3 acceptance criteria ticked; landed; suite green | 2026-10-24 |
