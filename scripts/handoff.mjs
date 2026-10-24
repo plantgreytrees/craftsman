@@ -5,7 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
-  atomicWrite, logEvent, projectContext, readStdin, sessionDir, sidOf,
+  atomicWrite, isMain, logEvent, projectContext, readStdin, sessionDir, sidOf,
 } from "./lib/core.mjs";
 import { recordMemory } from "./plan-memory.mjs";
 
@@ -46,7 +46,7 @@ export function normalizeHandoff(value, context = null) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");
