@@ -5,7 +5,7 @@ import { destructiveGit } from "./force-block.mjs";
 const own = ["feature/plan-*", "feat/unit-a"];
 const blocked = (cmd) => destructiveGit(cmd, own) !== null;
 
-test("force-with-lease to a named own branch is allowed (ARCH-LAND-23)", () => {
+test("force-with-lease to a named own branch is allowed (ARCH-LAND-31)", () => {
   for (const cmd of [
     "git push --force-with-lease origin feature/plan-x:refs/heads/feature/plan-x",
     "git push --force-with-lease=feature/plan-x:abc123 origin HEAD:refs/heads/feature/plan-x",
@@ -138,4 +138,16 @@ test("a lease push inside a quoted command string, or to a path or URL remote, i
 test("a push is blocked under a single-git config override (round 13)", () => {
   for (const cmd of ["git -c remote.origin.push=+HEAD:refs/heads/main git push origin", "git --config-env=remote.origin.push=X git push origin", "git --namespace=x git push origin HEAD:refs/heads/feat/unit-a"]) assert.ok(blocked(cmd), cmd);
   assert.equal(destructiveGit("git -C /tmp/w git push origin HEAD:main", own), null);
+});
+
+test("a lease push is refused after a shell alias definition or to a dot remote (round 14)", () => {
+  const own3 = ["feat/unit-a", "feature/p-*"];
+  const b = (cmd) => destructiveGit(cmd, own3) !== null;
+  for (const cmd of [
+    "alias git='git -c remote.origin.push=+HEAD:refs/heads/main'\ngit push --force-with-lease origin a:refs/heads/feature/p-1",
+    "alias p=ls; git push --force-with-lease origin a:refs/heads/feature/p-1",
+    "git push --force-with-lease . a:refs/heads/feature/p-1",
+    "git push --force-with-lease .. a:refs/heads/feature/p-1",
+  ]) assert.ok(b(cmd), cmd);
+  assert.equal(destructiveGit("git push --force-with-lease origin a:refs/heads/feature/p-1", own3), null);
 });
