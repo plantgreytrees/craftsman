@@ -204,3 +204,12 @@ test("copyAndCommit: a symlinked archive subfolder is refused with no commit (AR
   assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
   assert.deepEqual(fs.readdirSync(outside), []);
 });
+
+test("copyAndCommit: a symlinked source directory is refused with no commit (ARCH-ARCHIVE-03)", () => {
+  const f = fixture();
+  const real = path.join(f.src, "docs/plans-real");
+  fs.renameSync(path.join(f.src, "docs/plans"), real);
+  fs.symlinkSync(real, path.join(f.src, "docs/plans"));
+  assert.throws(() => copyAndCommit(f.args, f.seams), /symlink/);
+  assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
+});

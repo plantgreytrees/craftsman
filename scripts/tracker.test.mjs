@@ -521,18 +521,47 @@ test("tracker: lookup returns archive and restoreCommand with the sha, archive n
   fs.mkdirSync(path.dirname(archivePath(selected)), { recursive: true });
   fs.writeFileSync(archivePath(selected), [
     "# Tracker archive", "",
-    formatArchiveHeading({ plan: "docs/plans/a.md", date: "2026-10-18", goal: "g", doc: "d1", landed: "l1", archive: "abc123" }), "",
+    formatArchiveHeading({ plan: "docs/plans/a.md", date: "2026-10-18", goal: "g", doc: "d1", landed: "l1", archive: "abc1234" }), "",
     formatArchiveHeading({ plan: "docs/plans/b.md", date: "2026-10-18", goal: "g", doc: "d2", landed: "l2" }), "",
   ].join("\n"));
   const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
   process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
   try {
     const hit = lookupArchive({ plan: "a" }, selected);
-    assert.equal(hit.archive, "abc123");
-    assert.equal(hit.restoreCommand, `git -C ${path.join(real, "archive")} show abc123:prod/plans/a/docs/plans/a.md`);
+    assert.equal(hit.archive, "abc1234");
+    assert.equal(hit.restoreCommand, `git -C ${path.join(real, "archive")} show abc1234:prod/plans/a/docs/plans/a.md`);
     const miss = lookupArchive({ plan: "b" }, selected);
     assert.equal(miss.archive, null);
     assert.equal("restoreCommand" in miss, false);
+  } finally {
+    if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
+  }
+});
+
+test("tracker: an option-shaped archive value yields no restore command (ARCH-TRACKER-02)", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-ws-"));
+  fixtures.add(ws);
+  const real = fs.realpathSync(ws);
+  for (const id of ["prod", "archive"]) {
+    fs.mkdirSync(path.join(real, id));
+    spawnSync("git", ["init", "-q"], { cwd: path.join(real, id) });
+  }
+  const manifest = path.join(real, "craftsman.workspace.json");
+  fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { prod: { root: "prod" }, archive: { root: "archive" } } }));
+  const root = path.join(real, "prod");
+  const selected = { id: "prod", root, stateDir: path.join(root, ".craftsman") };
+  fs.mkdirSync(path.dirname(archivePath(selected)), { recursive: true });
+  fs.writeFileSync(archivePath(selected), [
+    "# Tracker archive", "",
+    formatArchiveHeading({ plan: "docs/plans/a.md", date: "2026-10-18", goal: "g", doc: "d1", landed: "l1", archive: "--output=x" }), "",
+    formatArchiveHeading({ plan: "docs/plans/b.md", date: "2026-10-18", goal: "g", doc: "d2", landed: "l2" }), "",
+  ].join("\n"));
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+  try {
+    const hit = lookupArchive({ plan: "a" }, selected);
+    assert.equal("restoreCommand" in hit, false);
+    assert.equal(fs.existsSync(path.join(real, "archive", "x")), false);
   } finally {
     if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
   }

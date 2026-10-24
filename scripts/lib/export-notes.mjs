@@ -18,7 +18,7 @@ export function exportRoot(context) {
 // Proves .craftsman and .craftsman/export under the main checkout are real
 // directories inside it (lstat, then realpath) and creates them when absent;
 // throws otherwise (ARCH-VIEWS-11). Returns the export directory.
-export function verifiedExportDir(context) {
+export function verifiedExportDir(context, { create = true } = {}) {
   const main = mainCheckoutRoot(context.root);
   let mainReal;
   try { mainReal = fs.realpathSync(main); } catch { throw new Error("refusing export: main checkout not found"); }
@@ -27,6 +27,7 @@ export function verifiedExportDir(context) {
     cur = path.join(cur, part);
     let st = null;
     try { st = fs.lstatSync(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    if (!st && !create) throw new Error(`refusing export: ${part} does not exist`);
     if (!st) { fs.mkdirSync(cur); st = fs.lstatSync(cur); }
     if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`refusing export: ${part} is not a real directory`);
     const real = fs.realpathSync(cur);
@@ -53,9 +54,36 @@ export function atomicWrite(file, text) {
   }
 }
 
+// Check-only variant: proves the export directory is real and inside the checkout, creates nothing.
+export const checkedExportDir = (context) => verifiedExportDir(context, { create: false });
+
+const STALE_TMP_MS = 10 * 60 * 1000;
+const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
+// Removes `.<name>.<pid>.<ts>.tmp` leftovers of dead writers (or older than ten minutes) directly in dir.
+export function sweepStaleTemps(dir, now = Date.now()) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const removed = [];
+  for (const n of names) {
+    const m = /^\..+\.(\d+)\.(\d+)\.tmp$/.exec(n);
+    if (!m) continue;
+    const file = path.join(dir, n);
+    try {
+      const st = fs.lstatSync(file);
+      if (!st.isFile()) continue;
+      if (pidAlive(Number(m[1])) && now - st.mtimeMs < STALE_TMP_MS) continue;
+      fs.unlinkSync(file);
+      removed.push(n);
+    } catch { /* raced */ }
+  }
+  return removed;
+}
+
 // Writes one file directly under the verified export directory.
 export function writeExportFile(context, name, text) {
-  const file = path.join(verifiedExportDir(context), name);
+  const dir = verifiedExportDir(context);
+  sweepStaleTemps(dir);
+  const file = path.join(dir, name);
   atomicWrite(file, text);
   return file;
 }
@@ -260,6 +288,7 @@ export function writeNotes(context) {
 
 // Removes every generated file (including README.md); foreign files stay.
 export function clearNotes(context) {
+  try { checkedExportDir(context); } catch { return []; }
   const notes = assertNotesRoot(context);
   const removed = [];
   for (const rel of walkGenerated(notes, notes)) {
