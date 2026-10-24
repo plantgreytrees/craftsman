@@ -6,11 +6,11 @@ import { execFileSync } from "node:child_process";
 import {
   isMain, atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
-  mainCheckoutRoot, loadWorkspaceManifest,
+  mainCheckoutRoot, loadWorkspaceManifest, isMain,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
-import { droppedKeys } from "./lib/ledger-keys.mjs";
+import { BLOCK_BEGIN, BLOCK_END, BLOCK_RE, droppedKeys, generatedBlock } from "./lib/ledger-keys.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 
@@ -134,14 +134,8 @@ export function trackerDocPath(context = projectContext(".")) {
 // TRACKER.md on every ledger write (and by the tracker-sync hook as a
 // backstop). Everything outside the fence stays hand-written; the fence
 // itself is never hand-edited — pre-guard refuses any edit that changes it.
-export const BLOCK_BEGIN = "<!-- craftsman:ledger:begin -->";
-export const BLOCK_END = "<!-- craftsman:ledger:end -->";
-const BLOCK_RE = new RegExp(`${BLOCK_BEGIN}[\\s\\S]*?${BLOCK_END}`);
-
-// The generated block inside `text`, or null when it has none.
-export function generatedBlock(text) {
-  return BLOCK_RE.exec(String(text))?.[0] ?? null;
-}
+// BLOCK_BEGIN/BLOCK_END/BLOCK_RE/generatedBlock live in lib/ledger-keys.mjs (which must not import this file); re-exported for callers.
+export { BLOCK_BEGIN, BLOCK_END, generatedBlock };
 
 function cell(value, max = 0) {
   let text = String(value ?? "").replace(/\s+/g, " ").trim();
