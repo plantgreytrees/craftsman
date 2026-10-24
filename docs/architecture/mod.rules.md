@@ -3,8 +3,8 @@ area: mod
 governs: ["hooks/register.js", "hooks/*.test.ts", "scripts/telemetry.mjs", "scripts/stats.mjs", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "scripts/self-update.mjs", "docs/mod-manifest.txt"]
 human: docs/architecture/mod.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
-updated: 2026-10-23
+verified_at: cefd54da8e08b406bdbc1fd9322d41ad17e7ff9c
+updated: 2026-10-24
 ---
 # ARCH mod — enforced rules
 
