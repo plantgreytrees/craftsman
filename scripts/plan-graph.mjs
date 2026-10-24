@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Validate and order scope-specific plan steps without loading plan prose.
-import { loadConfig, loadWorkspaceManifest, projectIdOf } from "./lib/core.mjs";
+import { isMain, loadConfig, loadWorkspaceManifest, projectIdOf } from "./lib/core.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { checkSubmoduleBumps } from "./lib/plan-submodules.mjs";
 
@@ -127,7 +127,7 @@ export function tagFeatures(steps, groups) {
     ? { ...s, feature: of.get(s.id) ?? of.get(s.scope_id) } : s));
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     let raw = "";
     for await (const chunk of process.stdin) raw += chunk;

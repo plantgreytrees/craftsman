@@ -200,6 +200,7 @@ export function raisedCaps(base, current) {
   return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
 }
 
+// Dependency-free on purpose: the ratchet test imports the merge-base copy of this file alone from a temp dir, so it must not import ./lib/core.mjs (isMain).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const findings = checkDocSizes();
   if (findings.length) {
