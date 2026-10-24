@@ -8,7 +8,6 @@ import {
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
   mainCheckoutRoot, loadWorkspaceManifest,
 } from "./lib/core.mjs";
-import { resolveArchive, archivePathFor, restoreCommand, productIdFor } from "./lib/archive.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
 import { droppedKeys } from "./lib/ledger-keys.mjs";
@@ -439,15 +438,9 @@ export function renderState(context = projectContext(".")) {
   return currentState(context).sort((a, b) => a.key.localeCompare(b.key));
 }
 
-// The ledger is append-only and `currentState`/`transition` replay it IN FULL
-// on every single call — every claim, every status change, for the entire
-// life of the project. Only the LATEST event per key is ever actually needed
-// (validateTransition only ever looks at the immediately-preceding status);
-// every earlier event for a key that has since moved on is dead weight that
-// makes every future read/write slower, forever, with nothing to show for it.
-// Safe to compact unconditionally: collapsing to "one event per key, in
-// first-seen key order" cannot change any `currentState()`/`transition()`
-// result, since neither ever consults more than the latest event per key.
+// The ledger is append-only and every read replays it in full, but only the latest event per key is ever consulted
+// (validateTransition looks at the previous status only). Collapsing to one event per key, in first-seen order,
+// cannot change any currentState()/transition() result, so compaction is always safe.
 export function compactLedger(context = projectContext(".")) {
   const file = ledgerPath(context);
   return withLock(file, () => {
@@ -513,6 +506,45 @@ export function lookupArchive(input, context = projectContext(".")) {
     if (restore) found.restoreCommand = restore;
   }
   return found;
+}
+
+const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const KINDS = ["plans", "ideas"];
+
+// ARCH-ARCHIVE-01/02/06 helpers; they live here so tracker.mjs has no archive import.
+export function resolveArchive(context = null) {
+  const id = loadConfig(context).archive?.project || "archive";
+  let m;
+  try { m = loadWorkspaceManifest(); } catch (e) { return { off: `workspace manifest unusable: ${e.message}` }; }
+  if (!m) return { off: "no workspace manifest" };
+  if (!Object.hasOwn(m.projects, id)) return { off: `archive project "${id}" is not registered in the workspace manifest` };
+  if (m.projects[id].initialized === false) return { off: `archive project "${id}" is not checked out (uninitialised)` };
+  return { id, root: m.projects[id].root };
+}
+
+export function archivePathFor({ productId, kind, slug, file }) {
+  const bad = (msg) => { throw new Error(msg); };
+  if (!KINDS.includes(kind)) bad(`archive kind must be one of ${KINDS.join(", ")}: ${kind}`);
+  for (const [name, v] of [["productId", productId], ["slug", slug]]) if (typeof v !== "string" || !SEGMENT.test(v) || v.includes("..")) bad(`invalid archive ${name}: ${v}`);
+  if (typeof file !== "string" || !file.trim()) bad("archive file is required");
+  const raw = file.replaceAll("\\", "/");
+  if (raw.startsWith("/") || /^[A-Za-z]:/.test(raw)) bad(`archive file must be repo-relative: ${file}`);
+  if (raw.split("/").includes("..")) bad(`archive file must not traverse: ${file}`);
+  const clean = path.posix.normalize(raw).replace(/^(\.\/)+/, "");
+  if (!clean || clean === "." || clean.startsWith("../") || clean.split("/").includes(".git")) bad(`invalid archive file: ${file}`);
+  if (clean === "docs/architecture" || clean.startsWith("docs/architecture/")) bad(`architecture rules docs are never archived (ARCH-ARCHIVE-06): ${file}`);
+  return `${productId}/${kind}/${slug}/${clean}`;
+}
+
+export function productIdFor(context) {
+  const root = fs.realpathSync(mainCheckoutRoot(context.root));
+  try { return Object.entries(loadWorkspaceManifest()?.projects ?? {}).find(([, p]) => p.root === root)?.[0] ?? path.basename(root); }
+  catch { return path.basename(root); }
+}
+
+export function restoreCommand(archiveRoot, sha, file) {
+  const q = (s) => (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(s) ? s : `'${String(s).replaceAll("'", "'\\''")}'`);
+  return `git -C ${q(archiveRoot)} show ${q(`${sha}:${file}`)}`;
 }
 
 // ARCH-ARCHIVE-04: the command that restores the archived plan doc, or null when no archive project resolves.
