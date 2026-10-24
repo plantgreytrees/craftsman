@@ -3,7 +3,7 @@
 // ledger orchestrate/scrutinise already write to (scripts/tracker.mjs) and
 // renders four things only: what shipped, what needs a human decision, what's
 // next, and how far each plan is from COMPLETE. No new state to maintain.
-import { loadConfig, projectContext } from "./lib/core.mjs";
+import { isMain, loadConfig, projectContext } from "./lib/core.mjs";
 import { writeDashboard } from "./lib/dashboard.mjs";
 import { writeNotes } from "./lib/export-notes.mjs";
 import { currentState } from "./tracker.mjs";
@@ -89,7 +89,7 @@ export function htmlOutput(context, { publish = false } = {}) {
   return publish ? [file, `publish: ${file}`] : [file];
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const args = process.argv.slice(2);
     if (args.includes("--html")) {

@@ -7,7 +7,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { grantValid, hasDocWriteGrant, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
+import { grantValid, hasDocWriteGrant, isMain, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
 import { classifyArchive, copyAndCommit, productIdFor, resolveArchive } from "./lib/archive.mjs";
 import { parseNext } from "./lib/next-queue.mjs";
 import { descendantSlugs, docGoal, loadIndex, removeChild, TRACKER_FILE } from "./lib/plan-index.mjs";
@@ -352,7 +352,7 @@ export function retire(input, context = projectContext(".")) {
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const at = process.argv.indexOf("--sid");
