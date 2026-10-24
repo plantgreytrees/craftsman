@@ -1,4 +1,4 @@
-// The force block (ARCH-LAND-05): the destructive git forms /auto must never
+// The force block (ARCH-LAND-31, ARCH-STATE-16): the destructive git forms /auto must never
 // run, found in a Bash command by a best-effort text scan (ARCH-LAND-31; defense in depth, not a proof).
 // A plain `git push origin HEAD:<base>` (tracker publish, ARCH-LAND-17) is not
 // destructive and passes; every force flag and `+refspec` still blocks.
@@ -82,7 +82,8 @@ export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
   const flags = rest.filter((w) => w.startsWith("-"));
   const [remote, ...refs] = rest.filter((w) => !w.startsWith("-"));
   if (!remote || !refs.length || rest.includes(UNEXPANDED)) return false;
-  if (!/^[A-Za-z0-9._-]+$/.test(remote)) return false; // a configured remote name, never a path or URL
+  if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(remote)) return false; // a remote word with no path separator, never `.`/`..`, a path or a URL
+  if (/(?:^|[\s;&|(])alias\s/.test(text)) return false; // a shell alias defined in the same command can rewrite the push
   if (!flags.some(isLease) || !flags.every((w) => isLease(w) || LEASE_OK.has(w))) return false;
   return refs.every((ref) => {
     // `src:refs/heads/<own>` only: a colon-less ref or a short destination is resolved by git through push config.
@@ -103,7 +104,7 @@ export function ownBranchesOf(binding, scope) {
   return own;
 }
 
-// The destructive git forms /auto must never run (ARCH-LAND-05), or null.
+// The destructive git forms /auto must never run (ARCH-LAND-31), or null.
 // Every quoted string is checked as a command (`bash -c`, `python3 -c`, …)
 // except a commit/tag message operand without $( ) or a backtick. Alias
 // definitions are checked as what they define, and an alias call as its

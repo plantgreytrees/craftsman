@@ -1,4 +1,4 @@
-// ARCH-STATE-16 / ARCH-LAND-23: the hook-bypass check reads heredoc bodies (PR #1); removal-word refusals stay; a lease push to the run's own branch is allowed.
+// ARCH-STATE-16 / ARCH-LAND-31: the hook-bypass check reads heredoc bodies (PR #1); removal-word refusals stay; a lease push to the run's own branch is allowed.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -53,7 +53,7 @@ test("narrow: the hard lines stay (ARCH-STATE-13): guarded removals and redirect
   });
 });
 
-test("narrow: the lease exception covers the run's own branches only (ARCH-LAND-23)", async () => {
+test("narrow: the lease exception covers the run's own branches only (ARCH-LAND-31)", async () => {
   const own = ownBranchesOf({ branch: "feat/guard-narrowing" }, { plan: "docs/plans/dev-lifecycle-docs-plan.md" });
   assert.ok(own.includes("feat/guard-narrowing"));
   assert.ok(own.includes("feature/dev-lifecycle-docs-plan-*"));
