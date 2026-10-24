@@ -5,7 +5,7 @@
 // pathspecs and push HEAD:<base> (plain push). One retry on rejection. Never parks.
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin } from "./lib/core.mjs";
+import { loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, isMain } from "./lib/core.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 import { acquireLock, releaseLock, heartbeat, inspectRepo, run } from "./repo-exec.mjs";
@@ -133,7 +133,7 @@ export function publishTracker(input = {}, context = projectContext(input.projec
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const input = JSON.parse(await readStdin() || "{}");
   process.stdout.write(JSON.stringify(publishTracker(input, projectContext(input.project || "."))) + "\n");
 }
