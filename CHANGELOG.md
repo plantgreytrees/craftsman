@@ -8,32 +8,27 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
-- **Approval before base** (ARCH-APPROVAL-01..07, ARCH-LAND-22/24/26/27). With `planning.featureBranches` on,
-  `land-feature` lands only against an approval record the artifact owner decided on a private page
-  (`scripts/approval.mjs`, `scripts/lib/approval-page.mjs`, `commands/_approval.md`): Merge now or Open PR,
-  with the recommendation, the attention list (env keys, migrations, CI), evidence, risk and rollback. The
-  record's `head_sha` must equal the feature head; a moved base re-merges and re-gates, a mismatch PARKs.
-  New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only for an
-  approved run whose record is landed, once per run, or a `manual:true` `/sync-docs --tracker`; older installs treat it as off). With feature branches off there is no
-  verification point and units still merge straight to base.
+- **Approval before base** (ARCH-APPROVAL-01..09, ARCH-LAND-28/29/30/31). With `planning.featureBranches` on, `land-feature`
+  lands only against an approval record the artifact owner decided on a private page (`scripts/approval.mjs`,
+  `scripts/lib/approval-page.mjs`, `commands/_approval.md`): Merge now or Open PR, with the recommendation, attention list
+  (env keys, migrations, CI), evidence, risk and rollback. The record's `head_sha` must equal the feature head; a moved base
+  re-merges and re-gates. New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only
+  for an approved run whose record is landed, once, or a `manual:true` `/sync-docs --tracker`). With feature branches off, units merge straight to base.
 - **Dashboard, notes and archive** (ARCH-DOCS-14, ARCH-ARCHIVE-05/07): the dashboard (with an archive tab) and a
   notes folder render at Stop by default, or on demand with `/digest --html`; a `NEXT.md` queue; local auto-archive
   of a finished plan at `land-feature`; and `/sync-docs --archive` / `--prune --archive` to retire closed plans.
-- **Ledger guard** (ARCH-TRACKER-13/14): publish refuses to drop a committed row unless an archive event names
-  its plan; `tracker.mjs init --merge` and `--from-block` repair a partial or missing ledger.
-- **Measurement** (ARCH-SLIM-10): a per-session `context{phase:"baseline"}` sample; `stats.mjs` reports
-  baseline, peak and growth, blocks by reason and the last 7 days of `guard_unparsed`; the SessionStart
-  context has a 3 KB cap test.
-- **Docs budgets** (ARCH-DOCS-10/11): `docs.budgets` ratchet enforced by `arch-check lint`; scrutinise docs keep
-  one rolling summary plus the latest round; `retireCheck` and a `doc_retire_candidate` log (nothing is deleted).
-- **Tool slots** (ARCH-ENGINE-20): `just check` leads `stopGate.commands`; `docs.checks` run by
-  `scripts/doc-checks.mjs`, with `pre-commit run --all-files` once at the verification point.
-- Skills `test-driven-development`, `systematic-debugging`, `verification-before-completion` (adapted from
-  obra/superpowers, MIT); `maxTurns` on reviewer agents; `toggle` and `builtin-check` hidden from the model;
-  `/init --update` scaffolds an empty `.claude/rules/craftsman-loop.md`; `craftsman#stable` documented.
-- `scripts/lib/force-block.mjs` can allow `--force-with-lease` to a run's own branches (ARCH-LAND-23).
-- Not yet: guard narrowing (ARCH-STATE-12), the TDD step in `unit-runner` (ARCH-ENGINE-21) and the `userConfig`
-  knobs wait for PR #1; `pre-guard` does not use the lease exception until then.
+- **Ledger guard** (ARCH-TRACKER-13/14): publish and sync refuse to drop a committed row unless an archive event names its plan; `tracker.mjs init --merge`/`--from-block` repair the ledger.
+- **Measurement** (ARCH-SLIM-10): a per-session baseline context sample; `stats.mjs` reports baseline, peak, growth and blocks
+  by reason; the SessionStart context has a 3 KB cap test. **Docs budgets** (ARCH-DOCS-11/15): the `docs.budgets` ratchet is
+  enforced by `arch-check lint`; scrutinise docs keep one rolling summary; `retireCheck` logs `doc_retire_candidate` (nothing is deleted).
+- **Tool slots** (ARCH-ENGINE-22): `just check` leads `stopGate.commands`; `docs.checks` (empty by default) run via `scripts/doc-checks.mjs`; `pre-commit` runs once at the verification point.
+- Skills `test-driven-development`, `systematic-debugging`, `verification-before-completion` (from obra/superpowers, MIT); `maxTurns` on reviewers; `toggle` and `builtin-check` hidden from the model; `/init --update` scaffolds `.claude/rules/craftsman-loop.md`; `craftsman#stable` documented.
+- **Own-branch lease** (ARCH-LAND-31): `force-block.mjs` allows `--force-with-lease` only as an unquoted top-level
+  `src:refs/heads/<own>` push to a named remote. The force block is a best-effort text scan; the rewrite is the follow-up
+  `force-block-wordlevel`. **Plugin settings** (ARCH-PLAN-07): `userConfig` `autonomyLevel`, `reviewDepth`, `modelTier`
+  (reserved), `budgetsEnforce` set defaults a project config overrides; this repo sets `claudeMdLines`/`openPlans` in
+  `craftsman.project.json`. The red-run TDD step is in `unit-runner` and the reviewers (ARCH-ENGINE-21). `.gitleaks.toml`
+  allowlists craftsman state and sibling checkouts only.
 - Stop and SessionEnd report **unpushed** work in the main checkout and every worktree, from local refs only; `stopGate.blockOnUnpushed` (default `false`) makes Stop block on it. Stop also reports guarded docs that changed without passing the doc guard.
 - SessionStart says whether the guards are on, or off and why, and notes when no settings scope enables the **sandbox**. `/craftsman:init --settings-diff` and `--settings-write` merge `sandbox.enabled` and ask rules into `.claude/settings.json` without overwriting anything.
 - The launcher skips node for Read, Glob and Grep when `pre-guard` cannot act (about 0.5 ms instead of about 25 ms), with a parity table pinning every verdict.
