@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import {
   PROJECT_ROOT, PLUGIN_ROOT, mainCheckoutRoot, atomicWrite, orchestrationEnabled, isGitRoot, loadConfig, logEvent, readStdin,
   projectContext, resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
-  sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR } from "./lib/core.mjs";
+  isMain, sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR } from "./lib/core.mjs";
 import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
 import { namesSelfScoped, realEntries } from "./lib/self-protect.mjs";
 
@@ -123,7 +123,7 @@ function sameRepository(first, second) {
   } catch { return false; }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const selectedContext = projectContext(input.project || ".");
