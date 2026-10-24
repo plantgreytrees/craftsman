@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { mainCheckoutRoot } from "./core.mjs";
-import { loadIndex, parseFrontmatter, SLUG_RE } from "./plan-index.mjs";
+import { frontmatterGoal, isTrackerDoc, listMd, loadIndex, parseFrontmatter, SLUG_RE, slugOf } from "./plan-index.mjs";
 import { currentState, parseArchiveHeading, archivePath } from "../tracker.mjs";
 
 export const INBOX_MAX_BYTES = 20 * 1024;
@@ -65,7 +65,6 @@ export const inboxRoot = (context) => path.join(exportRoot(context), "inbox");
 
 const oneLine = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
 const goodSlug = (s) => SLUG_RE.test(String(s)) && !/^\.+$/.test(String(s));
-const slugOf = (p) => path.posix.basename(String(p || "").split(path.sep).join("/"), ".md");
 
 // ---- frontmatter emit: every value stays on one line ----
 function scalar(v) {
@@ -94,12 +93,7 @@ export function planStatusRollup(rows) {
   return "IN_PROGRESS";
 }
 
-function listMd(dir, filter = () => true) {
-  try {
-    return fs.readdirSync(dir).filter((f) => f.endsWith(".md") && filter(f)).sort()
-      .filter((f) => fs.lstatSync(path.join(dir, f)).isFile());
-  } catch { return []; }
-}
+const readText = (file) => { try { return fs.readFileSync(file, "utf8"); } catch { return ""; } };
 const readFm = (file) => { try { return parseFrontmatter(fs.readFileSync(file, "utf8")); } catch { return {}; } };
 
 // Map of notes-relative path -> note text.
@@ -113,7 +107,7 @@ export function buildNotes(context) {
   // plans
   const planDir = path.join(root, "docs", "plans");
   const live = new Set();
-  for (const f of listMd(planDir, (n) => n !== "TRACKER.md" && n !== "TRACKER-archive.md" && n !== "NEXT.md")) {
+  for (const f of listMd(planDir, (n) => !isTrackerDoc(`docs/plans/${n}`) && n !== "NEXT.md")) {
     const fm = readFm(path.join(planDir, f));
     const slug = String(fm.slug || f.slice(0, -3));
     if (!goodSlug(slug) || f.slice(0, -3) !== slug) continue;
@@ -126,7 +120,7 @@ export function buildNotes(context) {
     out.set(`plans/${slug}.md`, note({
       type: "plan", slug, status: planStatusRollup(mine), progress: `${done}/${mine.length}`,
       priority: node?.priority ?? (fm.priority ? String(fm.priority) : "P2"),
-      parent: node?.parent ?? "", goal: oneLine(fm.goal), updated, source,
+      parent: node?.parent ?? "", goal: oneLine(frontmatterGoal(readText(path.join(planDir, f)))), updated, source,
     }, fm.goal || slug, source));
   }
 

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { loadConfig } from "./lib/core.mjs";
-import { resolveArchive, archivePathFor, copyAndCommit, restoreCommand } from "./lib/archive.mjs";
+import { resolveArchive, archivePathFor, copyAndCommit, restoreCommand, classifyArchive, productIdFor } from "./lib/archive.mjs";
 
 const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), `craftsman-archive-${n}-`));
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -144,4 +144,44 @@ test("copyAndCommit: refuses a rules doc", () => {
 
 test("restoreCommand returns the git show string", () => {
   assert.equal(restoreCommand("/a/archive", "abc123", "prod/plans/p/docs/plans/p.md"), "git -C /a/archive show abc123:prod/plans/p/docs/plans/p.md");
+});
+
+test("classifyArchive: one table test per class (auto, rewrite, blocked, not-archivable)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-classify-"));
+  const ctx = { root };
+  const plan = "docs/plans/p.md";
+  const on = { root: "/archive" };
+  const scan = (value) => ({ findReferrers: () => value });
+  const table = [
+    ["auto: no referrer", { archive: on, ...scan({ hits: [plan], blocking: [plan], rewritable: [] }) }, "auto", [], []],
+    ["auto: only exempt files (rollup, sibling, tracker, NEXT)", { archive: on, ...scan({ hits: ["docs/plans/p/TRACKER.md", "docs/plans/scrutinise-p.md", "docs/plans/TRACKER-archive.md", "docs/plans/NEXT.md"], blocking: ["docs/plans/p/TRACKER.md", "docs/plans/scrutinise-p.md", "docs/plans/TRACKER-archive.md", "docs/plans/NEXT.md"], rewritable: [] }) }, "auto", [], []],
+    ["auto: the removing set is exempt", { archive: on, removing: ["docs/plans/x.md"], ...scan({ hits: ["docs/plans/x.md"], blocking: [], rewritable: ["docs/plans/x.md"] }) }, "auto", [], []],
+    ["rewrite: prose referrer", { archive: on, ...scan({ hits: ["docs/plans/n.md"], blocking: [], rewritable: ["docs/plans/n.md"] }) }, "rewrite", [], ["docs/plans/n.md"]],
+    ["blocked: rules doc names the file", { archive: on, ...scan({ hits: ["docs/architecture/z.rules.md", "docs/plans/n.md"], blocking: ["docs/architecture/z.rules.md"], rewritable: ["docs/plans/n.md"] }) }, "blocked", ["docs/architecture/z.rules.md"], ["docs/plans/n.md"]],
+    ["blocked: scan failed", { archive: on, ...scan(null) }, "blocked", ["referrer scan failed"], []],
+    ["not-archivable: no archive project", { archive: { off: "none" }, ...scan({ hits: [], blocking: [], rewritable: [] }) }, "not-archivable", [], []],
+    ["blocked still names its file without an archive project", { archive: { off: "none" }, ...scan({ hits: ["README.md"], blocking: ["README.md"], rewritable: [] }) }, "blocked", ["README.md"], []],
+  ];
+  for (const [name, opts, cls, blocking, rewritable] of table) {
+    const v = classifyArchive(ctx, plan, opts);
+    assert.equal(v.class, cls, name);
+    assert.deepEqual(v.blocking, blocking, name);
+    assert.deepEqual(v.rewritable, rewritable, name);
+  }
+});
+
+test("productIdFor: the workspace project whose root is this checkout, else the directory name", () => {
+  const ws = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-pid-")));
+  const root = path.join(ws, "app");
+  fs.mkdirSync(root);
+  execFileSync("git", ["-C", root, "init", "-q"]);
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  try {
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = path.join(ws, "absent.json");
+    assert.equal(productIdFor({ root }), "app");
+    const manifest = path.join(ws, "craftsman.workspace.json");
+    fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { shop: { root: "app" } } }));
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+    assert.equal(productIdFor({ root }), "shop");
+  } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
 });
