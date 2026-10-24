@@ -70,34 +70,43 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | approval-record | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; 038049b on main; approval tests 6/6; check re… | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | baseline-metric | scripts/telemetry.mjs | COMPLETE | all 3 acceptance criteria ticked; 6d43dce on main; baseline event once per sid;… | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | closing-changelog | CHANGELOG.md | COMPLETE | all 2 acceptance criteria ticked; d04dc32 on main; one [Unreleased] entry under… | 2026-10-23 |
-| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | docs-budgets | scripts/arch-check.mjs | MERGED | 77d2da8 on main; arch-check tests 21/21; openPlans and claudeMdLines left to pr… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | docs-budgets | scripts/arch-check.mjs | COMPLETE | all criteria ticked | 2026-10-24 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-bypass-allowlist | scripts/pre-guard.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite 974 pass 0 fail | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-evidence-flow | workflows/run.js | COMPLETE | all 2 acceptance criteria ticked; landed; suite green; caps held | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-heredoc-strict | scripts/lib/heredoc-allow.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite 981 pass 0 fail | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-lease-expansion | scripts/lib/force-block.mjs | COMPLETE | all 4 acceptance criteria ticked; landed; suite green; lease refuses expansions | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-lease-qualified | scripts/lib/force-block.mjs | COMPLETE | all 3 acceptance criteria ticked; landed; suite green | 2026-10-24 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-red-run-evidence | agents/code-reviewer.md | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite 981 pass 0 fail | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | fix-reviewer-red | agents/code-reviewer.md | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite 974 pass 0 fail | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | force-lease | scripts/lib/force-block.mjs | COMPLETE | all 2 acceptance criteria ticked; 0e0428f on main; force-block tests 3/3; no ca… | 2026-10-23 |
-| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-narrowing | scripts/pre-guard.mjs | PARKED | Precondition 4.0 failed: safety.rules.md absent on origin/main (PR #1 not lande… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-narrowing | scripts/pre-guard.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main; suite 973 pass 0 fail | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | guard-stats | scripts/stats.mjs | COMPLETE | all 2 acceptance criteria ticked; 267514e on main; stats tests 6/6; also ranks … | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | land-gate | scripts/repo-exec.mjs | COMPLETE | all 5 acceptance criteria ticked; 461422a on main; 9 gate tests; suite 621/622 … | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | ledger-guard | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; b6e6c00 on main; tracker-publish tests 15/15;… | 2026-10-22 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | ledger-repair | scripts/tracker.mjs | COMPLETE | all 3 acceptance criteria ticked; e2cec01 on main; tracker tests 43/43; helpers… | 2026-10-23 |
-| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | profile-and-release | .claude-plugin/plugin.json | MERGED | d94c05e on main; init scaffold + stable-channel docs + no-version test; 18.1 us… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | profile-and-release | .claude-plugin/plugin.json | COMPLETE | all criteria ticked | 2026-10-24 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | profile-knobs | scripts/lib/user-config.mjs | COMPLETE | landed; criteria ticked; config keys set | 2026-10-24 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | retire-check | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; 340cbf2 on main; doc-retire tests 40/40 | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | revert-heredoc-prose | scripts/pre-guard.mjs | COMPLETE | all 3 acceptance criteria ticked; landed; pre-guard equals PR 1 except the leas… | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | rolling-scrutinise | commands/scrutinise.md | COMPLETE | all 2 acceptance criteria ticked; 6177f44 on main; scrutinise.md 8307 bytes und… | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | surface-trim | agents/*, commands/* | COMPLETE | all 4 acceptance criteria ticked; 3c62097 on main; 12 reviewers maxTurns, toggl… | 2026-10-23 |
-| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tdd-step | agents/unit-runner.md | PARKED | 12.0 precondition failed: docs/architecture/safety.rules.md absent from origin/… | 2026-10-23 |
+| [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tdd-step | agents/unit-runner.md | COMPLETE | all 3 acceptance criteria ticked; landed to main; suite 973 pass 0 fail | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | tool-slots | craftsman.config.json | COMPLETE | all 4 acceptance criteria ticked; 67a9d35 on main; doc-checks/tool-slots tests … | 2026-10-23 |
 | [dev-lifecycle-docs-plan](./dev-lifecycle-docs-plan.md) | vendored-skills | skills/* | COMPLETE | all 4 acceptance criteria ticked; f70741b on main; 3 skills attributed; descrip… | 2026-10-23 |
-| [external-project-board](./external-project-board.md) | archive-commands | commands/sync-docs.md | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | archive-lib | scripts/lib/archive.mjs | BLOCKED | Smoke gate red before any edit: pre-existing failure pre-guard.test.mjs:619 (st… | 2026-10-23 |
-| [external-project-board](./external-project-board.md) | auto-archive | scripts/repo-exec.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | changelog | CHANGELOG.md | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | dashboard-archive-tab | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | dashboard-core | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | digest-html | scripts/digest.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | export-notes | scripts/lib/export-notes.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | next-queue | scripts/lib/next-queue.mjs | BLOCKED | implementation finished in worktree but pre-guard refused git commit (cwd reset… | 2026-10-23 |
-| [external-project-board](./external-project-board.md) | retire-copy | scripts/doc-retire.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | retire-rewrite | scripts/doc-retire.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | stop-refresh | scripts/tracker-sync.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | tracker-heading | scripts/tracker.mjs | PENDING | — | 2026-10-22 |
-| [external-project-board](./external-project-board.md) | view-commands | commands/digest.md | PENDING | — | 2026-10-22 |
+| [external-project-board](./external-project-board.md) | archive-commands | commands/sync-docs.md | COMPLETE | all 1 acceptance criteria ticked; direct merge to main; tests pass | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | archive-lib | scripts/lib/archive.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge 0561cd8 (feat/archive-lib b2e099… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | auto-archive | scripts/repo-exec.mjs | COMPLETE | all 1 acceptance criteria ticked; merged locally f7e636f (feat/auto-archive 5c8… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | changelog | CHANGELOG.md | COMPLETE | all 2 acceptance criteria ticked; merged 2d2a67f (feat/changelog eeb9167) | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | dashboard-archive-tab | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; merged direct b7c15b23046ad212d0683a8b1fb98fb… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | dashboard-core | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge 408991fac85b79318655c255d7af6f1b… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | digest-html | scripts/digest.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | export-notes | scripts/lib/export-notes.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge e82314f (feat/export-notes); acc… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | next-queue | scripts/lib/next-queue.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge d52e615946df0cb639df4dfbd8c680df… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | retire-copy | scripts/doc-retire.mjs | COMPLETE | all 2 acceptance criteria ticked; merged direct to main | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | retire-rewrite | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main at 94918d4 (feat/retire-… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | stop-refresh | scripts/tracker-sync.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge 3da7a9e775658e98284497ccdfa10707… | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | tracker-heading | scripts/tracker.mjs | COMPLETE | all 1 acceptance criteria ticked; merged 2b7c678 direct to main; 75 tests green | 2026-10-23 |
+| [external-project-board](./external-project-board.md) | view-commands | commands/digest.md | COMPLETE | all 1 acceptance criteria ticked; direct merge to main | 2026-10-23 |
 | [p](./p.md) | u1 | — | MERGED | abc | 2026-10-22 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-lock-stale-race | scripts/approval.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-owner-trust | scripts/pre-guard.mjs | PENDING | — | 2026-10-23 |
@@ -122,10 +131,18 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-glob-anchoring | scripts/lib/force-block.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | ledger-parser-dedupe | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | offline-landed-record | scripts/lib/approval-gate.mjs | PENDING | — | 2026-10-23 |
-| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | profile-knobs | .claude-plugin/plugin.json | PARKED | waits for PR #1 (core.mjs) | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | profile-knobs | .claude-plugin/plugin.json | CANCELLED | moved to dev-lifecycle-docs-plan as unit profile-knobs (PR 1 landed) | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | publish-observability-tests | scripts/tracker-publish-cli.test.mjs | PENDING | round 5 suggestions: assert the second publish is a refusal not an unchanged no… | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | telemetry-baseline-marker | scripts/telemetry.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | workspace-key-collision | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | decide-auto-archive-authority | docs/architecture/docs.rules.md | PARKED | retire() ignores auto:true and still needs the doc-write grant (doc-retire.mjs:… | 2026-10-23 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | decide-rule-mismatches | docs/architecture | PARKED | decided rules VIEWS-04/08/11 and ARCHIVE-05/07 disagree with the shipped code a… | 2026-10-23 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-dashboard-queue | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main 4c828fb; criterion ticked | 2026-10-24 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-export-write-safety | scripts/lib/export-notes.mjs | IN_PROGRESS | unit-runner | 2026-10-24 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-landing-side-effects | scripts/lib/archive.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main c874e7b4d10214110560bc49… | 2026-10-24 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-one-classifier | scripts/lib/archive.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-retire-next-and-restore | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main; criteria ticked | 2026-10-24 |
+| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-suggestions | scripts/lib/dashboard.mjs | PENDING | — | 2026-10-23 |
 | [fixes-and-safety](../../fixes-and-safety) | ask-via-prompt | ask-via-prompt | MERGED | commit b862187 on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | bypass-flags | bypass-flags | MERGED | commit 62864b6 on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | ci-home-test | ci-home-test | MERGED | commit 64b4718 on feat/fixes-and-safety; CI set green | 2026-10-21 |
