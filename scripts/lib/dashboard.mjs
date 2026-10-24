@@ -5,25 +5,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { logEvent, loadConfig } from "./core.mjs";
-import { loadIndex, parseFrontmatter } from "./plan-index.mjs";
+import { frontmatterGoal, listMd, loadIndex, parseFrontmatter, slugOf } from "./plan-index.mjs";
+import { classifyArchive } from "./archive.mjs";
 import { queue } from "./next-queue.mjs";
 import { exportRoot, writeExportFile } from "./export-notes.mjs";
 import { archivePath, currentState, parseArchiveHeading } from "../tracker.mjs";
-import { findReferrers } from "../doc-retire.mjs";
 import { execFileSync } from "node:child_process";
 
 export const MERMAID_SRC = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
 export const SECTIONS = ["plans", "queue", "ideas", "architecture", "tree", "sizes", "archive"];
 const STATES = ["PENDING", "IN_PROGRESS", "BLOCKED", "PARKED", "MERGED", "FEATURE_MERGED", "COMPLETE", "CANCELLED"];
 const one = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
-const slugOf = (p) => path.basename(String(p || ""), ".md");
-
-function listMd(dir) {
-  try {
-    return fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort()
-      .filter((f) => fs.lstatSync(path.join(dir, f)).isFile());
-  } catch { return []; }
-}
 function read(file) { try { return fs.readFileSync(file, "utf8"); } catch { return ""; } }
 const fmOf = (file) => { try { return parseFrontmatter(read(file)); } catch { return {}; } };
 
@@ -61,13 +53,8 @@ function buildArchive(context, rows) {
     const slug = slugOf(plan);
     let bytes = 0;
     try { bytes = fs.statSync(path.join(root, plan)).size; } catch { /* gone */ }
-    const own = (f) => f === plan || /^docs\/plans\/TRACKER[^/]*\.md$/.test(f) || f === `docs/plans/scrutinise-${slug}.md` || f === `docs/plans/investigate-${slug}.md`;
-    let scan = null;
-    try { scan = findReferrers(context, plan, slug); } catch { scan = null; }
-    const blocking = scan ? scan.blocking.filter((f) => !own(f)) : [];
-    const rewritable = scan ? scan.rewritable.filter((f) => !own(f)) : [];
-    const cls = !scan ? "blocked" : blocking.length ? "blocked" : rewritable.length ? "rewrite" : "auto";
-    candidates.push({ plan, class: cls, bytes, blocking: scan ? blocking : ["referrer scan failed"], referrers: rewritable });
+    const verdict = classifyArchive(context, plan);
+    candidates.push({ plan, class: verdict.class, bytes, blocking: verdict.blocking, referrers: verdict.rewritable });
   }
   return { headings, candidates };
 }
@@ -78,7 +65,7 @@ export function buildModel(context) {
   let index = null;
   try { index = context.index ?? loadIndex(root); } catch { index = null; }
   const planDir = path.join(root, "docs", "plans");
-  const goalOf = (slug) => one(fmOf(path.join(planDir, `${slug}.md`)).goal);
+  const goalOf = (slug) => one(frontmatterGoal(read(path.join(planDir, `${slug}.md`))));
 
   // plans board: state -> [{slug, goal, units}]
   const byState = new Map(STATES.map((s) => [s, new Map()]));

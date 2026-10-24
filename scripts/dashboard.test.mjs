@@ -7,6 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { projectContext } from "./lib/core.mjs";
 import { ledgerPath } from "./tracker.mjs";
+import { autoArchiveEligible } from "./lib/archive.mjs";
 import { buildModel, renderHtml, writeDashboard, esc, SECTIONS, MERMAID_SRC } from "./lib/dashboard.mjs";
 
 const SECRET_BODY = "SECRET-BODY-TEXT-NEVER-RENDERED";
@@ -150,7 +151,7 @@ test("archive: candidates classed auto, rewrite or blocked, blocked names its fi
   try { m = buildModel(context); } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
   const by = Object.fromEntries(m.archive.candidates.map((c) => [path.basename(c.plan, ".md"), c]));
   assert.deepEqual(Object.keys(by).sort(), ["free", "prose", "ruled"], "open plan and missing docs are not candidates");
-  assert.equal(by.free.class, "auto");
+  assert.equal(by.free.class, "not-archivable", "no archive project resolves: never auto (matches autoArchiveEligible)");
   assert.deepEqual(by.free.blocking, []);
   assert.ok(by.free.bytes > 0);
   assert.equal(by.ruled.class, "blocked");
@@ -202,4 +203,29 @@ test("writeDashboard refuses a symlinked dashboard.html and leaves no temp file 
   assert.throws(() => writeDashboard({ root, rows: [] }), /not a regular file/);
   assert.equal(fs.readFileSync(victim, "utf8"), "keep");
   assert.deepEqual(fs.readdirSync(path.join(root, ".craftsman", "export")), ["dashboard.html"]);
+});
+
+test("archive: the dashboard label equals the autoArchiveEligible verdict for the same plan (ARCH-VIEWS-15, ARCH-DOCS-14)", () => {
+  for (const withArchive of [false, true]) {
+    const { context } = archiveFixture();
+    const ws = mk();
+    const manifest = path.join(ws, "craftsman.workspace.json");
+    if (withArchive) {
+      const arch = path.join(ws, "archive");
+      fs.mkdirSync(arch);
+      git(arch, "init", "-q");
+      fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { archive: { root: "archive" } } }));
+    }
+    const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+    try {
+      const m = buildModel(context);
+      assert.equal(m.archive.candidates.length, 3);
+      for (const c of m.archive.candidates) {
+        const verdict = autoArchiveEligible(context, c.plan, { currentState: () => context.rows });
+        assert.equal(c.class === "auto", verdict.eligible, `${c.plan} (archive ${withArchive}): ${c.class} vs ${verdict.reason}`);
+      }
+      if (withArchive) assert.ok(m.archive.candidates.some((c) => c.class === "auto"), "at least one plan is auto");
+    } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
+  }
 });
