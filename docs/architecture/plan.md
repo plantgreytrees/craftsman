@@ -74,3 +74,5 @@ Terminology: its "feature" is the hierarchy's feature; the idea doc's "plan doc 
 
 ## Profile amendment (2026-10-23)
 ARCH-PLAN-07: "how the owner wants Claude to work" lives in three places that already have loading and enforcement. Mechanism goes in config keys, judgement in `.claude/rules/craftsman-loop.md`, and invariants in ARCH rules. Four machine-wide plugin settings sit on top: autonomy level, review depth, model tier and budgets enforcement. A separate profile file was rejected as a fourth place to drift. See [approval](./approval.md).
+
+ARCH-PLAN-05 -> 08: `execution.maxSessions` may be read by the queue script and the dashboard to size lanes (ARCH-VIEWS-07); still never by the mod or a hook. Rejected: keeping it unread, which left the dashboard with one lane.
