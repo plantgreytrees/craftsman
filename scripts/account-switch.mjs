@@ -22,9 +22,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
 import {
-  atomicWrite, claudeHome, clearWorktreeBinding, forgetSessionWorktree, liveClaudeSession, logEvent,
+  atomicWrite, claudeHome, clearWorktreeBinding, forgetSessionWorktree, isMain, liveClaudeSession, logEvent,
   projectContext, readSessionWorktrees, readStdin, readWorktreeBindings, recordSessionWorktree,
   sessionDir, sharedStateDir, sidOf, writeWorktreeBinding,
 } from "./lib/core.mjs";
@@ -601,7 +600,7 @@ async function main(argv) {
 }
 
 // realpath: run through a symlink, a silent no-op would report nothing saved.
-if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   try { await main(process.argv.slice(2)); }
   catch (error) {
     process.stderr.write(`craftsman: account-switch: ${error.message}\n`);

@@ -27,7 +27,7 @@ import { execFileSync } from "node:child_process";
 import { buildIndex, parseFrontmatter as parsePlanFrontmatter } from "./lib/plan-index.mjs";
 import { lintNext } from "./lib/next-queue.mjs";
 import { currentState } from "./tracker.mjs";
-import { PROJECT_ROOT, globToRe, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
+import { PROJECT_ROOT, globToRe, isMain, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
 
 export const DEFAULT_DIR = "docs/architecture";
 const RULE_LINE = /^\s*-\s+\*\*(ARCH-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d+)\*\*\s+\[([^\]]+)\]/;
@@ -326,7 +326,7 @@ export function unmanagedDocs(root, docs, dir = DEFAULT_DIR) {
   return found.sort();
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const rootFlag = args.indexOf("--root");
   const root = rootFlag >= 0 ? path.resolve(args.splice(rootFlag, 2)[1]) : PROJECT_ROOT;
