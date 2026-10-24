@@ -1,0 +1,14 @@
+# Used by `gitleaks dir . --redact` (craftsman.config.json security.check).
+# Extends the default rules; the allowlist covers generated state and sibling checkouts only.
+title = "craftsman gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "git-ignored craftsman state (doc hashes) and other checkouts of this repo, each scanned on its own"
+paths = [
+  '''(^|/)\.craftsman/''',
+  '''(^|/)\.worktrees/''',
+  '''(^|/)\.claude/worktrees/''',
+]

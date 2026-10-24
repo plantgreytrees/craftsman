@@ -127,3 +127,37 @@ test("goal-token: the token holds the digest of the content, so restoring the mt
     assert.notEqual(createHash("sha256").update(fs.readFileSync(goal)).digest("hex"), token.sha256, "the content digest no longer matches");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ARCH-SAFETY-09: from a linked worktree the goal file lives in the MAIN checkout's .craftsman (state-write.mjs).
+function linked() {
+  const main = project();
+  const g = (...a) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd: main, encoding: "utf8" });
+  g("commit", "-q", "--allow-empty", "-m", "init");
+  const wt = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-goal-wt-"))), "wt");
+  assert.equal(g("worktree", "add", "-q", "-b", "wt", wt).status, 0);
+  return { main, wt, clean: () => { fs.rmSync(main, { recursive: true, force: true }); fs.rmSync(path.dirname(wt), { recursive: true, force: true }); } };
+}
+
+test("goal-token: in a linked worktree, a goal file state-write saved in the main checkout mints; outside, symlinked and worktree-local copies do not", () => {
+  const { main, wt, clean } = linked();
+  try {
+    assert.equal(typed(wt, "gt-6", "/craftsman:instruction x").status, 0);
+    const w = spawnSync(process.execPath, [path.join(ROOT, "state-write.mjs")], { cwd: wt, encoding: "utf8", env: envFor(wt, "gt-6"), input: JSON.stringify({ file: "instructions/x.goal.txt", content: "/goal x\n", project: "." }) });
+    assert.equal(w.status, 0, w.stderr);
+    const goal = path.join(main, ".craftsman", "instructions", "x.goal.txt");
+    assert.ok(fs.existsSync(goal));
+    const ok = mint(wt, goal, "gt-6");
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(mint(wt, ".craftsman/instructions/x.goal.txt", "gt-6").status, 0, "relative to the main checkout works too");
+    // refused: outside the instructions directory, a symlink out of it, a worktree-local copy
+    fs.writeFileSync(path.join(main, "evil.goal.txt"), "x");
+    assert.equal(mint(wt, path.join(main, "evil.goal.txt"), "gt-6").status, 2);
+    fs.symlinkSync(path.join(main, "evil.goal.txt"), path.join(main, ".craftsman", "instructions", "link.goal.txt"));
+    assert.equal(mint(wt, path.join(main, ".craftsman", "instructions", "link.goal.txt"), "gt-6").status, 2);
+    fs.mkdirSync(path.join(wt, ".craftsman", "instructions"), { recursive: true });
+    const local = path.join(wt, ".craftsman", "instructions", "local.goal.txt");
+    fs.writeFileSync(local, "x");
+    assert.equal(mint(wt, local, "gt-6").status, 2);
+    assert.equal(mint(wt, ".craftsman/instructions/local.goal.txt", "gt-6").status, 2);
+  } finally { clean(); }
+});

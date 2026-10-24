@@ -1172,3 +1172,15 @@ export function readStdin() {
 }
 
 export function warn(msg) { process.stderr.write(`[craftsman] ${msg}\n`); }
+
+// True when the module at `metaUrl` is the process entry script. Compares
+// realpaths of both sides so a space, a `%` or a symlinked script is handled,
+// unlike the `file://${argv[1]}` template-literal idiom.
+export function isMain(metaUrl, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  try {
+    return fs.realpathSync(fileURLToPath(metaUrl)) === fs.realpathSync(path.resolve(argv1));
+  } catch {
+    return false;
+  }
+}
