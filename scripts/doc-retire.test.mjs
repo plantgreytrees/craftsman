@@ -913,3 +913,36 @@ test("doc-retire rewrite: a pointer written for one doc is never rewritten for a
     assert.equal((hit.after.match(/archive:/g) ?? []).length, 1);
   });
 });
+
+test("doc-retire: retire({auto:true}) logs exactly one doc_retired with auto true; a manual retire logs none with auto (ARCH-DOCS-14)", () => {
+  const auto = noManifest(() => repo());
+  assert.equal(noManifest(() => retire({ plan: PLAN, auto: true }, auto)).retired, PLAN);
+  const autoEvents = events(auto).filter((e) => e.ev === "doc_retired");
+  assert.equal(autoEvents.length, 1);
+  assert.equal(autoEvents[0].auto, true);
+  const manual = noManifest(() => repo());
+  assert.equal(noManifest(() => retire({ plan: PLAN }, manual)).retired, PLAN);
+  const manualEvents = events(manual).filter((e) => e.ev === "doc_retired");
+  assert.equal(manualEvents.length, 1);
+  assert.equal("auto" in manualEvents[0], false);
+});
+
+test("doc-retire: NEXT.md lines of a retired descendant leave with it", () => {
+  const context = noManifest(() => repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD,
+    "docs/plans/NEXT.md": "# Next\n\n1. alpha — first\n2. beta — child\n3. gamma — other\n",
+  } }));
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n\n3. gamma — other\n");
+});
+
+test("doc-retire: a NEXT.md line for a prefix slug is kept (alpha retired, alpha-two kept)", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n\n1. alpha — first\n2. alpha-two — second\n" } }));
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n\n2. alpha-two — second\n");
+});

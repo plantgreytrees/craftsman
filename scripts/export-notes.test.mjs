@@ -254,3 +254,28 @@ test("write safety: atomicWrite renames a temp file, leaves the old file on fail
   assert.equal(fs.readFileSync(f, "utf8"), "two");
   assert.deepEqual(fs.readdirSync(d).sort(), ["dir", "f.txt"]);
 });
+
+test("clearNotes: unlinks nothing through a symlinked .craftsman or .craftsman/export (ARCH-VIEWS-11)", () => {
+  for (const linkAt of [".craftsman", ".craftsman/export"]) {
+    const { root, context } = fixture();
+    const outside = mk();
+    const victim = path.join(outside, "notes", "x.md");
+    put(outside, "notes/x.md", "---\ngenerated: true\n---\nx\n");
+    if (linkAt === ".craftsman") fs.symlinkSync(outside, path.join(root, ".craftsman"));
+    else { fs.mkdirSync(path.join(root, ".craftsman")); fs.symlinkSync(outside, path.join(root, ".craftsman/export")); }
+    assert.deepEqual(clearNotes(context), []);
+    assert.ok(fs.existsSync(victim), linkAt);
+  }
+});
+
+test("writeExportFile: sweeps a stale temp file, keeps a fresh one from a live pid (2.3)", () => {
+  const { context } = fixture();
+  const dir = verifiedExportDir(context);
+  const stale = path.join(dir, `.dashboard.html.${2 ** 22 + 12345}.1.tmp`);
+  const fresh = path.join(dir, `.dashboard.html.${process.pid}.${Date.now() - 5000}.tmp`);
+  fs.writeFileSync(stale, "s"); fs.writeFileSync(fresh, "f");
+  writeExportFile(context, "dashboard.html", "<html>");
+  assert.ok(!fs.existsSync(stale));
+  assert.ok(fs.existsSync(fresh));
+  assert.ok(fs.existsSync(path.join(dir, "dashboard.html")));
+});
