@@ -13,6 +13,8 @@ import { archivePath, currentState, parseArchiveHeading } from "../tracker.mjs";
 import { execFileSync } from "node:child_process";
 
 export const MERMAID_SRC = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js";
+// SHA-384 of the pinned file (identical from jsdelivr and unpkg); a bumped version needs a new hash.
+export const MERMAID_SRI = "sha384-WmdflGW9aGfoBdHc4rRyWzYuAjEmDwMdGdiPNacbwfGKxBW/SO6guzuQ76qjnSlr";
 export const SECTIONS = ["plans", "queue", "ideas", "architecture", "tree", "sizes", "archive"];
 const STATES = ["PENDING", "IN_PROGRESS", "BLOCKED", "PARKED", "MERGED", "FEATURE_MERGED", "COMPLETE", "CANCELLED"];
 const one = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
@@ -205,7 +207,7 @@ export function renderHtml(model) {
 <style>${CSS}</style></head><body>
 <h1>${esc(m.project)} dashboard</h1>
 ${SECTIONS.map((k) => `<section id="${k}"><h2>${titles[k]}</h2>${sec[k]}</section>`).join("\n")}
-<script src="${MERMAID_SRC}"></script>
+<script src="${MERMAID_SRC}" integrity="${MERMAID_SRI}" crossorigin="anonymous"></script>
 <script>${SCRIPT}</script>
 </body></html>
 `;

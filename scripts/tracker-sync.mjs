@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadConfig, enabled, projectContext, readStdin } from "./lib/core.mjs";
 import { syncTrackerDoc, renderState } from "./tracker.mjs";
-import { exportRoot, writeExportFile } from "./lib/export-notes.mjs";
+import { clearNotes, exportRoot, writeExportFile } from "./lib/export-notes.mjs";
 import { logRender } from "./lib/dashboard.mjs";
 
 export const RENDER_BUDGET_MS = 6000;
@@ -54,7 +54,8 @@ export const fingerprintPath = (context) => path.join(exportRoot(context), ".fin
 export function stopRefresh(context, { budgetMs = RENDER_BUDGET_MS, script = DIGEST, args = ["--html"] } = {}) {
   try {
     const cfg = loadConfig(context).export || {};
-    if (cfg.enabled === false || cfg.atStop === false) return "disabled";
+    if (cfg.enabled === false) { clearNotes(context); return "disabled"; }
+    if (cfg.atStop === false) return "disabled";
     const fp = inputFingerprint(context);
     const file = fingerprintPath(context);
     let prev = "";
