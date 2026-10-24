@@ -622,19 +622,13 @@ Tooling: implementer implementer · gates code-reviewer, security-auditor · gua
 Depends on: none
 Root runs this unit by hand. Round 11 findings in the general force block (older than the lease work): (Critical) a config option or `git config` write in the same command turns a plain push into a forced one (`remote.<n>.push=+HEAD:refs/heads/main`, `remote.<n>.mirror`), and the block only looks at the push words; (Critical) force flags supplied at run time through `xargs`/`parallel` are invisible; (Warning) `ownBranchesOf` trusts the bound branch as run-created, so a base other than main/master (develop, trunk) bound by a scope on the main checkout passes; (Suggestion) `--namespace` is not refused.
 - [ ] 29.1 Add tests first in `scripts/lib/force-block.test.mjs`: each of these is blocked: a push under `-c remote.<n>.push=+…`, `-c remote.<n>.mirror=…`, `--config-env=…`, `GIT_CONFIG_COUNT=…`, `--namespace=…`; `git config remote.<n>.push +…` and `git config remote.<n>.mirror …` writes; `xargs git …`, `xargs -a f git`, `parallel git …`; and `ownBranchesOf` returns no binding branch unless it starts with `feat/` or `feature/`; plain pushes, `-C dir push`, and the lease cases of 28.1 stay as they are → accept: the config and xargs shapes fail on the current code
-- [ ] 29.2 In `destructiveGit` block any `git push` whose command text carries `-c`, `--config-env`, `--namespace`, `--git-dir`, `--work-tree`, a `GIT_*=` variable or `env`, block `git config` writes of `remote.*.push`, `remote.*.mirror` and `alias.*`, and block any command where `xargs` or `parallel` runs `git`; limit `ownBranchesOf` to bound branches matching `^(?:feat|feature)/` → accept: tests green
+- [ ] 29.2 In `destructiveGit` block any `git push` whose command text carries `-c`, `--config-env`, `--namespace`, `--git-dir`, `--work-tree`, a `GIT_*=` variable or `env`, block `git config` writes of `remote.*.push`, `remote.*.mirror` and `alias.*`, and block any command where `xargs` or `parallel` runs `git`; limit `ownBranchesOf` to bound branches matching `^(?:feat|feature)/`; scope per owner decision 2026-10-23 after round 12: literal, unquoted, lowercase forms only (ARCH-LAND-31 states the block is best-effort); quoted, escaped, expansion-built and case-varied forms, `send-pack`, remote deletes and non-literal `git` words are the tracked follow-up `force-block-wordlevel` → accept: tests green
 - [ ] 29.3 Pin the same shapes through the real guard in `scripts/pre-guard-narrow.test.mjs` (plain push with `-c` remote push override, `xargs git push`) → accept: tests green
 
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
 
-Round 6 units (fix-bypass-allowlist, fix-reviewer-red) touch disjoint files and run in parallel. The `craftsman.project.json` edit of 9.1/20.4 waits for the owner to run /craftsman:upgrade and /reload-plugins (the installed hook is older than scripts/scope.mjs on main, so no session can record /orchestrate, and both config files are self-protected).
-
-Round 7 units (fix-heredoc-strict, fix-red-run-evidence) touch disjoint files and run in parallel.
-
-Round 8: revert-heredoc-prose (root, by hand) and fix-evidence-flow (runner) touch disjoint files.
-
-Round 9: fix-lease-expansion (root, by hand).
+Rounds 6 to 11 ran their fix units on disjoint files, in parallel or by root; round detail is in git history.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
