@@ -110,9 +110,9 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [external-project-board](./external-project-board.md) | tracker-heading | scripts/tracker.mjs | COMPLETE | all 1 acceptance criteria ticked; merged 2b7c678 direct to main; 75 tests green | 2026-10-23 |
 | [external-project-board](./external-project-board.md) | view-commands | commands/digest.md | COMPLETE | all 1 acceptance criteria ticked; direct merge to main | 2026-10-23 |
 | [p](./p.md) | u1 | — | MERGED | abc | 2026-10-22 |
-| [safety-followups-backlog](./safety-followups-backlog.md) | approval-keys-protected | — | MERGED | direct merge to main 858a68a | 2026-10-24 |
-| [safety-followups-backlog](./safety-followups-backlog.md) | goal-file-main-checkout | — | MERGED | landed direct on main (095bd2a); goal-token resolves instructions under mainChe… | 2026-10-24 |
-| [safety-followups-backlog](./safety-followups-backlog.md) | ismain-helper | — | MERGED | direct merge 984f1694c69809679260fa53c450dc394e4001ff of feat/ismain-helper | 2026-10-24 |
+| [safety-followups-backlog](./safety-followups-backlog.md) | approval-keys-protected | — | COMPLETE | 113e1d5/858a68a: both approval keys in SAFETY_CONFIG_KEYS; scrutinise r2 criter… | 2026-10-24 |
+| [safety-followups-backlog](./safety-followups-backlog.md) | goal-file-main-checkout | — | COMPLETE | e7dea5e/095bd2a + 7247c03: goal file resolves via main checkout and worktree; c… | 2026-10-24 |
+| [safety-followups-backlog](./safety-followups-backlog.md) | ismain-helper | — | COMPLETE | 51871b0/984f169 helper + 22 scripts switched (f845825..c889d44); doc-size-polic… | 2026-10-24 |
 | [safety-followups-backlog](./safety-followups-backlog.md) | ledger-housekeeping | docs/plans/TRACKER.md | COMPLETE | 4 ledger rows closed via tracker.mjs (config-keys-protected, followup-md-dirty-… | 2026-10-24 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-lock-stale-race | scripts/approval.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-owner-trust | scripts/pre-guard.mjs | PENDING | — | 2026-10-23 |
@@ -155,13 +155,13 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-retire-next-and-restore | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main; criteria ticked | 2026-10-24 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-suggestions | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; merged direct to main; gates green (1082 test… | 2026-10-24 |
 | [scrutinise-external-project-board](./scrutinise-external-project-board.md) | impl-landing-token | scripts/doc-retire.mjs | PENDING | — | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | goal-token-worktree | scripts/goal-token.mjs | MERGED | merged direct to main at aeb6034; 891 tests pass, arch-check lint PASS | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-1 | scripts | MERGED | direct merge 1eddbc89752a811f5e4688bbb063bd67aeb1e87f | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-2 | scripts | MERGED | landed direct on main, refactor isMain in 5 scripts | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-3 | scripts | MERGED | merged direct to main at a3cbcb55ac7a10fb7dbb3cbff5df85ee4c760691; 882 tests pa… | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-4 | scripts | MERGED | direct merge 3880252; suite 889 pass | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-5 | scripts | MERGED | direct merge b82b3ca; 891 tests pass | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | scrutinise-housekeeping | scripts/lib/core.test.mjs | MERGED | direct land to main, merged feat/scrutinise-housekeeping; push pending if unpus… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | goal-token-worktree | scripts/goal-token.mjs | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-1 | scripts | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-2 | scripts | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-3 | scripts | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-4 | scripts | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | ismain-switch-5 | scripts | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](./scrutinise-safety-followups-backlog.md) | scrutinise-housekeeping | scripts/lib/core.test.mjs | COMPLETE | merged on main; /scrutinise round 2: 0 Critical, 0 Warning, all criteria MET; s… | 2026-10-24 |
 | [fixes-and-safety](../../fixes-and-safety) | ask-via-prompt | ask-via-prompt | MERGED | commit b862187 on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | bypass-flags | bypass-flags | MERGED | commit 62864b6 on feat/fixes-and-safety; CI set green | 2026-10-21 |
 | [fixes-and-safety](../../fixes-and-safety) | ci-home-test | ci-home-test | MERGED | commit 64b4718 on feat/fixes-and-safety; CI set green | 2026-10-21 |

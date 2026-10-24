@@ -3,8 +3,8 @@ area: state
 governs: ["scripts/lib/core.mjs", "scripts/state-write.mjs", "scripts/scope.mjs", "scripts/pre-guard.mjs", "scripts/stop-gate.mjs", "scripts/orchestrate-scope-guard.mjs", "scripts/agent-mode-guard.mjs", "scripts/session-context.mjs", "scripts/doc-write.mjs", "scripts/quality-gate.mjs"]
 human: docs/architecture/state.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: b0328f634412c627bc6694cd6652ab2c57e1e450
-updated: 2026-10-23
+verified_at: cefd54da8e08b406bdbc1fd9322d41ad17e7ff9c
+updated: 2026-10-24
 ---
 # ARCH state — enforced rules
 
