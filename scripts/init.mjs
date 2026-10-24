@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { checkDocSizes } from "./doc-size-policy.mjs";
 import { DEFAULT_DIR, loadRules, unmanagedDocs } from "./arch-check.mjs";
 import { mergeSettings, renderSettingsDiff } from "./lib/settings-merge.mjs";
-import { loadConfig } from "./lib/core.mjs";
+import { isMain, loadConfig } from "./lib/core.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(pluginRoot, "craftsman.config.json");
@@ -499,7 +499,7 @@ export function applySandboxSettings(root) {
   return { ...preview, written: true, backup };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const args = new Set(process.argv.slice(2));
     const modes = ["--check", "--diff", "--write", "--update", "--settings-diff", "--settings-write"].filter((mode) => args.has(mode));
