@@ -1008,3 +1008,24 @@ test("consumeNonce: a leftover safety-off file does not stand in for the nonce, 
     assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), false, "and one-shot");
   } finally { fs.rmSync(stateDir, { recursive: true, force: true }); }
 });
+
+// ---- isMain (ARCH-STATE-06 unit ismain-helper) ----
+test("isMain: matches a plain path, a path with a space, a %, and a symlink; false when argv[1] is missing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ismain-"));
+  try {
+    for (const name of ["plain.mjs", "has space.mjs", "pct%41.mjs"]) {
+      const f = path.join(dir, name);
+      fs.writeFileSync(f, "");
+      assert.equal(coreNs.isMain(pathToFileURL(f).href, f), true, name);
+      assert.equal(coreNs.isMain(pathToFileURL(f).href, path.join(dir, "other.mjs")), false, name);
+    }
+    const real = path.join(dir, "plain.mjs");
+    const link = path.join(dir, "link.mjs");
+    fs.symlinkSync(real, link);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, link), true);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, undefined), false);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, path.join(dir, "missing.mjs")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
