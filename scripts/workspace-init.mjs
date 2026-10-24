@@ -2,7 +2,7 @@
 // Create or explicitly update a workspace manifest from caller-supplied roots.
 import fs from "node:fs";
 import path from "node:path";
-import { atomicWrite, isGitRoot, loadWorkspaceManifest, readStdin, workspaceManifestPath } from "./lib/core.mjs";
+import { atomicWrite, isGitRoot, loadWorkspaceManifest, readStdin, workspaceManifestPath, isMain } from "./lib/core.mjs";
 
 function validateInput(input) {
   if (!input || typeof input !== "object" || !input.projects || typeof input.projects !== "object") {
@@ -27,7 +27,7 @@ export function buildManifest(input, existing = null) {
   return { version: 1, projects };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = validateInput(JSON.parse(await readStdin() || "{}"));
     const file = input.manifest_path ? path.resolve(input.manifest_path) : workspaceManifestPath();
