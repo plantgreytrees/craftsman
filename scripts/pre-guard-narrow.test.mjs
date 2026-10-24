@@ -58,7 +58,7 @@ test("narrow: the lease exception covers the run's own branches only (ARCH-LAND-
   assert.ok(own.includes("feat/guard-narrowing"));
   assert.ok(own.includes("feature/dev-lifecycle-docs-plan-*"));
   assert.deepEqual(ownBranchesOf(null, null), []);
-  const ok = ["git push --force-with-lease origin feat/guard-narrowing", "git push --force-with-lease origin feature/dev-lifecycle-docs-plan-3"];
+  const ok = ["git push --force-with-lease origin HEAD:refs/heads/feat/guard-narrowing", "git push --force-with-lease origin HEAD:refs/heads/feature/dev-lifecycle-docs-plan-3"];
   const refused = [
     "git push --force-with-lease origin main", "git push --force-with-lease origin feat/other-unit",
     `git push ${FORCE} origin feat/guard-narrowing`, "git push --force-with-lease origin +feat/guard-narrowing",
@@ -74,5 +74,5 @@ test("narrow: the lease exception is refused for an expanded or double-colon ref
   for (const c of [`X=x:main; git push --force-with-lease origin feature/p-${dollar}X`, "git push --force-with-lease origin HEAD:feature/p-x:main", "git push --force-with-lease origin HEAD:feature/p-{x,y}"]) {
     assert.ok(await forceBlocked(c, { ownBranches: own }), `refused: ${c}`);
   }
-  assert.equal(await forceBlocked("git push --force-with-lease origin HEAD:feat/unit-a", { ownBranches: own }), null);
+  assert.equal(await forceBlocked("git push --force-with-lease origin HEAD:refs/heads/feat/unit-a", { ownBranches: own }), null);
 });

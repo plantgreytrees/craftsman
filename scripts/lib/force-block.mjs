@@ -74,6 +74,8 @@ const SAFE_NAME = /^[A-Za-z0-9._\/-]+$/;
 export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
   // The words were read before the shell expands them: any expansion character in the command, or in a word, is no exception.
   if (/[$`\\]/.test(text) || rest.some((w) => !SAFE_WORD.test(w))) return false;
+  // Git config can remap a push (remote.<n>.push, push.default): refuse any config-carrying global option, GIT_* variable or env prefix.
+  if (/(?:^|[\s;&|(])(?:-c|--config-env\S*|--git-dir\S*|--work-tree\S*|--exec-path\S*)(?=[\s=]|$)|\bGIT_[A-Z_]+=|(?:^|[\s;&|(])env(?:\s|$)/.test(text)) return false;
   const own = ownBranches.filter((b) => SAFE_NAME.test(b.replace(/\*/g, "x"))).map((glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[A-Za-z0-9._-]+")}$`));
   const isLease = (w) => w.startsWith("--force-w") && "--force-with-lease".startsWith(w.split("=")[0]);
   const flags = rest.filter((w) => w.startsWith("-"));
@@ -81,17 +83,18 @@ export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
   if (!remote || !refs.length || rest.includes(UNEXPANDED)) return false;
   if (!flags.some(isLease) || !flags.every((w) => isLease(w) || LEASE_OK.has(w))) return false;
   return refs.every((ref) => {
-    const sides = ref.split(":"); // at most one colon: git splits at the last one, so a second would hide the real destination
-    if (sides.length > 2 || !sides.every((side) => SAFE_NAME.test(side))) return false;
-    const dst = sides[sides.length - 1].replace(/^refs\/heads\//, "");
-    return dst !== "" && own.some((re) => re.test(dst));
+    // `src:refs/heads/<own>` only: a colon-less ref or a short destination is resolved by git through push config.
+    const sides = ref.split(":");
+    if (sides.length !== 2 || !sides.every((side) => SAFE_NAME.test(side)) || !sides[1].startsWith("refs/heads/")) return false;
+    return own.some((re) => re.test(sides[1].slice("refs/heads/".length)));
   });
 }
 
 // The branches this run owns: its bound unit branch and `feature/<plan>-*` for its plan.
 export function ownBranchesOf(binding, scope) {
   const slug = typeof scope?.plan === "string" ? scope.plan.replace(/^.*\//, "").replace(/\.md$/, "") : "";
-  const named = (b) => typeof b === "string" && /^[A-Za-z0-9._\/-]+$/.test(b) && !/^(?:main|master)$/.test(b);
+  // A safe name that git cannot read as another ref: not HEAD, not an option, not refs/ or heads/ qualified, never a main or master segment.
+  const named = (b) => typeof b === "string" && /^[A-Za-z0-9._\/-]+$/.test(b) && !/^(?:HEAD$|-|refs\/|heads\/)/i.test(b) && !/(?:^|\/)(?:main|master)$/i.test(b);
   const own = [];
   if (named(binding?.branch)) own.push(binding.branch); // exact name, never a pattern
   if (named(slug)) own.push(`feature/${slug}-*`);
