@@ -194,3 +194,12 @@ test("buildModel: real project context lists ready plans and execution.maxSessio
   assert.deepEqual(q.map((e) => e.slug).sort(), ["one", "three", "two"]);
   assert.equal(q.filter((e) => e.lane).length, 2);
 });
+
+test("writeDashboard refuses a symlinked dashboard.html and leaves no temp file (ARCH-VIEWS-11)", () => {
+  const root = mk(); const victim = path.join(mk(), "victim"); fs.writeFileSync(victim, "keep");
+  fs.mkdirSync(path.join(root, ".craftsman", "export"), { recursive: true });
+  fs.symlinkSync(victim, path.join(root, ".craftsman", "export", "dashboard.html"));
+  assert.throws(() => writeDashboard({ root, rows: [] }), /not a regular file/);
+  assert.equal(fs.readFileSync(victim, "utf8"), "keep");
+  assert.deepEqual(fs.readdirSync(path.join(root, ".craftsman", "export")), ["dashboard.html"]);
+});

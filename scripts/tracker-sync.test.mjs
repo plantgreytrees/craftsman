@@ -90,3 +90,19 @@ test("hook: garbage stdin and a broken config still exit 0", () => {
   put(root, "craftsman.project.json", "{not json");
   assert.equal(hook(root, "\u0000garbage").status, 0);
 });
+
+test("hook: running the script through a symlinked path still runs the hook (main-module check)", () => {
+  const root = fixture();
+  const link = path.join(mk(), "tracker-sync.mjs");
+  fs.symlinkSync(SYNC, link);
+  const r = spawnSync(process.execPath, [link], { cwd: root, input: JSON.stringify({ hook_event_name: "Stop" }), env: hookEnv(root), encoding: "utf8", timeout: 20000 });
+  assert.equal(r.status, 0);
+  assert.ok(fs.existsSync(dash(root)), "the Stop render ran through the symlink");
+});
+
+test("stopRefresh: a symlinked export dir stores no fingerprint and returns failed", () => {
+  const root = mk(); const out = mk();
+  fs.mkdirSync(path.join(root, ".craftsman")); fs.symlinkSync(out, path.join(root, ".craftsman", "export"));
+  assert.equal(stopRefresh(ctxOf(root), { script: process.execPath, args: ["-e", "0"] }), "failed");
+  assert.deepEqual(fs.readdirSync(out), []);
+});
