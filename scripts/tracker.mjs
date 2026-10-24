@@ -8,7 +8,7 @@ import {
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
   mainCheckoutRoot, loadWorkspaceManifest,
 } from "./lib/core.mjs";
-import { resolveArchive, archivePathFor, restoreCommand } from "./lib/archive.mjs";
+import { resolveArchive, archivePathFor, restoreCommand, productIdFor } from "./lib/archive.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
 import { droppedKeys } from "./lib/ledger-keys.mjs";
@@ -520,12 +520,7 @@ function restoreCommandFor(rec, context) {
   try {
     const archive = resolveArchive(context);
     if (!archive.root) return null;
-    const root = trackerRoot(context);
-    let productId = path.basename(root);
-    try {
-      const projects = loadWorkspaceManifest()?.projects ?? {};
-      productId = Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? productId;
-    } catch { /* fall back to the directory name */ }
+    const productId = productIdFor(context);
     const own = path.posix.basename(rec.plan, ".md");
     // A sibling (scrutinise-/investigate-) is archived under its owning plan's folder (doc-retire).
     const owner = own.replace(/^(?:scrutinise|investigate)-/, "");

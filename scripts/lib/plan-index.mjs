@@ -1,5 +1,5 @@
 // The only parser of docs/plans frontmatter for hierarchy (ARCH-PLAN-02).
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 
 export const LEVELS = ["epic", "story", "feature"];
@@ -113,7 +113,26 @@ export function removeChild(text, slug) {
   return front[1] + next.join("\n") + front[3] + String(text).slice(front[0].length);
 }
 
-const slugOf = (ref) => basename(String(ref).trim(), ".md");
+export const slugOf = (ref) => basename(String(ref ?? "").trim().replaceAll("\\", "/"), ".md");
+// Generated ledger docs under docs/plans (TRACKER.md, TRACKER-archive.md, ...); never plans or referrers.
+export const TRACKER_FILE = /^docs\/plans\/TRACKER[^/]*\.md$/;
+export const isTrackerDoc = (file) => /^TRACKER[^/]*\.md$/.test(basename(String(file)));
+// Sorted regular *.md names in dir (optionally filtered); [] when the dir is unreadable.
+export function listMd(dir, filter = () => true) {
+  try {
+    return readdirSync(dir).filter((f) => f.endsWith(".md") && filter(f)).sort()
+      .filter((f) => lstatSync(join(dir, f)).isFile());
+  } catch { return []; }
+}
+// Front-matter `goal:` of a doc text ("" when absent); the H1 is the fallback in docGoal (ARCH-DOCS-09).
+export function frontmatterGoal(text) {
+  try { return String(parseFrontmatter(String(text ?? "")).goal ?? "").trim(); } catch { return ""; }
+}
+export function docGoal(text) {
+  const front = frontmatterGoal(text);
+  if (front) return front;
+  return /^#[ \t]+(.+?)[ \t]*$/m.exec(String(text ?? "").replace(/^---\r?\n[\s\S]*?\r?\n---/, ""))?.[1] ?? "";
+}
 const asList = (v) => (Array.isArray(v) ? v : v == null || v === "" ? [] : [v]);
 
 // ---- building ----

@@ -5,7 +5,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { loadConfig, loadWorkspaceManifest, logEvent } from "./core.mjs";
 import { findReferrers, retire as docRetire } from "../doc-retire.mjs";
-import { currentState } from "../tracker.mjs";
+import { currentState, trackerRoot } from "../tracker.mjs";
+import { loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";
 import { mainCheckoutRoot } from "./core.mjs";
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -41,6 +42,52 @@ export function archivePathFor({ productId, kind, slug, file }) {
     throw new Error(`architecture rules docs are never archived (ARCH-ARCHIVE-06): ${file}`);
   }
   return `${productId}/${kind}/${slug}/${clean}`;
+}
+
+// One product id for archive paths and pointers (ARCH-ARCHIVE-02): the workspace project whose root is this checkout's
+// real tracker root, else the directory name.
+export function productIdFor(context) {
+  const root = fs.realpathSync(trackerRoot(context));
+  try {
+    const projects = loadWorkspaceManifest()?.projects ?? {};
+    return Object.entries(projects).find(([, p]) => p.root === root)?.[0] ?? path.basename(root);
+  } catch { return path.basename(root); }
+}
+
+// ARCH-VIEWS-15 / ARCH-DOCS-14: the one archive verdict for a plan doc, used by the dashboard, autoArchiveEligible and retire.
+// class: blocked (a rule/test/top-level doc refers to it, or the scan failed; names the file), not-archivable (no archive
+// project resolves and nothing blocks), rewrite (only prose referrers), auto (no referrer at all). blocking/rewritable name the files; hits is their sorted union.
+// Exempt, as retire exempts them: the plan, the removing set, its scrutinise-/investigate- siblings, TRACKER*.md, NEXT.md,
+// and (for the primary doc) the parent's rollup and a parent doc that only lists it in `children`.
+// opts: {slug, removing, primary (default true), archive (pre-resolved), resolveArchive, findReferrers}.
+export function classifyArchive(context, plan, opts = {}) {
+  const slug = opts.slug ?? slugOf(plan);
+  const dir = path.posix.dirname(plan);
+  const archive = opts.archive ?? (opts.resolveArchive || resolveArchive)(context);
+  let scan = null;
+  try { scan = (opts.findReferrers || findReferrers)(context, plan, slug); } catch { scan = null; }
+  if (scan === null || scan === undefined) {
+    return { class: "blocked", scanFailed: true, blocking: ["referrer scan failed"], rewritable: [], hits: [], reason: "referrer scan failed" };
+  }
+  const skip = new Set([plan, ...(opts.removing ?? []), path.posix.join("docs/plans", slug, "TRACKER.md"),
+    path.posix.join(dir, `scrutinise-${slug}.md`), path.posix.join(dir, `investigate-${slug}.md`), "docs/plans/NEXT.md"]);
+  if (opts.primary !== false) {
+    try {
+      const parent = loadIndex(context.root).get(slug)?.parent ?? null;
+      if (parent) {
+        skip.add(path.posix.join("docs/plans", parent, "TRACKER.md"));
+        const parentDoc = path.posix.join(dir, `${parent}.md`);
+        const next = removeChild(fs.readFileSync(path.join(context.root, parentDoc), "utf8"), slug);
+        if (next !== null && ![plan, slug].some((t) => next.includes(t))) skip.add(parentDoc);
+      }
+    } catch { /* no index or parent doc: nothing extra is exempt */ }
+  }
+  const keep = (file) => !skip.has(file) && !TRACKER_FILE.test(file);
+  const hits = (scan.hits ?? []).filter(keep).sort();
+  const rewritable = (scan.rewritable ?? []).filter(keep).sort();
+  const blocking = (scan.blocking ?? scan.hits ?? []).filter(keep).filter((f) => !rewritable.includes(f)).sort();
+  const cls = blocking.length ? "blocked" : !archive?.root ? "not-archivable" : rewritable.length ? "rewrite" : "auto";
+  return { class: cls, blocking, rewritable, hits, reason: cls === "not-archivable" ? `no archive project: ${archive?.off ?? "unresolved"}` : undefined };
 }
 
 export function restoreCommand(archiveRoot, sha, file) {
@@ -115,20 +162,15 @@ export function autoArchiveEligible(context, plan, seams = {}) {
   const no = (reason) => ({ eligible: false, reason });
   try {
     if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) return no("invalid plan path");
-    const slug = path.posix.basename(plan, ".md");
-    const dir = path.posix.dirname(plan);
     const archive = (seams.resolveArchive || resolveArchive)(context);
     if (!archive?.root) return no(`no archive project: ${archive?.off ?? "unresolved"}`);
     const rows = (seams.currentState || currentState)(context).filter((row) => row.plan === plan);
     if (!rows.length) return no("plan has no tracker rows");
     const open = rows.filter((row) => row.status !== "COMPLETE" && row.status !== "CANCELLED");
     if (open.length) return no(`open rows: ${open.map((row) => `${row.unit}=${row.status}`).join(", ")}`);
-    const scan = (seams.findReferrers || findReferrers)(context, plan, slug);
-    if (scan === null || scan === undefined) return no("referrer scan failed");
-    const own = new Set([plan, path.posix.join("docs/plans", slug, "TRACKER.md"),
-      path.posix.join(dir, `scrutinise-${slug}.md`), path.posix.join(dir, `investigate-${slug}.md`)]);
-    const hits = (scan.hits ?? []).filter((file) => !own.has(file) && !/^docs\/plans\/TRACKER[^/]*\.md$/.test(file));
-    if (hits.length) return no(`referenced by ${hits.sort().join(", ")}`);
+    const verdict = classifyArchive(context, plan, { archive, findReferrers: seams.findReferrers });
+    if (verdict.scanFailed) return no("referrer scan failed");
+    if (verdict.hits.length) return no(`referenced by ${verdict.hits.join(", ")}`);
     const git = seams.git || ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
     try { git(["ls-files", "--error-unmatch", "--", plan], context); } catch { return no(`${plan} is not tracked by git`); }
     if (String(git(["status", "--porcelain", "--", plan], context) ?? "").trim()) return no(`uncommitted changes in ${plan}`);
