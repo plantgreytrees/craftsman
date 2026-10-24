@@ -185,3 +185,22 @@ test("productIdFor: the workspace project whose root is this checkout, else the 
     assert.equal(productIdFor({ root }), "shop");
   } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
 });
+
+test("copyAndCommit: a symlinked source is refused with no commit (ARCH-ARCHIVE-03)", () => {
+  const f = fixture();
+  fs.rmSync(path.join(f.src, "docs/plans/s.md"));
+  fs.symlinkSync(path.join(f.src, "docs/plans/p.md"), path.join(f.src, "docs/plans/s.md"));
+  assert.throws(() => copyAndCommit(f.args, f.seams), /symlink/);
+  assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
+  assert.equal(fs.existsSync(path.join(f.archive, "prod/plans/p/docs/plans/p.md")), false);
+});
+
+test("copyAndCommit: a symlinked archive subfolder is refused with no commit (ARCH-ARCHIVE-03)", () => {
+  const f = fixture();
+  const outside = tmp("outside");
+  fs.mkdirSync(path.join(f.archive, "prod"), { recursive: true });
+  fs.symlinkSync(outside, path.join(f.archive, "prod/plans"));
+  assert.throws(() => copyAndCommit(f.args, f.seams), /symlink/);
+  assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
+  assert.deepEqual(fs.readdirSync(outside), []);
+});

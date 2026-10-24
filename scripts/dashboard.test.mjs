@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { projectContext } from "./lib/core.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { autoArchiveEligible } from "./lib/archive.mjs";
-import { buildModel, renderHtml, writeDashboard, esc, SECTIONS, MERMAID_SRC } from "./lib/dashboard.mjs";
+import { buildModel, renderHtml, writeDashboard, esc, SECTIONS, MERMAID_SRC, MERMAID_SRI } from "./lib/dashboard.mjs";
 
 const SECRET_BODY = "SECRET-BODY-TEXT-NEVER-RENDERED";
 const EVIL = "</script><img onerror=1>";
@@ -63,7 +63,7 @@ test("renderHtml: golden skeleton of an empty-model page", () => {
 <section id="tree"><h2>Plan tree</h2><p class="empty">No plans in the plan tree.</p></section>
 <section id="sizes"><h2>Doc sizes</h2><p class="empty">No docs found.</p></section>
 <section id="archive"><h2>Archive</h2><h3>Archived</h3><p class="empty">Nothing archived yet.</p><h3>Archive candidates</h3><p class="empty">No archive candidates.</p></section>
-<script src="${MERMAID_SRC}"></script>
+<script src="${MERMAID_SRC}" integrity="${MERMAID_SRI}" crossorigin="anonymous"></script>
 <script></script>
 </body></html>
 `);
@@ -81,6 +81,9 @@ test("renderHtml: hostile goal is escaped; no off-page src or href beyond pinned
   assert.deepEqual(urls, [MERMAID_SRC]);
   assert.match(MERMAID_SRC, /^https:\/\/cdn\.jsdelivr\.net\/npm\/mermaid@10\.9\.1\//);
   assert.equal((html.match(/<script/g) || []).length, 2);
+  assert.equal((html.match(/<script src=/g) || []).length, 1);
+  assert.match(MERMAID_SRI, /^sha384-[A-Za-z0-9+/]{64}$/);
+  assert.ok(html.includes(`integrity="${MERMAID_SRI}" crossorigin="anonymous"`));
   assert.ok(!/https?:\/\//.test(html.replace(MERMAID_SRC, "")));
   assert.match(html, /<pre class="mermaid">graph TD\n  A--&gt;B<\/pre>/);
   assert.match(html, /<details class="src"><summary>diagram source/);

@@ -4,6 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,4 +31,27 @@ test("the hooks config and tracker-sync.mjs have no publish path", () => {
   for (const f of ["hooks/" + "hooks.json", "scripts/tracker-sync.mjs"]) {
     assert.doesNotMatch(read(f), /publish|artifact/i, f);
   }
+});
+
+test("_sync-docs-prune.md: no force flag, rounds of 15, never pre-approved, push retry", () => {
+  const t = read("commands/_sync-docs-prune.md");
+  assert.doesNotMatch(t, /(^|\s)(--force|-f)(\s|$|[`.,;])/m);
+  assert.match(t, /Rounds of at most 15 docs/);
+  const never = t.slice(t.indexOf("## Never pre-approved"));
+  assert.match(never, /An active `\/goal` or any pre-approval does \*\*not\*\* cover `--archive`, `--prune` or `--prune --archive`/);
+  assert.match(t, /retry any `archive_push_pending`/);
+});
+
+test("stopRefresh: export.enabled false clears generated notes only", async () => {
+  const { stopRefresh } = await import("./tracker-sync.mjs");
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "views-clear-")));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  fs.writeFileSync(path.join(root, ["craftsman", "project", "json"].join(".")), JSON.stringify({ export: { enabled: false } }));
+  const notes = path.join(root, ".craftsman", "export", "notes");
+  fs.mkdirSync(notes, { recursive: true });
+  fs.writeFileSync(path.join(notes, "gen.md"), "---\ngenerated: true\n---\nx\n");
+  fs.writeFileSync(path.join(notes, "mine.md"), "hand written\n");
+  assert.equal(stopRefresh({ root, stateDir: path.join(root, ".craftsman") }), "disabled");
+  assert.ok(!fs.existsSync(path.join(notes, "gen.md")));
+  assert.ok(fs.existsSync(path.join(notes, "mine.md")));
 });

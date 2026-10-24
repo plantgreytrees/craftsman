@@ -96,6 +96,7 @@ export function restoreCommand(archiveRoot, sha, file) {
 }
 
 const defaultGit = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+const isLink = (f) => { try { return fs.lstatSync(f).isSymbolicLink(); } catch { return false; } };
 const defaultCopy = (from, to) => fs.copyFileSync(from, to);
 
 // files: repo-relative strings (read from sourceRoot) or {file, from}. seams: {git(args, cwd), copy(from, to), context}.
@@ -122,6 +123,13 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
       }
     }
     for (const p of plans) {
+      // ARCH-ARCHIVE-03: no symlink as the source or as any component under the archive root.
+      if (isLink(p.from)) throw new Error(`source is a symlink: ${p.file}`);
+      let walk = archiveRoot;
+      for (const part of path.relative(archiveRoot, p.to).split(path.sep)) {
+        walk = path.join(walk, part);
+        if (isLink(walk)) throw new Error(`archive path contains a symlink: ${p.rel}`);
+      }
       if (!fs.existsSync(p.from)) throw new Error(`source file missing: ${p.file}`);
       const source = fs.readFileSync(p.from);
       if (fs.existsSync(p.to)) {
