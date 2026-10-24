@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { autoArchiveEligible } from "./lib/archive.mjs";
+import { buildIndex } from "./lib/plan-index.mjs";
 import { inspectRepo, landFeature, prepare } from "./repo-exec.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { projectContext } from "./lib/core.mjs";
@@ -23,6 +24,7 @@ const ok = {
   currentState: () => closed,
   findReferrers: () => ({ hits: [PLAN, "docs/plans/TRACKER.md"], blocking: [], rewritable: [] }),
   git: () => "",
+  loadIndex: () => ({ get: () => undefined, nodes: new Map() }),
 };
 const ctx = { root: "/tmp/x" };
 
@@ -39,6 +41,10 @@ test("autoArchiveEligible: each failing condition is refused with its reason", (
     ["a failed scan", { findReferrers: () => null }, /referrer scan failed/],
     ["a blocking referrer", { findReferrers: () => ({ hits: [PLAN, "scripts/x.test.mjs"] }) }, /referenced by scripts\/x\.test\.mjs/],
     ["a rewritable prose referrer", { findReferrers: () => ({ hits: [PLAN, "docs/plans/q.md"], rewritable: ["docs/plans/q.md"] }) }, /referenced by docs\/plans\/q\.md/],
+    ["an open sibling", { currentState: () => [...closed, { plan: "docs/plans/scrutinise-p.md", unit: "s", status: "IN_PROGRESS" }] }, /open sibling plans keep docs\/plans\/p\.md: docs\/plans\/scrutinise-p\.md \(s=IN_PROGRESS\)/],
+    ["a live descendant", { loadIndex: () => buildIndex([
+      { path: PLAN, slug: "p", text: "---\nlevel: epic\nchildren: [c]\n---\n# p\n" },
+      { path: "docs/plans/c.md", slug: "c", text: "---\nparent: p\n---\n# c\n" }]) }, /has live descendants: c/],
     ["an untracked doc", { git: (args) => { if (args[0] === "ls-files") notTracked(); return ""; } }, /not tracked/],
     ["a dirty doc", { git: (args) => (args[0] === "status" ? " M docs/plans/p.md\n" : "") }, /uncommitted changes/],
     ["a throwing seam", { resolveArchive: () => { throw new Error("boom"); } }, /eligibility check failed: boom/],
@@ -58,7 +64,7 @@ test("autoArchiveEligible: sibling plans and the plan's own rollup are not refer
 });
 
 // ---- 5.2/5.3: land-feature wiring ------------------------------------------------------------------------------------
-function scenario(deps, { dirtyMain = false } = {}) {
+function scenario(deps, { dirtyMain = false, mainFiles = {}, featureFiles = {}, extraRows = [], plan = "docs/plans/p.md" } = {}) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-auto-archive-"));
   const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
   try {
@@ -86,24 +92,31 @@ function scenario(deps, { dirtyMain = false } = {}) {
     git(context.root, ["add", "craftsman.config.json"]);
     git(context.root, ["commit", "-q", "-m", "config"]);
     git(context.root, ["push", "-q", "origin", git(context.root, ["branch", "--show-current"])]);
+    const put = (root, files, message) => {
+      for (const [file, text] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); fs.writeFileSync(path.join(root, file), text); }
+      if (Object.keys(files).length) { git(root, ["add", ...Object.keys(files)]); git(root, ["commit", "-q", "-m", message]); }
+    };
+    put(context.root, mainFiles, "docs on main");
+    if (Object.keys(mainFiles).length) git(context.root, ["push", "-q", "origin", git(context.root, ["branch", "--show-current"])]);
     const info = inspectRepo(context);
     const feature = prepare(context, { unit: "f-x", slug: "p-f1", branch: "feature/p-f1" }, info);
     git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/p-f1"]);
     fs.writeFileSync(path.join(feature.worktree_path, "a.txt"), "a\n");
     git(feature.worktree_path, ["add", "a.txt"]);
     git(feature.worktree_path, ["commit", "-q", "-m", "feat: a"]);
+    put(feature.worktree_path, featureFiles, "docs in the landed merge");
     git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
-    const rows = ["u0", "u1"].map((unit) => ({ key: `.::p::${unit}`, project: ".", plan: "docs/plans/p.md", unit, status: "IN_PROGRESS", evidence: "x", session_id: "s", feature: "f1", feature_branch: "feature/p-f1", updated_at: "2026-01-01T00:00:00Z" }));
+    const rows = ["u0", "u1"].map((unit) => ({ key: `.::${plan}::${unit}`, project: ".", plan, unit, status: "IN_PROGRESS", evidence: "x", session_id: "s", feature: "f1", feature_branch: "feature/p-f1", updated_at: "2026-01-01T00:00:00Z" }));
     const file = ledgerPath(context);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, rows.flatMap((row) => [JSON.stringify(row), JSON.stringify({ ...row, status: "FEATURE_MERGED" })]).join("\n") + "\n");
+    fs.writeFileSync(file, rows.flatMap((row) => [JSON.stringify(row), JSON.stringify({ ...row, status: "FEATURE_MERGED" })]).join("\n") + "\n" + extraRows.map((r) => JSON.stringify({ key: `.::${r.plan}::${r.unit}`, project: ".", evidence: "x", session_id: "s", updated_at: "2026-01-01T00:00:00Z", ...r })).map((l) => `${l}\n`).join(""));
     if (dirtyMain) fs.appendFileSync(path.join(context.root, "README.md"), "dirty\n");
     const archiveBefore = git(repos.archive.root, ["rev-parse", "HEAD"]);
     const originBefore = git(repos.archive.origin, ["rev-parse", "HEAD"]);
     const calls = { retire: [] };
     const mainState = () => ({ head: git(context.root, ["rev-parse", "HEAD"]), status: git(context.root, ["status", "--porcelain", "-uno"]) });
     const mainBefore = mainState();
-    const result = landFeature(context, { plan: "docs/plans/p.md", feature: "f1", session_id: "s" }, info, deps(calls, repos));
+    const result = landFeature(context, { plan, feature: "f1", session_id: "s" }, info, deps(calls, repos));
     const events = fs.existsSync(path.join(context.stateDir, "events.jsonl"))
       ? fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
     const normal = JSON.parse(JSON.stringify(result, (k, v) => (typeof v === "string" ? v.replaceAll(workspace, "<ws>").replace(/\b[0-9a-f]{40}\b/g, "<sha>") : v)));
@@ -198,4 +211,44 @@ test("land-feature: a throwing retire does not change the landing result", () =>
   const run = scenario(() => ({ autoArchiveEligible: eligibleSeam, retire: () => { throw new Error("retire exploded"); } }));
   assert.deepEqual(run.normal, baseline.normal);
   assert.equal(run.normal.merged, true);
+});
+
+// ---- fix-pointer-rewrite-and-ff: eligibility predicts retire, so the main checkout never moves for a retire that cannot run ----
+const real = (calls) => ({ retire: (i) => { calls.retire.push(i); return {}; } });
+const P = "docs/plans/zq-plan.md";
+
+test("land-feature: an open sibling plan leaves the main checkout HEAD and working tree untouched (ARCH-LAND-30)", () => {
+  const run = scenario(real, { plan: P,
+    mainFiles: { [P]: "# zq-plan\n", "docs/plans/scrutinise-zq-plan.md": "# s\n" },
+    extraRows: [{ plan: "docs/plans/scrutinise-zq-plan.md", unit: "s1", status: "IN_PROGRESS" }],
+  });
+  assert.equal(run.normal.merged, true);
+  assert.equal(run.calls.retire.length, 0);
+  assert.deepEqual(run.mainAfter, run.mainBefore);
+  assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /open sibling plans/.test(e.reason)), JSON.stringify(run.events));
+});
+
+test("land-feature: a live descendant leaves the main checkout HEAD and working tree untouched (ARCH-LAND-30)", () => {
+  const run = scenario(real, { plan: P,
+    mainFiles: { [P]: "---\nlevel: epic\nchildren: [c]\n---\n# zq-plan\n", "docs/plans/c.md": "---\nparent: zq-plan\n---\n# c\n" },
+  });
+  assert.equal(run.normal.merged, true);
+  assert.equal(run.calls.retire.length, 0);
+  assert.deepEqual(run.mainAfter, run.mainBefore);
+  assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /live descendants: c/.test(e.reason)), JSON.stringify(run.events));
+});
+
+test("land-feature: a referrer brought by the landed merge leaves the main checkout HEAD and working tree untouched (ARCH-LAND-30)", () => {
+  const run = scenario(real, { plan: P, mainFiles: { [P]: "# zq-plan\n" }, featureFiles: { "docs/plans/q.md": `# q\nsee ${P}\n` } });
+  assert.equal(run.normal.merged, true);
+  assert.equal(run.calls.retire.length, 0);
+  assert.deepEqual(run.mainAfter, run.mainBefore);
+  assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /referenced by docs\/plans\/q\.md/.test(e.reason)), JSON.stringify(run.events));
+});
+
+test("land-feature: a plan doc that exists only in the landed merge is eligible, not reported untracked", () => {
+  const run = scenario(real, { plan: P, featureFiles: { [P]: "# zq-plan\n" } });
+  assert.equal(run.normal.merged, true);
+  assert.equal(run.calls.retire.length, 1, JSON.stringify(run.events));
+  assert.ok(!run.events.some((e) => e.ev === "doc_retire_skipped" && /not tracked/.test(e.reason)));
 });

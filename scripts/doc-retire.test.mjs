@@ -895,3 +895,21 @@ test("doc-retire: a NEXT.md line for a retired sibling is removed and lookup of 
     assert.ok(fs.existsSync(path.join(archive, slugDir, "plans/alpha", SIB)));
   });
 });
+
+test("doc-retire rewrite: a pointer written for one doc is never rewritten for a descendant whose slug is the product id (ARCH-DOCS-13)", () => {
+  const files = {
+    [PLAN]: EPIC, "docs/plans/beta.md": CHILD,
+    "docs/plans/alpha/TRACKER.md": "alpha rollup\n", "docs/plans/beta/TRACKER.md": "beta rollup\n",
+    "docs/plans/other.md": "# other\nsee alpha here\n",
+  };
+  const context = repo({ files, dirName: "beta" });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  withArchive(() => {
+    const out = retire({ plan: PLAN, dry_run: true }, context);
+    assert.equal(out.dry_run, true, JSON.stringify(out));
+    const hit = out.rewrites.find((r) => r.file === "docs/plans/other.md");
+    assert.equal(hit.after, "see archive:beta/plans/alpha@pending here");
+    assert.equal((hit.after.match(/archive:/g) ?? []).length, 1);
+  });
+});
