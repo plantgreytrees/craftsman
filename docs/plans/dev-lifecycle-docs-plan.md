@@ -628,13 +628,7 @@ Root runs this unit by hand. Round 11 findings in the general force block (older
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
 
-Round 6 units (fix-bypass-allowlist, fix-reviewer-red) touch disjoint files and run in parallel. The `craftsman.project.json` edit of 9.1/20.4 waits for the owner to run /craftsman:upgrade and /reload-plugins (the installed hook is older than scripts/scope.mjs on main, so no session can record /orchestrate, and both config files are self-protected).
-
-Round 7 units (fix-heredoc-strict, fix-red-run-evidence) touch disjoint files and run in parallel.
-
-Round 8: revert-heredoc-prose (root, by hand) and fix-evidence-flow (runner) touch disjoint files.
-
-Round 9: fix-lease-expansion (root, by hand).
+Rounds 6 to 11 ran their fix units on disjoint files, in parallel or by root; round detail is in git history.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - Publish guard only refuses a shrink to empty — `scripts/tracker-publish.mjs:57-60`
