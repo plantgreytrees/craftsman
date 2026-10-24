@@ -1,0 +1,2 @@
+# Fake input to the redact() test (expected output is [REDACTED]); pinned to the line, not the file.
+scripts/account-switch.test.mjs:generic-api-key:208
