@@ -7,7 +7,7 @@ import path from "node:path";
 import { logEvent, loadConfig } from "./core.mjs";
 import { loadIndex, parseFrontmatter } from "./plan-index.mjs";
 import { queue } from "./next-queue.mjs";
-import { exportRoot } from "./export-notes.mjs";
+import { exportRoot, writeExportFile } from "./export-notes.mjs";
 import { archivePath, currentState, parseArchiveHeading } from "../tracker.mjs";
 import { findReferrers } from "../doc-retire.mjs";
 import { execFileSync } from "node:child_process";
@@ -229,8 +229,7 @@ export function writeDashboard(context, { skipped = false } = {}) {
   const t0 = Date.now();
   const file = path.join(exportRoot(context), "dashboard.html");
   const html = renderHtml(buildModel(context));
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, html);
+  writeExportFile(context, "dashboard.html", html);
   logRender(context, { ms: Date.now() - t0, skipped, sections: SECTIONS.length });
   return file;
 }

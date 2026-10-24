@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadConfig, enabled, projectContext, readStdin } from "./lib/core.mjs";
 import { syncTrackerDoc, renderState } from "./tracker.mjs";
-import { exportRoot } from "./lib/export-notes.mjs";
+import { exportRoot, writeExportFile } from "./lib/export-notes.mjs";
 import { logRender } from "./lib/dashboard.mjs";
 
 export const RENDER_BUDGET_MS = 6000;
@@ -62,13 +62,17 @@ export function stopRefresh(context, { budgetMs = RENDER_BUDGET_MS, script = DIG
     if (prev === fp) { logRender(context, { ms: 0, skipped: true }); return "skipped"; }
     const r = spawnSync(process.execPath, [script, ...args], { cwd: context.root, timeout: budgetMs, killSignal: "SIGKILL", stdio: "ignore" });
     if (r.error || r.status !== 0) return "failed";
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, fp + "\n");
+    writeExportFile(context, ".fingerprint", fp + "\n");
     return "rendered";
   } catch { return "failed"; }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+const isMain = () => {
+  if (!process.argv[1]) return false;
+  try { return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(path.resolve(process.argv[1])); } catch { return false; }
+};
+
+if (isMain()) {
   try {
     const raw = await readStdin();
     let event = "";

@@ -15,6 +15,51 @@ const MARKER = /^generated:[ \t]*true[ \t]*$/m;
 export function exportRoot(context) {
   return path.join(mainCheckoutRoot(context.root), ".craftsman", "export");
 }
+// Proves .craftsman and .craftsman/export under the main checkout are real
+// directories inside it (lstat, then realpath) and creates them when absent;
+// throws otherwise (ARCH-VIEWS-11). Returns the export directory.
+export function verifiedExportDir(context) {
+  const main = mainCheckoutRoot(context.root);
+  let mainReal;
+  try { mainReal = fs.realpathSync(main); } catch { throw new Error("refusing export: main checkout not found"); }
+  let cur = main;
+  for (const part of [".craftsman", "export"]) {
+    cur = path.join(cur, part);
+    let st = null;
+    try { st = fs.lstatSync(cur); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    if (!st) { fs.mkdirSync(cur); st = fs.lstatSync(cur); }
+    if (st.isSymbolicLink() || !st.isDirectory()) throw new Error(`refusing export: ${part} is not a real directory`);
+    const real = fs.realpathSync(cur);
+    if (!inside(mainReal, real)) throw new Error(`refusing export: ${part} resolves outside the checkout`);
+  }
+  return cur;
+}
+
+// Writes text to file through a temp file in the same directory and renames it
+// into place; refuses a symlinked or non-regular target. The temp file is
+// removed on failure, so a write killed before the rename leaves file intact.
+export function atomicWrite(file, text) {
+  try {
+    const st = fs.lstatSync(file);
+    if (st.isSymbolicLink() || !st.isFile()) throw new Error(`refusing export target: ${path.basename(file)} is not a regular file`);
+  } catch (e) { if (e.code !== "ENOENT") throw e; }
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    fs.writeFileSync(tmp, text, { flag: "wx" });
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* already gone */ }
+    throw e;
+  }
+}
+
+// Writes one file directly under the verified export directory.
+export function writeExportFile(context, name, text) {
+  const file = path.join(verifiedExportDir(context), name);
+  atomicWrite(file, text);
+  return file;
+}
+
 export const notesRoot = (context) => path.join(exportRoot(context), "notes");
 export const inboxRoot = (context) => path.join(exportRoot(context), "inbox");
 
@@ -195,6 +240,7 @@ function ensureRealDir(notes, dir) {
 
 // Writes and updates notes; removes only generated files whose source is gone.
 export function writeNotes(context) {
+  verifiedExportDir(context);
   const notes = assertNotesRoot(context);
   const wanted = buildNotes(context);
   const result = { written: [], removed: [], skipped: [] };
@@ -207,7 +253,7 @@ export function writeNotes(context) {
     if (existing && (!existing.isFile() || !isGenerated(file))) { result.skipped.push(rel); continue; }
     if (existing && fs.readFileSync(file, "utf8") === text) continue;
     if (!ensureRealDir(notes, path.dirname(file))) { result.skipped.push(rel); continue; }
-    fs.writeFileSync(file, text);
+    atomicWrite(file, text);
     result.written.push(rel);
   }
   for (const rel of walkGenerated(notes, notes)) {

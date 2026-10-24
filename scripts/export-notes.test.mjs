@@ -7,7 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   exportRoot, notesRoot, inboxRoot, buildNotes, writeNotes, clearNotes, takeInboxNote,
-  planStatusRollup, INBOX_MAX_BYTES,
+  planStatusRollup, INBOX_MAX_BYTES, verifiedExportDir, atomicWrite, writeExportFile,
 } from "./lib/export-notes.mjs";
 import { parseFrontmatter } from "./lib/plan-index.mjs";
 
@@ -224,4 +224,33 @@ test("takeInboxNote: refuses a note over 20 KB, accepts exactly 20 KB; refuses a
   assert.throws(() => t.confirm(), /escapes inbox/);
   assert.deepEqual(fs.readdirSync(outside), []);
   assert.ok(fs.existsSync(path.join(inbox, "ok.md")));
+});
+
+test("write safety: a symlinked export/, .craftsman or target file is refused (ARCH-VIEWS-11)", () => {
+  const out = mk();
+  const a = mk(); fs.mkdirSync(path.join(a, ".craftsman")); fs.symlinkSync(out, path.join(a, ".craftsman", "export"));
+  assert.throws(() => verifiedExportDir({ root: a }), /refusing export/);
+  assert.throws(() => writeNotes({ root: a, rows: [] }), /refusing export/);
+  const b = mk(); fs.symlinkSync(out, path.join(b, ".craftsman"));
+  assert.throws(() => verifiedExportDir({ root: b }), /refusing export/);
+  assert.deepEqual(fs.readdirSync(out), []);
+  const c = mk(); const dir = verifiedExportDir({ root: c });
+  const victim = path.join(out, "victim"); fs.writeFileSync(victim, "keep");
+  fs.symlinkSync(victim, path.join(dir, "dashboard.html"));
+  assert.throws(() => writeExportFile({ root: c }, "dashboard.html", "x"), /not a regular file/);
+  assert.equal(fs.readFileSync(victim, "utf8"), "keep");
+});
+
+test("write safety: atomicWrite renames a temp file, leaves the old file on failure and no temp behind", () => {
+  const d = mk(); const f = path.join(d, "f.txt");
+  atomicWrite(f, "one"); atomicWrite(f, "two");
+  assert.equal(fs.readFileSync(f, "utf8"), "two");
+  assert.deepEqual(fs.readdirSync(d), ["f.txt"]);
+  const g = path.join(d, "dir"); fs.mkdirSync(g);
+  assert.throws(() => atomicWrite(g, "x"));
+  const orig = fs.renameSync;
+  fs.renameSync = () => { throw new Error("killed"); };
+  try { assert.throws(() => atomicWrite(f, "three"), /killed/); } finally { fs.renameSync = orig; }
+  assert.equal(fs.readFileSync(f, "utf8"), "two");
+  assert.deepEqual(fs.readdirSync(d).sort(), ["dir", "f.txt"]);
 });
