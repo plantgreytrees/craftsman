@@ -10,7 +10,7 @@ import { resolveArchive, archivePathFor, productIdFor, restoreCommand } from "..
 export { resolveArchive, archivePathFor, productIdFor, restoreCommand };
 import { findReferrers, retire as docRetire } from "../doc-retire.mjs";
 import { currentState } from "../tracker.mjs";
-import { loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";
+import { buildIndex, descendantSlugs, loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";
 import { mainCheckoutRoot } from "./core.mjs";
 
 // ARCH-VIEWS-15 / ARCH-DOCS-14: the one archive verdict for a plan doc, used by the dashboard, autoArchiveEligible and retire.
@@ -117,29 +117,72 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
 }
 
 // ARCH-DOCS-14 / ARCH-LAND-30: may land-feature archive this plan on its own? Read-only; returns {eligible, reason?}, never throws.
-// Every condition must hold: an archive project resolves, every tracker row of the plan is COMPLETE or CANCELLED, the referrer
-// scan succeeds and finds no hit at all (the plan, its ledger/rollup and its own scrutinise-/investigate- siblings excepted),
-// and the doc is tracked and clean. seams: {resolveArchive, currentState, findReferrers, git(args, context)}.
+// Every condition must hold: an archive project resolves, every tracker row of the plan is COMPLETE or CANCELLED, no
+// scrutinise-/investigate- sibling and no descendant plan is still open (as retire refuses), the referrer scan succeeds and
+// finds no hit at all (the plan, its ledger/rollup and its own siblings excepted), and the doc is tracked and clean.
+// seams.sha: the landed merge; tracked-ness, siblings, hierarchy and the HEAD referrer scan are read from that commit, so a doc
+// that exists only in the merge is judged as retire will see it after the fast-forward.
+// seams: {resolveArchive, currentState, findReferrers, loadIndex(context, sha), git(args, context), sha}.
 export function autoArchiveEligible(context, plan, seams = {}) {
   const no = (reason) => ({ eligible: false, reason });
   try {
     if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) return no("invalid plan path");
     const archive = (seams.resolveArchive || resolveArchive)(context);
     if (!archive?.root) return no(`no archive project: ${archive?.off ?? "unresolved"}`);
-    const rows = (seams.currentState || currentState)(context).filter((row) => row.plan === plan);
+    const state = (seams.currentState || currentState)(context);
+    const rowsOf = (p) => state.filter((row) => row.plan === p);
+    const rows = rowsOf(plan);
     if (!rows.length) return no("plan has no tracker rows");
-    const open = rows.filter((row) => row.status !== "COMPLETE" && row.status !== "CANCELLED");
+    const isOpen = (row) => row.status !== "COMPLETE" && row.status !== "CANCELLED";
+    const open = rows.filter(isOpen);
     if (open.length) return no(`open rows: ${open.map((row) => `${row.unit}=${row.status}`).join(", ")}`);
-    const verdict = classifyArchive(context, plan, { archive, findReferrers: seams.findReferrers });
+    const sha = seams.sha;
+    const git = seams.git || ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6 }));
+    const tracked = (p) => { try { git(sha ? ["cat-file", "-e", `${sha}:${p}`] : ["ls-files", "--error-unmatch", "--", p], context); return true; } catch { return false; } };
+    const slug = slugOf(plan);
+    const dir = path.posix.dirname(plan);
+    // Open siblings keep the plan (retire's refusal).
+    const siblings = [`scrutinise-${slug}.md`, `investigate-${slug}.md`].map((n) => path.posix.join(dir, n)).filter(tracked);
+    const openSiblings = siblings.map((s) => ({ s, open: rowsOf(s).filter(isOpen) })).filter((x) => x.open.length);
+    if (openSiblings.length) return no(`open sibling plans keep ${plan}: ${openSiblings.map((x) => `${x.s} (${x.open.map((r) => `${r.unit}=${r.status}`).join(", ")})`).join("; ")}`);
+    // Live descendants keep the plan (retire's refusal).
+    let index;
+    try {
+      index = seams.loadIndex ? seams.loadIndex(context, sha) : sha ? indexAt(context, sha, git) : loadIndex(context.root);
+    } catch (error) { return no(`cannot read the plan hierarchy: ${error.message}`); }
+    if (index.get(slug)) {
+      const own = new Set(siblings.map((p) => path.posix.basename(p, ".md")));
+      const isParent = (n) => n && (n.level === "epic" || n.level === "story");
+      const live = descendantSlugs(slug, { index }).filter((c) => !own.has(c)).filter((c) => {
+        const node = index.get(c);
+        const crows = rowsOf(node.path);
+        return crows.some(isOpen) || (!crows.length && !isParent(node) && !node.derived);
+      });
+      if (live.length) return no(`${plan} has live descendants: ${live.join(", ")}`);
+    }
+    let scanContext = context;
+    if (sha) {
+      const base = context.git ?? ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6 }));
+      scanContext = { ...context, git: (args, ctx) => {
+        if (args[0] !== "grep" || !args.includes("HEAD")) return base(args, ctx);
+        return String(base(args.map((a) => (a === "HEAD" ? sha : a)), ctx) ?? "").replaceAll(`${sha}:`, "HEAD:");
+      } };
+    }
+    const verdict = classifyArchive(scanContext, plan, { archive, findReferrers: seams.findReferrers });
     if (verdict.scanFailed) return no("referrer scan failed");
     if (verdict.hits.length) return no(`referenced by ${verdict.hits.join(", ")}`);
-    const git = seams.git || ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-    try { git(["ls-files", "--error-unmatch", "--", plan], context); } catch { return no(`${plan} is not tracked by git`); }
+    if (!tracked(plan)) return no(`${plan} is not tracked by git`);
     if (String(git(["status", "--porcelain", "--", plan], context) ?? "").trim()) return no(`uncommitted changes in ${plan}`);
     return { eligible: true };
   } catch (error) {
     return no(`eligibility check failed: ${error?.message ?? error}`);
   }
+}
+
+// The plan index as it stands at a commit, read from git rather than the working tree.
+function indexAt(context, sha, git) {
+  const names = String(git(["ls-tree", "--name-only", sha, "docs/plans/"], context) ?? "").split("\n").filter((f) => /^docs\/plans\/[^/]+\.md$/.test(f)).sort();
+  return buildIndex(names.map((f) => ({ path: f, slug: path.posix.basename(f, ".md"), text: String(git(["show", `${sha}:${f}`], context) ?? "") })));
 }
 
 const sh = (root, args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -168,7 +211,7 @@ export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
     const retire = deps.retire || docRetire;
     for (const plan of [...new Set(rows.map((row) => row.plan))]) {
       try {
-        const verdict = eligible(here, plan);
+        const verdict = eligible(here, plan, { sha });
         if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
         // Only a retire that will actually run may move the main checkout (ARCH-LAND-30).
         if (!holdsLanding(main, info.base_branch, sha)) {

@@ -205,14 +205,14 @@ export function retire(input, context = projectContext(".")) {
   const productId = productIdFor(context);
   const rewriteDocs = [{ plan, slug }, ...descendants.map((d) => ({ plan: d.plan, slug: d.slug }))];
   const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const rewriteLine = (line, shaOf) => {
-    let out = line;
-    for (const d of rewriteDocs) {
-      const pointer = `archive:${productId}/plans/${d.slug}@${shaOf(d.plan)}`;
-      out = out.replace(new RegExp(`(?<![\\w/.-])(?:${esc(d.plan)}|${esc(d.slug)})(?![\\w-])`, "g"), () => pointer);
-    }
-    return out;
-  };
+  // One pass over every doc's plan path and slug: a pointer written for one doc is never rewritten for another (ARCH-DOCS-13).
+  const tokenDoc = new Map();
+  for (const d of rewriteDocs) { for (const t of [d.plan, d.slug]) if (!tokenDoc.has(t)) tokenDoc.set(t, d); }
+  const tokenRe = new RegExp(`(?<![\\w/.-])(?:${[...tokenDoc.keys()].sort((a, b) => b.length - a.length).map(esc).join("|")})(?![\\w-])`, "g");
+  const rewriteLine = (line, shaOf) => line.replace(tokenRe, (m) => {
+    const d = tokenDoc.get(m);
+    return `archive:${productId}/plans/${d.slug}@${shaOf(d.plan)}`;
+  });
   const rewriteBase = (file) => (parentEdit?.file === file ? parentEdit.next : fs.readFileSync(path.join(context.root, file), "utf8"));
   const rewriteText = (file, shaOf) => rewriteBase(file).split("\n").map((l) => rewriteLine(l, shaOf)).join("\n");
   const rewrites = [];
