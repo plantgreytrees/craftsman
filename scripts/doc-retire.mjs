@@ -372,7 +372,7 @@ export function retire(input, context = projectContext(".")) {
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
   for (const file of new Set(rewrites.map((r) => r.file))) logEvent({ ev: "archive_rewrite", file, plan }, context);
-  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha }, context);
+  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha, ...(input.auto === true ? { auto: true } : {}) }, context);
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 

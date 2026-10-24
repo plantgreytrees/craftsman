@@ -164,15 +164,15 @@ export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
     const retire = deps.retire || docRetire;
     for (const plan of [...new Set(rows.map((row) => row.plan))]) {
       try {
+        const verdict = eligible(here, plan);
+        if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
+        // Only a retire that will actually run may move the main checkout (ARCH-LAND-30).
         if (!holdsLanding(main, info.base_branch, sha)) {
           note({ ev: "doc_retire_skipped", plan, reason: `main checkout is not on ${info.base_branch} holding the landed merge` });
           continue;
         }
-        const verdict = eligible(here, plan);
-        if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
         const out = retire({ plan, sid: input.session_id, auto: true, landed_sha: sha }, here);
         if (out?.refused) { note({ ev: "doc_retire_skipped", plan, reason: out.reason }); continue; }
-        note({ ev: "doc_retired", plan, sha: out.sha, auto: true });
         const archive = resolveArchive(here);
         note({ ev: "archive_push_pending", plan, commit: archive.root ? quiet(archive.root, ["rev-parse", "HEAD"]) : "" });
       } catch (error) {

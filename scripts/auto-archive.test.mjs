@@ -101,11 +101,13 @@ function scenario(deps, { dirtyMain = false } = {}) {
     const archiveBefore = git(repos.archive.root, ["rev-parse", "HEAD"]);
     const originBefore = git(repos.archive.origin, ["rev-parse", "HEAD"]);
     const calls = { retire: [] };
+    const mainState = () => ({ head: git(context.root, ["rev-parse", "HEAD"]), status: git(context.root, ["status", "--porcelain", "-uno"]) });
+    const mainBefore = mainState();
     const result = landFeature(context, { plan: "docs/plans/p.md", feature: "f1", session_id: "s" }, info, deps(calls, repos));
     const events = fs.existsSync(path.join(context.stateDir, "events.jsonl"))
       ? fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
     const normal = JSON.parse(JSON.stringify(result, (k, v) => (typeof v === "string" ? v.replaceAll(workspace, "<ws>").replace(/\b[0-9a-f]{40}\b/g, "<sha>") : v)));
-    return { normal, events, calls, repos, archiveBefore, originBefore, archiveAfter: git(repos.archive.root, ["rev-parse", "HEAD"]), originAfter: git(repos.archive.origin, ["rev-parse", "HEAD"]), context };
+    return { mainBefore, mainAfter: mainState(), normal, events, calls, repos, archiveBefore, originBefore, archiveAfter: git(repos.archive.root, ["rev-parse", "HEAD"]), originAfter: git(repos.archive.origin, ["rev-parse", "HEAD"]), context };
   } finally {
     if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
     fs.rmSync(workspace, { recursive: true, force: true });
@@ -144,7 +146,8 @@ test("land-feature: an eligible plan is retired with auto:true, archive_push_pen
   assert.equal(done.originAfter, done.originBefore, "archive remote untouched");
   const pending = done.events.find((e) => e.ev === "archive_push_pending");
   assert.equal(pending.commit, done.archiveAfter);
-  assert.ok(done.events.some((e) => e.ev === "doc_retired" && e.auto === true));
+  // The single auto doc_retired event is written by retire itself (input.auto); autoArchive adds none.
+  assert.equal(done.events.filter((e) => e.ev === "doc_retired").length, 0);
   assert.deepEqual(done.normal, baseline.normal);
 });
 
@@ -171,4 +174,28 @@ test("land-feature: a dirty main checkout skips the retire without changing the 
   const dirty = scenario((calls) => ({ autoArchiveEligible: eligibleSeam, retire: (i) => { calls.retire.push(i); return {}; } }), { dirtyMain: true });
   assert.equal(dirty.calls.retire.length, 0);
   assert.deepEqual(dirty.normal, baseline.normal);
+});
+
+test("land-feature: with no archive project the main checkout HEAD and working tree are untouched (ARCH-LAND-30)", () => {
+  const run = scenario((calls) => ({
+    autoArchiveEligible: (ctx, plan) => autoArchiveEligible(ctx, plan, { resolveArchive: () => ({ off: "none" }) }),
+    retire: (i) => { calls.retire.push(i); return {}; },
+  }));
+  assert.equal(run.normal.merged, true);
+  assert.equal(run.calls.retire.length, 0);
+  assert.deepEqual(run.mainAfter, run.mainBefore);
+  assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /no archive project/.test(e.reason)));
+});
+
+test("land-feature: an ineligible plan leaves the main checkout HEAD and working tree untouched", () => {
+  const run = scenario((calls) => ({ autoArchiveEligible: () => ({ eligible: false, reason: "open rows: u0=IN_PROGRESS" }), retire: (i) => { calls.retire.push(i); return {}; } }));
+  assert.equal(run.calls.retire.length, 0);
+  assert.deepEqual(run.mainAfter, run.mainBefore);
+});
+
+test("land-feature: a throwing retire does not change the landing result", () => {
+  const baseline = scenario(noRetire);
+  const run = scenario(() => ({ autoArchiveEligible: eligibleSeam, retire: () => { throw new Error("retire exploded"); } }));
+  assert.deepEqual(run.normal, baseline.normal);
+  assert.equal(run.normal.merged, true);
 });
