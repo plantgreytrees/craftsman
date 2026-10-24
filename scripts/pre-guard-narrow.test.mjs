@@ -76,3 +76,8 @@ test("narrow: the lease exception is refused for an expanded or double-colon ref
   }
   assert.equal(await forceBlocked("git push --force-with-lease origin HEAD:refs/heads/feat/unit-a", { ownBranches: own }), null);
 });
+
+test("narrow: a config-overridden push and git through xargs are refused by the real force block (round 11)", async () => {
+  for (const c of ["git -c remote.origin.push=+HEAD:refs/heads/main git push origin", "echo -f | xargs git git push origin HEAD:main"]) assert.ok(await forceBlocked(c, { ownBranches: [] }), c);
+  assert.equal(await forceBlocked("git push origin HEAD:refs/heads/feat/unit-a", { ownBranches: [] }), null);
+});
