@@ -644,15 +644,29 @@ test("config: hierarchy key defaults, and project config overrides them", () => 
   assert.equal(m.tracker.nudgeLines, 300);
 });
 
-test("config: execution.maxSessions is reserved, read by nothing yet", () => {
-  const root = path.dirname(CFG), hits = [];
+// ARCH-PLAN-08: only the queue readers may mention maxSessions.
+const MAXSESSIONS_READERS = ["scripts/lib/next-queue.mjs", "scripts/lib/dashboard.mjs"];
+function maxSessionsHits(root) {
+  const hits = [];
   const walk = (d) => fs.existsSync(d) && fs.readdirSync(d, { withFileTypes: true }).forEach((e) => {
     const f = path.join(d, e.name);
     if (e.isDirectory()) { if (e.name !== "node_modules") walk(f); }
-    else if (!/\.test\.m?[jt]s$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")) hits.push(f);
+    else if (!/\.test\.m?[jt]s$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")
+      && !MAXSESSIONS_READERS.includes(path.relative(root, f).split(path.sep).join("/"))) hits.push(f);
   });
   for (const d of ["scripts", "hooks", "workflows", "commands", "agents", "skills"]) walk(path.join(root, d));
-  assert.deepEqual(hits, []);
+  return hits;
+}
+test("config: execution.maxSessions is read only by the queue readers", () => {
+  assert.deepEqual(maxSessionsHits(path.dirname(CFG)), []);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-maxsess-"));
+  fs.mkdirSync(path.join(tmp, "scripts/lib"), { recursive: true });
+  for (const r of MAXSESSIONS_READERS) fs.writeFileSync(path.join(tmp, r), "maxSessions");
+  assert.deepEqual(maxSessionsHits(tmp), []);
+  const bad = path.join(tmp, "scripts/lib/other.mjs");
+  fs.writeFileSync(bad, "maxSessions");
+  assert.deepEqual(maxSessionsHits(tmp), [bad]);
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 // ARCH-TRACKER-08: feature-tagged, untagged and mixed criteria.
