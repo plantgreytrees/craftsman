@@ -10,7 +10,6 @@
 // or syntactically broken shipped file would.
 import fs from "node:fs";
 import path from "node:path";
-import { isMain } from "./lib/core.mjs";
 
 const DEFAULT_ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -201,7 +200,8 @@ export function raisedCaps(base, current) {
   return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
 }
 
-if (isMain(import.meta.url)) {
+// Dependency-free on purpose: the ratchet test imports the merge-base copy of this file alone from a temp dir, so it must not import ./lib/core.mjs (isMain).
+if (import.meta.url === `file://${process.argv[1]}`) {
   const findings = checkDocSizes();
   if (findings.length) {
     process.stderr.write(findings.join("\n") + "\n");
