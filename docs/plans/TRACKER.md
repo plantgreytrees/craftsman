@@ -205,8 +205,8 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | selfprotect-shell-words | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | state-filter-dedupe | scripts/lib/unpushed.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5ef1ef9 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | stop-loopguard-reports | scripts/stop-gate.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
-| [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-dsp-entry-check | scripts/doc-size-policy.mjs | PENDING | from /scrutinise round 2 (Suggestion), not driven | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-dsp-entry-check | scripts/doc-size-policy.mjs | COMPLETE | b9bec4e/252c385: realpath entry check, symlink+space regression test; suite 893… | 2026-10-24 |
 | [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-goal-token-test-stderr | scripts/goal-token.test.mjs | PENDING | from /scrutinise round 2 (Suggestion), not driven | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-isMain-notes | scripts/doc-checks.mjs | PENDING | from /scrutinise round 2 (Suggestion), not driven | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-isMain-notes | scripts/doc-checks.mjs | COMPLETE | notes only, verified: scripts/doc-checks.mjs:38 keeps its own entry check (file… | 2026-10-24 |
 
 <!-- craftsman:ledger:end -->
