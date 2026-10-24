@@ -151,3 +151,8 @@ test("a lease push is refused after a shell alias definition or to a dot remote 
   ]) assert.ok(b(cmd), cmd);
   assert.equal(destructiveGit("git push --force-with-lease origin a:refs/heads/feature/p-1", own3), null);
 });
+
+test("the alias refusal also sees an alias after a tab, a paren or a pipe (round 15)", () => {
+  const own4 = ["feat/unit-a", "feature/p-*"];
+  for (const cmd of ["true\talias p=ls; git push --force-with-lease origin a:refs/heads/feature/p-1", "(alias p=ls); git push --force-with-lease origin a:refs/heads/feature/p-1", "echo x | alias p=ls; git push --force-with-lease origin a:refs/heads/feature/p-1", "alias\tp=ls\ngit push --force-with-lease origin a:refs/heads/feature/p-1"]) assert.ok(destructiveGit(cmd, own4) !== null, cmd);
+});
