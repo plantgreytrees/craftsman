@@ -131,6 +131,20 @@ test("self-protect: safetyProjection reads dotted keys and the settings env", ()
   assert.deepEqual(st.env, { NODE_OPTIONS: "x" });
 });
 
+test("self-protect: the approval gate keys are safety keys, each resolves in the shipped config, and flipping either changes the projection", () => {
+  const shipped = JSON.parse(fs.readFileSync(new URL("../../craftsman.config.json", import.meta.url), "utf8"));
+  for (const key of ["repoExec.approval.required", "planning.featureBranches"]) {
+    assert.ok(SAFETY_CONFIG_KEYS.includes(key), `${key} is listed`);
+    const value = key.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), shipped);
+    assert.equal(typeof value, "boolean", `${key} is a real boolean key of craftsman.config.json`);
+  }
+  const base = { repoExec: { approval: { required: true, prLines: 400 } }, planning: { featureBranches: true } };
+  const proj = (c) => JSON.stringify(safetyProjection("craftsman.config.json", c));
+  assert.notEqual(proj(base), proj({ ...base, repoExec: { approval: { required: false, prLines: 400 } } }));
+  assert.notEqual(proj(base), proj({ ...base, planning: { featureBranches: false } }));
+  assert.equal(proj(base), proj({ ...base, repoExec: { approval: { required: true, prLines: 10 } } }), "prLines stays editable");
+});
+
 test("self-protect: scope.mjs and pre-guard.mjs import the list; no second copy remains", () => {
   const read = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
   for (const file of ["../scope.mjs", "../pre-guard.mjs"]) {
