@@ -117,3 +117,25 @@ test("ownBranchesOf trusts only feat/ and feature/ bound branches (round 11)", a
   assert.deepEqual(ownBranchesOf({ branch: "feat/unit-a" }, null), ["feat/unit-a"]);
   assert.deepEqual(ownBranchesOf({ branch: "feature/p-u1" }, null), ["feature/p-u1"]);
 });
+
+test("a lease push inside a quoted command string, or to a path or URL remote, is refused (round 13)", () => {
+  const own2 = ["feat/unit-a", "feature/p-*"];
+  const b = (cmd) => destructiveGit(cmd, own2) !== null;
+  for (const cmd of [
+    "bash -c 'git push --force-with-lease origin a:refs/heads/feature/p-1'' b:refs/heads/main'",
+    "sh -c 'git push --force-with-lease origin a:refs/heads/feature/p-1'' +b:refs/heads/main'",
+    "bash -c 'git push --force-with-lease origin a:refs/heads/feature/p-1'' --mirror'",
+    "bash -c \"git push --force-with-lease origin a:refs/heads/feature/p-1 \"b:refs/heads/main",
+    "bash -c 'git push --force-with-lease origin HEAD:refs/heads/feat/unit-a'",
+    "GIT_DIR=/x bash -c 'git push --force-with-lease origin a:refs/heads/feature/p-1'",
+    "git push --force-with-lease /some/other/repo a:refs/heads/feature/p-1",
+    "git push --force-with-lease ../other.git HEAD:refs/heads/feat/unit-a",
+    "git push --force-with-lease https://example.com/r.git HEAD:refs/heads/feat/unit-a",
+  ]) assert.ok(b(cmd), cmd);
+  assert.equal(destructiveGit("git push --force-with-lease origin HEAD:refs/heads/feat/unit-a", own2), null, "top-level named remote stays allowed");
+});
+
+test("a push is blocked under a single-git config override (round 13)", () => {
+  for (const cmd of ["git -c remote.origin.push=+HEAD:refs/heads/main git push origin", "git --config-env=remote.origin.push=X git push origin", "git --namespace=x git push origin HEAD:refs/heads/feat/unit-a"]) assert.ok(blocked(cmd), cmd);
+  assert.equal(destructiveGit("git -C /tmp/w git push origin HEAD:main", own), null);
+});

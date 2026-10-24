@@ -81,3 +81,9 @@ test("narrow: a config-overridden push and git through xargs are refused by the 
   for (const c of ["git -c remote.origin.push=+HEAD:refs/heads/main git push origin", "echo -f | xargs git git push origin HEAD:main"]) assert.ok(await forceBlocked(c, { ownBranches: [] }), c);
   assert.equal(await forceBlocked("git push origin HEAD:refs/heads/feat/unit-a", { ownBranches: [] }), null);
 });
+
+test("narrow: a lease push spliced inside bash -c is refused by the real force block (round 13)", async () => {
+  const own = ownBranchesOf({ branch: "feat/unit-a" }, { plan: "docs/plans/p.md" });
+  assert.ok(await forceBlocked("bash -c 'git push --force-with-lease origin a:refs/heads/feature/p-1'' b:refs/heads/main'", { ownBranches: own }));
+  assert.equal(await forceBlocked("git push --force-with-lease origin HEAD:refs/heads/feat/unit-a", { ownBranches: own }), null);
+});
