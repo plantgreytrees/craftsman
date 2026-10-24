@@ -8,13 +8,13 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Added
 
-- **Approval before base** (ARCH-APPROVAL-01..09, ARCH-LAND-28/29/30/31). With `planning.featureBranches` on, `land-feature`
+- **Approval before base** (ARCH-APPROVAL-03..09, ARCH-LAND-28/29/30/31). With `planning.featureBranches` on, `land-feature`
   lands only against an approval record the artifact owner decided on a private page (`scripts/approval.mjs`,
   `scripts/lib/approval-page.mjs`, `commands/_approval.md`): Merge now or Open PR, with the recommendation, attention list
   (env keys, migrations, CI), evidence, risk and rollback. The record's `head_sha` must equal the feature head; a moved base
   re-merges and re-gates. New defaults `repoExec.approval.required: true` and `tracker.publish: "on-approve"` (publishes only
   for an approved run whose record is landed, once, or a `manual:true` `/sync-docs --tracker`). With feature branches off, units merge straight to base.
-- **Dashboard, notes and archive** (ARCH-DOCS-14, ARCH-ARCHIVE-05/07): the dashboard (with an archive tab) and a
+- **Dashboard, notes and archive** (ARCH-DOCS-14, ARCH-ARCHIVE-09/10): the dashboard (with an archive tab) and a
   notes folder render at Stop by default, or on demand with `/digest --html`; a `NEXT.md` queue; local auto-archive
   of a finished plan at `land-feature`; and `/sync-docs --archive` / `--prune --archive` to retire closed plans.
 - **Ledger guard** (ARCH-TRACKER-13/14): publish and sync refuse to drop a committed row unless an archive event names its plan; `tracker.mjs init --merge`/`--from-block` repair the ledger.
@@ -24,7 +24,7 @@ All notable changes to craftsman are documented here. Format loosely follows
 - **Tool slots** (ARCH-ENGINE-22): `just check` leads `stopGate.commands`; `docs.checks` (empty by default) run via `scripts/doc-checks.mjs`; `pre-commit` runs once at the verification point.
 - Skills `test-driven-development`, `systematic-debugging`, `verification-before-completion` (from obra/superpowers, MIT); `maxTurns` on reviewers; `toggle` and `builtin-check` hidden from the model; `/init --update` scaffolds `.claude/rules/craftsman-loop.md`; `craftsman#stable` documented.
 - **Own-branch lease** (ARCH-LAND-31): `force-block.mjs` allows `--force-with-lease` only as an unquoted top-level
-  `src:refs/heads/<own>` push to a named remote. The force block is a best-effort text scan; the rewrite is the follow-up
+  `src:refs/heads/<own>` push to a path-free remote word. The force block is a best-effort text scan; the rewrite is the follow-up
   `force-block-wordlevel`. **Plugin settings** (ARCH-PLAN-07): `userConfig` `autonomyLevel`, `reviewDepth`, `modelTier`
   (reserved), `budgetsEnforce` set defaults a project config overrides; this repo sets `claudeMdLines`/`openPlans` in
   `craftsman.project.json`. The red-run TDD step is in `unit-runner` and the reviewers (ARCH-ENGINE-21). `.gitleaks.toml`
