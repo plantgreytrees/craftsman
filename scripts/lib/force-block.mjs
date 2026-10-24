@@ -1,5 +1,5 @@
 // The force block (ARCH-LAND-05): the destructive git forms /auto must never
-// run, found in a Bash command however it is quoted, split or wrapped.
+// run, found in a Bash command by a best-effort text scan (ARCH-LAND-31; defense in depth, not a proof).
 // A plain `git push origin HEAD:<base>` (tracker publish, ARCH-LAND-17) is not
 // destructive and passes; every force flag and `+refspec` still blocks.
 import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
@@ -64,7 +64,7 @@ const longFlag = (word, ...options) => {
 // Stops at ( ) ` $ too, so a substitution after a message is never one.
 const MESSAGE_OPERAND = /\bgit\b[^;&|\n()`$]*\s(?:commit|tag)\b[^;&|\n()`$]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
 
-// The one exception (ARCH-LAND-23): a lease push whose every refspec names a
+// The one exception (ARCH-LAND-31), top-level unquoted pushes only: a lease push whose every refspec names a
 // branch matching `ownBranches` (globs such as `feature/<plan>-*` and claimed
 // unit branches). Another flag, a `+` refspec, no refspec or an unexpanded
 // word is no exception.
@@ -82,6 +82,7 @@ export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
   const flags = rest.filter((w) => w.startsWith("-"));
   const [remote, ...refs] = rest.filter((w) => !w.startsWith("-"));
   if (!remote || !refs.length || rest.includes(UNEXPANDED)) return false;
+  if (!/^[A-Za-z0-9._-]+$/.test(remote)) return false; // a configured remote name, never a path or URL
   if (!flags.some(isLease) || !flags.every((w) => isLease(w) || LEASE_OK.has(w))) return false;
   return refs.every((ref) => {
     // `src:refs/heads/<own>` only: a colon-less ref or a short destination is resolved by git through push config.
@@ -111,14 +112,14 @@ export function destructiveGit(value, ownBranches = []) {
   for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
     const inner = quoted[1] ?? quoted[2];
     if (MESSAGE_OPERAND.test(value.slice(0, quoted.index)) && !/\$\(|`/.test(inner)) continue;
-    const found = destructiveGit(inner, ownBranches);
+    const found = destructiveGit(inner, []); // the lease exception is for a top-level push only: a quoted string may be spliced from adjacent pieces
     if (found) return found;
   }
   const aliases = new Map();
   for (const alias of value.matchAll(/\balias\.([\w.-]+)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
     const defined = (alias[2] ?? alias[3] ?? alias[4]).replace(/^!\s*/, "");
     aliases.set(alias[1], defined.replace(/^git\s+/, "").split(/\s+/).filter(Boolean));
-    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`, ownBranches);
+    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`, []);
     if (found) return found;
   }
   // Arguments supplied at run time (xargs, parallel) cannot be read: fail closed.
