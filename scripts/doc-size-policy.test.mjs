@@ -86,3 +86,21 @@ test("ratchet: no cap rises versus the merge-base (skips without git)", async (t
     assert.deepEqual(raisedCaps(base.INVOCATION_CAPS || {}, INVOCATION_CAPS), [], "per-invocation cap raised");
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
+
+test("CLI entry runs from a path with a space, via a symlink (ARCH-SLIM-01)", () => {
+  const root = fixture({ "agents/zz-uncapped.md": "hello" });
+  try {
+    fs.mkdirSync(path.join(root, "scripts"));
+    fs.copyFileSync(path.join(import.meta.dirname, "doc-size-policy.mjs"), path.join(root, "scripts", "doc-size-policy.mjs"));
+    fs.mkdirSync(path.join(root, "a b"));
+    const link = path.join(root, "a b", "dsp-link.mjs");
+    fs.symlinkSync(path.join(root, "scripts", "doc-size-policy.mjs"), link);
+    for (const script of [link, path.join(root, "scripts", "doc-size-policy.mjs")]) {
+      let err;
+      try { execFileSync(process.execPath, [script], { stdio: "pipe" }); } catch (e) { err = e; }
+      assert.ok(err, `expected non-zero exit for ${script}`);
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /zz-uncapped\.md: no per-file cap/);
+    }
+  } finally { fs.rmSync(root, { recursive: true }); }
+});
