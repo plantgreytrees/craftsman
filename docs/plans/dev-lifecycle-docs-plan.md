@@ -398,6 +398,19 @@ units:
       write: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs]
     arch: [ARCH-LAND-23, ARCH-STATE-16, ARCH-SAFETY-03]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-lease-toplevel
+    scope_id: fix-lease-toplevel
+    project: .
+    depends_on: []
+    module: scripts/lib/force-block.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/lib/force-block.mjs, scripts/lib/force-block.test.mjs, scripts/pre-guard-narrow.test.mjs, docs/architecture/landing.rules.md]
+    arch: [ARCH-LAND-31, ARCH-STATE-16, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Slim Craftsman — approval page, ledger guard, guard narrowing, measured tokens
@@ -557,7 +570,7 @@ Owner decision (2026-10-23): map three knobs, `modelTier` reserved. Platform fac
 ### Step 21 — fix-bypass-allowlist (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-`pre-guard.mjs` (93 KB) is write-listed, not read-listed: read it in parts. Finding (round 6, Warning): `bypassView` strips heredoc bodies from the hook-bypass check unless the text holds a listed shell or interpreter word, so an unlisted consumer (tcsh, mksh, ash, deno, bun, lua, pwsh, `nodejs`, `perl5.36`, or a heredoc written to a file that the same command then runs) now hides its body; main refused those.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 21.1 Add tests first in `scripts/pre-guard-narrow.test.mjs` (spell the flag in two parts so the file never trips the hook): a heredoc fed to each of tcsh, mksh, ash, busybox sh, deno, bun, lua, pwsh, nodejs, perl5.36 is refused; a heredoc written to a file with `cat > x <<EOF` and then run in the same command (`sh x`, `./x`, `source x`, `bash x`) is refused; `git -c alias.x='!sh' x <<EOF` is refused; the allowed cases stay allowed: `git commit -F - <<EOF` prose, `cat <<EOF`, `cat > notes.txt <<EOF`, `tee f <<EOF` → accept: the new refusals fail on the current `bypassView`
 - [ ] 21.2 Replace the denylist in `bypassView` with an allowlist: strip heredoc bodies only when every command head left in the command (after removing the bodies) is one of `cat`, `tee`, `git commit|tag|notes` without `-c`, `echo`, `printf`, `true`, `wc`, `sort`, `uniq`, `head`, `tail`; any other head, a pipe into an unlisted head, or a head that runs a file keeps the bodies in view (fail closed) → accept: tests green, `pre-guard.test.mjs` unchanged and green
 - [ ] 21.3 The comment above `bypassView` cites ARCH-STATE-14, not the superseded ARCH-STATE-12 → accept: grep shows no ARCH-STATE-12 in `pre-guard.mjs`
@@ -565,14 +578,14 @@ Depends on: none
 ### Step 22 — fix-reviewer-red (., markdown, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-Finding (round 6, Warning): ARCH-ENGINE-21 says the reviewer refuses a unit whose new test never failed, but the sentence exists only in `agents/implementer.md`.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 22.1 Add to `scripts/unit-runner-tdd.test.mjs` first: `agents/code-reviewer.md` carries the refusal sentence (the unit's evidence names the failing run of each new test, else the review returns a Critical finding) → accept: red before the change
 - [ ] 22.2 Add that sentence to `agents/code-reviewer.md` by trading bytes inside the file so its `FILE_CAPS` entry (2564) does not rise → accept: the test and `doc-size-policy` green
 
 ### Step 23 — fix-heredoc-strict (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-`pre-guard.mjs` (93 KB) is write-listed, not read-listed: read it in parts. Findings (round 7, Warning): (a) `sort` is on the `heredoc-allow.mjs` allowlist but `sort` can run a program (a compress-program option) and so run a heredoc body; (b) `stripHeredocs` does not track `${...}` parameter expansion, so `<<TAG}` inside `${x:-...}` (literal to bash) is read as a heredoc start and the lines after it, which bash runs, are stripped from the bypass check.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 23.1 Add tests first in `scripts/pre-guard-narrow.test.mjs` (flag spelled in two parts): a heredoc fed to `sort` with a program option is refused; the `${x:-<<EOF}` shape with the flag on the following line is refused; refused cases for `$( )`, backticks, `<( )`/`>( )`, `;`-chained shells, path-qualified heads (`/bin/sh`), leading assignments (`FOO=1 sh`) and `git -C dir commit`/`git -c k=v commit`; the allowed cases stay allowed (`git commit -F - <<EOF` prose, `cat <<EOF`, `cat > notes.txt <<EOF`, `tee f <<EOF`) → accept: the sort and `${}` cases fail on the current code
 - [ ] 23.2 Shrink the allowlist in `scripts/lib/heredoc-allow.mjs` to the consumers that cannot run a program: `cat`, `tee`, and `git commit|tag|notes` (drop `sort`, `echo`, `printf`, `true`, `wc`, `uniq`, `head`, `tail`) → accept: tests green
 - [ ] 23.3 Make `stripHeredocs` in `pre-guard.mjs` treat `${` … matching `}` as one opaque word in the command and double-quote contexts, as it already does for `$((` and `$[`; an unterminated `${` keeps the rest of the text in view (fail closed) → accept: tests green, `pre-guard.test.mjs` unchanged and green
@@ -580,7 +593,7 @@ Depends on: none
 ### Step 24 — fix-red-run-evidence (., markdown, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-Findings (round 7, Warning): the `agents/code-reviewer.md` refusal expects red-run evidence that no caller passes (`commands/_shared-execution.md` step 8 gives it the diff only; integration and scrutinise reviews have no unit evidence), and on the `/auto` workflow path `workflows/run.js` sends the review role only `worktree_path`; ARCH-PLAN-07's check names a no-fourth-profile-file assertion that does not exist.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 24.1 Add tests first in `scripts/unit-runner-tdd.test.mjs`: the `code-reviewer.md` sentence is scoped to per-unit review; `_shared-execution.md` step 8 tells root to pass the implementer's evidence (the failing run of each new test) to `code-reviewer`; the `## review` role in `agents/unit-runner.md` returns `CHANGES` when the evidence lacks that failing run; the review prompt in `workflows/run.js` carries the implementer's evidence → accept: red before the change
 - [ ] 24.2 Make those four edits, trading bytes inside each `.md` so no `FILE_CAPS` entry rises (`_shared-execution.md` is 12764 of 12769) → accept: the tests and `doc-size-policy` green
 - [ ] 24.3 Add to `scripts/wiring.test.mjs` the ARCH-PLAN-07 assertion that no fourth profile file exists: no tracked file named `craftsman.profile.*`, `.claude/profile.*` or a root or `docs/` `profile.json|md|yaml` → accept: the test passes and fails when such a file is added to a temp repo fixture
@@ -588,7 +601,7 @@ Findings (round 7, Warning): the `agents/code-reviewer.md` refusal expects red-r
 ### Step 25 — revert-heredoc-prose (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-Owner decision (2026-10-23, after round 8): the heredoc-prose allowance rests on a hand-written bash lexer in a safety hook and keeps meeting shapes where it and bash disagree (a quoted or escaped `}` in `${...}`, a backslash-newline before a terminator, `$'...'` strings). Drop it: the hook-bypass check reads the whole command again, exactly as PR #1 had it. Keep the own-branch lease allowance. Root runs this unit by hand (a mechanical revert verified against a92c915).
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 25.1 Add to `scripts/pre-guard-narrow.test.mjs` first: a heredoc body that mentions the bypass flag (flag spelled in two parts) is refused again, for `git commit -F - <<EOF`, `cat <<EOF` and `tee f <<EOF`; the lease tests stay → accept: the new refusals fail on the current `bypassView`
 - [ ] 25.2 Remove `bypassView`, `scripts/lib/heredoc-allow.mjs`, `braceEnd` and the `${` handling added to `arithmeticEnd`/`stripHeredocs`; the hook-bypass check tests `command` as in a92c915; keep `ownBranchesOf` wiring → accept: `pre-guard.mjs` differs from a92c915 only in the `ownBranchesOf` import and call; `pre-guard.test.mjs` unchanged and green
 - [ ] 25.3 ARCH-STATE-14 is superseded by ARCH-STATE-16 (lease allowance only; heredoc prose stays refused), and the plan and acceptance wording of 4.1/4.2 and of units fix-bypass-allowlist and fix-heredoc-strict follow it → accept: `arch-check lint` PASS
@@ -596,14 +609,14 @@ Owner decision (2026-10-23, after round 8): the heredoc-prose allowance rests on
 ### Step 26 — fix-evidence-flow (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-Findings (round 8, Warning): (a) after a fix round `workflows/run.js` hands the reviewer only the fix round's evidence, so the red-run check fails again and the unit PARKs; (b) the producer is never told to put the failing run into its returned evidence (`agents/unit-runner.md` steps 6-8, `agents/implementer.md` Return list); (c) on the root path a router SKIP runs no `code-reviewer`, so nobody checks the red run; (d) `agents/code-reviewer.md` does not say which modes "per-unit review" excludes.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 26.1 Add tests first to `scripts/unit-runner-tdd.test.mjs`: the review prompt in `workflows/run.js` carries the original evidence on every round; `agents/unit-runner.md` step 7 or 8 says evidence names the failing run of each new test; `agents/implementer.md` Return list names it; `commands/_shared-execution.md` step 8 makes the SKIP route check it; `agents/code-reviewer.md` names integration and scrutinise reviews as not subject to it → accept: red before the change
 - [ ] 26.2 Make those edits, trading bytes inside each `.md` so no `FILE_CAPS` entry rises (`unit-runner.md` 3605/3605, `implementer.md` 2222/2224, `code-reviewer.md` 2563/2564, `_shared-execution.md` 12764/12769) → accept: the tests and `doc-size-policy` green
 
 ### Step 27 — fix-lease-expansion (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-Root runs this unit by hand. Findings (round 9): (Critical) the lease allowance reads the refspec text before the shell expands it, so `feature/<plan>-$X` with `X=x:main`, a backtick or `$( )` substitution, `$'\x3a'`, or `HEAD:feature/p-x:main` (git splits at the last colon, the code at the first) reaches main; `ownBranchesOf` turns the bound branch into a glob, so a branch of `*` allows `HEAD:main`; (Warning) a fix round's evidence replaces the earlier fix round's, so the round-2 review can lack a new test's failing run; (Suggestion) the byte trades dropped the `(_architecture.md)` pointer in `_shared-execution.md` step 8.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 27.1 Add tests first in `scripts/lib/force-block.test.mjs` and `scripts/pre-guard-narrow.test.mjs`: a lease push is refused when its command text holds `$`, a backtick or a backslash anywhere, for a refspec word with `{`, `}`, `*`, `?`, `[`, `(`, a quote or a second colon (`HEAD:feature/p-x:main`), and for a binding branch of `*`; the existing allowed cases (plain names, `HEAD:feat/unit-a`, `refs/heads/` form, `--force-with-lease=name:sha`) stay allowed → accept: the expansion and double-colon cases fail on the current code
 - [ ] 27.2 In `leaseToOwnBranch` require every word to match `^[A-Za-z0-9._/:=-]+$`, every ref to be `name` or `src:dst` with exactly one colon at most and both sides `^[A-Za-z0-9._/-]+$`, and no `$`, backtick or backslash anywhere in the command text; make `ownBranchesOf` return the bound branch only when it matches `^[A-Za-z0-9._/-]+$` and compile the `feature/<plan>-*` glob so `*` means `[A-Za-z0-9._-]+` → accept: tests green
 - [ ] 27.3 `workflows/run.js` collects every fix round's evidence and sends all of it with the original on each review round; a behavioural test drives the loop through two fix rounds (or asserts the accumulation) → accept: test green
@@ -612,7 +625,7 @@ Root runs this unit by hand. Findings (round 9): (Critical) the lease allowance 
 ### Step 28 — fix-lease-qualified (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-Root runs this unit by hand. Round 10 (Critical): a colon-less ref lets git apply `remote.<n>.push` or `push.default=upstream` and push to main (config from a `-c` word, a `GIT_CONFIG_*` prefix or an earlier `git config`); an explicit `src:dst` ignores the remap. A bound branch such as `heads/main` makes `src:heads/main` resolve to refs/heads/main.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 28.1 Add tests first in `scripts/lib/force-block.test.mjs` and `scripts/pre-guard-narrow.test.mjs`: a lease push is refused for a colon-less ref, for a destination not written as `refs/heads/<own>`, with `-c`, `--config-env`, `--git-dir`, `--work-tree` before `push`, with a `GIT_*=` or `env` prefix, and for bound branches `HEAD`, `-x`, `refs/heads/main`, `heads/main`, `Main`, `a/main`; allowed: `HEAD:refs/heads/feat/unit-a`, `feat/unit-a:refs/heads/feat/unit-a`, `-C dir push` with those refs, `-u`, `--force-if-includes` → accept: the config-remap and `heads/main` cases fail on the current code
 - [ ] 28.2 In `leaseToOwnBranch` require every ref to be exactly `src:refs/heads/<own>` (one colon, `src` a safe name, no `+`); refuse the allowance when the command text holds a global config option, `GIT_*=` or `env`; in `ownBranchesOf` reject `HEAD`, names starting with `-`, `refs/` or `heads/`, and any name ending in a `main` or `master` segment, case-insensitively → accept: tests green
 - [ ] 28.3 Refresh the ARCH-LAND-23 cite to the file's real line count and word the rule's lease clause as `src:refs/heads/<own>` only → accept: `arch-check lint` PASS
@@ -620,10 +633,18 @@ Root runs this unit by hand. Round 10 (Critical): a colon-less ref lets git appl
 ### Step 29 — fix-force-config-xargs (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-Root runs this unit by hand. Round 11 findings in the general force block (older than the lease work): (Critical) a config option or `git config` write in the same command turns a plain push into a forced one (`remote.<n>.push=+HEAD:refs/heads/main`, `remote.<n>.mirror`), and the block only looks at the push words; (Critical) force flags supplied at run time through `xargs`/`parallel` are invisible; (Warning) `ownBranchesOf` trusts the bound branch as run-created, so a base other than main/master (develop, trunk) bound by a scope on the main checkout passes; (Suggestion) `--namespace` is not refused.
+Landed; the review findings behind it are in git history (rounds 6 to 11).
 - [ ] 29.1 Add tests first in `scripts/lib/force-block.test.mjs`: each of these is blocked: a push under `-c remote.<n>.push=+…`, `-c remote.<n>.mirror=…`, `--config-env=…`, `GIT_CONFIG_COUNT=…`, `--namespace=…`; `git config remote.<n>.push +…` and `git config remote.<n>.mirror …` writes; `xargs git …`, `xargs -a f git`, `parallel git …`; and `ownBranchesOf` returns no binding branch unless it starts with `feat/` or `feature/`; plain pushes, `-C dir push`, and the lease cases of 28.1 stay as they are → accept: the config and xargs shapes fail on the current code
 - [ ] 29.2 In `destructiveGit` block any `git push` whose command text carries `-c`, `--config-env`, `--namespace`, `--git-dir`, `--work-tree`, a `GIT_*=` variable or `env`, block `git config` writes of `remote.*.push`, `remote.*.mirror` and `alias.*`, and block any command where `xargs` or `parallel` runs `git`; limit `ownBranchesOf` to bound branches matching `^(?:feat|feature)/`; scope per owner decision 2026-10-23 after round 12: literal, unquoted, lowercase forms only (ARCH-LAND-31 states the block is best-effort); quoted, escaped, expansion-built and case-varied forms, `send-pack`, remote deletes and non-literal `git` words are the tracked follow-up `force-block-wordlevel` → accept: tests green
 - [ ] 29.3 Pin the same shapes through the real guard in `scripts/pre-guard-narrow.test.mjs` (plain push with `-c` remote push override, `xargs git push`) → accept: tests green
+
+### Step 30 — fix-lease-toplevel (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+Root runs this unit by hand. Round 13 (Warning, regression): the lease check runs on each quoted string alone, so adjacent quotes in `bash -c` splice a second refspec (`…feature/p-1'' b:refs/heads/main`); a `GIT_*=` prefix on the wrapper and a path as the remote also pass.
+- [ ] 30.1 Add tests first in `scripts/lib/force-block.test.mjs` (one also in `scripts/pre-guard-narrow.test.mjs`): lease pushes inside `bash -c`/`sh -c`, with adjacent-quote splices, a `GIT_*=` wrapper prefix, or a path or URL as the remote, are refused; the top-level `src:refs/heads/<own>` push to a named remote stays allowed; single-`git` forms of the `-c`, `--config-env` and `--namespace` push overrides are refused → accept: the quoted and remote-path cases fail on the current code
+- [ ] 30.2 In `destructiveGit` pass no own branches to the per-quoted-string recursion, so the lease exception applies only to a top-level push; require the remote word to match `^[A-Za-z0-9._-]+$` → accept: tests green
+- [ ] 30.3 ARCH-LAND-31 says the lease exception applies only to an unquoted top-level push and names adjacent-quote assembly in its cannot-read list; force-block.mjs comments cite ARCH-LAND-31/STATE-16 and the header drops the "however it is quoted" claim → accept: `arch-check lint` PASS
 
 ## Sequencing
 tracker guard first (live defect, no PR #1 files) → force-lease → guard narrowing (PR #1 precondition; nothing depends on it) → stats → baseline metric; surface-trim, tool-slots, docs-budgets, retire-check and rolling-scrutinise are independent and run between → tdd-step (PR #1 precondition; nothing depends on it) → vendored-skills (needs byte donors, waits only for surface-trim) → approval page → record → land gate (needs retire-check and budgets) → protocol → profile/release → CHANGELOG. The approval gate is last on purpose so every earlier unit lands before it exists. The two PR #1-gated units PARK in isolation: no other unit depends on them, so a PARK never stalls the programme.
