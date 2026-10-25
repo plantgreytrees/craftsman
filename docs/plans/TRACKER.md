@@ -63,8 +63,79 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 
 | plan | unit | module | status | evidence | updated |
 |---|---|---|---|---|---|
+| [a](./a.md) | unit-1 | — | COMPLETE | shipped | 2026-10-25 |
+| [a](./a.md) | unit-2 | — | BLOCKED | needs a call on auth provider | 2026-10-25 |
+| [a](./a.md) | unit-3 | — | PENDING | — | 2026-10-25 |
 | [artist-ui-gate](./artist-ui-gate.md) | ui-gate-script | scripts/ui-gate.mjs | COMPLETE | all 4 acceptance criteria ticked; c60bc4b on origin/main (feat/ui-gate-script f… | 2026-10-25 |
 | [artist-ui-gate](./artist-ui-gate.md) | ui-surface | agents/ui-ux-reviewer.md | COMPLETE | all 4 acceptance criteria ticked; merged direct to main | 2026-10-25 |
+| [big](./big.md) | u0 | m0 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u1 | m1 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u10 | m10 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u11 | m11 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u12 | m12 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u13 | m13 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u14 | m14 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u15 | m15 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u16 | m16 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u17 | m17 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u18 | m18 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u19 | m19 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u2 | m2 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u20 | m20 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u21 | m21 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u22 | m22 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u23 | m23 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u24 | m24 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u25 | m25 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u26 | m26 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u27 | m27 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u28 | m28 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u29 | m29 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u3 | m3 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u30 | m30 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u31 | m31 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u32 | m32 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u33 | m33 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u34 | m34 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u35 | m35 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u36 | m36 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u37 | m37 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u38 | m38 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u39 | m39 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u4 | m4 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u40 | m40 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u41 | m41 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u42 | m42 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u43 | m43 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u44 | m44 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u45 | m45 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u46 | m46 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u47 | m47 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u48 | m48 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u49 | m49 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u5 | m5 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u6 | m6 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u7 | m7 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u8 | m8 | PENDING | rehydrated from TRACKER.md block | 2026-10-25 |
+| [big](./big.md) | u9 | m9 | COMPLETE | rehydrated from TRACKER.md block | 2026-10-25 |
+| [demo](./demo.md) | alpha | — | PENDING | alpha PENDING | 2026-10-25 |
+| [demo](./demo.md) | beta | — | IN_PROGRESS | beta IN_PROGRESS | 2026-10-25 |
+| [demo](./demo.md) | solo | — | PENDING | solo PENDING | 2026-10-25 |
+| [example](./example.md) | m0 | — | PENDING | — | 2026-10-25 |
+| [example](./example.md) | m1 | — | PENDING | — | 2026-10-25 |
+| [example](./example.md) | m2 | — | PENDING | — | 2026-10-25 |
+| [example](./example.md) | m3 | — | PENDING | — | 2026-10-25 |
+| [example](./example.md) | m4 | — | PENDING | — | 2026-10-25 |
+| [example](./example.md) | u1 | — | FEATURE_MERGED | abc | 2026-10-25 |
+| [example](./example.md) | unit-1 | — | IN_PROGRESS | claimed | 2026-10-25 |
+| [example](./example.md) | unit-2 | — | IN_PROGRESS | claimed | 2026-10-25 |
+| [example](./example.md) | unit-3 | — | IN_PROGRESS | claimed | 2026-10-25 |
+| [example](./example.md) | unit-9 (S9) | — | COMPLETE | all 1 acceptance criteria ticked; def456 | 2026-10-25 |
+| [f](./f.md) | u | — | PENDING | — | 2026-10-25 |
+| [live](./live.md) | a | — | PENDING | — | 2026-10-25 |
+| [other](./other.md) | zeta | — | PENDING | — | 2026-10-25 |
+| [release](./release.md) | unit-1 | — | COMPLETE | verified | 2026-10-25 |
+| [release](./release.md) | unit-2 | — | BLOCKED | needs approval | 2026-10-25 |
 | [scrutinise-artist-ui-gate](./scrutinise-artist-ui-gate.md) | fix-ui-gate-round2 | scripts/ui-gate.mjs | COMPLETE | all 5 acceptance criteria ticked; merged direct 8ba334bdc592ca21d8c8fdbad7d58aa… | 2026-10-25 |
 | [scrutinise-artist-ui-gate](./scrutinise-artist-ui-gate.md) | fix-ui-gate-script | scripts/ui-gate.mjs | COMPLETE | all 4 acceptance criteria ticked; landed direct c9efbfbd215f86e4db93c2983f5df0d… | 2026-10-25 |
 | [scrutinise-artist-ui-gate](./scrutinise-artist-ui-gate.md) | fix-ui-gate-wiring | commands/_shared-execution.md | COMPLETE | all 2 acceptance criteria ticked; merged direct 5b0faf98b71ffab12613fa2e9b40c5c… | 2026-10-25 |
