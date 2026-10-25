@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { findReferrers, grantValid, landingCapability, retire, retireCheck } from "./doc-retire.mjs";
+import { resolveArchive as resolveArchiveReal } from "./lib/archive.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { classifyArchive } from "./lib/archive.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
@@ -926,7 +927,7 @@ test("doc-retire rewrite: a pointer written for one doc is never rewritten for a
 
 const docRetiredEvents = (context) => (fs.existsSync(path.join(context.stateDir, "events.jsonl")) ? events(context) : []).filter((e) => e.ev === "doc_retired");
 
-test("doc-retire: a call carrying the landing capability needs no grant and logs exactly one doc_retired with auto true (ARCH-DOCS-17)", () => {
+test("doc-retire: a call carrying the landing capability needs no grant and logs exactly one doc_retired with auto true (ARCH-DOCS-18)", () => {
   const auto = noManifest(() => repo({ grant: false }));
   assert.equal(withArchive(() => retire({ plan: PLAN }, auto, landingCapability())).retired, PLAN);
   const autoEvents = docRetiredEvents(auto);
@@ -934,7 +935,7 @@ test("doc-retire: a call carrying the landing capability needs no grant and logs
   assert.equal(autoEvents[0].auto, true);
 });
 
-test("doc-retire: a manual retire is never logged auto, even when it passes auto:true (ARCH-DOCS-17)", () => {
+test("doc-retire: a manual retire is never logged auto, even when it passes auto:true (ARCH-DOCS-18)", () => {
   const manual = noManifest(() => repo());
   assert.equal(noManifest(() => retire({ plan: PLAN, auto: true }, manual)).retired, PLAN);
   const manualEvents = docRetiredEvents(manual);
@@ -942,7 +943,7 @@ test("doc-retire: a manual retire is never logged auto, even when it passes auto
   assert.equal("auto" in manualEvents[0], false);
 });
 
-test("doc-retire: auto:true without the capability keeps the grant requirement and logs nothing (ARCH-DOCS-17)", () => {
+test("doc-retire: auto:true without the capability keeps the grant requirement and logs nothing (ARCH-DOCS-18)", () => {
   const context = noManifest(() => repo({ grant: false }));
   const before = snapshot(context);
   for (const forged of [undefined, true, { landing: true }, Object.freeze({ landing: true }), "landing"]) {
@@ -954,7 +955,7 @@ test("doc-retire: auto:true without the capability keeps the grant requirement a
   assert.equal(docRetiredEvents(context).length, 0);
 });
 
-test("doc-retire: auto:true through the CLI path without a grant is refused and logs no doc_retired with auto (ARCH-DOCS-17)", () => {
+test("doc-retire: auto:true through the CLI path without a grant is refused and logs no doc_retired with auto (ARCH-DOCS-18)", () => {
   const context = repo({ grant: false });
   const before = snapshot(context);
   const env = { ...process.env, CLAUDE_PROJECT_DIR: context.root, CLAUDE_CODE_SESSION_ID: "cli" };
@@ -985,6 +986,30 @@ test("doc-retire: the landing capability with no archive project is refused befo
   assert.deepEqual(snapshot(context), before);
   assert.ok(fs.existsSync(path.join(context.root, PLAN)), "the plan doc is untouched");
   assert.equal(docRetiredEvents(context).length, 0);
+});
+
+test("doc-retire: a landing retire copies into the archive resolved at its guard and never resolves a second time (ARCH-ARCHIVE-03, ARCH-DOCS-18)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  withArchive((archive) => {
+    // The real resolver answers once; any later resolve yields no root, as if the archive project vanished mid-retire.
+    let calls = 0;
+    const resolveArchive = (ctx) => { calls += 1; return calls === 1 ? resolveArchiveReal(ctx) : { off: "gone" }; };
+    const out = retire({ plan: PLAN }, context, landingCapability(), { resolveArchive });
+    assert.equal(out.retired, PLAN, out.reason);
+    assert.equal(calls, 1, "the archive resolved at the guard is the one copied into");
+    assert.ok(fs.readdirSync(archive).some((d) => !d.startsWith(".")), "the archive holds the copy");
+    assert.ok(!fs.existsSync(path.join(context.root, PLAN)), "removed only after the verified copy");
+  });
+});
+
+test("doc-retire: a landing retire whose archive has no root removes nothing (ARCH-ARCHIVE-03)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context, landingCapability(), { resolveArchive: () => ({ off: "gone" }) });
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /automatic archive needs an archive project/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
 });
 
 test("doc-retire: NEXT.md lines of a retired descendant leave with it", () => {

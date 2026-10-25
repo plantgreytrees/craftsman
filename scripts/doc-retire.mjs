@@ -99,7 +99,8 @@ function refuse(reason, referrers = []) {
   return { refused: true, reason, referrers };
 }
 
-export function retire(input, context = projectContext("."), capability = undefined) {
+export function retire(input, context = projectContext("."), capability = undefined, seams = {}) {
+  const resolve = seams.resolveArchive || resolveArchive;
   const plan = input?.plan;
   if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) {
     return refuse("retire needs a relative plan path");
@@ -117,9 +118,10 @@ export function retire(input, context = projectContext("."), capability = undefi
       : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
   }
   // ARCH-ARCHIVE-03: an automatic archive has nowhere to copy to without an archive project; refuse before anything is touched.
-  let archiveRoot = null;
-  if (landing) { try { archiveRoot = resolveArchive(context).root; } catch { /* unresolved */ } }
-  if (landing && !archiveRoot) return refuse("retire refused: automatic archive needs an archive project");
+  // The archive resolved here is the one copied into below: resolving again could answer differently and leave nothing to verify.
+  let landingArchive = null;
+  if (landing) { try { landingArchive = resolve(context); } catch { /* unresolved */ } }
+  if (landing && !landingArchive?.root) return refuse("retire refused: automatic archive needs an archive project");
   const dir = path.posix.dirname(plan);
   const slug = path.posix.basename(plan, ".md");
   const rowsOf = (p) => currentState(context).filter((row) => row.plan === p);
@@ -253,7 +255,8 @@ export function retire(input, context = projectContext("."), capability = undefi
   let archiveShas = null;
   let archiveSha;
   try {
-    const archive = resolveArchive(context);
+    const archive = landing ? landingArchive : resolve(context);
+    if (landing && !archive?.root) return refuse("retire refused: automatic archive needs an archive project");
     if (archive.root) {
         const seams = { context };
       archiveShas = new Map();
