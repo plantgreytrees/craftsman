@@ -350,7 +350,7 @@ function mergeOnly(context, input, info, deps = {}) {
   const cfg = loadConfig(context);
   const land = landMode(cfg);
   noteUnenforced(cfg, context);
-  assertMergeAllowed(cfg, input, { info, land, worktree });
+  const pin = assertMergeAllowed(cfg, input, { info, land, worktree });
   if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
@@ -358,10 +358,11 @@ function mergeOnly(context, input, info, deps = {}) {
   if (input.branch && input.branch !== branch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   verifyGateBeforeMerge(context, worktree);
+  pin();
   // ARCH-LAND-12: a unit PR targets its feature branch.
-  if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
+  if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner, pin });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
-  if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
+  if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch, pin });
   // Else merge where base is checked out (this root or another worktree), never dirty.
   const at = holder || context.root;
   if (holder && (run(holder, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })
@@ -374,6 +375,7 @@ function mergeOnly(context, input, info, deps = {}) {
   let pushed = true;
   let step = null; // the landing step that PARKs instead of throwing (ARCH-LAND-06)
   try {
+    pin();
     heartbeat(lock);
     if (!holder) run(at, ["checkout", info.base_branch]);
     if (info.has_remote && input.pull !== false) {
@@ -436,7 +438,7 @@ function baseHeldElsewhere(root, base) {
 
 // Base held elsewhere, pushing: merge in a temporary detached worktree at
 // origin's base (removed on every path), push HEAD:<base>.
-function landDetached(context, input, info, { worktree, branch }) {
+function landDetached(context, input, info, { worktree, branch, pin }) {
   const result = { ...info, branch, land: "direct", merged: false, merged_locally: false, worktree_path: worktree };
   const lock = acquireLock(info, input);
   const temp = path.join(info.common_git_dir, ".craftsman", "land", `${branch.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
@@ -444,6 +446,7 @@ function landDetached(context, input, info, { worktree, branch }) {
   let step = null;
   let pushed = true;
   try {
+    pin();
     heartbeat(lock);
     if (input.pull !== false) fetchBase(context, context.root, { ...input, fetch: undefined }, info);
     fs.mkdirSync(path.dirname(temp), { recursive: true });
@@ -727,7 +730,7 @@ function landingPark(reason, result, error) {
 
 // "pr" mode: no lock, base untouched; push the unit branch, open or reuse its
 // PR and ask for auto-merge. Every refusal is checked before the push.
-function landPullRequest(context, input, info, { worktree, branch, cfg, runner }) {
+function landPullRequest(context, input, info, { worktree, branch, cfg, runner, pin }) {
   if (!info.has_remote) throw new Error(`repoExec.land is "pr" but ${info.project} has no origin remote`);
   requireOnline(worktree, input, info, 'repoExec.land "pr"');
   const host = detectHost(info.origin, cfg.repoExec?.host);
@@ -741,6 +744,7 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner }
   fetchBase(context, context.root, input, info);
   const subjects = run(worktree, ["log", "--reverse", "--format=%s", `origin/${info.base_branch}..${branch}`]);
   if (!subjects) throw new Error(`${branch} has no commits beyond origin/${info.base_branch}`);
+  pin();
   try { remote(worktree, ["push", "-u", "origin", branch]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
