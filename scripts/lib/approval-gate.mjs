@@ -18,6 +18,11 @@ export function noteUnenforced(cfg, context) {
   if (approvalUnenforced(cfg)) logEvent({ ev: "approval_unenforced", reason: "featureBranches off" }, context);
 }
 
+// ARCH-LAND-28: with the gate on, a unit merge to base (no feature_branch) needs approval first.
+export function assertMergeAllowed(cfg, input) {
+  if (approvalRequired(cfg) && !input.feature_branch) throw new Error("approval required: a unit merge to base needs an approved page; land through land-feature or give feature_branch");
+}
+
 // A red gate after base moved in PARKs (ARCH-LAND-27).
 export const gatePark = (r) => ({
   question: `The gate failed on ${r.branch} merged with the moved ${r.base_branch}; nothing landed. How should it proceed?`,
