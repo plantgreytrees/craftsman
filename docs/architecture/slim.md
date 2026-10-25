@@ -57,3 +57,7 @@ ARCH-SLIM-10 measures always-loaded bytes: a 3 KB SessionStart target and a per-
 
 - **ARCH-SLIM-13** replaces 11: the Skill deny list in `/init` is dropped (it was never built).
 - **ARCH-SLIM-14** replaces 12: the ten entry points stay the documented surface; `/plan`, `/orchestrate` and `/scrutinise` stay model-invocable because `/auto` drives them; a command is flagged only when nothing invokes it, as `entry-surface.test.mjs` enforces.
+
+## Amendment (2026-10-25, owner-approved): Artist as an optional integration
+
+- **ARCH-SLIM-15** replaces 13. Craftsman still declares no plugin dependency and assumes no co-install. The one exception is narrow: the separate Artist plugin owns UI design, so the `ui` gate uses it when `scripts/ui-gate.mjs` finds it installed, enabled and usable. When it isn't, the gate runs craftsman's own reduced accessibility check. Rejected: a hard `dependencies` entry in `plugin.json`, which would make every craftsman install require Artist and its marketplace. Routing lives in [gates](./gates.md). Source: [artist-ui-gate](../ideas/artist-ui-gate.md).
