@@ -113,12 +113,20 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [safety-followups-backlog](./safety-followups-backlog.md) | goal-file-main-checkout | — | COMPLETE | e7dea5e/095bd2a + 7247c03: goal file resolves via main checkout and worktree; c… | 2026-10-24 |
 | [safety-followups-backlog](./safety-followups-backlog.md) | ismain-helper | — | COMPLETE | 51871b0/984f169 helper + 22 scripts switched (f845825..c889d44); doc-size-polic… | 2026-10-24 |
 | [safety-followups-backlog](./safety-followups-backlog.md) | ledger-housekeeping | docs/plans/TRACKER.md | COMPLETE | 4 ledger rows closed via tracker.mjs (config-keys-protected, followup-md-dirty-… | 2026-10-24 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-json-quoting | commands/_approval.md | PENDING | — | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-loadrecord-dedupe | scripts/approval.mjs | PENDING | — | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-lock-break-race | scripts/approval.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-lock-stale-race | scripts/approval.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-owner-trust | scripts/pre-guard.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-prepare-derive-diff | scripts/approval.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-scan-config-source | scripts/approval.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | budget-key-removal | scripts/arch-check.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | budget-ratchet-keys | scripts/arch-check.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | events-jsonl-protect | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-fallback | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; root landed a50fc30; suite 1115/1115, lint PA… | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-hardening | scripts/approval.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-record | scripts/approval.mjs | COMPLETE | all 7 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-record-protect | scripts/lib/self-protect.mjs | COMPLETE | all 2 acceptance criteria ticked; root landed bafa7a5; suite 1115/1115, lint PA… | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-reprepare | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-scan | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-budget-growth | scripts/arch-check.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
@@ -135,8 +143,10 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | force-block-wordlevel | scripts/lib/force-block.mjs | PENDING | — | 2026-10-24 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-doc-claim | commands/auto.md | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | lease-glob-anchoring | scripts/lib/force-block.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | ledger-parse-dedupe2 | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | ledger-parser-dedupe | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | offline-landed-record | scripts/lib/approval-gate.mjs | PENDING | — | 2026-10-23 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | onpath-dedupe | scripts/doc-checks.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | profile-knobs | .claude-plugin/plugin.json | CANCELLED | moved to dev-lifecycle-docs-plan as unit profile-knobs (PR 1 landed) | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | publish-observability-tests | scripts/tracker-publish-cli.test.mjs | PENDING | round 5 suggestions: assert the second publish is a refusal not an unchanged no… | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | telemetry-baseline-marker | scripts/telemetry.mjs | PENDING | — | 2026-10-23 |
@@ -206,7 +216,7 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | state-filter-dedupe | scripts/lib/unpushed.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 5ef1ef9 on feat/scrutinise-fixes-and-s… | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | stop-loopguard-reports | scripts/stop-gate.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
 | [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-dsp-entry-check | scripts/doc-size-policy.mjs | COMPLETE | b9bec4e/252c385: realpath entry check, symlink+space regression test; suite 893… | 2026-10-24 |
-| [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-goal-token-test-stderr | scripts/goal-token.test.mjs | PENDING | from /scrutinise round 2 (Suggestion), not driven | 2026-10-24 |
+| [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-goal-token-test-stderr | scripts/goal-token.test.mjs | COMPLETE | 2ca9f36/2bde6ef: refused() asserts status 2 and the real refusal message on all… | 2026-10-25 |
 | [scrutinise-safety-followups-backlog](../../scrutinise-safety-followups-backlog) | followup-isMain-notes | scripts/doc-checks.mjs | COMPLETE | notes only, verified: scripts/doc-checks.mjs:38 keeps its own entry check (file… | 2026-10-24 |
 
 <!-- craftsman:ledger:end -->
