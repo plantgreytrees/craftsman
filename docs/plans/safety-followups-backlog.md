@@ -93,7 +93,7 @@ Why first: `scripts/lib/approval-gate.mjs:13` enables the approval gate only whe
 Tooling: implementer implementer · gates security-auditor · skills test-driven-development · guards arch-check
 Depends on: approval-keys-protected
 - [ ] 2.1 Red test with a linked-worktree fixture: `state-write.mjs` writes `instructions/<slug>.goal.txt` into the main checkout's `.craftsman` (`state-write.mjs:19`), then `mintGoalToken` for that file succeeds; today it resolves under `PROJECT_ROOT` (`goal-token.mjs:27`) and throws → accept: red before, green after
-- [ ] 2.2 Resolve the instructions directory through `mainCheckoutRoot(root)` in `goal-token.mjs`, keeping the realpath-inside-instructions check, the name and SHA-256 record and the nonce strict → accept: a file outside the instructions directory, a symlink out of it and a worktree-local copy are still refused (new cases)
+- [ ] 2.2 Resolve the instructions directory through `mainCheckoutRoot(root)` in `goal-token.mjs`, keeping the realpath-inside-instructions check, the name and SHA-256 record and the nonce strict → accept: an outside file, a symlink out of the instructions directory and an unrelated copy are refused; a worktree-local copy directly under <root>/.craftsman/instructions now mints (W1 = B) (new cases)
 - [ ] 2.3 Update ARCH-SAFETY-09's text and cite lines → accept: `safety-cites` passes
 Impact: `/instruction` in a linked worktree falls back to the paste path today (fails closed, UX only).
 
