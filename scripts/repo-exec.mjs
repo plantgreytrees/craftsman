@@ -350,16 +350,15 @@ function mergeOnly(context, input, info, deps = {}) {
   const cfg = loadConfig(context);
   const land = landMode(cfg);
   noteUnenforced(cfg, context);
-  assertMergeAllowed(cfg, input);
+  assertMergeAllowed(cfg, input, { info, land, worktree });
   if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
-  const checkedOutBranch = run(worktree, ["branch", "--show-current"]);
-  if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
-  const branch = checkedOutBranch;
+  const branch = run(worktree, ["branch", "--show-current"]);
+  if (input.branch && input.branch !== branch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   verifyGateBeforeMerge(context, worktree);
-  // ARCH-LAND-12: a unit PR targets its feature branch when one is given.
+  // ARCH-LAND-12: a unit PR targets its feature branch.
   if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
   if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
@@ -778,9 +777,8 @@ function cleanupAfterLanding(context, input, info, result) {
 function cleanup(context, input, info) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
-  const checkedOutBranch = run(worktree, ["branch", "--show-current"]);
-  if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
-  const branch = checkedOutBranch;
+  const branch = run(worktree, ["branch", "--show-current"]);
+  if (input.branch && input.branch !== branch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   run(context.root, ["worktree", "remove", worktree]);
   forgetSessionWorktree(input, worktree, context);
   run(context.root, ["worktree", "prune"]);
