@@ -53,8 +53,8 @@ function fixture() {
     fs.writeFileSync(path.join(wt, "docs", "design", "DESIGN.md"), text);
   };
   f.design();
-  f.run = (args = [wt, "main"]) => {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: wt, encoding: "utf8", env: { ...process.env, HOME: home, USERPROFILE: home } });
+  f.run = (args = [wt, "main"], env = {}) => {
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: wt, encoding: "utf8", env: { ...process.env, HOME: home, USERPROFILE: home, ...env } });
     assert.equal(r.status, 0, `always exit 0: ${r.stderr}`);
     return JSON.parse(r.stdout);
   };
@@ -164,19 +164,22 @@ test("ui-gate: a bad merge-base falls back without crashing", () => {
   });
 });
 
-function report(wt, ts) {
+// A report whose screenshots are real files beside it (Artist verify.mjs layout).
+function report(wt, ts, body) {
   const dir = path.join(wt, ".artist", "runs", ts);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "report.json"), "{}");
+  fs.writeFileSync(path.join(dir, "home.png"), "png");
+  fs.writeFileSync(path.join(dir, "report.json"), body ?? JSON.stringify({ screenshots: { home: "home.png" } }));
   return path.join(dir, "report.json");
 }
+const future = (ms) => new Date(Date.now() + 3600_000 + ms);
 
 test("ui-gate: an untracked report.json yields critic and a11y false; newest wins", () => {
   withFixture((f) => {
     const old = report(f.wt, "20260101");
     const fresh = report(f.wt, "20260202");
-    fs.utimesSync(old, new Date(1000), new Date(1000));
-    fs.utimesSync(fresh, new Date(2000000), new Date(2000000));
+    fs.utimesSync(old, future(1000), future(1000));
+    fs.utimesSync(fresh, future(2000000), future(2000000));
     const out = f.run();
     assert.equal(out.route, "artist");
     assert.equal(out.critic.report, fresh);
@@ -229,4 +232,92 @@ test("ui-gate: usage error prints the usage line and exits 0 with route fallback
   const out = JSON.parse(r.stdout);
   assert.equal(out.route, "fallback");
   assert.equal(out.a11y, true);
+});
+
+test("ui-gate: a missing worktree path falls back with worktree not found", () => {
+  withFixture((f) => {
+    const gone = path.join(f.root, "nope");
+    const out = f.run([gone, "main"]);
+    assert.equal(out.route, "fallback");
+    assert.equal(out.reason, `worktree not found: ${gone}`);
+    assert.equal(out.a11y, true);
+  });
+});
+
+test("ui-gate: critic.screenshots are absolute paths from report.json, named in the step", () => {
+  withFixture((f) => {
+    const rep = report(f.wt, "r1", JSON.stringify({ screenshots: { home: "home.png", out: "../escape.png", gone: "missing.png" } }));
+    fs.writeFileSync(path.join(path.dirname(rep), "..", "escape.png"), "x");
+    const out = f.run();
+    const shot = path.join(path.dirname(rep), "home.png");
+    assert.deepEqual(out.critic.screenshots, [shot]);
+    assert.equal(out.a11y, false);
+    const step = out.steps.find((x) => x.includes("design-critic"));
+    assert.ok(step.includes(shot), step);
+    assert.ok(!step.includes("escape.png"));
+    assert.ok(!step.includes(" screenshots,"));
+  });
+});
+
+test("ui-gate: unparseable report, no screenshots key or no surviving path falls back to a11y", () => {
+  withFixture((f) => {
+    for (const body of ["not json", "{}", JSON.stringify({ screenshots: { a: "../x.png", b: "none.png" } })]) {
+      report(f.wt, "r1", body);
+      const out = f.run();
+      assert.equal(out.route, "artist");
+      assert.equal(out.critic, undefined, body);
+      assert.equal(out.a11y, true, body);
+    }
+  });
+});
+
+test("ui-gate: a report older than the HEAD commit is ignored", () => {
+  withFixture((f) => {
+    const rep = report(f.wt, "r1");
+    fs.utimesSync(rep, new Date(1000), new Date(1000));
+    const out = f.run();
+    assert.equal(out.critic, undefined);
+    assert.equal(out.a11y, true);
+  });
+});
+
+test("ui-gate: run-* dirs older than 7 days are pruned; fresh and other names stay", () => {
+  withFixture((f) => {
+    const parent = path.join(f.main, ".craftsman", "ui-gate");
+    for (const n of ["run-old", "run-new", "keep-old"]) fs.mkdirSync(path.join(parent, n), { recursive: true });
+    const old = new Date(Date.now() - 8 * 86400_000);
+    fs.utimesSync(path.join(parent, "run-old"), old, old);
+    fs.utimesSync(path.join(parent, "keep-old"), old, old);
+    assert.equal(f.run().route, "artist");
+    assert.ok(!fs.existsSync(path.join(parent, "run-old")));
+    assert.ok(fs.existsSync(path.join(parent, "run-new")));
+    assert.ok(fs.existsSync(path.join(parent, "keep-old")));
+  });
+});
+
+test("ui-gate: CRAFTSMAN_UI_GATE_TIMEOUT_MS bounds reuse-check; odd exits fall back", () => {
+  withFixture((f) => {
+    f.stub(`setTimeout(() => {}, 4000);\n`);
+    let out = f.run(undefined, { CRAFTSMAN_UI_GATE_TIMEOUT_MS: "200" });
+    assert.equal(out.route, "fallback");
+    assert.match(out.reason, /timed out/);
+    f.stub(`process.exit(3);\n`);
+    out = f.run();
+    assert.equal(out.route, "fallback");
+    f.stub(`process.kill(process.pid, "SIGKILL"); setTimeout(() => {}, 4000);\n`);
+    out = f.run();
+    assert.equal(out.route, "fallback");
+  });
+});
+
+test("ui-gate: project tier beats user; local beats project", () => {
+  withFixture((f) => {
+    f.settings("user", true);
+    f.settings("project", false);
+    let out = f.run();
+    assert.equal(out.route, "fallback");
+    assert.match(out.reason, /not enabled/);
+    f.settings("local", true);
+    assert.equal(f.run().route, "artist");
+  });
 });
