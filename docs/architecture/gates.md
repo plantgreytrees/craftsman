@@ -3,7 +3,7 @@
 > and `/architect --update gates` should be run.
 
 # Gates architecture
-_Last verified: 2026-10-25 at `0a2fc6f` · Source idea: [artist-ui-gate](../ideas/artist-ui-gate.md)_
+_Last verified: 2026-10-25 at `bf45a1a` · Source idea: [artist-ui-gate](../ideas/artist-ui-gate.md)_
 
 ## In plain English
 After a unit is implemented, `gate-select.mjs` reads its diff and names the
@@ -32,10 +32,11 @@ flowchart LR
 |---|---|---|---|
 | ARCH-GATES-01 | Routing in one script that prints JSON | Deterministic, testable with fixtures; keeps prose out of always-read docs (SLIM-03/05) | Routing prose in `_shared-execution.md` |
 | ARCH-GATES-02 | Exact `artist@artist-marketplace`, installed and enabled, plus format-2 DESIGN.md | Never runs a disabled or same-named foreign plugin's script; reuse-check throws without DESIGN.md | Installed-only, any marketplace |
-| ARCH-GATES-03 | reuse-check with `--base <merge-base>`, run dir outside the worktree | reuse-check defaults to HEAD; a run dir inside the worktree could be committed by the unit | Default base; `.artist/runs` in the worktree |
+| ARCH-GATES-03 | Superseded by ARCH-GATES-07 | Its fixed argv left out Artist's justifications | — |
 | ARCH-GATES-04 | Critic only with a verify report | The critic scores screenshots, not diffs; a unit gate has no dev server | Critic on every ui diff; gate starts a dev server |
 | ARCH-GATES-05 | Reduced ui-ux-reviewer as accessibility floor | Projects without Artist keep a UI floor; axe only runs inside Artist's verify | Skip with a note; full old checklist |
 | ARCH-GATES-06 | builtinAgents is user config | Guard code stays generic | Hardcode the critic in the guard |
+| ARCH-GATES-07 | reuse-check with `--base <merge-base>`, run dir outside the worktree, plus the report's `justifications.json` when it is valid | reuse-check defaults to HEAD; a run dir inside the worktree could be committed by the unit; the fresh run dir hid the user's recorded justifications, and a bad file must not cost the critic | Fixed argv without justifications; pass a bad file and fall back |
 
 ## Trade-offs & known limits
 Craftsman now follows Artist's CLI contract (arguments, exit codes, DESIGN.md
