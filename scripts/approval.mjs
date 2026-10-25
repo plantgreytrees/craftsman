@@ -54,16 +54,13 @@ export function defaultRunners(root) {
     secrets: (dir = root) => {
       const cfg = loadConfig({ root });
       const out = [];
-      let ran = 0;
       for (const cmd of cfg.security?.check || []) {
         const [bin, ...args] = splitCmd(cmd);
         if (!bin || !onPath(bin, process.env, dir)) continue;
-        ran++;
         const r = spawnSync(bin, args, { cwd: dir, encoding: "utf8", timeout: cfg.stopGate?.testTimeoutMs });
         if (r.status !== 0) out.push({ file: "(security.check)", line: 0, rule: `${path.basename(bin)} exit ${r.status ?? "timeout"}` });
       }
-      if (!ran) return scanTree(dir).map((f) => ({ file: f.file, line: f.line, rule: f.rule }));
-      return out;
+      return [...scanTree(dir).map((f) => ({ file: f.file, line: f.line, rule: f.rule })), ...out];
     },
     docChecks: (dir = root) => {
       const cfg = loadConfig({ root });
