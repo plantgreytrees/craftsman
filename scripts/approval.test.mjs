@@ -155,6 +155,31 @@ test("fallback writes the markdown twin and returns the one question", () => {
   assert.equal(fallback({ run: "nope", markdown: "x" }, { root: s.root }).refused, true);
 });
 
+test("fallback labels round trip through check only with source fallback", () => {
+  const want = ["merge", "open-pr"];
+  for (const [i, choice] of want.entries()) {
+    const s = setup();
+    const p = prepare({ ...s.input, plan: "p.md" }, { root: s.root, runners: s.runners });
+    const label = fallback({ run: "p-f", markdown: p.markdown }, { root: s.root }).options[i];
+    const row = { choice: label, head_sha: s.A };
+    assert.equal(check({ run: "p-f", row, writer_is_owner: true }, { root: s.root }).refused, true);
+    assert.equal(check({ run: "p-f", row, source: "fallback", writer_is_owner: false }, { root: s.root }).refused, true);
+    assert.equal(s.rec().status, "requested");
+    const out = check({ run: "p-f", row, source: "fallback", writer_is_owner: true }, { root: s.root });
+    assert.deepEqual([out.ok, out.choice], [true, choice]);
+    assert.equal(s.rec().status, "decided");
+    assert.equal(s.rec().choice, choice);
+  }
+});
+
+test("a stale db row without decided_at or source is still refused", () => {
+  const s = setup();
+  prepare(s.input, { root: s.root, runners: s.runners });
+  const out = check({ run: "p-f", row: { choice: "merge", head_sha: s.A }, writer_is_owner: true }, { root: s.root });
+  assert.match(out.reason, /predates/);
+  assert.equal(s.rec().status, "requested");
+});
+
 const git = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8" }).trim();
 
 test("prepare scans the feature head in a detached worktree, not the main checkout", () => {
