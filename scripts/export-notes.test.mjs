@@ -7,7 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   exportRoot, notesRoot, inboxRoot, buildNotes, writeNotes, clearNotes, takeInboxNote,
-  planStatusRollup, INBOX_MAX_BYTES, verifiedExportDir, atomicWrite, writeExportFile,
+  planStatusRollup, INBOX_MAX_BYTES, verifiedExportDir, atomicWrite, writeExportFile, sweepStaleTemps,
 } from "./lib/export-notes.mjs";
 import { parseFrontmatter } from "./lib/plan-index.mjs";
 
@@ -274,8 +274,33 @@ test("writeExportFile: sweeps a stale temp file, keeps a fresh one from a live p
   const stale = path.join(dir, `.dashboard.html.${2 ** 22 + 12345}.1.tmp`);
   const fresh = path.join(dir, `.dashboard.html.${process.pid}.${Date.now() - 5000}.tmp`);
   fs.writeFileSync(stale, "s"); fs.writeFileSync(fresh, "f");
+  const old = new Date(Date.now() - 2 * 60 * 1000);
+  fs.utimesSync(stale, old, old); // a dead writer's file is deleted once it is older than the minimum age
   writeExportFile(context, "dashboard.html", "<html>");
   assert.ok(!fs.existsSync(stale));
   assert.ok(fs.existsSync(fresh));
   assert.ok(fs.existsSync(path.join(dir, "dashboard.html")));
+});
+
+test("sweepStaleTemps: a dead pid's file is kept until it has a minimum age; a live pid's file goes only after ten minutes", () => {
+  const { context } = fixture();
+  const dir = verifiedExportDir(context);
+  const at = (name, ageMs) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, "x");
+    const t = new Date(Date.now() - ageMs);
+    fs.utimesSync(file, t, t);
+    return file;
+  };
+  const dead = 2 ** 22 + 54321;
+  const deadYoung = at(`.a.html.${dead}.1.tmp`, 5 * 1000);
+  const deadOld = at(`.b.html.${dead}.2.tmp`, 2 * 60 * 1000);
+  const liveYoung = at(`.c.html.${process.pid}.3.tmp`, 2 * 60 * 1000);
+  const liveOld = at(`.d.html.${process.pid}.4.tmp`, 11 * 60 * 1000);
+  const removed = sweepStaleTemps(dir).sort();
+  assert.deepEqual(removed, [path.basename(deadOld), path.basename(liveOld)].sort());
+  assert.ok(fs.existsSync(deadYoung), "a dead pid does not condemn a just-written file");
+  assert.ok(fs.existsSync(liveYoung), "a live pid's file under ten minutes stays");
+  assert.ok(!fs.existsSync(deadOld));
+  assert.ok(!fs.existsSync(liveOld), "a live pid's file past ten minutes goes");
 });

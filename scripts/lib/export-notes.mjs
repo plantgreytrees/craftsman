@@ -58,8 +58,11 @@ export function atomicWrite(file, text) {
 export const checkedExportDir = (context) => verifiedExportDir(context, { create: false });
 
 const STALE_TMP_MS = 10 * 60 * 1000;
+// A dead pid alone is not proof the writer is gone (pids are reused and a writer on another host shares the directory): a temp
+// file must also be older than this before it is deleted.
+const MIN_DEAD_PID_AGE_MS = 60 * 1000;
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } };
-// Removes `.<name>.<pid>.<ts>.tmp` leftovers of dead writers (or older than ten minutes) directly in dir.
+// Removes `.<name>.<pid>.<ts>.tmp` leftovers directly in dir: those of a dead writer once a minute old, and any older than ten minutes.
 export function sweepStaleTemps(dir, now = Date.now()) {
   let names;
   try { names = fs.readdirSync(dir); } catch { return []; }
@@ -71,7 +74,8 @@ export function sweepStaleTemps(dir, now = Date.now()) {
     try {
       const st = fs.lstatSync(file);
       if (!st.isFile()) continue;
-      if (pidAlive(Number(m[1])) && now - st.mtimeMs < STALE_TMP_MS) continue;
+      const age = now - st.mtimeMs;
+      if (age < (pidAlive(Number(m[1])) ? STALE_TMP_MS : MIN_DEAD_PID_AGE_MS)) continue;
       fs.unlinkSync(file);
       removed.push(n);
     } catch { /* raced */ }

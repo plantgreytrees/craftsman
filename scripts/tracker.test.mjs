@@ -555,6 +555,8 @@ test("tracker: an option-shaped archive value yields no restore command (ARCH-TR
     "# Tracker archive", "",
     formatArchiveHeading({ plan: "docs/plans/a.md", date: "2026-10-18", goal: "g", doc: "d1", landed: "l1", archive: "--output=x" }), "",
     formatArchiveHeading({ plan: "docs/plans/b.md", date: "2026-10-18", goal: "g", doc: "d2", landed: "l2" }), "",
+    // A closed sibling archived with the plan carries its own heading; an option-shaped value there is refused the same way.
+    formatArchiveHeading({ plan: "docs/plans/scrutinise-a.md", date: "2026-10-18", goal: "g", doc: "d3", landed: "l3", archive: "--output=y" }), "",
   ].join("\n"));
   const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
   process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
@@ -562,6 +564,12 @@ test("tracker: an option-shaped archive value yields no restore command (ARCH-TR
     const hit = lookupArchive({ plan: "a" }, selected);
     assert.equal("restoreCommand" in hit, false);
     assert.equal(fs.existsSync(path.join(real, "archive", "x")), false);
+    for (const key of ["scrutinise-a", "docs/plans/scrutinise-a.md"]) {
+      const sibling = lookupArchive({ plan: key }, selected);
+      assert.equal(sibling.archive, "--output=y", key);
+      assert.equal("restoreCommand" in sibling, false, key);
+    }
+    assert.equal(fs.existsSync(path.join(real, "archive", "y")), false);
   } finally {
     if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
   }

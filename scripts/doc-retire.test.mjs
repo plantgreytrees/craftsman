@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { findReferrers, grantValid, retire, retireCheck } from "./doc-retire.mjs";
+import { findReferrers, grantValid, landingCapability, retire, retireCheck } from "./doc-retire.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { classifyArchive } from "./lib/archive.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
@@ -924,17 +924,56 @@ test("doc-retire rewrite: a pointer written for one doc is never rewritten for a
   });
 });
 
-test("doc-retire: retire({auto:true}) logs exactly one doc_retired with auto true; a manual retire logs none with auto (ARCH-DOCS-14)", () => {
-  const auto = noManifest(() => repo());
-  assert.equal(noManifest(() => retire({ plan: PLAN, auto: true }, auto)).retired, PLAN);
-  const autoEvents = events(auto).filter((e) => e.ev === "doc_retired");
+const docRetiredEvents = (context) => (fs.existsSync(path.join(context.stateDir, "events.jsonl")) ? events(context) : []).filter((e) => e.ev === "doc_retired");
+
+test("doc-retire: a call carrying the landing capability needs no grant and logs exactly one doc_retired with auto true (ARCH-DOCS-17)", () => {
+  const auto = noManifest(() => repo({ grant: false }));
+  assert.equal(noManifest(() => retire({ plan: PLAN }, auto, landingCapability())).retired, PLAN);
+  const autoEvents = docRetiredEvents(auto);
   assert.equal(autoEvents.length, 1);
   assert.equal(autoEvents[0].auto, true);
+});
+
+test("doc-retire: a manual retire is never logged auto, even when it passes auto:true (ARCH-DOCS-17)", () => {
   const manual = noManifest(() => repo());
-  assert.equal(noManifest(() => retire({ plan: PLAN }, manual)).retired, PLAN);
-  const manualEvents = events(manual).filter((e) => e.ev === "doc_retired");
+  assert.equal(noManifest(() => retire({ plan: PLAN, auto: true }, manual)).retired, PLAN);
+  const manualEvents = docRetiredEvents(manual);
   assert.equal(manualEvents.length, 1);
   assert.equal("auto" in manualEvents[0], false);
+});
+
+test("doc-retire: auto:true without the capability keeps the grant requirement and logs nothing (ARCH-DOCS-17)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  const before = snapshot(context);
+  for (const forged of [undefined, true, { landing: true }, Object.freeze({ landing: true }), "landing"]) {
+    const out = noManifest(() => retire({ plan: PLAN, sid: "s", auto: true }, context, forged));
+    assert.equal(out.refused, true, String(forged));
+    assert.match(out.reason, /no doc-write grant/);
+  }
+  assert.deepEqual(snapshot(context), before);
+  assert.equal(docRetiredEvents(context).length, 0);
+});
+
+test("doc-retire: auto:true through the CLI path without a grant is refused and logs no doc_retired with auto (ARCH-DOCS-17)", () => {
+  const context = repo({ grant: false });
+  const before = snapshot(context);
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: context.root, CLAUDE_CODE_SESSION_ID: "cli" };
+  delete env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "doc-retire.mjs")], {
+    cwd: context.root, env, input: JSON.stringify({ plan: PLAN, auto: true, sid: "cli", landed_sha: "abc" }), encoding: "utf8" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stdout, /no doc-write grant/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)), "the plan doc is untouched");
+  assert.equal(docRetiredEvents(context).filter((e) => e.auto === true).length, 0);
+});
+
+test("doc-retire: the landing capability skips only the grant; every other refusal still applies", () => {
+  const context = noManifest(() => repo({ grant: false, sibStatus: "IN_PROGRESS" }));
+  const out = noManifest(() => retire({ plan: PLAN }, context, landingCapability()));
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /open sibling plans keep/);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
 });
 
 test("doc-retire: NEXT.md lines of a retired descendant leave with it", () => {

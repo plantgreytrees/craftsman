@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { autoArchiveEligible } from "./lib/archive.mjs";
+import { landingCapability } from "./doc-retire.mjs";
 import { buildIndex } from "./lib/plan-index.mjs";
 import { inspectRepo, landFeature, prepare } from "./repo-exec.mjs";
 import { ledgerPath } from "./tracker.mjs";
@@ -20,6 +21,7 @@ function git(root, args) {
 const PLAN = "docs/plans/p.md";
 const closed = [{ plan: PLAN, unit: "a", status: "COMPLETE" }, { plan: PLAN, unit: "b", status: "CANCELLED" }];
 const ok = {
+  capability: landingCapability(),
   resolveArchive: () => ({ id: "archive", root: "/tmp/archive" }),
   currentState: () => closed,
   findReferrers: () => ({ hits: [PLAN, "docs/plans/TRACKER.md"], blocking: [], rewritable: [] }),
@@ -49,6 +51,8 @@ test("autoArchiveEligible: each failing condition is refused with its reason", (
     ["a dirty doc", { git: (args) => (args[0] === "status" ? " M docs/plans/p.md\n" : "") }, /uncommitted changes/],
     ["a throwing seam", { resolveArchive: () => { throw new Error("boom"); } }, /eligibility check failed: boom/],
     ["a bad plan path", { plan: "../p.md" }, /invalid plan path/],
+    ["no landing capability", { capability: undefined }, /no landing capability/],
+    ["a forged capability", { capability: { landing: true } }, /no landing capability/],
   ];
   for (const [name, override, reason] of table) {
     const { plan, ...seams } = override;
@@ -113,14 +117,16 @@ function scenario(deps, { dirtyMain = false, mainFiles = {}, featureFiles = {}, 
     if (dirtyMain) fs.appendFileSync(path.join(context.root, "README.md"), "dirty\n");
     const archiveBefore = git(repos.archive.root, ["rev-parse", "HEAD"]);
     const originBefore = git(repos.archive.origin, ["rev-parse", "HEAD"]);
-    const calls = { retire: [] };
+    const calls = { retire: [], retireCapability: [] };
     const mainState = () => ({ head: git(context.root, ["rev-parse", "HEAD"]), status: git(context.root, ["status", "--porcelain", "-uno"]) });
     const mainBefore = mainState();
     const result = landFeature(context, { plan, feature: "f1", session_id: "s" }, info, deps(calls, repos));
     const events = fs.existsSync(path.join(context.stateDir, "events.jsonl"))
       ? fs.readFileSync(path.join(context.stateDir, "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
     const normal = JSON.parse(JSON.stringify(result, (k, v) => (typeof v === "string" ? v.replaceAll(workspace, "<ws>").replace(/\b[0-9a-f]{40}\b/g, "<sha>") : v)));
-    return { mainBefore, mainAfter: mainState(), normal, events, calls, repos, archiveBefore, originBefore, archiveAfter: git(repos.archive.root, ["rev-parse", "HEAD"]), originAfter: git(repos.archive.origin, ["rev-parse", "HEAD"]), context };
+    const after = { archiveFiles: git(repos.archive.root, ["ls-tree", "-r", "--name-only", "HEAD"]).split("\n"), archiveSubject: git(repos.archive.root, ["log", "-1", "--format=%s"]),
+      planPresent: fs.existsSync(path.join(context.root, plan)), mainSubject: git(context.root, ["log", "-1", "--format=%s"]) };
+    return { after, mainBefore, mainAfter: mainState(), normal, events, calls, repos, archiveBefore, originBefore, archiveAfter: git(repos.archive.root, ["rev-parse", "HEAD"]), originAfter: git(repos.archive.origin, ["rev-parse", "HEAD"]), context };
   } finally {
     if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
     fs.rmSync(workspace, { recursive: true, force: true });
@@ -139,12 +145,13 @@ test("land-feature: no retire is attempted when the plan is not eligible, and th
   assert.equal(baseline.normal.merged, true);
 });
 
-test("land-feature: an eligible plan is retired with auto:true, archive_push_pending is logged and the archive is never pushed", () => {
+test("land-feature: an eligible plan is retired through the landing capability, archive_push_pending is logged and the archive is never pushed", () => {
   const baseline = scenario(noRetire);
   const done = scenario((calls, repos) => ({
     autoArchiveEligible: eligibleSeam,
-    retire: (input) => {
+    retire: (input, _context, capability) => {
       calls.retire.push(input);
+      calls.retireCapability.push(capability);
       fs.writeFileSync(path.join(repos.archive.root, "x.txt"), "x\n");
       git(repos.archive.root, ["add", "x.txt"]);
       git(repos.archive.root, ["commit", "-q", "-m", "archive p"]);
@@ -152,14 +159,15 @@ test("land-feature: an eligible plan is retired with auto:true, archive_push_pen
     },
   }));
   assert.equal(done.calls.retire.length, 1);
-  assert.equal(done.calls.retire[0].auto, true);
+  assert.equal("auto" in done.calls.retire[0], false, "auto is not an input field: only the capability makes a retire automatic");
+  assert.equal(done.calls.retireCapability[0], landingCapability(), "retire is called with the landing capability (ARCH-DOCS-17)");
   assert.equal(done.calls.retire[0].plan, "docs/plans/p.md");
   assert.equal(done.calls.retire[0].sid, "s");
   assert.notEqual(done.archiveAfter, done.archiveBefore, "archive committed locally");
   assert.equal(done.originAfter, done.originBefore, "archive remote untouched");
   const pending = done.events.find((e) => e.ev === "archive_push_pending");
   assert.equal(pending.commit, done.archiveAfter);
-  // The single auto doc_retired event is written by retire itself (input.auto); autoArchive adds none.
+  // The single auto doc_retired event is written by retire itself (it carries the capability); autoArchive adds none.
   assert.equal(done.events.filter((e) => e.ev === "doc_retired").length, 0);
   assert.deepEqual(done.normal, baseline.normal);
 });
@@ -191,7 +199,7 @@ test("land-feature: a dirty main checkout skips the retire without changing the 
 
 test("land-feature: with no archive project the main checkout HEAD and working tree are untouched (ARCH-LAND-30)", () => {
   const run = scenario((calls) => ({
-    autoArchiveEligible: (ctx, plan) => autoArchiveEligible(ctx, plan, { resolveArchive: () => ({ off: "none" }) }),
+    autoArchiveEligible: (ctx, plan) => autoArchiveEligible(ctx, plan, { capability: landingCapability(), resolveArchive: () => ({ off: "none" }) }),
     retire: (i) => { calls.retire.push(i); return {}; },
   }));
   assert.equal(run.normal.merged, true);
@@ -251,4 +259,39 @@ test("land-feature: a plan doc that exists only in the landed merge is eligible,
   assert.equal(run.normal.merged, true);
   assert.equal(run.calls.retire.length, 1, JSON.stringify(run.events));
   assert.ok(!run.events.some((e) => e.ev === "doc_retire_skipped" && /not tracked/.test(e.reason)));
+});
+
+// ---- impl-landing-token 5.4: the real retire, no stub (ARCH-DOCS-17, ARCH-LAND-32, ARCH-ARCHIVE-03, ARCH-ARCHIVE-09) ----
+test("land-feature end to end: a landed, referrer-free plan is archived locally through the real retire, with no grant and no push", () => {
+  const run = scenario(() => ({}), { plan: P, mainFiles: { [P]: "# zq-plan\n" } });
+  assert.equal(run.normal.merged, true);
+  assert.ok(!run.events.some((e) => e.ev === "doc_retire_skipped"), JSON.stringify(run.events));
+  // Copied and committed locally in the archive repo, never pushed (ARCH-ARCHIVE-03, ARCH-ARCHIVE-09).
+  assert.notEqual(run.archiveAfter, run.archiveBefore, "archive committed locally");
+  assert.ok(run.after.archiveFiles.some((f) => f.endsWith("docs/plans/zq-plan.md")), run.after.archiveFiles.join(","));
+  assert.match(run.after.archiveSubject, /^archive plans\/zq-plan /);
+  assert.equal(run.originAfter, run.originBefore, "archive remote untouched");
+  // Retired in the main checkout by the real retire, and logged once as automatic.
+  assert.equal(run.after.planPresent, false, "the plan doc left the main checkout");
+  assert.equal(run.after.mainSubject, `docs: retire ${P}`);
+  const retired = run.events.filter((e) => e.ev === "doc_retired");
+  assert.equal(retired.length, 1, JSON.stringify(run.events));
+  assert.equal(retired[0].auto, true);
+  assert.equal(retired[0].plan, P);
+  const pending = run.events.filter((e) => e.ev === "archive_push_pending");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].commit, run.archiveAfter);
+  assert.ok(run.events.some((e) => e.ev === "archive_copied"));
+});
+
+test("land-feature: with no landing capability the main checkout HEAD and working tree are untouched (ARCH-LAND-32)", () => {
+  // The real eligibility check, called without the capability, as a caller that never obtained it would.
+  const run = scenario((calls) => ({
+    autoArchiveEligible: (ctx, plan, seams) => autoArchiveEligible(ctx, plan, { ...seams, capability: undefined }),
+    retire: (i) => { calls.retire.push(i); return {}; },
+  }), { plan: P, mainFiles: { [P]: "# zq-plan\n" }, featureFiles: { "a2.txt": "x\n" } });
+  assert.equal(run.normal.merged, true);
+  assert.equal(run.calls.retire.length, 0);
+  assert.deepEqual(run.mainAfter, run.mainBefore, "main HEAD and tree did not move");
+  assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /no landing capability/.test(e.reason)), JSON.stringify(run.events));
 });
