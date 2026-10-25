@@ -10,6 +10,23 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 - The ui gate is routed through `scripts/ui-gate.mjs` to the optional Artist plugin (ARCH-SLIM-15, ARCH-GATES-01..06); `ui-ux-reviewer` is reduced to an accessibility floor and the `design-review` skill is removed.
 
+## [2.3.1] - 2026-10-25
+
+### Fixed
+
+- **Landing capability hardened** (ARCH-DOCS-18, ARCH-LAND-33, superseding DOCS-17 and LAND-32): the capability is not
+  exported as a value and is obtainable only through `landingCapability()`, and a wiring test limits who may name it. A
+  caller-injected seam now receives a marker `retire` refuses, a landing retire with no archive project refuses before
+  removing anything, and it copies into the archive it resolved at its guard. The `indexAt` size and header checks fail
+  closed, and the test for them now fails on the old code.
+- **Unit merges respect approval.** With the approval gate on, a unit merge to base needs approval (ARCH-LAND-28).
+- **Claims anchor at the main checkout.** Account switch lists and adopts claims there (ARCH-STATE-03), and the unit
+  runner's helper runs from the project root so workspace mode resolves it.
+
+### Changed
+
+- The UI gate routes to the Artist agent or an accessibility fallback, and its critic step names the screenshots folder.
+
 ## [2.3.0] - 2026-10-25
 
 ### Changed
@@ -20,9 +37,7 @@ All notable changes to craftsman are documented here. Format loosely follows
 ### Added
 
 - **Landing capability for the automatic archive** (ARCH-DOCS-18, ARCH-LAND-33): `land-feature` retires a closed
-  plan only through an in-process capability that is not exported as a value and is obtainable only through
-  `landingCapability()` (a wiring test limits its importers); `auto: true` alone is ignored, a caller-injected seam
-  receives a marker `retire` refuses, and a landing retire with no archive project refuses before removing anything.
+  plan only through an in-process capability that `doc-retire.mjs` does not export; `auto: true` alone is ignored.
 
 - **Approval before base** (ARCH-APPROVAL-03..09, ARCH-LAND-28/29/30/31). With `planning.featureBranches` on, `land-feature`
   lands only against an approval record the artifact owner decided on a private page (`scripts/approval.mjs`,

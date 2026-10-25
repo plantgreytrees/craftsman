@@ -1,6 +1,6 @@
 # craftsman
 
-**v2.3.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
+**v2.3.1** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 A Claude Code plugin that makes code better automatically, in **any language**.
 It runs your formatters, linters and type-checkers on every edit and reports
@@ -21,6 +21,20 @@ Claude Code.
 [Good to know](#good-to-know) · [Safety](#safety) · [Layout](#layout)
 
 ---
+
+## What's new in 2.3.1
+
+- **Automatic archive hardened.** The in-process landing capability can be
+  obtained only through one function and a wiring test limits who names it.
+  Injected test seams get a marker the real `retire` refuses, and a landing
+  retire with no archive project refuses before removing anything.
+- **Unit merges respect approval.** With the approval gate on, a unit merge to
+  base needs your approval too.
+- **Claims and the unit runner.** Claims anchor at the main checkout, and the
+  runner's helper runs from the project root so workspace mode resolves it.
+- **UI gate.** It routes to the Artist agent or an accessibility fallback.
+
+The full list is in [CHANGELOG.md](CHANGELOG.md#231---2026-10-25).
 
 ## What's new in 2.3.0
 
