@@ -9,7 +9,7 @@ import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
 import { autoArchive } from "./lib/archive.mjs";
-import { afterLand, afterUnitLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
+import { afterLand, afterUnitLand, assertMergeAllowed, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
@@ -350,6 +350,7 @@ function mergeOnly(context, input, info, deps = {}) {
   const cfg = loadConfig(context);
   const land = landMode(cfg);
   noteUnenforced(cfg, context);
+  assertMergeAllowed(cfg, input);
   if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
