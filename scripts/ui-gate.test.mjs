@@ -191,12 +191,18 @@ function report(wt, ts, body) {
 }
 // Between the 2000-01-01 merge-base and the HEAD commit (now): written before the unit commit.
 const past = (year) => new Date(`${year}-01-01T00:00:00Z`);
-// Date the unit's changed and untracked files (b.txt, DESIGN.md) before any report.
+// Date every worktree file and directory (outside .git and .artist) before any report.
 const ageCode = (f, when = past(2010)) => {
-  for (const rel of ["b.txt", "docs/design/DESIGN.md"]) {
-    const p = path.join(f.wt, rel);
-    if (fs.existsSync(p)) fs.utimesSync(p, when, when);
-  }
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (dir === f.wt && (e.name === ".git" || e.name === ".artist")) continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      fs.utimesSync(p, when, when);
+    }
+  };
+  walk(f.wt);
+  fs.utimesSync(f.wt, when, when);
 };
 
 test("ui-gate: an untracked report.json yields critic and a11y false; newest wins", () => {
@@ -316,8 +322,8 @@ test("ui-gate: a report written before the unit commit still reaches the critic"
 
 test("ui-gate: a file edited after the verify report drops the critic and keeps the a11y floor", () => {
   withFixture((f) => {
-    ageCode(f);
     const rep = report(f.wt, "r1");
+    ageCode(f);
     fs.utimesSync(rep, past(2021), past(2021));
     assert.equal(f.run().critic?.report, rep, "control: report newer than the code");
     fs.appendFileSync(path.join(f.wt, "b.txt"), "fix round\n");
@@ -331,6 +337,48 @@ test("ui-gate: a file edited after the verify report drops the critic and keeps 
     out = f.run();
     assert.equal(out.critic, undefined, "untracked file after verify");
     assert.equal(out.a11y, true);
+  });
+});
+
+// A unit with Button.tsx and a changed a.txt committed, then a verify report
+// newer than all of its code; `after` makes a fix-round change and commits it.
+for (const [name, after] of [
+  ["revert to base", (f) => { fs.writeFileSync(path.join(f.wt, "a.txt"), "a\n"); sh(f.wt, "commit", "-qam", "revert a.txt"); }],
+  ["git mv rename", (f) => { sh(f.wt, "mv", "Button.tsx", "Card.tsx"); sh(f.wt, "commit", "-qm", "rename"); }],
+  ["git rm delete", (f) => { sh(f.wt, "rm", "-q", "Button.tsx"); sh(f.wt, "commit", "-qm", "delete"); }],
+]) {
+  test(`ui-gate: a ${name} after the verify report drops the critic`, () => {
+    withFixture((f) => {
+      fs.writeFileSync(path.join(f.wt, "a.txt"), "a changed\n");
+      fs.writeFileSync(path.join(f.wt, "Button.tsx"), "b\n");
+      sh(f.wt, "add", "-A", "a.txt", "Button.tsx");
+      sh(f.wt, "commit", "-qm", "unit code");
+      const rep = report(f.wt, "r1");
+      ageCode(f);
+      fs.utimesSync(rep, past(2021), past(2021));
+      assert.equal(f.run().critic?.report, rep, "control: report newer than the code and its dirs");
+      after(f);
+      const out = f.run();
+      assert.equal(out.route, "artist");
+      assert.equal(out.critic, undefined, name);
+      assert.equal(out.a11y, true);
+    });
+  });
+}
+
+test("ui-gate: a justifications.json that is not a JSON object is never passed", () => {
+  withFixture((f) => {
+    const argvFile = path.join(f.root, "argv.json");
+    f.stub(`import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2))); process.exit(0);\n`);
+    const mb = sh(f.wt, "merge-base", "main", "HEAD").trim();
+    const rep = report(f.wt, "r1");
+    for (const body of ["null", "[]", "3"]) {
+      fs.writeFileSync(path.join(path.dirname(rep), "justifications.json"), body);
+      const out = f.run();
+      assert.equal(out.route, "artist", body);
+      assert.match(out.reason, /justifications\.json ignored: not a JSON object/, body);
+      assert.deepEqual(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4), ["--base", mb], body);
+    }
   });
 });
 
@@ -354,7 +402,7 @@ test("ui-gate: reuse-check gets --justifications only when the report dir has on
     f.run();
     assert.deepEqual(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4), ["--base", mb]);
     const just = path.join(path.dirname(rep), "justifications.json");
-    fs.writeFileSync(just, "[]");
+    fs.writeFileSync(just, "{}");
     assert.equal(f.run().route, "artist");
     assert.deepEqual(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4), ["--base", mb, "--justifications", just]);
   });

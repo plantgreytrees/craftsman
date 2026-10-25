@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Routes the advisory `ui` gate (ARCH-GATES-01..06): to the optional Artist
+// Routes the advisory `ui` gate (ARCH-GATES-01..07): to the optional Artist
 // plugin when it is installed, enabled and the project has a format-2
 // DESIGN.md, otherwise to the built-in accessibility floor (ui-ux-reviewer).
 //
@@ -126,15 +126,17 @@ function isFormat2(file) {
 }
 
 // <report dir>/justifications.json (ARCH-GATES-07): {file} when it is a regular
-// file inside that dir that parses as JSON, {invalid} when it does not parse, else null.
+// file inside that dir holding a JSON object, {invalid: why} when it does not, else
+// null. Artist's reuse-check calls Object.hasOwn on it, so null or an array would crash it.
 function justificationsOf(report) {
   const dir = path.dirname(report);
   const file = path.join(dir, "justifications.json");
   try {
     if (!inside(realOr(dir), fs.realpathSync(file)) || !fs.statSync(file).isFile()) return null;
   } catch { return null; }
-  try { JSON.parse(fs.readFileSync(file, "utf8")); } catch { return { invalid: true }; }
-  return { file };
+  let v;
+  try { v = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return { invalid: "invalid JSON" }; }
+  return v && typeof v === "object" && !Array.isArray(v) ? { file } : { invalid: "not a JSON object" };
 }
 
 function isFile(p) {
@@ -145,18 +147,26 @@ async function git(cwd, args) {
   return (await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
 }
 
-// Newest mtime (s) of the unit's code: files changed since the merge-base plus
-// untracked files, outside .artist/. Commits leave mtimes alone, so a report
-// written after the last edit stays fresh, and an edit after verify makes it stale.
+// Newest mtime (s) of the unit's code: files changed since the merge-base, files
+// committed since it (a revert to base leaves the diff), untracked files, and each
+// one's parent dir (rename and delete bump it; git mv keeps the file's mtime), all
+// outside .artist/. Commits leave mtimes alone, so a report written after the last
+// edit stays fresh, and an edit after verify makes it stale.
 async function codeMtime(worktree, mergeBase) {
   const lists = await Promise.all([
     git(worktree, ["diff", "--name-only", "-z", mergeBase]),
+    git(worktree, ["log", "--format=", "--name-only", "-z", `${mergeBase}..HEAD`]),
     git(worktree, ["ls-files", "-z", "--others", "--exclude-standard"]),
   ]);
-  let newest = 0;
-  for (const rel of new Set(lists.join("\0").split("\0"))) {
+  const paths = new Set();
+  for (const rel of lists.join("\0").split(/[\0\n]/)) {
     if (!rel || rel.startsWith(".artist/")) continue;
-    try { newest = Math.max(newest, fs.lstatSync(path.join(worktree, rel)).mtimeMs); } catch { /* deleted */ }
+    paths.add(path.join(worktree, rel));
+    paths.add(path.dirname(path.join(worktree, rel)));
+  }
+  let newest = 0;
+  for (const p of paths) {
+    try { newest = Math.max(newest, fs.lstatSync(p).mtimeMs); } catch { /* deleted: its dir counts */ }
   }
   return newest / 1000;
 }
@@ -254,7 +264,7 @@ async function route(worktreeArg, baseRef) {
   }
 
   let reason = "artist installed, enabled, format-2 DESIGN.md";
-  if (justifications?.invalid) reason += "; justifications.json ignored: invalid JSON";
+  if (justifications?.invalid) reason += `; justifications.json ignored: ${justifications.invalid}`;
   const out = { route: "artist", reason, reuse, a11y: true, steps: [] };
   const rubric = path.join(inst.installPath, "skills", "create", "references", "rubric.md");
   if (report && screenshots.length > 0 && isFile(rubric)) {
