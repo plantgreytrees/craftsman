@@ -3,7 +3,7 @@
 > and `/architect --update approval` should be run.
 
 # Approval architecture
-_Last verified: 2026-10-23 at `b0328f6` · Source idea: [dev-lifecycle-docs-plan](../ideas/dev-lifecycle-docs-plan.md)_
+_Last verified: 2026-10-25 at `480903d` · Source idea: [dev-lifecycle-docs-plan](../ideas/dev-lifecycle-docs-plan.md)_
 
 ## In plain English
 A run asks every question up front, then works unattended until everything is built, reviewed and green on its feature branch. It then stops at one **verification point**. It publishes a private page that explains every change, flags anything you must think about (env keys, migrations, new dependencies, CI changes), shows the evidence, and says how to roll back.
@@ -36,7 +36,7 @@ flowchart LR
 | ARCH-APPROVAL-04 | Session verifies the row itself (owner + head_sha) | A notice or page text could be forged or stale; head_sha stops approving code that changed afterwards | Trusting the republish notice |
 | ARCH-APPROVAL-05 | Pending runs survive the session; next session lands | You chose "next session picks it up"; no expiry | Keep the session alive; expire approvals |
 | ARCH-APPROVAL-06 | Three events, time-to-approve in stats | Shows where runs wait on you | No telemetry |
-| ARCH-APPROVAL-07 | Markdown + AskUserQuestion fallback | -p and offline runs must still land the same way | Fail the run |
+| ARCH-APPROVAL-07 | Markdown + AskUserQuestion fallback; the answer lands through `check` with `source:"fallback"` | -p and offline runs must still land the same way, through the same refusals | Fail the run; a separate fallback landing path |
 
 ## Data & flows
 - `.craftsman/approvals/<run>.json` (local, gitignored) owns the request: artifact URL, plan, feature heads, recommendation.
@@ -113,3 +113,8 @@ Outside the plugin (owner's workstation): hourly btrfs snapshots and restic befo
 - **ARCH-APPROVAL-08** replaces 01: the verification point exists only with `planning.featureBranches` on (default off). With it off, units land on base through `repo-exec merge` and `approval_unenforced` is logged. The default stays off because flipping it changes the branch workflow of every repo.
 - **ARCH-APPROVAL-09** replaces 02: env key names are derived from the diff; migrations, CI/hook, dependency and API items, and any diagram, come from the caller.
 - **ARCH-APPROVAL-10** replaces 09 (2026-10-25): the page shows what changed, env key names derived from the diff, evidence, risk and rollback. A diagram slot and caller-supplied attention items feeding the recommendation were claimed but never built; they are dropped from the rule (the code never had them).
+
+## Refinements (2026-10-25, same decisions)
+
+- **ARCH-APPROVAL-07:** the terminal answer is passed to `check` with `source:"fallback"`, which maps the option label to `merge` / `open-pr` and stamps the decision time. A db row without `source` gets no such help, so a stale row is still refused (492da4f).
+- **ARCH-APPROVAL-08:** the built-in secrets scan of the feature head is a floor. A configured `security.check` adds findings and can never replace the scan (4730288).

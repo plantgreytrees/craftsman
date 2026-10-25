@@ -3,7 +3,7 @@ area: engine
 governs: ["workflows/**", "scripts/run-args.mjs", "commands/_network.md", "agents/unit-runner.md", "commands/_shared-execution.md", "commands/_features.md", "craftsman.config.json", "scripts/wiring.test.mjs", "scripts/claim.mjs"]
 human: docs/architecture/engine.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ca1534f838e26eba29599a9c43f690c55dd93e11
+verified_at: 480903d33194bea8f92ced1bd5598cdcbde7b952
 updated: 2026-10-25
 ---
 # ARCH engine — enforced rules

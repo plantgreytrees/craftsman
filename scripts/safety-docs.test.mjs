@@ -77,8 +77,9 @@ test("docs/architecture/README.md lists the safety area", () => {
   assert.match(read("docs/architecture/README.md"), /\[safety\]\(\.\/safety\.md\)/);
 });
 
-test("CHANGELOG [Unreleased] has one entry per feature area, including the steps 24-26 reconciliation", () => {
-  const unreleased = read("CHANGELOG.md").match(/^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## \[)/m)[1];
+// The fixes-and-safety entries shipped in 2.3.0.
+test("CHANGELOG 2.3.0 has one entry per feature area, including the steps 24-26 reconciliation", () => {
+  const unreleased = read("CHANGELOG.md").match(/^## \[2\.3\.0\][^\n]*\n([\s\S]*?)(?=^## \[)/m)[1];
   assert.match(unreleased, /### Fixed/);
   assert.match(unreleased, /### Added/);
   assert.match(unreleased, /guard-failclosed|steps? 24/i);

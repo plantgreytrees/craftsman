@@ -3,7 +3,7 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: ca1534f838e26eba29599a9c43f690c55dd93e11
+verified_at: 480903d33194bea8f92ced1bd5598cdcbde7b952
 updated: 2026-10-25
 ---
 # ARCH slim — enforced rules

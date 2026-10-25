@@ -20,6 +20,6 @@
     "budgetsEnforce": { "type": "boolean", "title": "Enforce doc budgets", "description": "Whether arch-check lint fails on doc budget overruns.", "default": true }
   },
   "metadata": {
-    "release": "2.2.0"
+    "release": "2.3.0"
   }
 }

@@ -1,16 +1,47 @@
 # craftsman
 
-**v2.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
+**v2.3.0** — see [CHANGELOG.md](CHANGELOG.md) for what changed.
 
-A Claude Code plugin that makes code better automatically — in **any language**.
-It runs your formatters, linters, and type-checkers on every edit (flagging only
-the issues *you* introduce), refuses to call a task "done" if it broke the tests
-or left plan criteria unmet, and adds a clean plan → build → review workflow.
+A Claude Code plugin that makes code better automatically, in **any language**.
+It runs your formatters, linters and type-checkers on every edit and reports
+only the issues *you* introduce. It won't let a task count as "done" if the
+tests broke, a secret leaked or a plan criterion is still open. On top of that
+it adds a doc-first workflow (idea → architecture → plan → build → review →
+docs → merge) that can run unattended, with guards that keep it inside the
+lines.
 
 Drop it into a Python, Go, Rust, Java, Ruby, JS/TS, C#, Swift, Kotlin, PHP,
-C++, Terraform, or Kubernetes repo and run `/craftsman:init` — it detects your
-stack and configures itself. It's the generalized evolution of the craftsman
-v0.2 starter.
+C++, Terraform or Kubernetes repo and run `/craftsman:init`. It detects your
+stack and configures itself. It is dependency-free: Node only, which ships with
+Claude Code.
+
+**Contents:** [Quick start](#quick-start) · [How it works](#how-it-works) ·
+[Features](#features) · [Commands](#commands) · [Configure it](#configure-it-for-your-stack) ·
+[Full update](#full-update-taking-every-change-and-its-knock-on-changes) ·
+[Good to know](#good-to-know) · [Safety](#safety) · [Layout](#layout)
+
+---
+
+## What's new in 2.3.0
+
+- **Approval before base.** With `planning.featureBranches` on, a run stops at
+  one private page (Merge now / Open PR) and lands only on your own checked
+  click. Headless runs fall back to Markdown and one terminal question.
+- **Guards fail closed.** Every hook runs through `hooks/run.sh`. Only
+  `CRAFTSMAN_SAFETY=off` in your own environment turns the safety guards off,
+  and the model cannot switch them off.
+- **Evidence-based worktree sweep.** A branch counts as merged only into a
+  remote-tracking ref, and every deleted branch is logged and recoverable.
+- **Dashboard, notes export and archive.** `/digest --html`, an
+  Obsidian/Foam/Quartz notes folder, and automatic archiving of closed plans
+  through an in-process landing capability.
+- **Ledger guard, measurement and tool slots.** Tracker publishing never drops
+  a committed row. Per-session context is measured, and `just check` leads the
+  stop-gate commands.
+- **Docs.** This README now explains how craftsman works and gives a
+  step-by-step [full update](#full-update-taking-every-change-and-its-knock-on-changes).
+
+The full list is in [CHANGELOG.md](CHANGELOG.md#230---2026-10-25).
 
 ---
 
@@ -26,50 +57,164 @@ v0.2 starter.
 /craftsman:baseline    # snapshot existing lint issues so only NEW ones get flagged
 ```
 
-That's the whole setup. Installing from a local folder instead of GitHub? Use
-`/plugin marketplace add /absolute/path/to/craftsman`. Full walkthrough and
-troubleshooting is in **[INSTALL.md](INSTALL.md)**.
+That's the whole setup. To install from a local folder instead of GitHub, use
+`/plugin marketplace add /absolute/path/to/craftsman`. The full walkthrough and
+troubleshooting are in **[INSTALL.md](INSTALL.md)**.
+
+A first piece of work then looks like this:
+
+```text
+/craftsman:auto add rate limiting to the public API
+```
+
+`/auto` asks its open questions up front, plans the work, builds each unit in
+its own worktree with gates and reviews, asks once more about anything that
+came back, and lands the result.
 
 ---
 
-## What it does
+## How it works
 
-**1. A quality engine that runs itself.** Three layers, cheapest first — each only
-does what the layer below can't:
+Craftsman is three things working together: **hooks** that run on every tool
+call, a set of **commands and agents** that make up the workflow, and **state
+on disk** that both of them read and write.
+
+### 1. Hooks: the part that runs itself
+
+Claude Code calls craftsman's hooks at fixed points in every session
+(`hooks/hooks.json`). Every hook goes through one launcher, `hooks/run.sh`,
+which fails closed for the safety hooks.
+
+| When | Hook | What it does |
+|---|---|---|
+| Session start | `session-context`, `tracker-sync` | states that the guards are on, names unlanded approvals, restores the last hand-off, re-renders the tracker |
+| Before Read/Glob/Grep/Write/Edit/Bash | `pre-guard` | protected paths, unit scope, doc-write authority, tracker block, hook-bypass flags, force-push and other git rules |
+| Before Task/Agent/Workflow | `agent-mode-guard` | enforces root-only agent mode and its named exceptions |
+| Before Skill | `builtin-skill-context` | hands the built-in `simplify` / `code-review` skills the governing rules and open criteria |
+| After Write/Edit | `quality-gate` | format → lint → type-check the edited file; feeds new issues back to Claude mid-turn |
+| After Bash/Write/Edit | `tracker-sync` | re-renders `TRACKER.md` from the ledger |
+| Prompt submit, after Skill | `orchestrate-scope-guard` | binds a running `/orchestrate` to its plan unit |
+| Stop | `stop-gate`, `tracker-sync`, `telemetry` | secrets scan, test-regression check, `extraChecks`, open acceptance criteria, unpushed-work report, gate telemetry |
+| Session end | `session-end` | unpushed-work report and hand-off |
+
+### 2. The quality engine: three layers, cheapest first
+
+Each layer does only what the one below it can't:
 
 | Layer | What happens | Cost |
 |---|---|---|
-| Deterministic | on every edit: format → lint → type-check; at "done": secrets scan + test-regression check (skipped when nothing changed since the last check). **Only newly-introduced issues are reported.** | ~free |
+| Deterministic | on every edit: format → lint → type-check. At "done": secrets scan + test-regression check, skipped when nothing changed since the last check. **Only newly introduced issues are reported.** | ~free |
 | Feedback | when a check fails, its output is fed straight back to Claude mid-turn to fix | ~free |
-| Judgment | LLM review — correctness, security, house-style conformance, plan soundness — runs *only* where linters are structurally blind, and only when a cheap router says a given diff is worth it | gated |
+| Judgment | LLM review (correctness, security, house-style conformance, plan soundness) runs *only* where linters are structurally blind, and only when a cheap router says the diff is worth it | gated |
 
-**2. A doc-first workflow:** **IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE.**
-`/idea` vets a new idea, `/architect` turns it into enforced decisions, and
-`/instruction` packs the rest into one `/goal` prompt; `/understand` and
-`/investigate` enter at PLAN for existing code and bugs. One slug names the
-work from idea doc to plan, fix round and sync. `/craftsman:auto` is the
-single entry for the whole loop: it asks every open decision up front, runs
-the units unattended, asks once more about what came back, and lands it.
-Planners write a short plan doc; `/orchestrate` executes it, reading each unit's
-actual diff through `gate-select.mjs` to deterministically route it to the
-specialists that apply — `ui-ux-reviewer`, `migration-reviewer`, `api-reviewer`,
-`dependency-auditor`, `performance-reviewer`, `observability-reviewer` — instead
-of trusting a file-pattern rule to be remembered correctly; `/scrutinise`
-reviews the result; `/sync-docs` keeps the docs honest; `/craftsman:merge`
-lands what's left on the base branch and cleans up. Acceptance criteria written
-at plan-time are enforced before a task can finish. `/craftsman:digest` reads the
-same tracker state at any point for a done/decisions/next/%-complete summary.
-
-**Language-agnostic by design:** every check is a config entry that **silently skips
-if its tool isn't installed** — so the same plugin lints Python with `ruff`, Go with
-`staticcheck`, Rust with `clippy`, and so on, wherever those tools exist. Adding a
+Every check is a config entry that **silently skips if its tool isn't
+installed**. So the same plugin lints Python with `ruff`, Go with
+`staticcheck` and Rust with `clippy`, wherever those tools exist. Adding a
 language is a one-block config edit, never a code change.
 
-**3. Pre-existing issues don't just vanish.** The gate only ever reports issues
-*you* introduce — but `/craftsman:baseline` also writes what it skipped to
-`docs/errors/KNOWN_ISSUES.md` (worst file first, regenerated on every run), so
-a legacy repo's debt stays visible and addressable instead of living only in a
-gitignored local snapshot.
+### 3. The workflow: a doc-first loop
+
+```mermaid
+flowchart LR
+  idea["/idea<br/>vet it"] --> arch["/architect<br/>decide + rules"]
+  arch --> plan["/plan<br/>plan doc + tracker rows"]
+  und["/understand<br/>/investigate"] --> plan
+  plan --> orch["/orchestrate<br/>unit by unit"]
+  orch --> scr["/scrutinise<br/>isolated review"]
+  scr -->|findings| plan
+  scr --> sync["/sync-docs<br/>docs = code"]
+  sync --> merge["/craftsman:merge<br/>land + clean up"]
+  auto(["/craftsman:auto"]) -.drives.-> plan
+  auto -.-> orch
+  auto -.-> merge
+```
+
+- **One slug** names the work from idea doc to plan, fix round and sync.
+- **`/idea`** checks a new idea for overlap and whole-system fit, then has it
+  judged by one isolated critic. The result is a scored verdict in
+  `docs/ideas/`.
+- **`/architect`** turns a vetted idea into decisions you confirm. Each area is
+  written as a pair: `<area>.md` for people and `<area>.rules.md`, a list of
+  numbered `ARCH-…` rules the loop enforces.
+- **`/plan`** writes the only plan docs (`docs/plans/<slug>.md`). Each unit
+  gets scope, acceptance criteria, cited rules and a tooling manifest.
+- **`/orchestrate`** executes a plan one unit at a time, each in its own git
+  worktree. `gate-select.mjs` reads the unit's *actual diff* and routes it to
+  the specialists that apply: `security-auditor`, `ui-ux-reviewer`,
+  `migration-reviewer`, `api-reviewer`, `dependency-auditor`,
+  `performance-reviewer`, `observability-reviewer`. It doesn't rely on anyone
+  remembering a file-pattern rule.
+- **`/scrutinise`** sends one fresh-context reviewer to audit the merged work
+  against every open criterion. Its findings become the next plan round.
+- **`/sync-docs`** reconciles docs and tracker chips with shipped code.
+  **`/craftsman:merge`** lands the branch and cleans up.
+- **`/craftsman:auto`** is the single entry for the whole loop. It asks every
+  open decision first, runs the units unattended in fresh agent contexts, asks
+  about parked rows, and lands the result. It repeats until every row is
+  COMPLETE.
+- **`/instruction`** packs the same loop into one paste-ready `/goal` prompt
+  with a size estimate.
+
+### 4. State on disk
+
+| Where | What | Committed? |
+|---|---|---|
+| `craftsman.config.json` (+ optional `craftsman.project.json`) | your overrides, deep-merged over the plugin defaults | yes |
+| `docs/ideas/`, `docs/architecture/`, `docs/plans/` | idea verdicts, decisions + rules, plan docs | yes |
+| `docs/plans/TRACKER.md`, `TRACKER-archive.md` | the readable tracker and retired rows | yes |
+| `docs/errors/KNOWN_ISSUES.md` | pre-existing lint debt, written by `/craftsman:baseline` | yes |
+| `.craftsman/tracker/events.jsonl` | the validated tracker ledger (source of truth for status) | no |
+| `.craftsman/sessions/<id>/` | per-session baseline, criteria and doc authority | no |
+| `.craftsman/claims/`, `runs/`, `approvals/`, `instructions/` | unit claims, run manifests, pending approvals, `/goal` files | no |
+| `.craftsman/events.jsonl`, `sweep-log.jsonl` | gate telemetry for `/craftsman:stats`, deleted-branch log | no |
+
+---
+
+## Features
+
+**Only your issues are flagged.** `/craftsman:baseline` snapshots existing
+findings, so the gate reports only what *you* introduce. It also writes what it
+skipped to `docs/errors/KNOWN_ISSUES.md` (worst file first, regenerated on
+every run). A legacy repo's debt stays visible instead of living only in a
+gitignored snapshot.
+
+**"Done" is a contract.** The Stop gate blocks completion on a failed secrets
+scan, a test regression or an unticked acceptance criterion. Criteria are
+written at plan time and enforced before a task can finish.
+
+**Architecture is enforced, not just written down.** `/plan` cites the rules
+for each unit, and `plan-reviewer` and the scrutineer check them. `scope.mjs`
+refuses to activate a unit that writes a governed path until it has loaded and
+cited the rules for that path. Breaking a decided rule takes `/architect`,
+never a workaround.
+
+**Unattended runs that stay light.** `/craftsman:auto` runs each unit in a
+fresh agent context (`execution.engine`: `workflow` by default, else
+`subagent` or `root`). Every unit ends in a hand-off on disk, so auto-compact
+never loses the thread. `/plan` refuses a unit too large for one fresh agent
+(`execution.unitContextBytes`).
+
+**One approval page.** With `planning.featureBranches` on, a run stops at a
+verification point: a private claude.ai page shows what changed, env keys
+touched, evidence, risk and rollback, with **Merge now** / **Open PR** buttons.
+Only your own click, re-read and checked against the feature head, lands it.
+Headless runs fall back to a Markdown page and one terminal question.
+
+**Concurrent sessions are safe.** Session state is isolated, each unit runs in
+its own worktree, and the tracker lives in the main checkout so every session
+sees one board. Stale claims from crashed sessions are recoverable.
+
+**Progress you can read.** `/craftsman:digest` gives done / decisions needed /
+next / % complete per plan. `/digest --html` renders a local dashboard, and
+the notes export produces an Obsidian/Foam/Quartz folder. `/craftsman:stats`
+shows which gates actually fire, so you can delete the ones that don't earn
+their keep.
+
+**Built-in skills, craftsman's rules.** `/orchestrate` runs Claude Code's own
+`simplify` and `code-review` skills inside the loop. Their output is only a
+candidate list: `code-reviewer` owns the verdict.
+
+**Safety guards that fail closed.** See [Safety](#safety).
 
 ---
 
@@ -77,35 +222,37 @@ gitignored local snapshot.
 
 | Command | What it's for |
 |---|---|
-| `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair required project structure |
-| `/craftsman:merge` | land a finished branch or worktree when you say "merge": tests, merge, push, then remove the worktree and the local and remote branch |
-| `/craftsman:upgrade` | update every Craftsman install (user and per-project) to the latest commit, then tell you what to reload and re-init |
+| `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair the required project structure (`--check`, `--diff`, `--write`, `--update`, `--settings-diff`) |
+| `/craftsman:upgrade` | update every Craftsman install (user and per-project) to the latest commit, then tell you what to reload and re-init (`--dry-run`) |
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
 | `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
-| `/architect` | turn a vetted idea into confirmed engineering/data/systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`; `--backfill` derives them for a project with existing plans and legacy docs) |
+| `/architect` | turn a vetted idea into confirmed engineering, data and systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`; `--backfill` derives them for a project with existing plans and legacy docs) |
 | `/craftsman:auto` | one entry for the whole loop: ask every open decision first, run the units unattended in fresh agent contexts, ask about parked rows, land; repeat until every row is COMPLETE |
+| `/craftsman:auto-go` | one key to launch the newest `/craftsman:auto` goal |
 | `/instruction` | generate one paste-ready `/goal` prompt that drives the whole loop to verified completion, plus an effort estimate |
-| `/understand` | build a cited understanding of a feature/area before touching it |
+| `/understand` | build a cited understanding of a feature or area before touching it |
 | `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
-| `/orchestrate` | implement a plan doc across the repo (per-unit review is routed too, same reasoning as `/scrutinise`) |
-| `/investigate` | root-cause a bug into a fix-ready plan |
-| `/scrutinise` | review what was built (routed, so trivial diffs stay cheap) |
-| `/sync-docs` | reconcile the docs with the code that actually shipped |
+| `/orchestrate` | implement a plan doc across the repo, with per-unit routed review |
+| `/investigate` | root-cause a bug into a fix-ready analysis |
+| `/scrutinise` | review what was built (routed, so trivial diffs stay cheap; `--deep` for a deeper round) |
+| `/sync-docs` | reconcile docs and tracker with shipped code (`--arch`, `--tracker`, `--all`, `--archive`, `--prune`) |
+| `/craftsman:merge` | land a finished branch or worktree when you say "merge": tests, merge, push, then remove the worktree and the local and remote branch |
 | `/fix-tests` | get a red test suite green |
-| `/craftsman:digest` | ADHD-friendly progress digest: done, decisions needed, next, % complete per plan |
-| `/craftsman:baseline` | snapshot pre-existing lint issues (run once per repo) |
-| `/craftsman:stats` | see which gates actually fire — delete the ones that don't earn their keep |
-| `/craftsman:toggle` | turn the gates on/off for this repo |
-| `/craftsman:account-switch` | switch Claude account mid-session without losing the thread: `prepare` a handoff (goal, decisions and their reasoning, state, next steps) before `/login`, `restore` it after, or `recover` one from the transcript when no prepare ran; hands a running plan's claims to the new session |
-| `/craftsman:builtin-check` | after `claude update`: verify the wrapped Claude Code built-ins still match craftsman's assumptions, and propose new ones to wrap |
+| `/craftsman:digest` | progress digest: done, decisions needed, next, % complete per plan |
+| `/craftsman:baseline` | snapshot pre-existing lint issues (run once per repo, again after a tooling change) |
+| `/craftsman:stats` | see which gates actually fire, so you can delete the ones that don't earn their keep |
+| `/craftsman:toggle` | turn the gates on or off for this repo |
+| `/craftsman:account-switch` | switch Claude account mid-session without losing the thread: `prepare` a hand-off before `/login`, `restore` it after, or `recover` one from the transcript; hands a running plan's claims to the new session |
+| `/craftsman:builtin-check` | after `claude update`: verify the wrapped Claude Code built-ins still match craftsman's assumptions, and propose new ones to wrap (`--report-only`) |
 
 ---
 
 ## Configure it for your stack
 
-`/craftsman:init` writes a starter `craftsman.config.json` in your repo root; edit
-it any time. It **deep-merges over the plugin's defaults**, so you only write what
-you're changing. Common tweaks (full guide in **[EXTENDING.md](EXTENDING.md)**):
+`/craftsman:init` writes a starter `craftsman.config.json` in your repo root;
+edit it any time. It **deep-merges over the plugin's defaults**, so you only
+write what you're changing. Common tweaks (full guide in
+**[EXTENDING.md](EXTENDING.md)**):
 
 ```jsonc
 {
@@ -119,125 +266,205 @@ you're changing. Common tweaks (full guide in **[EXTENDING.md](EXTENDING.md)**):
 }
 ```
 
+| Key | Default | Meaning |
+|---|---|---|
+| `execution.agentMode` | `root-only` | `subagents` restores real fan-out |
+| `execution.engine` | `workflow` | how `/auto` runs units: `workflow`, `subagent` or `root` |
+| `repoExec.land` | `direct` | `pr` lands each unit through an auto-merging PR (`gh`, `glab`, `az`) |
+| `planning.featureBranches` | `false` | units land on a feature branch and stop at the approval page |
+| `stopGate.totalBudgetMs` | `280000` | one shared wall-clock budget for every Stop check |
+| `architecture.enforce` | `true` | `false` switches off the ARCH-rule scope gate |
+
 Turn the quality, doc and tracker gates off with `CRAFTSMAN=off` (env) or `/craftsman:toggle off`; the safety guards stay on (see [Safety](#safety)).
+
+---
+
+## Full update: taking every change and its knock-on changes
+
+Craftsman has no pinned version. Each install tracks the marketplace's git
+commit, so every merge to `main` is an update. A **full update** means more
+than pulling the plugin. The project's own surfaces, the Claude Code built-ins
+craftsman wraps, the lint baseline, the architecture rules and the docs all
+have to follow. Run the steps in order. Each one is safe to repeat.
+
+**0. Start clean.** Land or commit work in progress first, so the update
+doesn't tangle with it:
+
+```text
+/craftsman:digest          # anything IN_PROGRESS or awaiting a decision?
+git status                 # Stop also lists unpushed work in every worktree
+```
+
+**1. Update Claude Code itself (if due).** Some features have a minimum
+version (see the table under [Safety](#safety)):
+
+```text
+claude update
+```
+
+**2. Update every craftsman install.** This covers the user install and each
+project that installed it:
+
+```text
+/craftsman:upgrade --dry-run   # list what would move
+/craftsman:upgrade             # refresh the marketplace, update each install
+```
+
+It prints one row per install: `updated` (old → new commit), `current`,
+`skipped` (the project directory is gone) or `failed` (usually the network;
+re-run once it's fixed). Outside Claude Code, run
+`node <plugin>/scripts/self-update.mjs`.
+
+**3. Load the new copy.** The running session keeps the copy it started with:
+
+```text
+/reload-plugins                # or restart Claude Code
+```
+
+The old copy stays on disk for 14 days, so other running sessions keep
+working.
+
+**4. Refresh each project.** Run this in every project the upgrade listed,
+this one included:
+
+```text
+/craftsman:init                # its --update pass
+```
+
+It backs up every managed file under `.craftsman/init-backups/` first, then
+refreshes the project's `craftsman.config.json`, `.claude/CLAUDE.md`,
+`.claudeignore` and the `craftsman_version` stamp on each plan. It audits every
+shipped command, agent, hook, script and skill, and reports missing quality
+tools. It also offers `--settings-diff`, which adds the Claude Code sandbox and
+ask rules, and writes nothing until you agree.
+
+**5. Re-check the wrapped built-ins** after a Claude Code update:
+
+```text
+/craftsman:builtin-check       # updates docs/builtins.md
+```
+
+**6. Re-baseline** if the update or your own changes added a linter, a
+language or a new rule set. Otherwise new pre-existing findings would show up
+as "yours":
+
+```text
+/craftsman:baseline
+```
+
+**7. Bring the architecture rules up to date:**
+
+```text
+/architect --backfill          # only if init's architecture report says so (plans, no *.rules.md)
+/architect --update            # re-verify every rule whose governed code moved since verified_at
+```
+
+`--update` refreshes stale cites and wording itself. A rule the code now
+contradicts is reported, never rewritten, and routed to `/investigate` or
+`/plan`.
+
+**8. Reconcile docs and tracker with the code:**
+
+```text
+/craftsman:sync-docs --all     # docs drift + tracker chips + archive shipped plans, then /architect --update
+```
+
+**9. Verify.** Run the real checks and read their output:
+
+```text
+node --test scripts/*.test.mjs scripts/lib/*.test.mjs   # in the craftsman repo; elsewhere, your test command
+node <plugin>/scripts/arch-check.mjs lint               # every rules doc must PASS
+/craftsman:digest                                       # the board reads as expected
+```
+
+**10. Land the doc changes.** Steps 4–8 edit committed docs:
+
+```text
+/craftsman:merge
+```
+
+To get updates without asking, open `/plugin` → **Marketplaces** →
+`craftsman-marketplace` → **Enable auto-update**. Steps 4–10 still apply after
+an auto-update. If a project-scope install still shows an older commit, run
+`/craftsman:upgrade`.
+
+**Holding projects on tested code.** Installs from `plantgreytrees/craftsman`
+follow `main`. To update only to releases that passed craftsman's own loop,
+add the marketplace as `plantgreytrees/craftsman#stable`. That is a branch the
+owner moves forward after each release (`git push origin main:stable`), and
+rolls back by pushing an older commit to it (ARCH-MOD-06).
+
+**Changing craftsman itself?** The same loop applies inside this repo. Plan
+and land the change, add a `CHANGELOG.md` entry under `[Unreleased]`, keep
+this README's version line equal to the newest released CHANGELOG heading
+(a test checks it), and run the full suite plus `claude plugin validate .`.
+Every install then picks the change up through step 2 above. See
+[CONTRIBUTING.md](CONTRIBUTING.md) and [PUBLISH.md](PUBLISH.md).
 
 ---
 
 ## Good to know
 
 - **Plan levels.** `level: epic|story|feature` in a plan's frontmatter, with
-  `parent:`/`children:`, builds a tree; `/orchestrate` and `/auto` take
+  `parent:`/`children:`, builds a tree. `/orchestrate` and `/auto` take
   `--level` and `--feature`. Epics and stories get generated rollup
   `TRACKER.md` files, and `tracker.publish` pushes progress to the base
   branch. `planning.featureBranches`, `planning.featureUnitCap`,
   `execution.maxSubagents` and `execution.maxSessions` default to behaviour
   that changes nothing; see EXTENDING.md.
-
-- **Protected base branches (GitHub, GitLab, Azure DevOps)** — by default a
+- **Protected base branches (GitHub, GitLab, Azure DevOps).** By default a
   finished unit is merged locally and the base branch is pushed. If your host
-  rejects direct pushes, set `repoExec.land: "pr"`: each unit's branch is
+  rejects direct pushes, set `repoExec.land: "pr"`. Each unit's branch is then
   pushed and lands through an auto-merging pull/merge request opened with
-  `gh`, `glab` or `az`, so your branch protection, CI and approvals apply.
-  Worktree isolation is the same either way — see
+  `gh`, `glab` or `az`, so your branch protection, CI and approvals apply. See
   [EXTENDING.md](EXTENDING.md#landing-units-through-pull-requests).
-- **Doc-write authority** — the guarded paths (`docs/plans/**`, `docs/ideas/**`,
+- **Doc-write authority.** The guarded paths (`docs/plans/**`, `docs/ideas/**`,
   `docs/architecture/**`) are blocked until a writer command grants the
-  session. `/plan` writes plans; `/orchestrate`, `/scrutinise` and
-  `/sync-docs --tracker` update tracker rows; `/idea` writes idea docs
-  (`/architect` marks them `architected`); `/architect` writes paired
-  architecture areas (`<area>.rules.md` + `<area>.md`). Unpaired legacy prose
-  under `docs/architecture/` stays `/sync-docs`' until `/architect --backfill`
-  pairs it. `/understand` and `/investigate` write nothing and hand
-  off to `/plan`. The rest of `docs/` is ordinary prose, freely editable;
-  widen the guard in config if you want it stricter. The block is a hook; the
-  grant covers every guarded path for that session, so which command writes
-  which path is the commands' contract.
-- **Architecture decisions are enforced, not just written down** — `/architect`
-  writes each area as a pair: `<area>.md` for people (plain English, mermaid,
-  rationale), which the loop never loads, and a terse `<area>.rules.md` of
-  numbered `ARCH-…` rules plus the paths it `governs`. `/plan` cites the rules
-  per unit, `plan-reviewer` and the scrutineer check them, and `scope.mjs`
-  refuses to activate a unit that writes a governed path without loading and
-  citing its rules — so `/orchestrate` cannot edit there until it does. Breaking
-  a decided rule takes `/architect`, never a workaround. Switch the gate off
-  with `architecture.enforce: false`.
-- **Safe with concurrent sessions** — each session's state (test baseline, plan
-  criteria, doc authority) is isolated under `.craftsman/sessions/<id>/`; one
-  session finishing never blocks another. Each execution unit must activate a
-  separate Git worktree with `worktree_path`; mutating Git commands from another
-  checkout are blocked until the binding is released for the locked merge. A
-  claim left behind by a crashed session can only be recovered once it's
-  confirmed stale (24h+ by default) — see [EXTENDING.md](EXTENDING.md).
-- **Structured tracker state** — the readable [tracker](docs/plans/TRACKER.md)
+  session. `/plan` writes plans. `/orchestrate`, `/scrutinise` and
+  `/sync-docs --tracker` update tracker rows. `/idea` writes idea docs, and
+  `/architect` marks them `architected`. `/architect` writes paired
+  architecture areas; unpaired legacy prose under `docs/architecture/` belongs
+  to `/sync-docs` until `/architect --backfill` pairs it. `/understand` and
+  `/investigate` write nothing and hand off to `/plan`. The rest of `docs/` is
+  ordinary prose.
+- **Structured tracker state.** The readable [tracker](docs/plans/TRACKER.md)
   stays concise and link-first, while `scripts/tracker.mjs` records validated
-  unit identities, legal status transitions, and terse evidence in the local
-  `.craftsman/tracker/events.jsonl` ledger. Claims write `IN_PROGRESS` there
-  automatically. Both the ledger and `TRACKER.md` live in the **main checkout**
-  even when a session works in a worktree, so every parallel session sees one
-  tracker. Each transition re-renders the file's generated ledger block, and
-  the `tracker-sync` hook does the same at SessionStart, after edits and at
-  Stop. `pre-guard` blocks writes to a worktree's copy and hand edits of the
-  block. When a unit reaches MERGED or COMPLETE, the ledger also keeps its own
-  `[unit:<id>]` acceptance lines, so they outlive the worktree's gitignored
-  `acceptance.md`. Once every row of a plan is COMPLETE or CANCELLED,
-  `{"action":"archive","plan":"docs/plans/<slug>.md"}` retires it: the rows
-  leave the ledger and `TRACKER.md`, and one line per unit, with its criteria,
-  goes to the committed [tracker archive](docs/plans/TRACKER-archive.md).
-- **Fast** — session start never blocks on a build (the baseline runs in the
-  background); tool detection is scoped to your detected stack and cached;
-  lint results are content-hash cached; the Stop-gate's test-regression check
-  only re-runs when something was actually edited since the last check, so an
-  answer-only turn doesn't re-run the suite for nothing. At Stop, every test
-  command, `extraChecks` entry, and secrets scan run concurrently against one
-  shared wall-clock budget (`stopGate.totalBudgetMs`) rather than summed —
-  see [EXTENDING.md](EXTENDING.md).
-- **Secrets are a hard block, never silently skipped** — a scan that gets cut
-  off (budget or its own timeout) fails the Stop gate with a clear message
-  instead of passing quietly; a clean working tree still gets scanned at least
-  once per session, and gitignored `.env` files are checked too, not just
-  tracked changes. If the configured scanner (`gitleaks` by default) isn't on
-  `PATH`, the gate falls back to a dependency-free built-in scanner instead of
-  just blocking on a missing tool (opt out with `security.builtinFallback: false`).
-- **Root-only by default, mechanically enforced** — `/orchestrate` and the
-  planners do the work themselves, sequentially, instead of fanning out
-  subagents; `execution.agentMode` (default `root-only`) is enforced by a
-  `PreToolUse` hook that hard-blocks `Task` calls, not just a convention.
-  The standing exceptions are `/plan`'s one decomposition step and one
-  isolated fresh-context agent per run of `/scrutinise` (`scrutineer`, which
-  reviews merged work without having seen it written), `/idea`
-  (`idea-critic`, which judges the idea without hearing the pitch) and
-  `/architect --deep` (`architect-analyst`, on Fable). The first three run on
-  `opus`; everything else in `/plan`, and most agents, run cheaper —
-  `implementer`/`security-auditor` stay on `sonnet`. Each run is granted
-  exactly one such agent, so a second or parallel dispatch is blocked.
-  Claude Code's read-only built-in agents listed in `execution.builtinAgents`
-  (default `["Explore"]`) also pass, since they're read-only by design. Flip
-  `execution.agentMode` to `"subagents"` to restore real fan-out.
-- **Autonomous runs keep the root context light** — root-only mode was chosen
-  for lower total tokens. For autonomous runs that rationale is superseded:
-  root context comes first (ARCH-ENGINE-10), because a long unattended run
-  fails when root fills, not when the bill grows. `/craftsman:auto` therefore
-  runs each unit in a fresh agent context, chosen by `execution.engine`:
-  `workflow` (default) runs the plugin workflow `workflows/run.js`,
-  `subagent` dispatches one `unit-runner` per unit, and `root` keeps the old
-  in-root behaviour. Measured, root grew ~20k tokens per workflow unit against
-  ~47k–108k per root-only unit (`docs/plans/autonomous-e2e-loop-evidence.md`).
-  `/plan` refuses a unit whose scoped files and task text exceed
-  `execution.unitContextBytes` (default 122,880), so every unit fits one
-  fresh agent.
-- **Built-in skills, craftsman's rules** — `/orchestrate` runs Claude Code's
-  own maintained `simplify` (step 6) and `code-review` (step 8) skills inside
-  the loop. A `PreToolUse` hook on `Skill` hands them the governing standards,
-  ARCH rules and open acceptance criteria. Their output is only a candidate
-  list: `code-reviewer` still owns the verdict, and the scope guard and
-  quality gate cover every edit they make.
-- **Context stays bounded without stopping** — every unit ends in a hand-off
-  on disk, and the next unit re-reads only the tracker and its own scope.
-  Claude Code's auto-compact reclaims context when it fills, and SessionStart
-  restores the hand-off afterwards, so runs don't halt waiting for a manual
-  `/compact`. Worktrees left behind after a merge, oversized
-  shipped docs, and unbounded plan-memory/tracker growth are all caught the
-  same way — by a hook or a CI check, not by remembering to do it.
+  unit identities, legal status transitions (`PENDING → IN_PROGRESS → MERGED →
+  COMPLETE`, plus `BLOCKED`, `PARKED`, `CANCELLED`) and terse evidence in
+  `.craftsman/tracker/events.jsonl`. Both live in the **main checkout**, even
+  when a session works in a worktree. `pre-guard` blocks writes to a
+  worktree's copy and hand edits of the generated block. Once every row of a
+  plan is COMPLETE or CANCELLED, `{"action":"archive","plan":"docs/plans/<slug>.md"}`
+  moves it to the committed [tracker archive](docs/plans/TRACKER-archive.md),
+  one line per unit with its criteria.
+- **Root-only by default, mechanically enforced.** `execution.agentMode`
+  (default `root-only`) is enforced by a `PreToolUse` hook that hard-blocks
+  `Task` calls. The standing exceptions are `/plan`'s one decomposition step
+  and one isolated fresh-context agent per run of `/scrutinise`
+  (`scrutineer`), `/idea` (`idea-critic`) and `/architect --deep`
+  (`architect-analyst`). Each run is granted exactly one such agent. The
+  read-only built-ins in `execution.builtinAgents` (default `["Explore"]`)
+  also pass. `/craftsman:auto` is the other exception: it runs units in fresh
+  contexts, because on a long unattended run the root context filling up is
+  the real limit (ARCH-ENGINE-10). Measured, root grew ~20k tokens per
+  workflow unit against ~47k–108k per root-only unit
+  (`docs/plans/autonomous-e2e-loop-evidence.md`).
+- **Fast.** Session start never blocks on a build (the baseline runs in the
+  background). Tool detection is scoped to your stack and cached, and lint
+  results are content-hash cached. The test-regression check re-runs only when
+  something was edited. At Stop, every test command, `extraChecks` entry and
+  secrets scan run concurrently against one shared budget
+  (`stopGate.totalBudgetMs`).
+- **Secrets are a hard block, never silently skipped.** A scan that gets cut
+  off fails the Stop gate loudly. A clean tree is still scanned once per
+  session, and gitignored `.env` files are checked too. If `gitleaks` isn't on
+  `PATH`, a dependency-free built-in scanner runs instead (opt out with
+  `security.builtinFallback: false`). At the approval point the built-in scan
+  always runs, and a configured `security.check` adds to it, never replaces it.
+- **Context stays bounded without stopping.** Every unit ends in a hand-off on
+  disk, and the next unit re-reads only the tracker and its own scope. Leftover
+  worktrees, oversized docs and unbounded tracker or memory growth are each
+  caught by a hook or a CI check, not by anyone remembering.
 
 ---
 
@@ -294,14 +521,19 @@ Features without a documented minimum are proved with `claude plugin test .` and
 ```text
 .claude-plugin/{plugin.json, marketplace.json}   plugin + marketplace manifests
 craftsman.config.json                            default tunables (a project can override)
-hooks/hooks.json                                 SessionStart / PreToolUse / PostToolUse / Stop
-scripts/                                         the Node engine (no dependencies)
-commands/                                        the workflow + engine commands
-agents/                                          the specialist review/implement agents
-skills/language-aware-planning/                  19 per-language idiom checklists + plan template
+hooks/hooks.json, hooks/run.sh                   hook wiring and the fail-closed launcher
+hooks/register.js                                the launcher / telemetry / progress-band mod
+scripts/                                         the Node engine (no dependencies) and its tests
+commands/                                        the workflow + engine commands (_*.md are internal partials)
+agents/                                          the specialist review / implement / runner agents
+workflows/run.js                                 the plugin workflow that runs plan units in fresh contexts
+skills/language-aware-planning/                  per-language idiom checklists + plan, idea and architecture templates
 skills/design-review/                            the UI/UX review checklist ui-ux-reviewer loads
-skills/deep-research/                            forked read-only repo research (/deep-research)
+skills/deep-research/                            forked read-only repo research
+skills/{systematic-debugging, test-driven-development, verification-before-completion}/   loop disciplines
 output-styles/craftsman-terse.md                 an optional terse response style
+docs/architecture/                               craftsman's own decisions: <area>.md + <area>.rules.md
+docs/plans/, docs/ideas/                         craftsman's own plans, tracker and idea verdicts
 .github/workflows/ci.yml                         syntax/test/JSON checks on every push and PR
 ```
 
@@ -309,31 +541,31 @@ output-styles/craftsman-terse.md                 an optional terse response styl
 
 ## Docs
 
-- **[INSTALL.md](INSTALL.md)** — step-by-step install + troubleshooting
-- **[EXTENDING.md](EXTENDING.md)** — add languages, checks, or project skill packs
-- **[PUBLISH.md](PUBLISH.md)** — put this repo on GitHub
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute
-- **[CHANGELOG.md](CHANGELOG.md)** — version history
+- **[INSTALL.md](INSTALL.md)**: step-by-step install, updating and troubleshooting
+- **[EXTENDING.md](EXTENDING.md)**: add languages, checks or project skill packs; every config key
+- **[docs/architecture/](docs/architecture/README.md)**: how each area is built and the rules it enforces
+- **[PUBLISH.md](PUBLISH.md)**: put this repo on GitHub
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**: how to contribute
+- **[CHANGELOG.md](CHANGELOG.md)**: version history
 
 ## Upgrading from craftsman v0.2
 
-This **replaces** the v0.2 starter (it includes that engine plus the full
-workflow). Don't run both — they share `.craftsman/` state and the `craftsman`
-plugin name. Uninstall v0.2 first (see [INSTALL.md](INSTALL.md), step 0).
+This **replaces** the v0.2 starter: it includes that engine plus the full
+workflow. Don't run both, because they share `.craftsman/` state and the
+`craftsman` plugin name. Uninstall v0.2 first (see [INSTALL.md](INSTALL.md),
+step 0), then follow [Quick start](#quick-start).
 
 ## Contributing
 
-Issues and PRs welcome — see **[CONTRIBUTING.md](CONTRIBUTING.md)**. The plugin is
-dependency-free; `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` (every
-script's unit/subprocess suite, including claim/handoff/plan-graph/repo-exec/
-scope/toggle/workspace coverage), `node --check` on every script, and
-`claude plugin validate .` are the whole test suite — CI runs all of it plus a
-diff-whitespace check on every push and PR. Run `claude plugin validate .` from
-this directory (the repo root is one level up and has no manifest); because
-`plugin.json` and `marketplace.json` share `.claude-plugin/`, the CLI validates
-the marketplace manifest. Keep it stack-agnostic —
-project-specific behaviour belongs in a project's own `.claude/`, not in the
-plugin.
+Issues and PRs welcome; see **[CONTRIBUTING.md](CONTRIBUTING.md)**. The plugin
+is dependency-free. The whole test suite is three things:
+`node --test scripts/*.test.mjs scripts/lib/*.test.mjs` (every script's
+unit/subprocess suite), `node --check` on every script, and
+`claude plugin validate .`. CI runs all of it plus a diff-whitespace check on
+every push and PR. Because `plugin.json` and `marketplace.json` share
+`.claude-plugin/`, the CLI validates the marketplace manifest. Keep it
+stack-agnostic: project-specific behaviour belongs in a project's own
+`.claude/`, not in the plugin.
 
 ## License
 

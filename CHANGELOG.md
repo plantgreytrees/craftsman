@@ -6,7 +6,17 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-25
+
+### Changed
+
+- **README rewritten** around how craftsman works (hooks, quality layers, the loop, state on disk) with a
+  step-by-step full-update guide: upgrade, reload, re-init, built-in check, baseline, architecture, docs, verify.
+
 ### Added
+
+- **Landing capability for the automatic archive** (ARCH-DOCS-18, ARCH-LAND-33): `land-feature` retires a closed
+  plan only through an in-process capability that `doc-retire.mjs` does not export; `auto: true` alone is ignored.
 
 - **Approval before base** (ARCH-APPROVAL-03..09, ARCH-LAND-28/29/30/31). With `planning.featureBranches` on, `land-feature`
   lands only against an approval record the artifact owner decided on a private page (`scripts/approval.mjs`,
