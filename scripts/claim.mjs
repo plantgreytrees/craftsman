@@ -4,12 +4,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite, isMain, liveClaudeSession, logEvent, mainCheckoutRoot, projectContext, readStdin, sidOf } from "./lib/core.mjs";
 
-export function claimPath(plan, unit, project = ".", context = null) {
-  const key = `${project}--${plan}--${unit}`.replace(/[^A-Za-z0-9_.-]/g, "_");
-  // Anchored at the main checkout so root and linked-worktree sessions share one lock directory.
+// Anchored at the main checkout so root and linked-worktree sessions share one lock directory.
+export function claimsDir(context = null, project = ".") {
   const root = context?.root || (context?.stateDir ? null : projectContext(project).root);
   const state = root ? path.join(mainCheckoutRoot(root), ".craftsman") : context.stateDir;
-  return path.join(state, "claims", `${key}.lock`);
+  return path.join(state, "claims");
+}
+
+export function claimPath(plan, unit, project = ".", context = null) {
+  const key = `${project}--${plan}--${unit}`.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return path.join(claimsDir(context, project), `${key}.lock`);
 }
 
 // Hand a claim to the session that replaced its owner (e.g. after an account

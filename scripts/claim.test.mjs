@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { claimPath } from "./claim.mjs";
+import { claimPath, claimsDir } from "./claim.mjs";
 import { projectContext } from "./lib/core.mjs";
 
 const CLAIM = path.join(path.dirname(fileURLToPath(import.meta.url)), "claim.mjs");
@@ -118,6 +118,40 @@ test("claim: a claim from a linked worktree shares the main checkout's lock", ()
     assert.equal(run(wt, { action: "release" }).status, 0);
     assert.equal(fs.existsSync(claimPath(input.plan, input.unit, ".", { root: dir })), false);
     assert.equal(run(wt, { session_id: "other" }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("claim: claimsDir is the main checkout's; transfer and recover work from a linked worktree", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-claim-")));
+  try {
+    const git = (...args) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: dir });
+    git("init", "-q", "-b", "main");
+    git("commit", "-q", "--allow-empty", "-m", "init");
+    const wt = path.join(dir, ".worktrees", "u");
+    assert.equal(git("worktree", "add", "-q", wt, "-b", "feat/u").status, 0);
+    assert.equal(claimsDir({ root: wt }), path.join(dir, ".craftsman", "claims"));
+    assert.equal(claimsDir({ stateDir: path.join(dir, ".craftsman") }), path.join(dir, ".craftsman", "claims"));
+
+    const input = { plan: "docs/plans/example.md", unit: "unit-1", project: ".", session_id: "old" };
+    const run = (payload) => spawnSync(process.execPath, [CLAIM], {
+      cwd: wt, env: { ...process.env, CLAUDE_PROJECT_DIR: wt }, input: JSON.stringify(payload), encoding: "utf8",
+    });
+    assert.equal(run(input).status, 0);
+    const lock = claimPath(input.plan, input.unit, ".", { root: wt });
+    assert.equal(path.dirname(lock), claimsDir({ root: wt }));
+    const moved = run({ ...input, session_id: "new", action: "transfer", from_session: "old", confirm: true });
+    assert.equal(moved.status, 0, moved.stderr);
+    const ownerPath = path.join(lock, "owner.json");
+    const owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+    assert.equal(owner.session_id, "new");
+
+    owner.claimed_at = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+    fs.writeFileSync(ownerPath, JSON.stringify(owner));
+    const recovered = run({ ...input, session_id: "r", action: "recover", confirm: true });
+    assert.equal(recovered.status, 0, recovered.stderr);
+    assert.equal(fs.existsSync(lock), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

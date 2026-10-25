@@ -225,3 +225,30 @@ test("account-switch: adopt refuses while the previous session is still running"
     f.cleanup();
   }
 });
+
+test("account-switch: a claim made from a linked worktree is snapshotted and adopted (ARCH-STATE-03)", () => {
+  const f = fixture();
+  try {
+    const git = (...args) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: f.repo, encoding: "utf8" });
+    git("commit", "-q", "--allow-empty", "-m", "init");
+    const wt = path.join(f.root, "wt");
+    assert.equal(git("worktree", "add", "-q", "-b", "feat/x", wt).status, 0);
+    const env = { ...f.env, CLAUDE_PROJECT_DIR: wt };
+    const claim = { plan: "docs/plans/p.md", unit: "u1", project: ".", session_id: "old" };
+    assert.equal(spawnSync(process.execPath, [CLAIM], { cwd: wt, env, input: JSON.stringify(claim), encoding: "utf8" }).status, 0);
+    const cli = (args, input = "", sid = "new") =>
+      spawnSync(process.execPath, [SCRIPT, ...args], { cwd: wt, env: { ...env, CLAUDE_CODE_SESSION_ID: sid }, input, encoding: "utf8" });
+
+    const saved = cli(["save"], "# Handoff: wt\n\n## 1. Goal\nx\n", "old");
+    assert.equal(saved.status, 0, saved.stderr);
+    assert.match(fs.readFileSync(/handoff saved: (\S+)/.exec(saved.stdout)[1], "utf8"), /unit claims held: docs\/plans\/p\.md \/ u1/);
+
+    const done = cli(["adopt", "--from", "old", "--confirm"]);
+    assert.equal(done.status, 0, done.stderr);
+    const dir = path.join(f.repo, ".craftsman", "claims");
+    const owners = fs.readdirSync(dir).map((n) => JSON.parse(fs.readFileSync(path.join(dir, n, "owner.json"), "utf8")));
+    assert.deepEqual(owners.map((o) => o.session_id), ["new"]);
+  } finally {
+    f.cleanup();
+  }
+});

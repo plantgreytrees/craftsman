@@ -27,7 +27,7 @@ import {
   projectContext, readSessionWorktrees, readStdin, readWorktreeBindings, recordSessionWorktree,
   sessionDir, sharedStateDir, sidOf, writeWorktreeBinding,
 } from "./lib/core.mjs";
-import { transferClaim } from "./claim.mjs";
+import { claimsDir, transferClaim } from "./claim.mjs";
 import { requiredFile } from "./scope.mjs";
 import { PATTERNS } from "./secrets-scan.mjs";
 
@@ -201,7 +201,7 @@ function gitSection(dir) {
 }
 
 export function ownedClaims(context, sid) {
-  const dir = path.join(context.stateDir, "claims");
+  const dir = claimsDir(context);
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return []; }
   return names.flatMap((name) => {
