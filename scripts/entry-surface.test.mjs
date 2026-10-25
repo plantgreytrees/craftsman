@@ -57,3 +57,9 @@ test("every reviewer agent carries maxTurns", () => {
   const missing = names.filter((n) => !/^maxTurns:\s*\d+$/m.test(fs.readFileSync(path.join(ROOT, `agents/${n}.md`), "utf8").split("\n---")[0]));
   assert.deepEqual(missing, []);
 });
+
+test("retired design skill is gone and ui-ux-reviewer names no skill (a11y floor)", () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, "skills/design" + "-review")));
+  const body = fs.readFileSync(path.join(ROOT, "agents/ui-ux-reviewer.md"), "utf8");
+  assert.ok(!/design.review|SKILL\.md/.test(body));
+});

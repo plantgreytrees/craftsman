@@ -48,7 +48,7 @@ Every plan doc carries, per unit, a `### Tooling` block naming only what it need
 ```
 ### Tooling — <unit-slug>
 Implementer:  implementer                     # language auto-detected at execute time
-Gates:        security-auditor, ui-ux-reviewer, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper   # only ones this diff triggers
+Gates:        security-auditor, ui-gate, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper   # only ones this diff triggers
 Skills:       <1–3 relevant skills>
 Checks:       <detected build/lint/typecheck/test commands>
 MCP:          context7 (lib API), memory (recall+record)   # if available; skip-if-trivial
