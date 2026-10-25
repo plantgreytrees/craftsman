@@ -35,7 +35,7 @@ test("the hooks config and tracker-sync.mjs have no publish path", () => {
 
 test("_sync-docs-prune.md: no force flag, rounds of 15, never pre-approved, push retry", () => {
   const t = read("commands/_sync-docs-prune.md");
-  assert.doesNotMatch(t, /(^|\s)(--force|-f)(\s|$|[`.,;])/m);
+  assert.doesNotMatch(t, /(^|[\s`(])(--force|-f)(\s|$|[`.,;)])/m);
   assert.match(t, /Rounds of at most 15 docs/);
   const never = t.slice(t.indexOf("## Never pre-approved"));
   assert.match(never, /An active `\/goal` or any pre-approval does \*\*not\*\* cover `--archive`, `--prune` or `--prune --archive`/);

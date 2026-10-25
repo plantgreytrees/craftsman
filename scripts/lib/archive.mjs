@@ -11,7 +11,7 @@ export { resolveArchive, archivePathFor, productIdFor, restoreCommand };
 // Accepted two-way edge (ARCH-ARCHIVE-03): doc-retire.mjs imports classifyArchive from here, this file imports findReferrers/retire
 // back. Both are hoisted function declarations used only at call time, never at module load, so the cycle is inert; the
 // views-wiring guard allows exactly this pair and nothing else.
-import { findReferrers, retire as docRetire } from "../doc-retire.mjs";
+import { findReferrers, landingCapability, retire as docRetire } from "../doc-retire.mjs";
 import { currentState } from "../tracker.mjs";
 import { buildIndex, descendantSlugs, loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";
 import { mainCheckoutRoot } from "./core.mjs";
@@ -52,7 +52,12 @@ export function classifyArchive(context, plan, opts = {}) {
   return { class: cls, blocking, rewritable, hits, reason: cls === "not-archivable" ? `no archive project: ${archive?.off ?? "unresolved"}` : undefined };
 }
 
-const defaultGit = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+// The one git runner in this module: `git -C root`, throws on any non-zero status. opts.input feeds stdin; opts.buffer returns bytes.
+const gitIn = (root, args, opts = {}) => execFileSync("git", ["-C", root, ...args], {
+  encoding: opts.buffer ? "buffer" : "utf8", stdio: ["pipe", "pipe", "pipe"], maxBuffer: 64e6, ...(opts.input === undefined ? {} : { input: Buffer.from(opts.input) }),
+});
+const defaultGit = (args, cwd, opts) => gitIn(cwd, args, opts);
+const seamGit = (args, ctx, opts) => gitIn(ctx.root, args, opts);
 const isLink = (f) => { try { return fs.lstatSync(f).isSymbolicLink(); } catch { return false; } };
 const defaultCopy = (from, to) => fs.copyFileSync(from, to);
 
@@ -127,6 +132,37 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
   }
 }
 
+// ARCH-DOCS-09 / ARCH-DOCS-17: the one live-blocker check, shared by autoArchiveEligible and retire so they cannot disagree. Open
+// scrutinise-/investigate- siblings and live descendant plans keep the plan. Read-only.
+// {plan, rowsOf(plan) -> rows, trackedSiblings: tracked sibling paths, loadIndex() -> plan index (may throw; read only when no sibling is open)}.
+// Returns {siblings (closed, retire with the plan), openSiblings[], live[] (slugs), descendants (closed: {slug, node, rows}), isParent,
+// reason (set when anything blocks)}.
+export function liveBlockers({ plan, rowsOf, trackedSiblings, loadIndex: readIndex }) {
+  const slug = slugOf(plan);
+  const isOpen = (row) => row.status !== "COMPLETE" && row.status !== "CANCELLED";
+  const isParent = (n) => Boolean(n) && (n.level === "epic" || n.level === "story");
+  const out = { siblings: [], openSiblings: [], live: [], descendants: [], isParent: false, reason: undefined };
+  for (const sibling of trackedSiblings) {
+    const open = rowsOf(sibling).filter(isOpen);
+    if (open.length) out.openSiblings.push(`${sibling} (${open.map((r) => `${r.unit}=${r.status}`).join(", ")})`);
+    else out.siblings.push(sibling);
+  }
+  if (out.openSiblings.length) { out.reason = `open sibling plans keep ${plan}: ${out.openSiblings.join("; ")}`; return out; }
+  const index = readIndex();
+  if (index.get(slug)) {
+    out.isParent = isParent(index.get(slug));
+    const own = new Set(out.siblings.map((p) => path.posix.basename(p, ".md")));
+    for (const child of descendantSlugs(slug, { index }).filter((c) => !own.has(c))) {
+      const node = index.get(child);
+      const rows = rowsOf(node.path);
+      if (rows.some(isOpen) || (!rows.length && !isParent(node) && !node.derived)) out.live.push(child);
+      else out.descendants.push({ slug: child, node, rows });
+    }
+  }
+  if (out.live.length) out.reason = `${plan} has live descendants: ${out.live.join(", ")}`;
+  return out;
+}
+
 // ARCH-DOCS-14 / ARCH-LAND-30: may land-feature archive this plan on its own? Read-only; returns {eligible, reason?}, never throws.
 // Every condition must hold: an archive project resolves, every tracker row of the plan is COMPLETE or CANCELLED, no
 // scrutinise-/investigate- sibling and no descendant plan is still open (as retire refuses), the referrer scan succeeds and
@@ -137,6 +173,9 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
 export function autoArchiveEligible(context, plan, seams = {}) {
   const no = (reason) => ({ eligible: false, reason });
   try {
+    // ARCH-LAND-32: without the landing capability retire would refuse for lack of the grant, so refuse here, before anything else
+    // (and so before holdsLanding can move the main checkout).
+    if (seams.capability === undefined || seams.capability !== landingCapability()) return no("no landing capability");
     if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) return no("invalid plan path");
     const archive = (seams.resolveArchive || resolveArchive)(context);
     if (!archive?.root) return no(`no archive project: ${archive?.off ?? "unresolved"}`);
@@ -144,36 +183,24 @@ export function autoArchiveEligible(context, plan, seams = {}) {
     const rowsOf = (p) => state.filter((row) => row.plan === p);
     const rows = rowsOf(plan);
     if (!rows.length) return no("plan has no tracker rows");
-    const isOpen = (row) => row.status !== "COMPLETE" && row.status !== "CANCELLED";
-    const open = rows.filter(isOpen);
+    const open = rows.filter((row) => row.status !== "COMPLETE" && row.status !== "CANCELLED");
     if (open.length) return no(`open rows: ${open.map((row) => `${row.unit}=${row.status}`).join(", ")}`);
     const sha = seams.sha;
-    const git = seams.git || ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6 }));
+    const git = seams.git || seamGit;
     const tracked = (p) => { try { git(sha ? ["cat-file", "-e", `${sha}:${p}`] : ["ls-files", "--error-unmatch", "--", p], context); return true; } catch { return false; } };
     const slug = slugOf(plan);
     const dir = path.posix.dirname(plan);
-    // Open siblings keep the plan (retire's refusal).
-    const siblings = [`scrutinise-${slug}.md`, `investigate-${slug}.md`].map((n) => path.posix.join(dir, n)).filter(tracked);
-    const openSiblings = siblings.map((s) => ({ s, open: rowsOf(s).filter(isOpen) })).filter((x) => x.open.length);
-    if (openSiblings.length) return no(`open sibling plans keep ${plan}: ${openSiblings.map((x) => `${x.s} (${x.open.map((r) => `${r.unit}=${r.status}`).join(", ")})`).join("; ")}`);
-    // Live descendants keep the plan (retire's refusal).
-    let index;
+    // Open siblings and live descendants keep the plan: the same liveBlockers check retire runs.
+    const trackedSiblings = [`scrutinise-${slug}.md`, `investigate-${slug}.md`].map((n) => path.posix.join(dir, n)).filter(tracked);
+    let blockers;
     try {
-      index = seams.loadIndex ? seams.loadIndex(context, sha) : sha ? indexAt(context, sha, git) : loadIndex(context.root);
+      blockers = liveBlockers({ plan, rowsOf, trackedSiblings,
+        loadIndex: () => (seams.loadIndex ? seams.loadIndex(context, sha) : sha ? indexAt(context, sha, git) : loadIndex(context.root)) });
     } catch (error) { return no(`cannot read the plan hierarchy: ${error.message}`); }
-    if (index.get(slug)) {
-      const own = new Set(siblings.map((p) => path.posix.basename(p, ".md")));
-      const isParent = (n) => n && (n.level === "epic" || n.level === "story");
-      const live = descendantSlugs(slug, { index }).filter((c) => !own.has(c)).filter((c) => {
-        const node = index.get(c);
-        const crows = rowsOf(node.path);
-        return crows.some(isOpen) || (!crows.length && !isParent(node) && !node.derived);
-      });
-      if (live.length) return no(`${plan} has live descendants: ${live.join(", ")}`);
-    }
+    if (blockers.reason) return no(blockers.reason);
     let scanContext = context;
     if (sha) {
-      const base = context.git ?? ((args, ctx) => execFileSync("git", ["-C", ctx.root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6 }));
+      const base = context.git ?? seamGit;
       scanContext = { ...context, git: (args, ctx) => {
         if (args[0] !== "grep" || !args.includes("HEAD")) return base(args, ctx);
         return String(base(args.map((a) => (a === "HEAD" ? sha : a)), ctx) ?? "").replaceAll(`${sha}:`, "HEAD:");
@@ -190,13 +217,30 @@ export function autoArchiveEligible(context, plan, seams = {}) {
   }
 }
 
-// The plan index as it stands at a commit, read from git rather than the working tree.
+// The plan index as it stands at a commit, read from git rather than the working tree: names from `ls-tree -z` (no path quoting,
+// a name with a newline cannot split), contents from one `cat-file --batch` (bytes, so the size header is exact).
 function indexAt(context, sha, git) {
-  const names = String(git(["ls-tree", "--name-only", sha, "docs/plans/"], context) ?? "").split("\n").filter((f) => /^docs\/plans\/[^/]+\.md$/.test(f)).sort();
-  return buildIndex(names.map((f) => ({ path: f, slug: path.posix.basename(f, ".md"), text: String(git(["show", `${sha}:${f}`], context) ?? "") })));
+  const names = String(git(["ls-tree", "-z", "--name-only", sha, "docs/plans/"], context) ?? "").split("\0")
+    .filter((f) => /^docs\/plans\/[^/\n]+\.md$/.test(f)).sort();
+  const texts = new Map();
+  if (names.length) {
+    const out = git(["cat-file", "--batch"], context, { input: names.map((f) => `${sha}:${f}\n`).join(""), buffer: true });
+    const bytes = Buffer.isBuffer(out) ? out : Buffer.from(String(out ?? ""));
+    let at = 0;
+    for (const f of names) {
+      const eol = bytes.indexOf(10, at);
+      if (eol < 0) throw new Error(`cat-file --batch ended early at ${f}`);
+      const header = bytes.subarray(at, eol).toString("utf8").split(" ");
+      if (header[1] !== "blob") throw new Error(`cannot read ${f} at ${sha}`);
+      const size = Number(header[2]);
+      texts.set(f, bytes.subarray(eol + 1, eol + 1 + size).toString("utf8"));
+      at = eol + 1 + size + 1;
+    }
+  }
+  return buildIndex(names.map((f) => ({ path: f, slug: path.posix.basename(f, ".md"), text: texts.get(f) ?? "" })));
 }
 
-const sh = (root, args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const sh = (root, args) => gitIn(root, args).trim();
 const quiet = (root, args) => { try { return sh(root, args); } catch { return ""; } };
 
 // The retire commits in the main checkout, so it must sit on base and hold the landed merge. A clean checkout whose tip is an
@@ -220,16 +264,17 @@ export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
     const here = { ...context, root: main };
     const eligible = deps.autoArchiveEligible || autoArchiveEligible;
     const retire = deps.retire || docRetire;
+    const capability = landingCapability(); // ARCH-DOCS-17: the only way retire skips the grant; never read from input
     for (const plan of [...new Set(rows.map((row) => row.plan))]) {
       try {
-        const verdict = eligible(here, plan, { sha });
+        const verdict = eligible(here, plan, { sha, capability });
         if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
         // Only a retire that will actually run may move the main checkout (ARCH-LAND-30).
         if (!holdsLanding(main, info.base_branch, sha)) {
           note({ ev: "doc_retire_skipped", plan, reason: `main checkout is not on ${info.base_branch} holding the landed merge` });
           continue;
         }
-        const out = retire({ plan, sid: input.session_id, auto: true, landed_sha: sha }, here);
+        const out = retire({ plan, sid: input.session_id, landed_sha: sha }, here, capability);
         if (out?.refused) { note({ ev: "doc_retire_skipped", plan, reason: out.reason }); continue; }
         const archive = resolveArchive(here);
         note({ ev: "archive_push_pending", plan, commit: archive.root ? quiet(archive.root, ["rev-parse", "HEAD"]) : "" });

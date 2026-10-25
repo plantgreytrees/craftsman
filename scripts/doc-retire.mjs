@@ -8,12 +8,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { grantValid, hasDocWriteGrant, isMain, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
-import { classifyArchive, copyAndCommit, productIdFor, resolveArchive } from "./lib/archive.mjs";
+import { classifyArchive, copyAndCommit, liveBlockers, productIdFor, resolveArchive } from "./lib/archive.mjs";
 import { parseNext } from "./lib/next-queue.mjs";
 import { descendantSlugs, docGoal, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
-const CLOSED = ["COMPLETE", "CANCELLED"];
 function git(context, args) {
   return execFileSync("git", ["-C", context.root, ...args], {
     encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6,
@@ -25,12 +24,15 @@ const tryGit = (context, args) => { try { return git(context, args); } catch { r
 export { grantValid };
 const hasGrant = (sid, context) => hasDocWriteGrant({ sid }, context);
 
+// The landing capability (ARCH-DOCS-17): a module-private object that is never exported as a value and that no stdin field, argument
+// or CLI flag can supply. land-feature's automatic archive obtains it through landingCapability() and passes it as retire's third
+// argument; only a call carrying it skips the doc-write grant and is logged `auto`. It adds no file, nonce or environment key, and
+// ARCH-SAFETY-05 is unchanged: every other caller, `auto: true` on stdin included, still needs the grant.
+const LANDING = Object.freeze({ landing: true });
+export function landingCapability() { return LANDING; }
+
 // Default git runner for the referrer scan: throws on any non-zero status.
-function defaultGit(args, context) {
-  return execFileSync("git", ["-C", context.root, ...args], {
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6,
-  });
-}
+const defaultGit = (args, context) => git(context, args);
 
 // Union of HEAD, the index and the working-tree copies of tracked files.
 // Untracked files are NOT scanned. Status 1 with empty output means no hits;
@@ -97,7 +99,7 @@ function refuse(reason, referrers = []) {
   return { refused: true, reason, referrers };
 }
 
-export function retire(input, context = projectContext(".")) {
+export function retire(input, context = projectContext("."), capability = undefined) {
   const plan = input?.plan;
   if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) {
     return refuse("retire needs a relative plan path");
@@ -105,9 +107,11 @@ export function retire(input, context = projectContext(".")) {
   if (fs.realpathSync(trackerRoot(context)) !== fs.realpathSync(context.root)) {
     return refuse("retire refused: run doc-retire from the main checkout");
   }
-  // The grant is always required. CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which
-  // any child process can set, so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
-  if (!hasGrant(input.sid, context)) {
+  // The grant is required unless the call carries the in-process landing capability (ARCH-DOCS-17); `input.auto` alone never skips it.
+  // CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which any child process can set,
+  // so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
+  const landing = capability === LANDING;
+  if (!landing && !hasGrant(input.sid, context)) {
     return refuse(safetyEnabled()
       ? "retire refused: no doc-write grant (run doc-write.mjs first)"
       : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
@@ -116,42 +120,25 @@ export function retire(input, context = projectContext(".")) {
   const slug = path.posix.basename(plan, ".md");
   const rowsOf = (p) => currentState(context).filter((row) => row.plan === p);
 
-  // Open rows of the plan itself are archive's refusal; open siblings keep the plan.
+  // Open siblings and live descendants keep the plan: the one check autoArchiveEligible shares (liveBlockers, ARCH-DOCS-09). A parent
+  // whose descendant plans still have an open row (or no row to prove them closed) is live; our own closed siblings and closed
+  // descendants retire with it.
   const candidates = [`scrutinise-${slug}.md`, `investigate-${slug}.md`].map((n) => path.posix.join(dir, n))
     .filter((p) => tryGit(context, ["ls-files", "--error-unmatch", "--", p]) !== null);
-  const siblings = [];
-  const openSiblings = [];
-  for (const sibling of candidates) {
-    const open = rowsOf(sibling).filter((row) => !CLOSED.includes(row.status));
-    if (open.length) openSiblings.push(`${sibling} (${open.map((r) => `${r.unit}=${r.status}`).join(", ")})`);
-    else siblings.push(sibling);
-  }
-  if (openSiblings.length) return refuse(`retire refused: open sibling plans keep ${plan}: ${openSiblings.join("; ")}`);
-
-  // A parent whose descendant plans still have an open row (or no row to prove them closed) is live
-  // (ARCH-DOCS-09); our own closed siblings and closed descendants retire with it.
-  const hierarchy = new Set();
-  const descendants = [];
+  let blockers;
   try {
-    const index = loadIndex(context.root);
-    const own = new Set(siblings.map((p) => path.posix.basename(p, ".md")));
-    const isParent = (n) => n && (n.level === "epic" || n.level === "story");
-    if (isParent(index.get(slug))) hierarchy.add(plan);
-    const found = index.get(slug) ? descendantSlugs(slug, { index }).filter((s) => !own.has(s)) : [];
-    const live = [];
-    for (const child of found) {
-      const node = index.get(child);
-      const childPlan = node.path;
-      const rows = rowsOf(childPlan);
-      const open = rows.filter((row) => !CLOSED.includes(row.status));
-      if (open.length || (!rows.length && !isParent(node) && !node.derived)) { live.push(child); continue; }
-      if (!rows.length) hierarchy.add(childPlan);
-      descendants.push({ slug: child, plan: childPlan, goal: rows.find((row) => row.goal)?.goal || planDocGoal(context, childPlan) || child });
-    }
-    if (live.length) return refuse(`retire refused: ${plan} has live descendants: ${live.join(", ")}`);
+    blockers = liveBlockers({ plan, rowsOf, trackedSiblings: candidates, loadIndex: () => loadIndex(context.root) });
   } catch (error) {
     return refuse(`retire refused: cannot read the plan hierarchy: ${error.message}`);
   }
+  if (blockers.reason) return refuse(`retire refused: ${blockers.reason}`);
+  const { siblings } = blockers;
+  const hierarchy = new Set();
+  if (blockers.isParent) hierarchy.add(plan);
+  const descendants = blockers.descendants.map(({ slug: child, node, rows }) => {
+    if (!rows.length) hierarchy.add(node.path);
+    return { slug: child, plan: node.path, goal: rows.find((row) => row.goal)?.goal || planDocGoal(context, node.path) || child };
+  });
 
   // Every sibling takes its own goal (rows, else doc); read before the docs leave the tree.
   const siblingGoal = new Map(siblings.map((p) => [p, rowsOf(p).find((row) => row.goal)?.goal || planDocGoal(context, p) || path.posix.basename(p, ".md")]));
@@ -349,7 +336,7 @@ export function retire(input, context = projectContext(".")) {
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
   for (const file of new Set(rewrites.map((r) => r.file))) logEvent({ ev: "archive_rewrite", file, plan }, context);
-  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha, ...(input.auto === true ? { auto: true } : {}) }, context);
+  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha, ...(landing ? { auto: true } : {}) }, context);
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 

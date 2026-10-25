@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { projectContext } from "./lib/core.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { autoArchiveEligible } from "./lib/archive.mjs";
+import { landingCapability } from "./doc-retire.mjs";
 import { buildModel, renderHtml, writeDashboard, esc, SECTIONS, MERMAID_SRC, MERMAID_SRI } from "./lib/dashboard.mjs";
 
 const SECRET_BODY = "SECRET-BODY-TEXT-NEVER-RENDERED";
@@ -225,7 +226,7 @@ test("archive: the dashboard label equals the autoArchiveEligible verdict for th
       const m = buildModel(context);
       assert.equal(m.archive.candidates.length, 3);
       for (const c of m.archive.candidates) {
-        const verdict = autoArchiveEligible(context, c.plan, { currentState: () => context.rows });
+        const verdict = autoArchiveEligible(context, c.plan, { capability: landingCapability(), currentState: () => context.rows });
         assert.equal(c.class === "auto", verdict.eligible, `${c.plan} (archive ${withArchive}): ${c.class} vs ${verdict.reason}`);
       }
       if (withArchive) assert.ok(m.archive.candidates.some((c) => c.class === "auto"), "at least one plan is auto");
