@@ -2119,3 +2119,22 @@ test("pre-guard: a dangling symlink cannot be written through, and ln refuses a 
     for (const command of ["ln -s src/a.txt src/b", "ln -s /tmp/craftsman-nowhere out.link", "ln -s a.txt b.txt"]) assert.equal(bash(command), 0, `allowed: ${command}`);
   } finally { fs.rmSync(p.dir, { recursive: true, force: true }); fs.rmSync(p.home, { recursive: true, force: true }); }
 });
+
+// The approval record gateFeature and runLanded trust is written only by approval.mjs / repo-exec.mjs (ARCH-APPROVAL-04, ARCH-SAFETY-05).
+test("pre-guard: a Write, Edit or shell redirect onto .craftsman/approvals/x.json is denied; the owning scripts are not", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-approvals-"));
+  try {
+    const file = path.join(dir, ".craftsman", "approvals", "x.json");
+    for (const [tool_name, tool_input] of [["Write", { file_path: file, content: "{}" }], ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+      ["Bash", { command: "echo '{}' > .craftsman/approvals/x.json" }], ["Bash", { command: "echo '{}' | tee .craftsman/approvals/x.json" }]]) {
+      const r = run(GUARD, dir, { session_id: "appr", tool_name, tool_input });
+      assert.equal(r.status, 2, `${tool_name} ${JSON.stringify(tool_input)}: ${r.stderr}`);
+    }
+    for (const command of ["node scripts/approval.mjs", "node scripts/repo-exec.mjs"]) {
+      const r = run(GUARD, dir, { session_id: "appr", tool_name: "Bash", tool_input: { command } });
+      assert.notEqual(r.status, 2, `${command}: ${r.stderr}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

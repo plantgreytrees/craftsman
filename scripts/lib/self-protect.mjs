@@ -18,6 +18,8 @@ export const SELF_NEVER = Object.freeze([
   ".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/commands.json", ".craftsman/sessions/**/goal-tokens.json", ".craftsman/sessions/**/nonce-*",
   // The scope manifests: scope.mjs (a script, never a tool call) is their only writer, so a forged one cannot widen a unit.
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*",
+  // The approval record gateFeature and runLanded trust: approval.mjs and repo-exec.mjs write it from their own process, so a forged one would pass the gate.
+  ".craftsman/approvals/**",
   // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
   "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
   // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git
