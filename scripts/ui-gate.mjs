@@ -19,7 +19,7 @@ const REUSE_TIMEOUT_MS = 60_000;
 const A11Y_STEP = "dispatch ui-ux-reviewer with the diff";
 const REUSE_STEP = "report reuse.json findings (advisory)";
 const criticStep = (c) =>
-  `dispatch artist:design-critic once with only <${c.report} screenshots, ${c.report}, ${c.design}, ${c.rubric}>; ` +
+  `dispatch artist:design-critic once with only <${path.dirname(c.report)}/ screenshots, ${c.report}, ${c.design}, ${c.rubric}>; ` +
   "if blocked (not in execution.builtinAgents) apply its brief yourself, labelled NOT ISOLATED; never retry";
 
 function fallback(reason) {
