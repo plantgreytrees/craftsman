@@ -159,14 +159,19 @@ async function codeMtime(worktree, mergeBase) {
     git(worktree, ["ls-files", "-z", "--others", "--exclude-standard"]),
   ]);
   const paths = new Set();
-  for (const rel of lists.join("\0").split(/[\0\n]/)) {
+  for (const rel of lists.join("\0").split("\0")) {
     if (!rel || rel.startsWith(".artist/")) continue;
     paths.add(path.join(worktree, rel));
     paths.add(path.dirname(path.join(worktree, rel)));
   }
   let newest = 0;
-  for (const p of paths) {
-    try { newest = Math.max(newest, fs.lstatSync(p).mtimeMs); } catch { /* deleted: its dir counts */ }
+  for (let p of paths) {
+    // A deleted path (or dir): count the nearest directory that still exists.
+    for (;;) {
+      try { newest = Math.max(newest, fs.lstatSync(p).mtimeMs); break; } catch { /* gone */ }
+      if (p === worktree || !inside(worktree, p)) break;
+      p = path.dirname(p);
+    }
   }
   return newest / 1000;
 }
