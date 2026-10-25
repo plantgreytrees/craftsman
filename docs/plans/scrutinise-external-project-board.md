@@ -103,7 +103,7 @@ units:
     security: high
     scope:
       read: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/repo-exec.mjs, scripts/doc-retire.test.mjs, scripts/archive.test.mjs, scripts/auto-archive.test.mjs, scripts/views-wiring.test.mjs]
-      docs: [docs/architecture/docs.rules.md, docs/architecture/landing.rules.md, docs/architecture/safety.rules.md]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/landing.rules.md, docs/architecture/safety.rules.md, docs/architecture/archive.rules.md]
       write: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/repo-exec.mjs, scripts/doc-retire.test.mjs, scripts/archive.test.mjs, scripts/views-wiring.test.mjs]
     arch: [ARCH-DOCS-18, ARCH-LAND-33, ARCH-ARCHIVE-03, ARCH-SAFETY-05]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
