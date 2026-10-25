@@ -191,11 +191,19 @@ function report(wt, ts, body) {
 }
 // Between the 2000-01-01 merge-base and the HEAD commit (now): written before the unit commit.
 const past = (year) => new Date(`${year}-01-01T00:00:00Z`);
+// Date the unit's changed and untracked files (b.txt, DESIGN.md) before any report.
+const ageCode = (f, when = past(2010)) => {
+  for (const rel of ["b.txt", "docs/design/DESIGN.md"]) {
+    const p = path.join(f.wt, rel);
+    if (fs.existsSync(p)) fs.utimesSync(p, when, when);
+  }
+};
 
 test("ui-gate: an untracked report.json yields critic and a11y false; newest wins", () => {
   withFixture((f) => {
     const old = report(f.wt, "20260101");
     const fresh = report(f.wt, "20260202");
+    ageCode(f);
     fs.utimesSync(old, past(2020), past(2020));
     fs.utimesSync(fresh, past(2021), past(2021));
     const out = f.run();
@@ -294,14 +302,35 @@ test("ui-gate: unparseable report, no screenshots key or no surviving path falls
 
 test("ui-gate: a report written before the unit commit still reaches the critic", () => {
   withFixture((f) => {
-    const rep = report(f.wt, "r1");
     fs.writeFileSync(path.join(f.wt, "c.txt"), "c\n");
+    fs.utimesSync(path.join(f.wt, "c.txt"), past(2010), past(2010));
+    const rep = report(f.wt, "r1");
     sh(f.wt, "add", "c.txt");
     const later = new Date(Date.now() + 120_000).toISOString();
     shEnv(f.wt, { GIT_AUTHOR_DATE: later, GIT_COMMITTER_DATE: later }, "commit", "-qm", "unit commit after verify");
     const out = f.run();
     assert.equal(out.critic?.report, rep, out.reason);
     assert.equal(out.a11y, false);
+  });
+});
+
+test("ui-gate: a file edited after the verify report drops the critic and keeps the a11y floor", () => {
+  withFixture((f) => {
+    ageCode(f);
+    const rep = report(f.wt, "r1");
+    fs.utimesSync(rep, past(2021), past(2021));
+    assert.equal(f.run().critic?.report, rep, "control: report newer than the code");
+    fs.appendFileSync(path.join(f.wt, "b.txt"), "fix round\n");
+    sh(f.wt, "commit", "-qam", "fix round without a new verify");
+    let out = f.run();
+    assert.equal(out.critic, undefined, "tracked edit after verify");
+    assert.equal(out.a11y, true);
+    ageCode(f);
+    assert.equal(f.run().critic?.report, rep, "control after re-ageing");
+    fs.writeFileSync(path.join(f.wt, "Button.tsx"), "x\n");
+    out = f.run();
+    assert.equal(out.critic, undefined, "untracked file after verify");
+    assert.equal(out.a11y, true);
   });
 });
 
@@ -328,6 +357,36 @@ test("ui-gate: reuse-check gets --justifications only when the report dir has on
     fs.writeFileSync(just, "[]");
     assert.equal(f.run().route, "artist");
     assert.deepEqual(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4), ["--base", mb, "--justifications", just]);
+  });
+});
+
+test("ui-gate: invalid, escaping or non-file justifications.json is never passed", () => {
+  withFixture((f) => {
+    const argvFile = path.join(f.root, "argv.json");
+    f.stub(`import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2))); process.exit(0);\n`);
+    const mb = sh(f.wt, "merge-base", "main", "HEAD").trim();
+    const rep = report(f.wt, "r1");
+    const just = path.join(path.dirname(rep), "justifications.json");
+    const argvTail = () => JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4);
+    fs.writeFileSync(just, "{bad");
+    let out = f.run();
+    assert.equal(out.route, "artist");
+    assert.match(out.reason, /justifications\.json ignored: invalid JSON/);
+    assert.equal(out.critic?.report, rep);
+    assert.deepEqual(argvTail(), ["--base", mb]);
+    fs.rmSync(just);
+    const outside = path.join(f.root, "outside.json");
+    fs.writeFileSync(outside, "[]");
+    fs.symlinkSync(outside, just);
+    out = f.run();
+    assert.equal(out.route, "artist");
+    assert.deepEqual(argvTail(), ["--base", mb], "symlink escaping the report dir");
+    fs.rmSync(just);
+    fs.mkdirSync(just);
+    out = f.run();
+    assert.equal(out.route, "artist");
+    assert.deepEqual(argvTail(), ["--base", mb], "directory");
+    assert.doesNotMatch(out.reason, /ignored/);
   });
 });
 
