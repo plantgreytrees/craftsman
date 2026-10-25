@@ -154,3 +154,8 @@ test("self-protect: scope.mjs and pre-guard.mjs import the list; no second copy 
   }
   assert.doesNotMatch(read("../scope.mjs"), /"hooks\/hooks\.json",\s*"craftsman\.config\.json"/);
 });
+
+test("self-protect: SELF_NEVER holds the approval record directory", () => {
+  assert.ok(SELF_NEVER.includes(".craftsman/approvals/**"));
+  assert.ok(SELF_NEVER.some((p) => globToRe(p).test(".craftsman/approvals/x.json")));
+});
