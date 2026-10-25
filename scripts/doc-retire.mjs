@@ -24,7 +24,7 @@ const tryGit = (context, args) => { try { return git(context, args); } catch { r
 export { grantValid };
 const hasGrant = (sid, context) => hasDocWriteGrant({ sid }, context);
 
-// The landing capability (ARCH-DOCS-17): a module-private object that is never exported as a value and that no stdin field, argument
+// The landing capability (ARCH-DOCS-18), seam retire(input, context, capability): a module-private object that is never exported as a value and that no stdin field, argument
 // or CLI flag can supply. land-feature's automatic archive obtains it through landingCapability() and passes it as retire's third
 // argument; only a call carrying it skips the doc-write grant and is logged `auto`. It adds no file, nonce or environment key, and
 // ARCH-SAFETY-05 is unchanged: every other caller, `auto: true` on stdin included, still needs the grant.
@@ -107,7 +107,7 @@ export function retire(input, context = projectContext("."), capability = undefi
   if (fs.realpathSync(trackerRoot(context)) !== fs.realpathSync(context.root)) {
     return refuse("retire refused: run doc-retire from the main checkout");
   }
-  // The grant is required unless the call carries the in-process landing capability (ARCH-DOCS-17); `input.auto` alone never skips it.
+  // The grant is required unless the call carries the in-process landing capability (ARCH-DOCS-18); `input.auto` alone never skips it.
   // CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which any child process can set,
   // so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
   const landing = capability === LANDING;
@@ -116,6 +116,10 @@ export function retire(input, context = projectContext("."), capability = undefi
       ? "retire refused: no doc-write grant (run doc-write.mjs first)"
       : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
   }
+  // ARCH-ARCHIVE-03: an automatic archive has nowhere to copy to without an archive project; refuse before anything is touched.
+  let archiveRoot = null;
+  if (landing) { try { archiveRoot = resolveArchive(context).root; } catch { /* unresolved */ } }
+  if (landing && !archiveRoot) return refuse("retire refused: automatic archive needs an archive project");
   const dir = path.posix.dirname(plan);
   const slug = path.posix.basename(plan, ".md");
   const rowsOf = (p) => currentState(context).filter((row) => row.plan === p);

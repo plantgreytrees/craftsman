@@ -16,7 +16,7 @@ import { currentState } from "../tracker.mjs";
 import { buildIndex, descendantSlugs, loadIndex, removeChild, slugOf, TRACKER_FILE } from "./plan-index.mjs";
 import { mainCheckoutRoot } from "./core.mjs";
 
-// ARCH-VIEWS-15 / ARCH-DOCS-14: the one archive verdict for a plan doc, used by the dashboard, autoArchiveEligible and retire.
+// ARCH-VIEWS-15 / ARCH-DOCS-18: the one archive verdict for a plan doc, used by the dashboard, autoArchiveEligible and retire.
 // class: blocked (a rule/test/top-level doc refers to it, or the scan failed; names the file), not-archivable (no archive
 // project resolves and nothing blocks), rewrite (only prose referrers), auto (no referrer at all). blocking/rewritable name the files; hits is their sorted union.
 // Exempt, as retire exempts them: the plan, the removing set, its scrutinise-/investigate- siblings, TRACKER*.md, NEXT.md,
@@ -132,7 +132,7 @@ export function copyAndCommit({ archive, productId, kind, slug, files, sourceRoo
   }
 }
 
-// ARCH-DOCS-09 / ARCH-DOCS-17: the one live-blocker check, shared by autoArchiveEligible and retire so they cannot disagree. Open
+// ARCH-DOCS-09 / ARCH-DOCS-18: the one live-blocker check, shared by autoArchiveEligible and retire so they cannot disagree. Open
 // scrutinise-/investigate- siblings and live descendant plans keep the plan. Read-only.
 // {plan, rowsOf(plan) -> rows, trackedSiblings: tracked sibling paths, loadIndex() -> plan index (may throw; read only when no sibling is open)}.
 // Returns {siblings (closed, retire with the plan), openSiblings[], live[] (slugs), descendants (closed: {slug, node, rows}), isParent,
@@ -163,17 +163,18 @@ export function liveBlockers({ plan, rowsOf, trackedSiblings, loadIndex: readInd
   return out;
 }
 
-// ARCH-DOCS-14 / ARCH-LAND-30: may land-feature archive this plan on its own? Read-only; returns {eligible, reason?}, never throws.
+// ARCH-DOCS-18 / ARCH-LAND-33: may land-feature archive this plan on its own? Read-only; returns {eligible, reason?}, never throws.
 // Every condition must hold: an archive project resolves, every tracker row of the plan is COMPLETE or CANCELLED, no
 // scrutinise-/investigate- sibling and no descendant plan is still open (as retire refuses), the referrer scan succeeds and
 // finds no hit at all (the plan, its ledger/rollup and its own siblings excepted), and the doc is tracked and clean.
 // seams.sha: the landed merge; tracked-ness, siblings, hierarchy and the HEAD referrer scan are read from that commit, so a doc
 // that exists only in the merge is judged as retire will see it after the fast-forward.
-// seams: {resolveArchive, currentState, findReferrers, loadIndex(context, sha), git(args, context), sha}.
+// Seam: autoArchiveEligible(context, plan, {sha, capability}); capability must be landingCapability() or the plan is refused.
+// seams: {resolveArchive, currentState, findReferrers, loadIndex(context, sha), git(args, context), sha, capability}.
 export function autoArchiveEligible(context, plan, seams = {}) {
   const no = (reason) => ({ eligible: false, reason });
   try {
-    // ARCH-LAND-32: without the landing capability retire would refuse for lack of the grant, so refuse here, before anything else
+    // ARCH-LAND-33: without the landing capability retire would refuse for lack of the grant, so refuse here, before anything else
     // (and so before holdsLanding can move the main checkout).
     if (seams.capability === undefined || seams.capability !== landingCapability()) return no("no landing capability");
     if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) return no("invalid plan path");
@@ -233,6 +234,7 @@ function indexAt(context, sha, git) {
       const header = bytes.subarray(at, eol).toString("utf8").split(" ");
       if (header[1] !== "blob") throw new Error(`cannot read ${f} at ${sha}`);
       const size = Number(header[2]);
+      if (!Number.isSafeInteger(size) || size < 0 || eol + 1 + size > bytes.length) throw new Error(`cat-file --batch gave a bad size for ${f} at ${sha}`);
       texts.set(f, bytes.subarray(eol + 1, eol + 1 + size).toString("utf8"));
       at = eol + 1 + size + 1;
     }
@@ -253,10 +255,10 @@ function holdsLanding(main, base, sha) {
   try { sh(main, ["merge", "--ff-only", "-q", sha]); return true; } catch { return false; }
 }
 
-// ARCH-LAND-30 / ARCH-DOCS-14: after land-feature has promoted and pushed, archive each closed, unreferenced plan. The archive repo is
+// ARCH-LAND-33 / ARCH-DOCS-18: after land-feature has promoted and pushed, archive each closed, unreferenced plan. The archive repo is
 // committed locally and archive_push_pending is logged; nothing is ever pushed (ARCH-ARCHIVE-05). Nothing here can throw, park or
 // change the landing result (ARCH-LAND-06 is for real landing failures): refusals and exceptions are logged and swallowed.
-// deps seams: autoArchiveEligible(context, plan), retire(input, context).
+// deps seams: autoArchiveEligible(context, plan, {sha, capability}), retire(input, context, capability).
 export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
   const note = (ev) => { try { logEvent(ev, context); } catch { /* logging never changes a landing */ } };
   try {
@@ -264,12 +266,12 @@ export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
     const here = { ...context, root: main };
     const eligible = deps.autoArchiveEligible || autoArchiveEligible;
     const retire = deps.retire || docRetire;
-    const capability = landingCapability(); // ARCH-DOCS-17: the only way retire skips the grant; never read from input
+    const capability = landingCapability(); // ARCH-DOCS-18: the only way retire skips the grant; never read from input
     for (const plan of [...new Set(rows.map((row) => row.plan))]) {
       try {
         const verdict = eligible(here, plan, { sha, capability });
         if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
-        // Only a retire that will actually run may move the main checkout (ARCH-LAND-30).
+        // Only a retire that will actually run may move the main checkout (ARCH-LAND-33).
         if (!holdsLanding(main, info.base_branch, sha)) {
           note({ ev: "doc_retire_skipped", plan, reason: `main checkout is not on ${info.base_branch} holding the landed merge` });
           continue;

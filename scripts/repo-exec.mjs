@@ -662,7 +662,7 @@ function landFeature(context, input, info, deps = {}) {
   }
   logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: true, sha: result.merge_sha }, context);
   afterLand({ gate, sha: result.merge_sha, rows, context, retire: deps.retireCheck });
-  autoArchive(context, input, info, { rows, sha: result.merge_sha, deps }); // ARCH-LAND-30: never changes the result
+  autoArchive(context, input, info, { rows, sha: result.merge_sha, deps }); // ARCH-LAND-33: never changes the result
   return { ...result, merged: true, merged_locally: true, pushed: true, promoted, promote_errors, cleaned, remote_branch_deleted: remoteDeleted };
 }
 
