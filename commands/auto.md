@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill
 
 Target: `$ARGUMENTS`; for `--level`/`--feature` read `commands/_features.md` § levels and flags. Questions first and last; the middle is unattended (ARCH-AUTO-01).
 
-**Git authority.** Invoking `/craftsman:auto` is standing approval to commit, branch, merge base in, push, land and clean up this run's own branches and worktrees in every registered project; base, PR and external posts wait for approval (ARCH-LAND-22). **Limits:** never `--force`/`-f`/`+refspec` on push, `reset --hard` or `worktree remove --force`; `--force-with-lease` only to this run's own branch (ARCH-LAND-23). `pre-guard.mjs` blocks them and any command it cannot read in time. A conflict, rejected push or failed auto-merge PARKs the unit (ARCH-LAND-06).
+**Git authority.** Invoking `/craftsman:auto` is standing approval to commit, branch, merge base in, push, land and clean up this run's own branches and worktrees in every registered project; base, PR and external posts wait for approval (ARCH-LAND-28). **Limits:** never `--force`/`-f`/`+refspec` on push, `reset --hard` or `worktree remove --force`; no history rewrite (filter-repo, rebasing pushed work); `--force-with-lease` only to this run's own branch (ARCH-LAND-31). `pre-guard.mjs` blocks what it can read. A conflict, rejected push or failed auto-merge PARKs the unit (ARCH-LAND-06).
 
 ## Phase A — Ask
 

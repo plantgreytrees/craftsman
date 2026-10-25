@@ -329,6 +329,18 @@ test("7.1 budgets: growth under the default passes; over the default only shrink
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("7.2 budgets: a project-config cap ratchets against the merge-base craftsman.project.json", () => {
+  const git = (dir, ...a) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, encoding: "utf8" });
+  const dir = project({ "craftsman.project.json": JSON.stringify({ docs: { budgets: { openPlans: 1 } } }), "docs/plans/a.md": "x" });
+  try {
+    git(dir, "add", "-A"); git(dir, "commit", "-qm", "base"); git(dir, "branch", "-M", "main");
+    const base = git(dir, "rev-parse", "HEAD").stdout.trim();
+    fs.writeFileSync(path.join(dir, "docs/plans/b.md"), "y");
+    const cfg = { docs: { budgets: { planBytes: 61440, scrutiniseBytes: 30720, enforce: true, openPlans: 5 } } };
+    assert.match(lintBudgets(dir, cfg, base).errors[0], /openPlans: 2 plans exceeds its 1-plans budget/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("9.2 budgets: growth fails lint, shrink passes, new files default, enforce:false only reports", () => {
   const git = (dir, ...a) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, encoding: "utf8" });
   const dir = project({ "docs/plans/old.md": "x".repeat(1000), "docs/plans/scrutinise-old.md": "y".repeat(500) });
