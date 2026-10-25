@@ -16,10 +16,12 @@ const execFileAsync = promisify(execFile);
 const KEY = "artist@artist-marketplace";
 const DEFAULT_TIMEOUT_MS = 60_000;
 const PRUNE_AGE_MS = 7 * 24 * 3600_000;
+const MAX_TIMER_MS = 2147483647; // Node clamps larger timer delays to 1 ms
 
 function timeoutMs() {
   const raw = process.env.CRAFTSMAN_UI_GATE_TIMEOUT_MS;
-  return /^[1-9]\d*$/.test(raw ?? "") ? Number(raw) : DEFAULT_TIMEOUT_MS;
+  const n = /^[1-9]\d*$/.test(raw ?? "") ? Number(raw) : 0;
+  return n > 0 && n <= MAX_TIMER_MS ? n : DEFAULT_TIMEOUT_MS;
 }
 
 // Remove run-* dirs older than 7 days; lstat so symlinks are never followed.
@@ -116,16 +118,31 @@ function designOf(worktree) {
   return null;
 }
 
+// Mirrors Artist's formatOf (scripts/inventory.mjs).
 function isFormat2(file) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(file, "utf8"));
-  return !!m && /^format:\s*2\s*$/m.test(m[1]);
+  const f = m && /^format:\s*(\d+)\s*$/m.exec(m[1]);
+  return !!f && Number(f[1]) === 2;
+}
+
+// <report dir>/justifications.json, when it is a regular file inside that dir.
+function justificationsOf(report) {
+  const dir = path.dirname(report);
+  const file = path.join(dir, "justifications.json");
+  try {
+    return inside(realOr(dir), fs.realpathSync(file)) && fs.statSync(file).isFile() ? file : null;
+  } catch { return null; }
+}
+
+function isFile(p) {
+  try { return fs.statSync(p).isFile(); } catch { return false; }
 }
 
 async function git(cwd, args) {
   return (await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
 }
 
-async function newestReport(worktree, headSec) {
+async function newestReport(worktree, sinceSec) {
   const lists = await Promise.all([
     git(worktree, ["ls-files", "-z", "--others", "--exclude-standard"]),
     git(worktree, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard"]),
@@ -139,7 +156,8 @@ async function newestReport(worktree, headSec) {
     const abs = path.join(worktree, rel);
     let m;
     try { m = fs.statSync(abs).mtimeMs; } catch { continue; }
-    if (m / 1000 < headSec) continue; // stale: older than the HEAD commit
+    // stale: older than the merge-base. Not HEAD: the unit commits after verify.
+    if (m / 1000 < sinceSec) continue;
     if (!best || m > best.m || (m === best.m && abs > best.abs)) best = { abs, m };
   }
   return best?.abs ?? null;
@@ -176,6 +194,16 @@ async function route(worktreeArg, baseRef) {
     return fallback(`merge-base unresolvable for ${baseRef}: ${firstLine(e)}`);
   }
 
+  // The report comes first: reuse-check reads the justifications beside it.
+  let report = null;
+  let screenshots = [];
+  try {
+    const since = Number((await git(worktree, ["log", "-1", "--format=%ct", mergeBase])).trim()) || 0;
+    report = await newestReport(worktree, since);
+    if (report) screenshots = screenshotsOf(report);
+  } catch { /* no report -> a11y floor */ }
+  const justifications = report ? justificationsOf(report) : null;
+
   let reuse;
   try {
     const parent = path.join(mainRoot, ".craftsman", "ui-gate");
@@ -187,7 +215,9 @@ async function route(worktreeArg, baseRef) {
     let code = 0;
     let stderr = "";
     try {
-      const r = await execFileAsync(process.execPath, [script, "--project", worktree, "--run", runDir, "--base", mergeBase], { timeout: timeoutMs(), maxBuffer: 16 * 1024 * 1024 });
+      const argv = [script, "--project", worktree, "--run", runDir, "--base", mergeBase];
+      if (justifications) argv.push("--justifications", justifications);
+      const r = await execFileAsync(process.execPath, argv, { timeout: timeoutMs(), maxBuffer: 16 * 1024 * 1024 });
       stderr = r.stderr;
     } catch (e) {
       if (e.killed || typeof e.code !== "number") return fallback(`reuse-check failed: ${e.killed ? "timed out" : firstLine(e)}`);
@@ -204,15 +234,9 @@ async function route(worktreeArg, baseRef) {
   }
 
   const out = { route: "artist", reason: "artist installed, enabled, format-2 DESIGN.md", reuse, a11y: true, steps: [] };
-  let report = null;
-  let screenshots = [];
-  try {
-    const head = Number((await git(worktree, ["log", "-1", "--format=%ct"])).trim()) || 0;
-    report = await newestReport(worktree, head);
-    if (report) screenshots = screenshotsOf(report);
-  } catch { /* no report -> a11y floor */ }
-  if (report && screenshots.length > 0) {
-    out.critic = { report, screenshots, design, rubric: path.join(inst.installPath, "skills", "create", "references", "rubric.md") };
+  const rubric = path.join(inst.installPath, "skills", "create", "references", "rubric.md");
+  if (report && screenshots.length > 0 && isFile(rubric)) {
+    out.critic = { report, screenshots, design, rubric };
     out.a11y = false;
   }
   if (out.a11y) out.steps.push(A11Y_STEP);

@@ -10,12 +10,18 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "ui-gate.
 const KEY = "artist@artist-marketplace";
 
 function sh(cwd, ...args) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  return shEnv(cwd, {}, ...args);
+}
+
+function shEnv(cwd, env, ...args) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout;
 }
 
-// A temp HOME, a main checkout with a base commit, and a linked worktree on a branch.
+// A temp HOME, a main checkout with a base commit dated 2000-01-01 (so report
+// mtimes can sit between the merge-base and HEAD), and a linked worktree on a branch.
+const BASE_DATE = "2000-01-01T00:00:00Z";
 function fixture() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-uigate-")));
   const home = path.join(root, "home");
@@ -28,7 +34,7 @@ function fixture() {
   sh(main, "config", "user.name", "t");
   fs.writeFileSync(path.join(main, "a.txt"), "a\n");
   sh(main, "add", "-A");
-  sh(main, "commit", "-qm", "base");
+  shEnv(main, { GIT_AUTHOR_DATE: BASE_DATE, GIT_COMMITTER_DATE: BASE_DATE }, "commit", "-qm", "base");
   sh(main, "worktree", "add", "-q", "-b", "feat", wt);
   fs.writeFileSync(path.join(wt, "b.txt"), "b\n");
   sh(wt, "add", "-A");
@@ -36,6 +42,9 @@ function fixture() {
   const f = { root, home, main, wt };
   const install = path.join(home, ".claude", "plugins", "cache", "artist");
   fs.mkdirSync(path.join(install, "scripts"), { recursive: true });
+  f.rubric = path.join(install, "skills", "create", "references", "rubric.md");
+  fs.mkdirSync(path.dirname(f.rubric), { recursive: true });
+  fs.writeFileSync(f.rubric, "# rubric\n");
   f.install = install;
   f.stub = (body) => fs.writeFileSync(path.join(install, "scripts", "reuse-check.mjs"), body);
   f.stub(`process.exit(0);\n`);
@@ -93,6 +102,7 @@ const fallbackCases = [
   ["disabled at local over enabled at user", (f) => f.settings("local", false), /not enabled/],
   ["no DESIGN.md", (f) => fs.rmSync(path.join(f.wt, "docs"), { recursive: true }), /DESIGN\.md/],
   ["format 1 DESIGN.md", (f) => f.design("---\nformat: 1\n---\n"), /format 2/],
+  ["format 3 DESIGN.md", (f) => f.design("---\nformat: 3\n---\n"), /format 2/],
 ];
 for (const [name, mutate, re] of fallbackCases) {
   test(`ui-gate: ${name} -> fallback`, () => {
@@ -116,6 +126,13 @@ test("ui-gate: enabled at local over disabled at user routes to artist; project 
     f.installed({ [KEY]: [{ scope: "project", projectPath: path.join(f.root, "other"), installPath: f.install }] });
     assert.equal(f.run().route, "fallback");
     f.installed({ [KEY]: [{ scope: "project", projectPath: f.main, installPath: f.install }] });
+    assert.equal(f.run().route, "artist");
+  });
+});
+
+test("ui-gate: format detection mirrors Artist formatOf (format: 02 is 2)", () => {
+  withFixture((f) => {
+    f.design("---\nformat: 02\n---\n");
     assert.equal(f.run().route, "artist");
   });
 });
@@ -172,14 +189,15 @@ function report(wt, ts, body) {
   fs.writeFileSync(path.join(dir, "report.json"), body ?? JSON.stringify({ screenshots: { home: "home.png" } }));
   return path.join(dir, "report.json");
 }
-const future = (ms) => new Date(Date.now() + 3600_000 + ms);
+// Between the 2000-01-01 merge-base and the HEAD commit (now): written before the unit commit.
+const past = (year) => new Date(`${year}-01-01T00:00:00Z`);
 
 test("ui-gate: an untracked report.json yields critic and a11y false; newest wins", () => {
   withFixture((f) => {
     const old = report(f.wt, "20260101");
     const fresh = report(f.wt, "20260202");
-    fs.utimesSync(old, future(1000), future(1000));
-    fs.utimesSync(fresh, future(2000000), future(2000000));
+    fs.utimesSync(old, past(2020), past(2020));
+    fs.utimesSync(fresh, past(2021), past(2021));
     const out = f.run();
     assert.equal(out.route, "artist");
     assert.equal(out.critic.report, fresh);
@@ -262,16 +280,58 @@ test("ui-gate: critic.screenshots are absolute paths from report.json, named in 
 test("ui-gate: unparseable report, no screenshots key or no surviving path falls back to a11y", () => {
   withFixture((f) => {
     for (const body of ["not json", "{}", JSON.stringify({ screenshots: { a: "../x.png", b: "none.png" } })]) {
-      report(f.wt, "r1", body);
+      const rep = report(f.wt, "r1", body);
       const out = f.run();
       assert.equal(out.route, "artist");
       assert.equal(out.critic, undefined, body);
       assert.equal(out.a11y, true, body);
+      // Control: the same fresh report made valid does reach the critic.
+      fs.writeFileSync(rep, JSON.stringify({ screenshots: { home: "home.png" } }));
+      assert.equal(f.run().critic?.report, rep, `control for ${body}`);
     }
   });
 });
 
-test("ui-gate: a report older than the HEAD commit is ignored", () => {
+test("ui-gate: a report written before the unit commit still reaches the critic", () => {
+  withFixture((f) => {
+    const rep = report(f.wt, "r1");
+    fs.writeFileSync(path.join(f.wt, "c.txt"), "c\n");
+    sh(f.wt, "add", "c.txt");
+    const later = new Date(Date.now() + 120_000).toISOString();
+    shEnv(f.wt, { GIT_AUTHOR_DATE: later, GIT_COMMITTER_DATE: later }, "commit", "-qm", "unit commit after verify");
+    const out = f.run();
+    assert.equal(out.critic?.report, rep, out.reason);
+    assert.equal(out.a11y, false);
+  });
+});
+
+test("ui-gate: a missing rubric skips the critic and keeps the a11y floor", () => {
+  withFixture((f) => {
+    report(f.wt, "r1");
+    fs.rmSync(f.rubric);
+    const out = f.run();
+    assert.equal(out.route, "artist");
+    assert.equal(out.critic, undefined);
+    assert.equal(out.a11y, true);
+  });
+});
+
+test("ui-gate: reuse-check gets --justifications only when the report dir has one", () => {
+  withFixture((f) => {
+    const argvFile = path.join(f.root, "argv.json");
+    f.stub(`import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2))); process.exit(0);\n`);
+    const mb = sh(f.wt, "merge-base", "main", "HEAD").trim();
+    const rep = report(f.wt, "r1");
+    f.run();
+    assert.deepEqual(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4), ["--base", mb]);
+    const just = path.join(path.dirname(rep), "justifications.json");
+    fs.writeFileSync(just, "[]");
+    assert.equal(f.run().route, "artist");
+    assert.deepEqual(JSON.parse(fs.readFileSync(argvFile, "utf8")).slice(4), ["--base", mb, "--justifications", just]);
+  });
+});
+
+test("ui-gate: a report older than the merge-base is ignored", () => {
   withFixture((f) => {
     const rep = report(f.wt, "r1");
     fs.utimesSync(rep, new Date(1000), new Date(1000));
@@ -307,6 +367,24 @@ test("ui-gate: CRAFTSMAN_UI_GATE_TIMEOUT_MS bounds reuse-check; odd exits fall b
     f.stub(`process.kill(process.pid, "SIGKILL"); setTimeout(() => {}, 4000);\n`);
     out = f.run();
     assert.equal(out.route, "fallback");
+  });
+});
+
+test("ui-gate: a timeout above the int32 timer limit uses the default", () => {
+  withFixture((f) => {
+    f.stub(`setTimeout(() => process.exit(0), 300);\n`);
+    const out = f.run(undefined, { CRAFTSMAN_UI_GATE_TIMEOUT_MS: "9999999999" });
+    assert.equal(out.route, "artist", out.reason);
+  });
+});
+
+test("ui-gate: reuse-check output over the 16 MiB buffer falls back", () => {
+  withFixture((f) => {
+    f.stub(`process.stdout.write("x".repeat(17 * 1024 * 1024), () => process.exit(0));\n`);
+    const out = f.run();
+    assert.equal(out.route, "fallback");
+    assert.match(out.reason, /reuse-check failed/);
+    assert.equal(out.a11y, true);
   });
 });
 
