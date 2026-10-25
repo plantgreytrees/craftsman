@@ -366,6 +366,47 @@ for (const [name, after] of [
   });
 }
 
+test("ui-gate: deleting a unit-only subdirectory after the verify report drops the critic", () => {
+  withFixture((f) => {
+    fs.mkdirSync(path.join(f.main, "src"));
+    fs.writeFileSync(path.join(f.main, "src", "keep.ts"), "k\n");
+    sh(f.main, "add", "src/keep.ts");
+    shEnv(f.main, { GIT_AUTHOR_DATE: BASE_DATE, GIT_COMMITTER_DATE: BASE_DATE }, "commit", "-qm", "base src");
+    sh(f.wt, "rebase", "-q", "main");
+    fs.mkdirSync(path.join(f.wt, "src", "ui"));
+    fs.writeFileSync(path.join(f.wt, "src", "ui", "Button.tsx"), "b\n");
+    sh(f.wt, "add", "src/ui/Button.tsx");
+    sh(f.wt, "commit", "-qm", "unit code");
+    const rep = report(f.wt, "r1");
+    ageCode(f);
+    fs.utimesSync(rep, past(2021), past(2021));
+    assert.equal(f.run().critic?.report, rep, "control before the delete");
+    sh(f.wt, "rm", "-rq", "src/ui");
+    sh(f.wt, "commit", "-qm", "delete src/ui");
+    const out = f.run();
+    assert.equal(out.critic, undefined);
+    assert.equal(out.a11y, true);
+  });
+});
+
+test("ui-gate: a newline in a file name does not hide an edit after the verify report", () => {
+  withFixture((f) => {
+    const odd = path.join(f.wt, "a\nb.tsx");
+    fs.writeFileSync(odd, "x\n");
+    sh(f.wt, "add", "-A");
+    sh(f.wt, "commit", "-qm", "unit code");
+    const rep = report(f.wt, "r1");
+    ageCode(f);
+    fs.utimesSync(rep, past(2021), past(2021));
+    assert.equal(f.run().critic?.report, rep, "control before the edit");
+    fs.appendFileSync(odd, "fix\n");
+    sh(f.wt, "commit", "-qam", "edit");
+    const out = f.run();
+    assert.equal(out.critic, undefined);
+    assert.equal(out.a11y, true);
+  });
+});
+
 test("ui-gate: a justifications.json that is not a JSON object is never passed", () => {
   withFixture((f) => {
     const argvFile = path.join(f.root, "argv.json");
