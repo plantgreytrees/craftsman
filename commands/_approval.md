@@ -5,7 +5,7 @@ user-invocable: false
 ---
 # Approval protocol (ARCH-APPROVAL-01..07)
 
-`A <json>` = `printf '%s' '<json>' | CLAUDE_PROJECT_DIR="<root>" node "${CLAUDE_PLUGIN_ROOT}/scripts/approval.mjs" <action>`. Run id = plan basename + "-" + feature. Root runs all of it.
+`A <json>` = `printf '%s' '<json>' | node "${CLAUDE_PLUGIN_ROOT}/scripts/approval.mjs" <action>` at root, `project` in <json>. Run id = plan basename + "-" + feature. Root runs all this.
 
 1. **When.** Phase B has finished, every unit is on its feature branch and `planning.featureBranches` is on. With it off, units merge straight to base and there is no verification point.
 2. **Prepare.** `A prepare` with plan, feature, base, head_sha (feature head commit), feature_heads, evidence, changes, risk, rollback. A secrets refusal stops the run; list file:line:rule only, never values.

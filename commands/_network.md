@@ -5,7 +5,7 @@ user-invocable: false
 ---
 # Network phase (ARCH-LAND-19)
 
-Unit runners are sandboxed and hold no credentials; the sandbox config is never loosened (no allowlisting `~/.config/gh`, no tokens passed in). So **root** runs every step that talks to the remote, outside the sandbox. `R <json>` = `printf '%s' '<json>' | CLAUDE_PROJECT_DIR="<root>" node "${CLAUDE_PLUGIN_ROOT}/scripts/repo-exec.mjs"`, run with the sandbox disabled for that call only (the user approves it). Nothing else needs it.
+Unit runners are sandboxed and hold no credentials; the sandbox config is never loosened (no allowlisting `~/.config/gh`, no tokens passed in). So **root** runs every step touching the remote, outside the sandbox. `R <json>` = `printf '%s' '<json>' | node "${CLAUDE_PLUGIN_ROOT}/scripts/repo-exec.mjs"` at root, `project` in <json>, run with the sandbox disabled for that call only (the user approves it). Nothing else needs it.
 
 ## Around a workflow run
 1. **Args.** `{"plan":"docs/plans/<slug>.md","session_id":"<id>"}` to `scripts/run-args.mjs` → `{runs:[{project, units, args}], warnings}`. Never pass a plan path as `args`. A plan across projects is several `runs` in plan-graph order; launch `Workflow({name:"craftsman:run", args: run.args})` for each, and stop at the first run with a unit that is not `MERGED`.
