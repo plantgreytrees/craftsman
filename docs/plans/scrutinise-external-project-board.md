@@ -107,6 +107,19 @@ units:
       write: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/repo-exec.mjs, scripts/doc-retire.test.mjs, scripts/archive.test.mjs, scripts/views-wiring.test.mjs]
     arch: [ARCH-DOCS-18, ARCH-LAND-33, ARCH-ARCHIVE-03, ARCH-SAFETY-05]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-round5-test-and-deps-seam
+    scope_id: fix-round5-test-and-deps-seam
+    project: .
+    depends_on: []
+    module: scripts/lib/archive.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/repo-exec.mjs, scripts/archive.test.mjs, scripts/auto-archive.test.mjs, scripts/doc-retire.test.mjs, scripts/views-wiring.test.mjs, scripts/dashboard.test.mjs]
+      docs: [docs/architecture/docs.rules.md, docs/architecture/landing.rules.md, docs/architecture/safety.rules.md, docs/architecture/archive.rules.md]
+      write: [scripts/doc-retire.mjs, scripts/lib/archive.mjs, scripts/archive.test.mjs, scripts/auto-archive.test.mjs, scripts/doc-retire.test.mjs, scripts/views-wiring.test.mjs, scripts/dashboard.test.mjs]
+    arch: [ARCH-DOCS-18, ARCH-LAND-33, ARCH-ARCHIVE-03, ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: scrutinise external-project-board
@@ -120,7 +133,8 @@ Two isolated `/scrutinise` rounds of `external-project-board`. Round 1 found the
 | 1 | six units | 4c828fb to 8432d18 | 10 Warnings, 2 unjustified ticks; fixed: dashboard queue and lanes (ARCH-PLAN-08 amends PLAN-05), NEXT.md retirement, sibling restore path, landing side effects, symlink-safe atomic export writes, one `classifyArchive`, SRI, lazy path helpers |
 | 2 | 1.1-3.5 | 600c063..2b7c678 | 4 Warnings (pointer double rewrite across docs, fast-forward before a refusable retire, `clearNotes` through a symlink, no real `auto` event test), reopened ticks for `fix-landing-side-effects` and `fix-suggestions`; fixes below |
 | 3 | 4.1-5.6 | 6858209, ab589d2 | clean of Critical; D1 and D2 applied: landing capability (ARCH-DOCS-17, ARCH-LAND-32), `liveBlockers`, end-to-end archive test |
-| 4 | 6.1-7.6 | (this round) | 1 Warning, 5 Suggestions, 4.1-5.6 all MET: `landingCapability()` is exported, contradicting the "does not export" wording; unvalidated `cat-file --batch` size; capability retire without an archive root; stale ids and a misnamed check; two missing `liveBlockers` cases |
+| 4 | 6.1-7.6 | a387eb7, 9490a81 | 1 Warning, 5 Suggestions: exported `landingCapability()` vs the "does not export" wording (rules now DOCS-18, LAND-33), `cat-file --batch` size check, no-archive refusal, stale ids, two `liveBlockers` cases |
+| 5 | 8.1-8.6 | (this round) | 2 Warnings, 5 Suggestions; 7.2 UNMET: the S1 test passes on the old code; `autoArchive` hands the live capability to injected `deps`; fixes in Step 8 |
 
 ## Tasks
 
@@ -185,8 +199,18 @@ Depends on: fix-capability-wording
 - [ ] 7.5 Add to the `liveBlockers` table in `scripts/archive.test.mjs` a `derived` descendant with no rows and a parent-level (epic/story) descendant with no rows, each asserted to land in `descendants`, not `live` → accept: both cases pass (S5)
 - [ ] 7.6 Run the full suite and `node scripts/arch-check.mjs lint` → accept: both pass
 
-## Round 4 (isolated review, 0 Critical, 1 Warning, 5 Suggestions)
-Range `6858209^1..6858209` and `ab589d2^1..ab589d2`; floor 1128 of 1128 and lint PASS; acceptance 4.1-5.6 all MET, nothing disputed. The Warning: `landingCapability()` is exported, so any importer can retire without a grant and get the `auto` label, which the rule's "does not export" wording denies; ARCH-LAND-32 and criterion 5.1 already say "one narrow function", so the wording is what changes (owner decision D1 stands). Suggestions S1-S5 are Steps 6 and 7. Residual risk, not driven: the no-capability test was judged against the old code by reading, not by running it; `gitIn` now pipes stdin (proven only by the suite); `cat-file --batch` for gitlinks and symlinks under `docs/plans/` is untested; the 60 s dead-pid window assumes no slower writer; the ARCH-ARCHIVE-03 cite (`doc-retire.mjs:187-196`) points at the rewrite loop; the dashboard `auto` label can differ from `autoArchiveEligible` when a plan has an open sibling (`dashboard.mjs:58`, older than this range).
+### Step 8 — fix-round5-test-and-deps-seam (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor
+Depends on: none
+- [ ] 8.1 In `scripts/archive.test.mjs` (~:292-307) make the S1 test tell old code from new: assert `/gave a bad size/`, use the valid name `docs/plans/q.md` for the past-buffer and negative-size answers, and keep the spaced-name `missing` case only with a specific assertion → accept: the test fails on `555a8da^1` and passes now (7.2 stays unticked until shown)
+- [ ] 8.2 In `autoArchive` (`scripts/lib/archive.mjs` ~:265-277) give caller-injected `deps.autoArchiveEligible` and `deps.retire` a non-capability marker and hand `LANDING` only to the built-in functions; update `auto-archive.test.mjs` (~:163) and add a test that a deps stub never receives an object `retire` accepts → accept: the probe that captured `s.capability` and passed it to the real `retire` is refused (ARCH-DOCS-18, ARCH-LAND-33; no rule text changes)
+- [ ] 8.3 In `retire` (`scripts/doc-retire.mjs` ~:119-122, :256) reuse the archive resolved at the landing guard for the copy, or refuse when `landing && !archive.root` there; add a test where the second resolve yields no root → accept: nothing is removed without a verified copy (ARCH-ARCHIVE-03)
+- [ ] 8.4 In `scripts/views-wiring.test.mjs` (~:92-102) add positive assertions that `doc-retire.mjs` exports `landingCapability` and `lib/archive.mjs` names it, and also scan `hooks/` and `workflows/` for `.js`/`.cjs`/`.mjs` → accept: a rename of the export turns it red
+- [ ] 8.5 In `indexAt` (`scripts/lib/archive.mjs` ~:234-237) require `header.length === 3` and a hex `header[0]`; retag the test titles that cite ARCH-DOCS-14/17 or ARCH-LAND-30/32 (`auto-archive.test.mjs`, `doc-retire.test.mjs`, `archive.test.mjs`, `dashboard.test.mjs`) to ARCH-DOCS-18 and ARCH-LAND-33 → accept: a malformed-header case passes; `git grep -n -e ARCH-DOCS-14 -e ARCH-DOCS-17 -e ARCH-LAND-30 -e ARCH-LAND-32 -- scripts` lists nothing
+- [ ] 8.6 Run the full suite and `node scripts/arch-check.mjs lint` → accept: both pass
+
+## Round 5 (isolated review, 0 Critical, 2 Warnings, 5 Suggestions)
+Ranges `f56a96b^1..f56a96b` and `555a8da^1..555a8da`; floor 1131 of 1131, lint PASS; 6.1, 6.2, 7.1, 7.3-7.6 MET, 7.2 UNMET. W1: the S1 test's spaced name is rejected by `buildIndex` and wrapped in the same "cannot read the plan hierarchy", so it passes on the old code. W2: `autoArchive` passes the live capability to injected `deps`, so it is obtainable without `landingCapability()`; production calls `landFeature` without `deps` (`repo-exec.mjs:838`), and the goal forbids editing a rule to fit, so the code changes. Suggestions S1-S4 are 8.3-8.5. Deferred to `/sync-docs --all` (rules text untouched here): the DOCS-18 cites (`doc-retire.mjs:102-122`, `archive.mjs:135-244`) and its `check:` naming `views-wiring.test.mjs`. Residual, not driven: the deps seam is unreachable in production by reading alone; the double `resolveArchive` window; `cat-file --batch` for gitlinks and symlinks.
 
 ## Round 3 (review clean of Critical; owner decisions applied)
 The third isolated review found 0 Critical and one Warning: `autoArchive` fast-forwards the main checkout before a retire that is certain to refuse for lack of the doc-write grant (`archive.mjs:227-233`), so every unit criterion is ticked but the auto path is inert until D1 is built. The owner answered D1 and D2 in `/auto` Phase C; the follow-up work is queued as two PENDING rows for the next `/craftsman:auto external-project-board` pass:
