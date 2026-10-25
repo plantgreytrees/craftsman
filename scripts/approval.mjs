@@ -160,7 +160,14 @@ export function check(input, { root = "." } = {}) {
   try { return withLock(root, input.run, () => checkLocked(input, { root })); } catch (e) { return refuse(e.message); }
 }
 
-function checkLocked({ run, row, writer_is_owner }, { root }) {
+// The terminal answer is a QUESTION.options label; it is stamped decided now (ARCH-APPROVAL-07).
+const fromFallback = (row) => {
+  const i = QUESTION.options.indexOf(row?.choice);
+  return i < 0 ? row : { ...row, choice: CHOICES[i], decided_at: new Date().toISOString() };
+};
+
+function checkLocked({ run, row: given, writer_is_owner, source }, { root }) {
+  const row = source === "fallback" ? fromFallback(given) : given;
   const rec = load(root, run);
   if (!rec) return refuse("no approval record");
   if (rec.status !== "requested") return refuse(`record status is ${rec.status}, not requested`);
