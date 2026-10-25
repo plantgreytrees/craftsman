@@ -138,6 +138,13 @@ function linked() {
   return { main, wt, clean: () => { fs.rmSync(main, { recursive: true, force: true }); fs.rmSync(path.dirname(wt), { recursive: true, force: true }); } };
 }
 
+// a refusal is status 2 AND the not-a-goal-file message, so it cannot be confused with the nonce or /instruction refusals
+function refused(r, why) {
+  assert.equal(r.status, 2, why);
+  assert.equal(typeof r.stderr, "string");
+  assert.match(r.stderr, /not a \*\.goal\.txt directly under/, why);
+}
+
 test("goal-token: in a linked worktree, a goal file saved in the worktree or in the main checkout mints; outside, symlinked and unrelated copies do not", () => {
   const { main, wt, clean } = linked();
   try {
@@ -161,17 +168,17 @@ test("goal-token: in a linked worktree, a goal file saved in the worktree or in 
     assert.equal(fs.existsSync(path.join(main, ".craftsman", "sessions", "gt-6", "goal-tokens.json")), false);
     // refused: outside the instructions directories, a symlink out of either, an unrelated copy
     fs.writeFileSync(path.join(main, "evil.goal.txt"), "x");
-    assert.equal(mint(wt, path.join(main, "evil.goal.txt"), "gt-6").status, 2);
+    refused(mint(wt, path.join(main, "evil.goal.txt"), "gt-6"));
     fs.writeFileSync(path.join(wt, "evil2.goal.txt"), "x");
-    assert.equal(mint(wt, path.join(wt, "evil2.goal.txt"), "gt-6").status, 2);
+    refused(mint(wt, path.join(wt, "evil2.goal.txt"), "gt-6"));
     fs.symlinkSync(path.join(main, "evil.goal.txt"), path.join(main, ".craftsman", "instructions", "link.goal.txt"));
-    assert.equal(mint(wt, path.join(main, ".craftsman", "instructions", "link.goal.txt"), "gt-6").status, 2);
+    refused(mint(wt, path.join(main, ".craftsman", "instructions", "link.goal.txt"), "gt-6"));
     fs.symlinkSync(path.join(wt, "evil2.goal.txt"), path.join(wt, ".craftsman", "instructions", "link2.goal.txt"));
-    assert.equal(mint(wt, path.join(wt, ".craftsman", "instructions", "link2.goal.txt"), "gt-6").status, 2);
+    refused(mint(wt, path.join(wt, ".craftsman", "instructions", "link2.goal.txt"), "gt-6"));
     const other = path.join(path.dirname(wt), "other");
     fs.mkdirSync(other);
     fs.writeFileSync(path.join(other, "x.goal.txt"), "/goal x\n");
-    assert.equal(mint(wt, path.join(other, "x.goal.txt"), "gt-6").status, 2, "an unrelated copy elsewhere");
-    assert.equal(mint(wt, "../other/x.goal.txt", "gt-6").status, 2);
+    refused(mint(wt, path.join(other, "x.goal.txt"), "gt-6"), "an unrelated copy elsewhere");
+    refused(mint(wt, "../other/x.goal.txt", "gt-6"));
   } finally { clean(); }
 });
