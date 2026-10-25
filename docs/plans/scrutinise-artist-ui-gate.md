@@ -3,8 +3,8 @@ slug: scrutinise-artist-ui-gate
 goal: The ui gate reaches Artist's critic only with a report that matches the code, honours valid Artist justifications, and names the gate script plainly
 level: feature
 priority: P1
-classification: in-scope # round 4 of an isolated /scrutinise of artist-ui-gate (round 1 c9efbfb, 5b0faf9; round 2 8ba334b; round 3 4b4d2f6)
-tracker_rows: [TRACKER#fix-ui-gate-script, TRACKER#fix-ui-gate-wiring, TRACKER#fix-ui-gate-round2, TRACKER#fix-ui-gate-round3, TRACKER#fix-ui-gate-round4]
+classification: in-scope # round 5 of an isolated /scrutinise of artist-ui-gate (round 1 c9efbfb, 5b0faf9; round 2 8ba334b; round 3 4b4d2f6; round 4 d2d81ec)
+tracker_rows: [TRACKER#fix-ui-gate-script, TRACKER#fix-ui-gate-wiring, TRACKER#fix-ui-gate-round2, TRACKER#fix-ui-gate-round3, TRACKER#fix-ui-gate-round4, TRACKER#fix-ui-gate-round5]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -14,7 +14,7 @@ coverage:
   data:          N/A(no persistence; run dirs are gitignored session state)
   config:        1.5, 3.5 (timeout override env var, clamped to int32)
   security:      1.2 (report screenshot names resolved inside the run dir only), 4.2 (justifications containment + JSON check)
-  tests:         1.1-1.6, 2.2, 3.1-3.7, 4.1-4.3, 5.1-5.2
+  tests:         1.1-1.6, 2.2, 3.1-3.7, 4.1-4.3, 5.1-5.2, 6.1-6.2
   observability: 1.1 (reason "worktree not found: <path>")
   interface:     2.1 (CLI order), 2.3 (lens name in shared docs), 3.2 (reuse-check --justifications), 3.6 (manifest example)
   docs:          2.3, 3.6, 4.4
@@ -85,12 +85,25 @@ units:
       write: [scripts/ui-gate.mjs, scripts/ui-gate.test.mjs]
     arch: [ARCH-GATES-04, ARCH-GATES-05, ARCH-GATES-07]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: fix-ui-gate-round5
+    scope_id: fix-ui-gate-round5
+    project: .
+    depends_on: [fix-ui-gate-round4]
+    module: scripts/ui-gate.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/ui-gate.mjs, scripts/ui-gate.test.mjs]
+      docs: [docs/architecture/gates.rules.md, docs/plans/scrutinise-artist-ui-gate.md]
+      write: [scripts/ui-gate.mjs, scripts/ui-gate.test.mjs]
+    arch: [ARCH-GATES-04, ARCH-GATES-05]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
-# Plan: scrutinise-artist-ui-gate — rolling summary + round 4
+# Plan: scrutinise-artist-ui-gate — rolling summary + round 5
 
 ## Rolling summary
-Round 1 (landed `c9efbfb`, `5b0faf9`): fixed the reversed `ui-gate.mjs` arguments in `_shared-execution.md:33` (Critical), with a wiring test; added the missing-worktree reason, exact screenshots, a stale-report filter, run-dir pruning, the timeout env var and project-tier tests; renamed the lens to `ui-ux-reviewer`. Round 2 (landed `8ba334b`): staleness measured from the merge-base so the critic is reachable; `--justifications` passed; format, rubric, timeout and test hardening. Round 3 (landed `4b4d2f6`): a report from before a fix-round edit still counted; the user superseded ARCH-GATES-03 with ARCH-GATES-07 (`e0b6e7e`), so justifications must also be valid JSON; containment tests; plain gate naming. Round 4 (this round): revert, rename and delete after verify escaped the freshness floor; a non-object justifications.json crashes Artist's reuse-check.
+Round 1 (landed `c9efbfb`, `5b0faf9`): fixed the reversed `ui-gate.mjs` arguments in `_shared-execution.md:33` (Critical), with a wiring test; added the missing-worktree reason, exact screenshots, a stale-report filter, run-dir pruning, the timeout env var and project-tier tests; renamed the lens to `ui-ux-reviewer`. Round 2 (landed `8ba334b`): staleness measured from the merge-base so the critic is reachable; `--justifications` passed; format, rubric, timeout and test hardening. Round 3 (landed `4b4d2f6`): a report from before a fix-round edit still counted; the user superseded ARCH-GATES-03 with ARCH-GATES-07 (`e0b6e7e`), so justifications must also be valid JSON; containment tests; plain gate naming. Round 4 (landed `d2d81ec`): revert, rename and delete after verify escaped the freshness floor; a non-object justifications.json crashes Artist's reuse-check. Round 5 (this round): a deleted subdirectory hides the change from the floor; newline file names split wrongly.
 
 ## Outcome
 The ui gate reaches Artist's critic only with a report that matches the code, honours valid Artist justifications, and names the gate script plainly.
@@ -144,8 +157,15 @@ Every task writes its failing test in `scripts/ui-gate.test.mjs` first and recor
 - [ ] 5.2 Justifications must be a plain JSON object (Artist `reuse-check.mjs:66-67` calls `Object.hasOwn` on it; ARCH-GATES-07, user choice "skip it and say so"): `null`, an array or a scalar → not passed, route stays `artist`, `reason` gains `; justifications.json ignored: not a JSON object` → accept: a `null` and an `[]` file each give no `--justifications` and that reason.
 - [ ] 5.3 Header comment (`ui-gate.mjs:2`) cites ARCH-GATES-01..07 → accept: `node --test scripts/*.test.mjs` green.
 
+### Step 6 — fix-ui-gate-round5 (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer · skills test-driven-development · guards arch-check
+Depends on: fix-ui-gate-round4
+Every task writes its failing test in `scripts/ui-gate.test.mjs` first and records the red run.
+- [ ] 6.1 Warning — a deleted directory hides the change (`scripts/ui-gate.mjs:164-169`, ARCH-GATES-04/05): for a path that no longer exists, climb `path.dirname` to the nearest existing directory inside the worktree and count its mtime → accept: base holds `src/keep.ts`; the unit commits `src/ui/Button.tsx`; after the report, `git rm -r src/ui` committed → no critic, `a11y: true`; a control before the delete yields `critic`.
+- [ ] 6.2 Split git `-z` output on `\0` only (`:162`; `git log -z` emits no newlines) → accept: a file named with a newline, edited and committed after the report, yields no critic; `node --test scripts/*.test.mjs` green.
+
 ## Sequencing
-Script fixes first (the critic step text changes shape), then the wiring line and its test, which reads the script's usage line. Round 2 runs after both; round 3 after round 2; round 4 after round 3.
+Script fixes first (the critic step text changes shape), then the wiring line and its test, which reads the script's usage line. Round 2 runs after both; round 3 after round 2; round 4 after round 3; round 5 after round 4.
 
 ## Verification background
 - Usage `<worktree> <base-ref>` — `scripts/ui-gate.mjs:6,176`; consumer passes `<merge-base> <worktree>` — `commands/_shared-execution.md:33`; reproduced: documented order → `{"route":"fallback","reason":"not a git worktree: spawn git ENOENT"}`, correct order → detection reached.
@@ -155,6 +175,9 @@ Script fixes first (the critic step text changes shape), then the wiring line an
 CONSUMERS:
 - `scripts/ui-gate.mjs` CLI → `commands/_shared-execution.md:33` (only consumer; `rg ui-gate.mjs commands agents workflows hooks`).
 - `ui-gate` lens name → `commands/_scrutinise-deep.md:20`, `commands/_shared-machinery.md:51`.
+
+## Findings (round 5, isolated scrutineer)
+Warning 1 (Correctness: `git rm -r` of a unit-only subdirectory leaves only missing paths, so the changed parent dir is never read) · Suggestion 3 (newline split; ARCH-GATES-07 text "holds a JSON object" and cite drift, both to /sync-docs; nested-delete test). Disputed: none. Residual risk: parent-dir mtimes widen false-stale (build output in a changed file's dir drops the critic, fail-safe); a justification value whose toString throws makes reuse-check exit 1 (falls back).
 
 ## Findings (round 4, isolated scrutineer)
 Warning 2 (Correctness: revert-to-base, rename and delete after verify escape the freshness floor; Test-coverage: none of the three tested) · Suggestion 3 (non-object justifications crash Artist; ARCH-GATES-07 cite drift and the ui-gate.mjs header, the cite going to /sync-docs; untracked build output after verify drops the critic — fail-safe, recorded as residual, no task). Disputed: none. Residual risk: mtime-preserving tools (cp -p, rsync -t, tar) and clock skew; edit-then-revert never committed; a worktree argument that is a subdirectory.
