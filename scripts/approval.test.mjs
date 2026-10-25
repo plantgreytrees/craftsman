@@ -202,6 +202,23 @@ test("prepare scans the feature head in a detached worktree, not the main checko
   assert.equal(git(s.root, "status", "--porcelain").replace(/.*\.craftsman.*\n?/g, ""), "");
 });
 
+test("a configured security.check cannot replace the built-in scan of the feature head", () => {
+  const s = setup();
+  fs.writeFileSync(path.join(s.root, "a.txt"), "ok\n");
+  fs.writeFileSync(path.join(s.root, "craftsman.config.json"), JSON.stringify({ security: { check: ["true"] } }));
+  git(s.root, "add", "."); git(s.root, "commit", "-qm", "base");
+  git(s.root, "checkout", "-qb", "feat");
+  fs.writeFileSync(path.join(s.root, "leak.txt"), `key = ${"AKIA"}${"ABCDEFGHIJKLMNOP"}\n`);
+  git(s.root, "add", "."); git(s.root, "commit", "-qm", "leak");
+  const head = git(s.root, "rev-parse", "HEAD");
+  git(s.root, "checkout", "-q", "main");
+  const out = prepare({ ...s.input, head_sha: head }, { root: s.root });
+  assert.equal(out.refused, true);
+  assert.equal(out.findings[0].file, "leak.txt");
+  assert.ok(out.findings.every((f) => Object.keys(f).length === 3));
+  assert.ok(!JSON.stringify(out).includes("ABCDEFGHIJKLMNOP"));
+});
+
 test("prepare refuses a secret-shaped risk string in the rendered page without echoing it", () => {
   const s = setup();
   const secret = `${"AKIA"}${"ZYXWVUTSRQPONMLK"}`;
