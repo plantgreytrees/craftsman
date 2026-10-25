@@ -57,3 +57,4 @@ ARCH-DOCS-12 is superseded by ARCH-DOCS-13: prose mentions of an archived plan a
 ## Amendments (2026-10-23, owner-approved)
 
 - **ARCH-DOCS-15** replaces 10: a plan or scrutinise doc may grow up to its default; one already over the default can only shrink; `claudeMdLines` and `openPlans` are optional; `enforce` defaults to true.
+- **ARCH-DOCS-16** replaces 15 (2026-10-25): budgets are read from `craftsman.config.json` or `craftsman.project.json`, and each cap ratchets against the merge-base value in either file. Before, a project-level `claudeMdLines`/`openPlans` never ratcheted.

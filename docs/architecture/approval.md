@@ -112,3 +112,4 @@ Outside the plugin (owner's workstation): hourly btrfs snapshots and restic befo
 
 - **ARCH-APPROVAL-08** replaces 01: the verification point exists only with `planning.featureBranches` on (default off). With it off, units land on base through `repo-exec merge` and `approval_unenforced` is logged. The default stays off because flipping it changes the branch workflow of every repo.
 - **ARCH-APPROVAL-09** replaces 02: env key names are derived from the diff; migrations, CI/hook, dependency and API items, and any diagram, come from the caller.
+- **ARCH-APPROVAL-10** replaces 09 (2026-10-25): the page shows what changed, env key names derived from the diff, evidence, risk and rollback. A diagram slot and caller-supplied attention items feeding the recommendation were claimed but never built; they are dropped from the rule (the code never had them).

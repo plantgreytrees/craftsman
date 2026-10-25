@@ -273,7 +273,9 @@ export function mergeBase(root) {
 export function lintBudgets(root, cfg, base = mergeBase(root)) {
   const b = cfg?.docs?.budgets || {};
   let prev = {};
-  try { prev = JSON.parse(gitOut(root, ["show", `${base}:craftsman.config.json`]))?.docs?.budgets || {}; } catch { /* no base config */ }
+  for (const file of ["craftsman.config.json", "craftsman.project.json"]) { // a project's own budgets ratchet too (loadConfig merges both)
+    try { prev = { ...prev, ...JSON.parse(gitOut(root, ["show", `${base}:${file}`]))?.docs?.budgets }; } catch { /* no base file */ }
+  }
   const lim = (k) => (Number.isFinite(b[k]) ? Math.min(b[k], Number.isFinite(prev[k]) ? prev[k] : Infinity) : null);
   const baseSize = (rel) => { const n = base && gitOut(root, ["cat-file", "-s", `${base}:${rel}`]); return n ? Number(n) : null; };
   let names = [];
