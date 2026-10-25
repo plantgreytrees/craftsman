@@ -16,7 +16,9 @@ All notable changes to craftsman are documented here. Format loosely follows
 ### Added
 
 - **Landing capability for the automatic archive** (ARCH-DOCS-18, ARCH-LAND-33): `land-feature` retires a closed
-  plan only through an in-process capability that `doc-retire.mjs` does not export; `auto: true` alone is ignored.
+  plan only through an in-process capability that is not exported as a value and is obtainable only through
+  `landingCapability()` (a wiring test limits its importers); `auto: true` alone is ignored, a caller-injected seam
+  receives a marker `retire` refuses, and a landing retire with no archive project refuses before removing anything.
 
 - **Approval before base** (ARCH-APPROVAL-03..09, ARCH-LAND-28/29/30/31). With `planning.featureBranches` on, `land-feature`
   lands only against an approval record the artifact owner decided on a private page (`scripts/approval.mjs`,
