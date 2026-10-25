@@ -1,10 +1,10 @@
 ---
 slug: scrutinise-artist-ui-gate
-goal: The ui gate really reaches Artist and its design critic in a normal run: reports written before the unit commit count, Artist justifications are honoured, and planners never dispatch the a11y floor directly
+goal: The ui gate reaches Artist's critic only with a report that matches the code, honours valid Artist justifications, and names the gate script plainly
 level: feature
 priority: P1
-classification: in-scope # round 2 of an isolated /scrutinise of artist-ui-gate (round 1 landed as c9efbfb, 5b0faf9)
-tracker_rows: [TRACKER#fix-ui-gate-script, TRACKER#fix-ui-gate-wiring, TRACKER#fix-ui-gate-round2]
+classification: in-scope # round 3 of an isolated /scrutinise of artist-ui-gate (round 1 c9efbfb, 5b0faf9; round 2 8ba334b)
+tracker_rows: [TRACKER#fix-ui-gate-script, TRACKER#fix-ui-gate-wiring, TRACKER#fix-ui-gate-round2, TRACKER#fix-ui-gate-round3]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -13,11 +13,11 @@ coverage:
   contract:      2.1, 2.2 (the ui-gate.mjs CLI argument order in its only consumer)
   data:          N/A(no persistence; run dirs are gitignored session state)
   config:        1.5, 3.5 (timeout override env var, clamped to int32)
-  security:      1.2 (report screenshot names resolved inside the run dir only)
-  tests:         1.1-1.6, 2.2, 3.1-3.7
+  security:      1.2 (report screenshot names resolved inside the run dir only), 4.2 (justifications containment + JSON check)
+  tests:         1.1-1.6, 2.2, 3.1-3.7, 4.1-4.3
   observability: 1.1 (reason "worktree not found: <path>")
   interface:     2.1 (CLI order), 2.3 (lens name in shared docs), 3.2 (reuse-check --justifications), 3.6 (manifest example)
-  docs:          2.3, 3.6
+  docs:          2.3, 3.6, 4.4
   rollback:      every unit is one merge commit; revert it
 units:
   - id: fix-ui-gate-script
@@ -59,15 +59,28 @@ units:
       write: [scripts/ui-gate.mjs, scripts/ui-gate.test.mjs, commands/_shared-machinery.md, scripts/doc-size-policy.mjs]
     arch: [ARCH-GATES-01, ARCH-GATES-03, ARCH-GATES-04, ARCH-GATES-05, ARCH-SLIM-01, ARCH-SLIM-02]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check, doc-size-policy], mcp: [] }
+  - id: fix-ui-gate-round3
+    scope_id: fix-ui-gate-round3
+    project: .
+    depends_on: [fix-ui-gate-round2]
+    module: scripts/ui-gate.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/ui-gate.mjs, scripts/ui-gate.test.mjs, commands/_shared-machinery.md, scripts/doc-size-policy.mjs, agents/unit-runner.md]
+      docs: [docs/architecture/gates.rules.md, docs/architecture/slim.rules.md, docs/plans/scrutinise-artist-ui-gate.md]
+      write: [scripts/ui-gate.mjs, scripts/ui-gate.test.mjs, commands/_shared-machinery.md, scripts/doc-size-policy.mjs]
+    arch: [ARCH-GATES-01, ARCH-GATES-04, ARCH-GATES-05, ARCH-GATES-07, ARCH-SLIM-01, ARCH-SLIM-02]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check, doc-size-policy], mcp: [] }
 ---
 
-# Plan: scrutinise-artist-ui-gate — rolling summary + round 2
+# Plan: scrutinise-artist-ui-gate — rolling summary + round 3
 
 ## Rolling summary
-Round 1 (landed `c9efbfb`, `5b0faf9`): fixed the reversed `ui-gate.mjs` arguments in `_shared-execution.md:33` (Critical), with a wiring test; added the missing-worktree reason, exact screenshots, a stale-report filter, run-dir pruning, the timeout env var and project-tier tests; renamed the lens to `ui-ux-reviewer`. Round 2 (this round): the round-1 stale filter makes the critic unreachable in real runs; justifications are ignored; four smaller hardening items.
+Round 1 (landed `c9efbfb`, `5b0faf9`): fixed the reversed `ui-gate.mjs` arguments in `_shared-execution.md:33` (Critical), with a wiring test; added the missing-worktree reason, exact screenshots, a stale-report filter, run-dir pruning, the timeout env var and project-tier tests; renamed the lens to `ui-ux-reviewer`. Round 2 (landed `8ba334b`): staleness measured from the merge-base so the critic is reachable; `--justifications` passed; format, rubric, timeout and test hardening. Round 3 (this round): a report from before a fix-round edit still counted; the user superseded ARCH-GATES-03 with ARCH-GATES-07 (`e0b6e7e`), so justifications must also be valid JSON; containment tests; plain gate naming.
 
 ## Outcome
-The ui gate really reaches Artist and its design critic in a normal run: reports written before the unit commit count, Artist justifications are honoured, and planners never dispatch the a11y floor directly.
+The ui gate reaches Artist's critic only with a report that matches the code, honours valid Artist justifications, and names the gate script plainly.
 
 ## Scope Steps (executable core)
 
@@ -101,8 +114,17 @@ Every task writes its failing test in `scripts/ui-gate.test.mjs` first and recor
 - [ ] 3.6 Manifest example (`commands/_shared-machinery.md:51`, ARCH-GATES-01): replace `ui-ux-reviewer` in the Gates example with `ui:ui-gate.mjs` (byte-neutral, 14 bytes each), so planners name the ui gate, not the a11y agent → accept: `grep -c ui-ux-reviewer` on that line is 0; file ≤ cap 6895; lower the cap if it shrank; `node scripts/doc-size-policy.mjs` PASS.
 - [ ] 3.7 Tests: spawn/maxBuffer catch path (a stub writing >16 MiB to stdout falls back, exit 0); the unparseable / no-screenshots cases (`ui-gate.test.mjs:262-272`) each gain a fresh valid-report control in the same fixture that does yield `critic` → accept: `node --test scripts/*.test.mjs` green.
 
+### Step 4 — fix-ui-gate-round3 (., javascript + markdown, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check, doc-size-policy
+Depends on: fix-ui-gate-round2
+Every task writes its failing test in `scripts/ui-gate.test.mjs` first and records the red run.
+- [ ] 4.1 Warning — report older than the code (`scripts/ui-gate.mjs:159-160,201`; fix rounds re-run edit+commit without verify, `agents/unit-runner.md:20`; ARCH-GATES-04/05): the staleness floor becomes the max of the merge-base commit time and the newest mtime among existing files in `git diff --name-only -z <mergeBase>` (working tree vs merge-base) plus `git ls-files -z --others --exclude-standard`, excluding `.artist/`; use lstat, skip missing paths. Committing leaves mtimes alone, so a report written after the last edit and before the commit still counts → accept: report written, then a changed file touched later → no critic, `a11y: true`; files edited, then report, then a commit dated later → `critic`; fixtures that set report mtimes in the past also set the changed and untracked files' mtimes earlier.
+- [ ] 4.2 Justifications must be valid JSON (ARCH-GATES-07, user choice "skip it and say so"): `justificationsOf` also parses the file; invalid → no `--justifications`, route stays `artist`, critic kept, and `reason` gains `; justifications.json ignored: invalid JSON` → accept: an argv-recording stub sees no `--justifications`, `reason` matches `/justifications\.json ignored: invalid JSON/`, `critic` present.
+- [ ] 4.3 Containment tests (`justificationsOf`, `ui-gate.mjs:133`): `justifications.json` as a symlink to a file outside the report dir, and as a directory → argv ends at `--base <mb>` with no `--justifications` → accept: both tests pass; `node --test scripts/*.test.mjs` green.
+- [ ] 4.4 Gate naming (`commands/_shared-machinery.md:51`, Artist peer review): write `ui-gate.mjs` instead of `ui:ui-gate.mjs` in the Gates example (it read like `plugin:agent`); lower its cap in `scripts/doc-size-policy.mjs` by the 3 bytes saved (ARCH-SLIM-01/02) → accept: `node scripts/doc-size-policy.mjs` PASS with the lowered cap.
+
 ## Sequencing
-Script fixes first (the critic step text changes shape), then the wiring line and its test, which reads the script's usage line. Round 2 runs after both.
+Script fixes first (the critic step text changes shape), then the wiring line and its test, which reads the script's usage line. Round 2 runs after both; round 3 after round 2.
 
 ## Verification background
 - Usage `<worktree> <base-ref>` — `scripts/ui-gate.mjs:6,176`; consumer passes `<merge-base> <worktree>` — `commands/_shared-execution.md:33`; reproduced: documented order → `{"route":"fallback","reason":"not a git worktree: spawn git ENOENT"}`, correct order → detection reached.
@@ -112,6 +134,9 @@ Script fixes first (the critic step text changes shape), then the wiring line an
 CONSUMERS:
 - `scripts/ui-gate.mjs` CLI → `commands/_shared-execution.md:33` (only consumer; `rg ui-gate.mjs commands agents workflows hooks`).
 - `ui-gate` lens name → `commands/_scrutinise-deep.md:20`, `commands/_shared-machinery.md:51`.
+
+## Findings (round 3, isolated scrutineer + Artist peer review)
+Warning 2 (Correctness: report older than a fix-round edit suppresses the a11y floor; Architecture: `--justifications` outside decided ARCH-GATES-03, resolved by the user superseding it with ARCH-GATES-07) · Suggestion 4 (invalid-JSON path, containment tests, invalid-JSON test, `ui:ui-gate.mjs` naming). Disputed: none. Residual risk: mtime vs committer-time clock skew; TOCTOU between the realpath check and reuse-check's read (low: keys only become justification reasons).
 
 ## Findings (round 2, isolated scrutineer + Artist peer review)
 Warning 2 (Correctness: stale filter vs HEAD makes critic unreachable; Correctness: justifications ignored) · Suggestion 6 (format regex, rubric check, timeout int32 clamp, manifest example, maxBuffer test, fresh-report controls). Disputed: none. The Artist session's round-7 review of `676f3b2..5b0faf9` found the same Warning independently. Residual risk: a SIGTERM-trapping child outlives the execFile timeout.
