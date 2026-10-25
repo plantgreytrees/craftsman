@@ -3,7 +3,7 @@
 > and `/architect --update gates` should be run.
 
 # Gates architecture
-_Last verified: 2026-10-25 at `bf45a1a` · Source idea: [artist-ui-gate](../ideas/artist-ui-gate.md)_
+_Last verified: 2026-10-26 at `5ddf5f0` · Source idea: [artist-ui-gate](../ideas/artist-ui-gate.md)_
 
 ## In plain English
 After a unit is implemented, `gate-select.mjs` reads its diff and names the
@@ -36,7 +36,7 @@ flowchart LR
 | ARCH-GATES-04 | Critic only with a verify report | The critic scores screenshots, not diffs; a unit gate has no dev server | Critic on every ui diff; gate starts a dev server |
 | ARCH-GATES-05 | Reduced ui-ux-reviewer as accessibility floor | Projects without Artist keep a UI floor; axe only runs inside Artist's verify | Skip with a note; full old checklist |
 | ARCH-GATES-06 | builtinAgents is user config | Guard code stays generic | Hardcode the critic in the guard |
-| ARCH-GATES-07 | reuse-check with `--base <merge-base>`, run dir outside the worktree, plus the report's `justifications.json` when it is valid | reuse-check defaults to HEAD; a run dir inside the worktree could be committed by the unit; the fresh run dir hid the user's recorded justifications, and a bad file must not cost the critic | Fixed argv without justifications; pass a bad file and fall back |
+| ARCH-GATES-07 | reuse-check with `--base <merge-base>`, run dir outside the worktree, plus the report's `justifications.json` when it holds a JSON object | reuse-check defaults to HEAD; a run dir inside the worktree could be committed by the unit; the fresh run dir hid the user's recorded justifications, and a bad file must not cost the critic | Fixed argv without justifications; pass a bad file and fall back |
 
 ## Trade-offs & known limits
 Craftsman now follows Artist's CLI contract (arguments, exit codes, DESIGN.md

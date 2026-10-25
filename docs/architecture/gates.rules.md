@@ -3,8 +3,8 @@ area: gates
 governs: ["scripts/gate-select.mjs", "scripts/ui-gate.mjs", "scripts/ui-gate.test.mjs", "agents/ui-ux-reviewer.md"]
 human: docs/architecture/gates.md
 source: docs/ideas/artist-ui-gate.md
-verified_at: bf45a1acc994d28a711c4946f1b87b9fae8f9bdb
-updated: 2026-10-25
+verified_at: 5ddf5f0fdbe891132b3b048c62bfc05fadc5af54
+updated: 2026-10-26
 ---
 # ARCH gates — enforced rules
 
@@ -14,4 +14,4 @@ updated: 2026-10-25
 - **ARCH-GATES-04** [decided] artist:design-critic MUST run only when the unit worktree holds an untracked .artist/runs/*/report.json, with a brief of exactly that report's screenshots, the report.json, DESIGN.md and Artist's rubric path; it is dispatched isolated only when listed in execution.builtinAgents, otherwise root applies the brief labelled NOT ISOLATED, and it is never retried — check: ui-gate.test.mjs critic field; _shared-execution.md — cite: scripts/agent-mode-guard.mjs:101-102
 - **ARCH-GATES-05** [decided] ui-ux-reviewer is the built-in accessibility floor (contrast, focus, semantic markup, accessible names, React Native equivalents) and loads no design skill; ui-gate sets a11y true on the fallback route and on the artist route whenever no verify report exists — check: ui-gate.test.mjs a11y field; doc-size-policy cap — cite: agents/ui-ux-reviewer.md:1-6
 - **ARCH-GATES-06** [decided] Allowing artist:design-critic is user configuration (execution.builtinAgents, documented in EXTENDING.md); agent-mode-guard.mjs MUST NOT special-case it — check: agent-mode-guard.mjs diff empty — cite: scripts/agent-mode-guard.mjs:101-102
-- **ARCH-GATES-07** [decided] On the artist route reuse-check MUST run as `node <installPath>/scripts/reuse-check.mjs --project <worktree> --run <dir> --base <merge-base>`, plus `--justifications <report dir>/justifications.json` only when the chosen verify report's dir holds that file as a regular file inside the dir that parses as JSON (an invalid one is omitted and named in reason); the run dir is in craftsman session state outside the worktree; exit 0/1 are advisory findings, exit 2 or a throw MUST fall back with the error as reason — check: ui-gate.test.mjs exit cases and justifications argv cases — cite: scripts/ui-gate.mjs:218-219
+- **ARCH-GATES-07** [decided] On the artist route reuse-check MUST run as `node <installPath>/scripts/reuse-check.mjs --project <worktree> --run <dir> --base <merge-base>`, plus `--justifications <report dir>/justifications.json` only when the chosen verify report's dir holds that file as a regular file inside the dir holding a JSON object (an invalid or non-object one is omitted and named in reason); the run dir is in craftsman session state outside the worktree; exit 0/1 are advisory findings, exit 2 or a throw MUST fall back with the error as reason — check: ui-gate.test.mjs exit cases and justifications argv cases — cite: scripts/ui-gate.mjs:131-139,253-254

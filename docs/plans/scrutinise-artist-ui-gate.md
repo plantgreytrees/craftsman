@@ -176,6 +176,9 @@ CONSUMERS:
 - `scripts/ui-gate.mjs` CLI → `commands/_shared-execution.md:33` (only consumer; `rg ui-gate.mjs commands agents workflows hooks`).
 - `ui-gate` lens name → `commands/_scrutinise-deep.md:20`, `commands/_shared-machinery.md:51`.
 
+## Findings (round 6, isolated scrutineer — closing)
+0 Critical · 0 Warning · 0 Architecture · 0 UNMET on `01d865d`. Suggestion 3, not scheduled (no tracker row): a control proving a delete before verify keeps the critic; a top-level directory delete (walk-up stops at the worktree root); the `codeMtime` header comment omits the nearest-ancestor climb. Residual risk: the worktree root's mtime moves with any top-level entry (build dirs, caches), wrongly marking a report stale (critic dropped, a11y kept); NUL-only split verified on git 2.56.0.
+
 ## Findings (round 5, isolated scrutineer)
 Warning 1 (Correctness: `git rm -r` of a unit-only subdirectory leaves only missing paths, so the changed parent dir is never read) · Suggestion 3 (newline split; ARCH-GATES-07 text "holds a JSON object" and cite drift, both to /sync-docs; nested-delete test). Disputed: none. Residual risk: parent-dir mtimes widen false-stale (build output in a changed file's dir drops the critic, fail-safe); a justification value whose toString throws makes reuse-check exit 1 (falls back).
 
