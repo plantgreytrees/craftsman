@@ -990,7 +990,7 @@ test("this repo's craftsman.project.json lists the markdown its own tests read, 
   assert.deepEqual(shipped.stopGate.markdownTests, [], "the default other projects get");
   for (const pattern of ["README.md", "CHANGELOG.md", "commands/*.md", "agents/*.md", "docs/architecture/*.md"]) assert.ok(project.stopGate.markdownTests.includes(pattern), pattern);
   assert.deepEqual(Object.keys(project).sort(), ["docs", "stopGate"], "only project-only values live here");
-  assert.deepEqual(project.docs, { budgets: { claudeMdLines: 200, openPlans: 30 } }, "this repo sets the two optional budgets (ARCH-DOCS-15); the plugin default stays at three keys");
+  assert.deepEqual(project.docs, { budgets: { claudeMdLines: 200, openPlans: 30 } }, "this repo sets the two optional budgets (ARCH-DOCS-16); the plugin default stays at three keys");
 });
 
 // Round 6 (42.1): the nonce is required whatever files exist; no marker can stand in for it.
