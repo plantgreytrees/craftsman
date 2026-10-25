@@ -49,7 +49,7 @@ export const FILE_CAPS = {
   "commands/_scrutinise-deep.md": 5457,
   "commands/_shared-analysis.md": 6314,
   "commands/_shared-execution.md": 12766,
-  "commands/_shared-machinery.md": 6895,
+  "commands/_shared-machinery.md": 6892,
   "commands/_sync-docs-prune.md": 1565,
   "commands/account-switch.md": 8257,
   "commands/architect.md": 7034,

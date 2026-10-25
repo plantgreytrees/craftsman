@@ -125,13 +125,16 @@ function isFormat2(file) {
   return !!f && Number(f[1]) === 2;
 }
 
-// <report dir>/justifications.json, when it is a regular file inside that dir.
+// <report dir>/justifications.json (ARCH-GATES-07): {file} when it is a regular
+// file inside that dir that parses as JSON, {invalid} when it does not parse, else null.
 function justificationsOf(report) {
   const dir = path.dirname(report);
   const file = path.join(dir, "justifications.json");
   try {
-    return inside(realOr(dir), fs.realpathSync(file)) && fs.statSync(file).isFile() ? file : null;
+    if (!inside(realOr(dir), fs.realpathSync(file)) || !fs.statSync(file).isFile()) return null;
   } catch { return null; }
+  try { JSON.parse(fs.readFileSync(file, "utf8")); } catch { return { invalid: true }; }
+  return { file };
 }
 
 function isFile(p) {
@@ -140,6 +143,22 @@ function isFile(p) {
 
 async function git(cwd, args) {
   return (await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
+}
+
+// Newest mtime (s) of the unit's code: files changed since the merge-base plus
+// untracked files, outside .artist/. Commits leave mtimes alone, so a report
+// written after the last edit stays fresh, and an edit after verify makes it stale.
+async function codeMtime(worktree, mergeBase) {
+  const lists = await Promise.all([
+    git(worktree, ["diff", "--name-only", "-z", mergeBase]),
+    git(worktree, ["ls-files", "-z", "--others", "--exclude-standard"]),
+  ]);
+  let newest = 0;
+  for (const rel of new Set(lists.join("\0").split("\0"))) {
+    if (!rel || rel.startsWith(".artist/")) continue;
+    try { newest = Math.max(newest, fs.lstatSync(path.join(worktree, rel)).mtimeMs); } catch { /* deleted */ }
+  }
+  return newest / 1000;
 }
 
 async function newestReport(worktree, sinceSec) {
@@ -156,7 +175,8 @@ async function newestReport(worktree, sinceSec) {
     const abs = path.join(worktree, rel);
     let m;
     try { m = fs.statSync(abs).mtimeMs; } catch { continue; }
-    // stale: older than the merge-base. Not HEAD: the unit commits after verify.
+    // stale: older than the merge-base or the unit's newest code edit (not HEAD:
+    // the unit commits after verify).
     if (m / 1000 < sinceSec) continue;
     if (!best || m > best.m || (m === best.m && abs > best.abs)) best = { abs, m };
   }
@@ -198,8 +218,8 @@ async function route(worktreeArg, baseRef) {
   let report = null;
   let screenshots = [];
   try {
-    const since = Number((await git(worktree, ["log", "-1", "--format=%ct", mergeBase])).trim()) || 0;
-    report = await newestReport(worktree, since);
+    const base = Number((await git(worktree, ["log", "-1", "--format=%ct", mergeBase])).trim()) || 0;
+    report = await newestReport(worktree, Math.max(base, await codeMtime(worktree, mergeBase)));
     if (report) screenshots = screenshotsOf(report);
   } catch { /* no report -> a11y floor */ }
   const justifications = report ? justificationsOf(report) : null;
@@ -216,7 +236,7 @@ async function route(worktreeArg, baseRef) {
     let stderr = "";
     try {
       const argv = [script, "--project", worktree, "--run", runDir, "--base", mergeBase];
-      if (justifications) argv.push("--justifications", justifications);
+      if (justifications?.file) argv.push("--justifications", justifications.file);
       const r = await execFileAsync(process.execPath, argv, { timeout: timeoutMs(), maxBuffer: 16 * 1024 * 1024 });
       stderr = r.stderr;
     } catch (e) {
@@ -233,7 +253,9 @@ async function route(worktreeArg, baseRef) {
     return fallback(`reuse-check failed: ${firstLine(e)}`);
   }
 
-  const out = { route: "artist", reason: "artist installed, enabled, format-2 DESIGN.md", reuse, a11y: true, steps: [] };
+  let reason = "artist installed, enabled, format-2 DESIGN.md";
+  if (justifications?.invalid) reason += "; justifications.json ignored: invalid JSON";
+  const out = { route: "artist", reason, reuse, a11y: true, steps: [] };
   const rubric = path.join(inst.installPath, "skills", "create", "references", "rubric.md");
   if (report && screenshots.length > 0 && isFile(rubric)) {
     out.critic = { report, screenshots, design, rubric };
