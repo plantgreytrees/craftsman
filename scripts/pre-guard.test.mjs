@@ -2138,3 +2138,50 @@ test("pre-guard: a Write, Edit or shell redirect onto .craftsman/approvals/x.jso
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Round 17: the documented helpers (A, R, S) once set the project-dir variable, which this guard refuses (ARCH-SAFETY-05), so every
+// documented approval, remote-step and unit-runner script call was blocked. They now run from the project root with `project` in the JSON.
+const PLUGIN_ROOT_DIR = path.dirname(ROOT);
+function documentedHelper(doc, name) {
+  const text = fs.readFileSync(path.join(PLUGIN_ROOT_DIR, doc), "utf8");
+  const m = text.match(new RegExp(`\`${name} <[^\`]*>\` = \`([^\`]*)\``));
+  assert.ok(m, `${doc} documents ${name}`);
+  return m[1];
+}
+function fillHelper(template, literalRoot) {
+  let cmd = template.replaceAll("<json>", '{"project":"."}').replaceAll("<plugin_root>", PLUGIN_ROOT_DIR).replaceAll("<name>", "tracker").replaceAll("<action>", "prepare");
+  if (!literalRoot) cmd = cmd.replaceAll("${CLAUDE_PLUGIN_ROOT}", PLUGIN_ROOT_DIR);
+  return cmd.includes("printf") ? cmd : `printf '%s' '{"project":"."}' | ${cmd}`;
+}
+const helperBash = (sid, command) => ({ session_id: sid, tool_name: "Bash", tool_input: { command } });
+
+test("pre-guard: each documented helper (A, R, S) is allowed, filled with sample JSON (18.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-helper-")));
+  try {
+    for (const [doc, name] of [["commands/_approval.md", "A"], ["commands/_network.md", "R"], ["agents/unit-runner.md", "S"]]) {
+      const template = documentedHelper(doc, name);
+      assert.ok(!/PROJECT_DIR/.test(template), `${doc} ${name}: no project-dir assignment`);
+      for (const literalRoot of [false, true]) {
+        const command = fillHelper(template, literalRoot);
+        const r = run(GUARD, dir, helperBash("helper", command), { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT_DIR });
+        assert.equal(r.status, 0, `${doc} ${name}: ${command}: ${r.stderr}`);
+      }
+    }
+    // the refusal itself still holds
+    assert.equal(run(GUARD, dir, helperBash("helper", `printf '%s' '{}' | ${"CLAUDE_PROJECT" + "_DIR"}="${dir}" node ${PLUGIN_ROOT_DIR}/scripts/approval.mjs prepare`)).status, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: approval.mjs and repo-exec.mjs are allowed from a linked worktree, a Write to the main approvals dir is not (18.1)", () => {
+  const { main, worktree } = gitRepoWithWorktree();
+  try {
+    for (const name of ["approval", "repo-exec"]) {
+      const r = run(GUARD, worktree, helperBash("wt-helper", `printf '%s' '{"project":"."}' | node ${PLUGIN_ROOT_DIR}/scripts/${name}.mjs prepare`));
+      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      const rel = run(GUARD, worktree, helperBash("wt-helper", `printf '%s' '{"project":"."}' | node scripts/${name}.mjs prepare`));
+      assert.equal(rel.status, 0, `scripts/${name}: ${rel.stderr}`);
+    }
+    const w = run(GUARD, worktree, { session_id: "wt-helper", tool_name: "Write", tool_input: { file_path: path.join(main, ".craftsman", "approvals", "x.json"), content: "{}" } });
+    assert.equal(w.status, 2, w.stderr);
+  } finally { fs.rmSync(main, { recursive: true, force: true }); }
+});

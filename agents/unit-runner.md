@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 model: sonnet
 ---
 
-Prompt has `role`, root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task, criteria. `S <name>` = `CLAUDE_PROJECT_DIR="<project_root>" node "<plugin_root>/scripts/<name>.mjs"` with JSON on stdin. Pass the **root** `session_id`, never your own; your unit is keyed by its worktree (ARCH-STATE-03).
+Prompt has `role`, root `session_id`, `plugin_root`, `project_root`, `project`, `plan`, `unit`, `scope`, `arch`, task, criteria. `S <name>` = `node "<plugin_root>/scripts/<name>.mjs"` from the worktree root, JSON on stdin with `project`. Pass the **root** `session_id`, never your own; your unit is keyed by its worktree (ARCH-STATE-03).
 
 ## implement
 1. `S claim` `{session_id, plan, unit}`; `S tracker` `{action:"transition", project, plan, unit, status:"IN_PROGRESS", evidence:"unit-runner", session_id}` (+`feature`, `feature_branch`).
