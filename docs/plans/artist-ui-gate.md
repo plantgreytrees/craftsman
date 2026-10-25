@@ -17,7 +17,7 @@ coverage:
   security:      1.2 (installPath confined under ~/.claude/plugins/, exact plugin id, execFile without shell)
   tests:         1.1-1.4, 2.4
   observability: 1.5 (route + reason in JSON), 2.6 (log-specialist names)
-  interface:     1.1 (CLI: node scripts/ui-gate.mjs <merge-base> <worktree>)
+  interface:     1.1 (CLI: node scripts/ui-gate.mjs <worktree> <merge-base>; corrected by scrutinise-artist-ui-gate)
   docs:          1.6, 2.8, 2.9
   rollback:      git revert of the two unit merges restores ui-ux-reviewer, design-review and their caps
 units:
@@ -73,7 +73,7 @@ Depends on: ui-gate-script
 - [ ] 2.2 Delete `skills/design-review/SKILL.md` (and its directory) → accept: path absent.
 - [ ] 2.3 `scripts/doc-size-policy.mjs`: remove the `skills/design-review/SKILL.md` entry; lower the `agents/ui-ux-reviewer.md` cap to the new file size (ARCH-SLIM-01/02); lower any other edited doc's cap to its new size if it shrank → accept: `node scripts/doc-size-policy.mjs` PASS.
 - [ ] 2.4 `scripts/entry-surface.test.mjs`: keep `ui-ux-reviewer` in the maxTurns list; add a test that `skills/design-review` does not exist and `agents/ui-ux-reviewer.md` names no skill → accept: new test fails before 2.1/2.2, passes after.
-- [ ] 2.5 `commands/_shared-execution.md:33`: `ui`→ run `node "${CLAUDE_PLUGIN_ROOT}/scripts/ui-gate.mjs" <merge-base> <worktree>` and apply its `steps`, still advisory; byte-neutral or smaller (cap 12769, size 12764) → accept: line names `ui-gate.mjs`; doc-size PASS.
+- [ ] 2.5 `commands/_shared-execution.md:33`: `ui`→ run `node "${CLAUDE_PLUGIN_ROOT}/scripts/ui-gate.mjs" <worktree> <merge-base>` and apply its `steps`, still advisory; byte-neutral or smaller (cap 12769, size 12764) → accept: line names `ui-gate.mjs`; doc-size PASS.
 - [ ] 2.6 `commands/_shared-machinery.md:51`, `commands/_scrutinise-deep.md:20`, `scripts/log-specialist.mjs:3` (comment), `scripts/gate-select.mjs:3` (comment only, behaviour unchanged), `skills/language-aware-planning/references/react-native.md:28`: replace the stale `ui-ux-reviewer`/`design-review` wording (the lens is now "ui-gate (Artist or ui-ux-reviewer a11y)"; react-native.md drops the design-review reference); each capped doc byte-neutral or smaller → accept: `grep -rn design-review commands agents skills scripts` returns nothing; doc-size PASS.
 - [ ] 2.7 `docs/builtins.md`: add a row/line for `artist:design-critic` as an optional read-only builtin via `execution.builtinAgents` → accept: grep hit.
 - [ ] 2.8 `README.md:143`, `:446` and `:531`: describe the ui gate (Artist when present, a11y reviewer fallback); mention the optional `artist:design-critic` beside the `builtinAgents` default; remove the `skills/design-review/` tree line → accept: `grep -n design-review README.md` empty.

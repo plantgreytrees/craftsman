@@ -63,8 +63,10 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 
 | plan | unit | module | status | evidence | updated |
 |---|---|---|---|---|---|
-| [artist-ui-gate](./artist-ui-gate.md) | ui-gate-script | scripts/ui-gate.mjs | PENDING | — | 2026-10-25 |
-| [artist-ui-gate](./artist-ui-gate.md) | ui-surface | agents/ui-ux-reviewer.md | PENDING | — | 2026-10-25 |
+| [artist-ui-gate](./artist-ui-gate.md) | ui-gate-script | scripts/ui-gate.mjs | COMPLETE | all 4 acceptance criteria ticked; c60bc4b on origin/main (feat/ui-gate-script f… | 2026-10-25 |
+| [artist-ui-gate](./artist-ui-gate.md) | ui-surface | agents/ui-ux-reviewer.md | COMPLETE | all 4 acceptance criteria ticked; merged direct to main | 2026-10-25 |
+| [scrutinise-artist-ui-gate](./scrutinise-artist-ui-gate.md) | fix-ui-gate-script | scripts/ui-gate.mjs | PENDING | — | 2026-10-25 |
+| [scrutinise-artist-ui-gate](./scrutinise-artist-ui-gate.md) | fix-ui-gate-wiring | commands/_shared-execution.md | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-cli-refusal | scripts/approval.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-floor-vs-stopgate-note | docs/architecture/safety.rules.md | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-json-quoting | commands/_approval.md | PENDING | — | 2026-10-25 |
@@ -85,13 +87,13 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-approval-scan | scripts/approval.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-budget-growth | scripts/arch-check.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-claim-anchor | scripts/claim.mjs | COMPLETE | all 2 acceptance criteria ticked; root landed 7853ef3; suite 1132/1132, lint PA… | 2026-10-25 |
-| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-claims-dir | scripts/claim.mjs | BLOCKED | Work finished and tested, left UNCOMMITTED in worktree (cannot commit: pre-guar… | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-claims-dir | scripts/claim.mjs | COMPLETE | all 2 acceptance criteria ticked; root landed 2cb2db5; suite 1140/1140, lint PA… | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-cli-contract | scripts/tracker.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-gate-lookup | scripts/lib/gate-command.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-helper-form | commands/_approval.md | COMPLETE | all 2 acceptance criteria ticked; root landed 59684fd; suite 1118/1118, lint PA… | 2026-10-25 |
-| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-helper-root | agents/unit-runner.md | IN_PROGRESS | unit-runner | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-helper-root | agents/unit-runner.md | COMPLETE | all 2 acceptance criteria ticked; root landed a875848; suite 1140/1140, lint PA… | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-land-race | scripts/repo-exec.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
-| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-approval | scripts/repo-exec.mjs | BLOCKED | Work finished and tested but left UNCOMMITTED in worktree (pre-guard blocks com… | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-approval | scripts/repo-exec.mjs | COMPLETE | all 2 acceptance criteria ticked; root landed 42f50d7; suite 1140/1140, lint PA… | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-retire | scripts/repo-exec.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-atomic | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-cli | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main | 2026-10-23 |
