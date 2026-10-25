@@ -234,6 +234,15 @@ test("liveBlockers: one table case per blocker, and the clean cases", () => {
     ["a descendant with an open row", { docs: [epic(["c"]), child("c")], rows: [openRow("docs/plans/c.md")] }, /has live descendants: c$/],
     ["a descendant with no row proving it closed", { docs: [epic(["c"]), child("c")] }, /has live descendants: c$/],
   ];
+  // A derived or parent-level descendant with no rows is a descendant (retired with the plan), not a live blocker.
+  const derived = { path: "docs/plans/scrutinise-c.md", slug: "scrutinise-c", text: "---\nparent: p\n---\n# d\n" };
+  const story = { path: "docs/plans/s.md", slug: "s", text: "---\nparent: p\nlevel: story\n---\n# s\n" };
+  for (const [name, doc] of [["a derived descendant with no rows", derived], ["a parent-level (story) descendant with no rows", story]]) {
+    const out = run({ docs: [epic(doc.slug === "scrutinise-c" ? [] : [doc.slug]), doc] });
+    assert.deepEqual(out.live, [], name);
+    assert.deepEqual(out.descendants.map((d) => d.slug), [doc.slug], name);
+    assert.equal(out.reason, undefined, name);
+  }
   for (const [name, input, reason] of table) {
     const out = run(input);
     assert.match(out.reason, reason, name);
@@ -278,4 +287,21 @@ test("autoArchiveEligible: the hierarchy at the landed commit is read with ls-tr
   assert.ok(calls.includes("ls-tree -z"), calls.join("|"));
   assert.equal(calls.filter((c) => c === "cat-file --batch").length, 1);
   assert.ok(!calls.some((c) => c.startsWith("show ")), "no per-file git show");
+});
+
+test("autoArchiveEligible: a cat-file --batch size that is not a safe integer, or runs past the buffer, is an unreadable hierarchy (S1)", () => {
+  const root = repo(tmp("indexat-bad"));
+  const name = "docs/plans/a blob 3.md"; // spaces in the name: `<sha>:<name> missing` splits into a fake header
+  const state = [{ plan: "docs/plans/p.md", unit: "u", status: "COMPLETE" }];
+  const verdictFor = (answer) => autoArchiveEligible({ root }, "docs/plans/p.md", {
+    capability: landingCapability(), sha: "abc",
+    git: (args) => (args[0] === "ls-tree" ? `${name}\0` : args[0] === "cat-file" && args[1] === "--batch" ? Buffer.from(answer) : ""),
+    resolveArchive: () => ({ root: "/tmp/archive" }), currentState: () => state,
+    findReferrers: () => ({ hits: [], blocking: [], rewritable: [] }),
+  });
+  for (const answer of [`abc:${name} missing\n`, "0123 blob 99\nshort\n", "0123 blob -1\n\n"]) {
+    const v = verdictFor(answer);
+    assert.equal(v.eligible, false);
+    assert.match(v.reason, /cannot read the plan hierarchy/, answer);
+  }
 });

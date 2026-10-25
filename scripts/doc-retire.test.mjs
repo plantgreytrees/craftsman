@@ -928,7 +928,7 @@ const docRetiredEvents = (context) => (fs.existsSync(path.join(context.stateDir,
 
 test("doc-retire: a call carrying the landing capability needs no grant and logs exactly one doc_retired with auto true (ARCH-DOCS-17)", () => {
   const auto = noManifest(() => repo({ grant: false }));
-  assert.equal(noManifest(() => retire({ plan: PLAN }, auto, landingCapability())).retired, PLAN);
+  assert.equal(withArchive(() => retire({ plan: PLAN }, auto, landingCapability())).retired, PLAN);
   const autoEvents = docRetiredEvents(auto);
   assert.equal(autoEvents.length, 1);
   assert.equal(autoEvents[0].auto, true);
@@ -970,10 +970,21 @@ test("doc-retire: auto:true through the CLI path without a grant is refused and 
 
 test("doc-retire: the landing capability skips only the grant; every other refusal still applies", () => {
   const context = noManifest(() => repo({ grant: false, sibStatus: "IN_PROGRESS" }));
-  const out = noManifest(() => retire({ plan: PLAN }, context, landingCapability()));
+  const out = withArchive(() => retire({ plan: PLAN }, context, landingCapability()));
   assert.equal(out.refused, true);
   assert.match(out.reason, /open sibling plans keep/);
   assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: the landing capability with no archive project is refused before anything is touched (ARCH-ARCHIVE-03, ARCH-DOCS-18)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  const before = snapshot(context);
+  const out = noManifest(() => retire({ plan: PLAN }, context, landingCapability()));
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /automatic archive needs an archive project/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)), "the plan doc is untouched");
+  assert.equal(docRetiredEvents(context).length, 0);
 });
 
 test("doc-retire: NEXT.md lines of a retired descendant leave with it", () => {

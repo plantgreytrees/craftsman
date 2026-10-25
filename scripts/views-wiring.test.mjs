@@ -88,3 +88,15 @@ test("no static import cycle through tracker.mjs; ledger-keys has no edge back; 
   const cyclic = [...graph.keys()].filter((f) => reaches(graph, f, f)).sort();
   assert.deepEqual(cyclic, ["scripts/doc-retire.mjs", "scripts/lib/archive.mjs"]);
 });
+
+test("landingCapability is named by no non-test module except lib/archive.mjs and doc-retire.mjs (ARCH-DOCS-18)", () => {
+  const allowed = new Set(["scripts/lib/archive.mjs", "scripts/doc-retire.mjs"]);
+  const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
+    const rel = `${dir}/${e.name}`;
+    return e.isDirectory() ? walk(rel) : [rel];
+  });
+  const modules = walk("scripts").filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"));
+  assert.ok(modules.includes("scripts/lib/archive.mjs") && modules.includes("scripts/doc-retire.mjs"));
+  const offenders = modules.filter((f) => !allowed.has(f) && /landingCapability/.test(read(f)));
+  assert.deepEqual(offenders, []);
+});
