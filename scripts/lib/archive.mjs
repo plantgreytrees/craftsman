@@ -232,7 +232,7 @@ function indexAt(context, sha, git) {
       const eol = bytes.indexOf(10, at);
       if (eol < 0) throw new Error(`cat-file --batch ended early at ${f}`);
       const header = bytes.subarray(at, eol).toString("utf8").split(" ");
-      if (header[1] !== "blob") throw new Error(`cannot read ${f} at ${sha}`);
+      if (header.length !== 3 || !/^[0-9a-f]+$/.test(header[0]) || header[1] !== "blob") throw new Error(`cannot read ${f} at ${sha}`);
       const size = Number(header[2]);
       if (!Number.isSafeInteger(size) || size < 0 || eol + 1 + size > bytes.length) throw new Error(`cat-file --batch gave a bad size for ${f} at ${sha}`);
       texts.set(f, bytes.subarray(eol + 1, eol + 1 + size).toString("utf8"));
@@ -258,25 +258,30 @@ function holdsLanding(main, base, sha) {
 // ARCH-LAND-33 / ARCH-DOCS-18: after land-feature has promoted and pushed, archive each closed, unreferenced plan. The archive repo is
 // committed locally and archive_push_pending is logged; nothing is ever pushed (ARCH-ARCHIVE-05). Nothing here can throw, park or
 // change the landing result (ARCH-LAND-06 is for real landing failures): refusals and exceptions are logged and swallowed.
-// deps seams: autoArchiveEligible(context, plan, {sha, capability}), retire(input, context, capability).
+// deps seams: autoArchiveEligible(context, plan, {sha, capability}), retire(input, context, capability); an injected seam receives INJECTED, never the capability.
+const INJECTED = Object.freeze({ landing: false, injected: true });
 export function autoArchive(context, input, info, { rows, sha, deps = {} }) {
   const note = (ev) => { try { logEvent(ev, context); } catch { /* logging never changes a landing */ } };
   try {
     const main = mainCheckoutRoot(context.root);
     const here = { ...context, root: main };
+    // ARCH-DOCS-18: the landing capability goes only to the built-in eligibility and retire; a caller-injected seam gets a marker
+    // that no retire accepts, so a stub can neither capture the capability nor replay it into the real retire.
+    const capability = landingCapability();
     const eligible = deps.autoArchiveEligible || autoArchiveEligible;
     const retire = deps.retire || docRetire;
-    const capability = landingCapability(); // ARCH-DOCS-18: the only way retire skips the grant; never read from input
+    const eligibleCap = deps.autoArchiveEligible ? INJECTED : capability;
+    const retireCap = deps.retire ? INJECTED : capability;
     for (const plan of [...new Set(rows.map((row) => row.plan))]) {
       try {
-        const verdict = eligible(here, plan, { sha, capability });
+        const verdict = eligible(here, plan, { sha, capability: eligibleCap });
         if (!verdict.eligible) { note({ ev: "doc_retire_skipped", plan, reason: verdict.reason }); continue; }
         // Only a retire that will actually run may move the main checkout (ARCH-LAND-33).
         if (!holdsLanding(main, info.base_branch, sha)) {
           note({ ev: "doc_retire_skipped", plan, reason: `main checkout is not on ${info.base_branch} holding the landed merge` });
           continue;
         }
-        const out = retire({ plan, sid: input.session_id, landed_sha: sha }, here, capability);
+        const out = retire({ plan, sid: input.session_id, landed_sha: sha }, here, retireCap);
         if (out?.refused) { note({ ev: "doc_retire_skipped", plan, reason: out.reason }); continue; }
         const archive = resolveArchive(here);
         note({ ev: "archive_push_pending", plan, commit: archive.root ? quiet(archive.root, ["rev-parse", "HEAD"]) : "" });

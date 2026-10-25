@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { autoArchiveEligible } from "./lib/archive.mjs";
-import { landingCapability } from "./doc-retire.mjs";
+import { landingCapability, retire } from "./doc-retire.mjs";
 import { buildIndex } from "./lib/plan-index.mjs";
 import { inspectRepo, landFeature, prepare } from "./repo-exec.mjs";
 import { ledgerPath } from "./tracker.mjs";
@@ -160,7 +160,7 @@ test("land-feature: an eligible plan is retired through the landing capability, 
   }));
   assert.equal(done.calls.retire.length, 1);
   assert.equal("auto" in done.calls.retire[0], false, "auto is not an input field: only the capability makes a retire automatic");
-  assert.equal(done.calls.retireCapability[0], landingCapability(), "retire is called with the landing capability (ARCH-DOCS-17)");
+  assert.notEqual(done.calls.retireCapability[0], landingCapability(), "an injected retire never receives the landing capability (ARCH-DOCS-18)");
   assert.equal(done.calls.retire[0].plan, "docs/plans/p.md");
   assert.equal(done.calls.retire[0].sid, "s");
   assert.notEqual(done.archiveAfter, done.archiveBefore, "archive committed locally");
@@ -170,6 +170,26 @@ test("land-feature: an eligible plan is retired through the landing capability, 
   // The single auto doc_retired event is written by retire itself (it carries the capability); autoArchive adds none.
   assert.equal(done.events.filter((e) => e.ev === "doc_retired").length, 0);
   assert.deepEqual(done.normal, baseline.normal);
+});
+
+test("land-feature: a deps stub never receives an object the real retire accepts (ARCH-DOCS-18, ARCH-LAND-33)", () => {
+  const seen = [];
+  scenario((calls) => ({
+    autoArchiveEligible: (_context, _plan, seams) => { seen.push(seams.capability); return { eligible: true }; },
+    retire: (input, _context, capability) => { seen.push(capability); calls.retire.push(input); return {}; },
+  }));
+  assert.equal(seen.length, 2, "both stubs ran");
+  for (const captured of seen) {
+    assert.notEqual(captured, landingCapability());
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "stub-cap-")));
+    try {
+      git(root, ["init", "-q"]);
+      const stateDir = path.join(root, ".craftsman");
+      const out = retire({ plan: "docs/plans/p.md", sid: "none" }, { id: ".", root, stateDir, grantStateDir: stateDir }, captured);
+      assert.equal(out.refused, true);
+      assert.match(out.reason, /no doc-write grant/);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  }
 });
 
 test("land-feature: a retire refusal or exception leaves the landing result identical and never parks", () => {
@@ -197,7 +217,7 @@ test("land-feature: a dirty main checkout skips the retire without changing the 
   assert.deepEqual(dirty.normal, baseline.normal);
 });
 
-test("land-feature: with no archive project the main checkout HEAD and working tree are untouched (ARCH-LAND-30)", () => {
+test("land-feature: with no archive project the main checkout HEAD and working tree are untouched (ARCH-LAND-33)", () => {
   const run = scenario((calls) => ({
     autoArchiveEligible: (ctx, plan) => autoArchiveEligible(ctx, plan, { capability: landingCapability(), resolveArchive: () => ({ off: "none" }) }),
     retire: (i) => { calls.retire.push(i); return {}; },
@@ -225,7 +245,7 @@ test("land-feature: a throwing retire does not change the landing result", () =>
 const real = (calls) => ({ retire: (i) => { calls.retire.push(i); return {}; } });
 const P = "docs/plans/zq-plan.md";
 
-test("land-feature: an open sibling plan leaves the main checkout HEAD and working tree untouched (ARCH-LAND-30)", () => {
+test("land-feature: an open sibling plan leaves the main checkout HEAD and working tree untouched (ARCH-LAND-33)", () => {
   const run = scenario(real, { plan: P,
     mainFiles: { [P]: "# zq-plan\n", "docs/plans/scrutinise-zq-plan.md": "# s\n" },
     extraRows: [{ plan: "docs/plans/scrutinise-zq-plan.md", unit: "s1", status: "IN_PROGRESS" }],
@@ -236,7 +256,7 @@ test("land-feature: an open sibling plan leaves the main checkout HEAD and worki
   assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /open sibling plans/.test(e.reason)), JSON.stringify(run.events));
 });
 
-test("land-feature: a live descendant leaves the main checkout HEAD and working tree untouched (ARCH-LAND-30)", () => {
+test("land-feature: a live descendant leaves the main checkout HEAD and working tree untouched (ARCH-LAND-33)", () => {
   const run = scenario(real, { plan: P,
     mainFiles: { [P]: "---\nlevel: epic\nchildren: [c]\n---\n# zq-plan\n", "docs/plans/c.md": "---\nparent: zq-plan\n---\n# c\n" },
   });
@@ -246,7 +266,7 @@ test("land-feature: a live descendant leaves the main checkout HEAD and working 
   assert.ok(run.events.some((e) => e.ev === "doc_retire_skipped" && /live descendants: c/.test(e.reason)), JSON.stringify(run.events));
 });
 
-test("land-feature: a referrer brought by the landed merge leaves the main checkout HEAD and working tree untouched (ARCH-LAND-30)", () => {
+test("land-feature: a referrer brought by the landed merge leaves the main checkout HEAD and working tree untouched (ARCH-LAND-33)", () => {
   const run = scenario(real, { plan: P, mainFiles: { [P]: "# zq-plan\n" }, featureFiles: { "docs/plans/q.md": `# q\nsee ${P}\n` } });
   assert.equal(run.normal.merged, true);
   assert.equal(run.calls.retire.length, 0);
@@ -261,7 +281,7 @@ test("land-feature: a plan doc that exists only in the landed merge is eligible,
   assert.ok(!run.events.some((e) => e.ev === "doc_retire_skipped" && /not tracked/.test(e.reason)));
 });
 
-// ---- impl-landing-token 5.4: the real retire, no stub (ARCH-DOCS-17, ARCH-LAND-32, ARCH-ARCHIVE-03, ARCH-ARCHIVE-09) ----
+// ---- impl-landing-token 5.4: the real retire, no stub (ARCH-DOCS-18, ARCH-LAND-33, ARCH-ARCHIVE-03, ARCH-ARCHIVE-09) ----
 test("land-feature end to end: a landed, referrer-free plan is archived locally through the real retire, with no grant and no push", () => {
   const run = scenario(() => ({}), { plan: P, mainFiles: { [P]: "# zq-plan\n" } });
   assert.equal(run.normal.merged, true);
@@ -284,7 +304,7 @@ test("land-feature end to end: a landed, referrer-free plan is archived locally 
   assert.ok(run.events.some((e) => e.ev === "archive_copied"));
 });
 
-test("land-feature: with no landing capability the main checkout HEAD and working tree are untouched (ARCH-LAND-32)", () => {
+test("land-feature: with no landing capability the main checkout HEAD and working tree are untouched (ARCH-LAND-33)", () => {
   // The real eligibility check, called without the capability, as a caller that never obtained it would.
   const run = scenario((calls) => ({
     autoArchiveEligible: (ctx, plan, seams) => autoArchiveEligible(ctx, plan, { ...seams, capability: undefined }),

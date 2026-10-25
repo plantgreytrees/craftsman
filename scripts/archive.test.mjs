@@ -214,7 +214,7 @@ test("copyAndCommit: a symlinked source directory is refused with no commit (ARC
   assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
 });
 
-// ---- impl-landing-token 5.3: one liveBlockers check, two callers (ARCH-DOCS-09, ARCH-DOCS-17) ----
+// ---- impl-landing-token 5.3: one liveBlockers check, two callers (ARCH-DOCS-09, ARCH-DOCS-18) ----
 import { autoArchiveEligible, liveBlockers } from "./lib/archive.mjs";
 import { landingCapability } from "./doc-retire.mjs";
 import { buildIndex } from "./lib/plan-index.mjs";
@@ -291,17 +291,29 @@ test("autoArchiveEligible: the hierarchy at the landed commit is read with ls-tr
 
 test("autoArchiveEligible: a cat-file --batch size that is not a safe integer, or runs past the buffer, is an unreadable hierarchy (S1)", () => {
   const root = repo(tmp("indexat-bad"));
-  const name = "docs/plans/a blob 3.md"; // spaces in the name: `<sha>:<name> missing` splits into a fake header
   const state = [{ plan: "docs/plans/p.md", unit: "u", status: "COMPLETE" }];
-  const verdictFor = (answer) => autoArchiveEligible({ root }, "docs/plans/p.md", {
+  const verdictFor = (name, answer) => autoArchiveEligible({ root }, "docs/plans/p.md", {
     capability: landingCapability(), sha: "abc",
     git: (args) => (args[0] === "ls-tree" ? `${name}\0` : args[0] === "cat-file" && args[1] === "--batch" ? Buffer.from(answer) : ""),
     resolveArchive: () => ({ root: "/tmp/archive" }), currentState: () => state,
     findReferrers: () => ({ hits: [], blocking: [], rewritable: [] }),
   });
-  for (const answer of [`abc:${name} missing\n`, "0123 blob 99\nshort\n", "0123 blob -1\n\n"]) {
-    const v = verdictFor(answer);
+  // A valid name, so the size check is what refuses: old code accepted a size that ran past the buffer or went negative.
+  for (const answer of ["0123 blob 99\nshort\n", "0123 blob -1\n\n"]) {
+    const v = verdictFor("docs/plans/q.md", answer);
     assert.equal(v.eligible, false);
     assert.match(v.reason, /cannot read the plan hierarchy/, answer);
+    assert.match(v.reason, /gave a bad size for docs\/plans\/q\.md/, answer);
   }
+  // A header that is not `<hex oid> blob <size>` is unreadable whatever its size says (ARCH-DOCS-18).
+  for (const answer of ["zzzz blob 2\nhi\n", "0123 blob 2 extra\nhi\n", "0123 tree 2\nhi\n"]) {
+    const v = verdictFor("docs/plans/q.md", answer);
+    assert.equal(v.eligible, false, answer);
+    assert.match(v.reason, /cannot read docs\/plans\/q\.md/, answer);
+  }
+  // A name with spaces makes `<sha>:<name> missing` split into a fake header; it is refused as unreadable, not as a bad size.
+  const spaced = verdictFor("docs/plans/a blob 3.md", "abc:docs/plans/a blob 3.md missing\n");
+  assert.equal(spaced.eligible, false);
+  assert.match(spaced.reason, /cannot read docs\/plans\/a blob 3\.md/);
+  assert.doesNotMatch(spaced.reason, /bad size/);
 });

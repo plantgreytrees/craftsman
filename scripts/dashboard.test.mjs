@@ -209,7 +209,7 @@ test("writeDashboard refuses a symlinked dashboard.html and leaves no temp file 
   assert.deepEqual(fs.readdirSync(path.join(root, ".craftsman", "export")), ["dashboard.html"]);
 });
 
-test("archive: the dashboard label equals the autoArchiveEligible verdict for the same plan (ARCH-VIEWS-15, ARCH-DOCS-14)", () => {
+test("archive: the dashboard label equals the autoArchiveEligible verdict for the same plan (ARCH-VIEWS-15, ARCH-DOCS-18)", () => {
   for (const withArchive of [false, true]) {
     const { context } = archiveFixture();
     const ws = mk();

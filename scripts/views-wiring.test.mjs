@@ -95,8 +95,12 @@ test("landingCapability is named by no non-test module except lib/archive.mjs an
     const rel = `${dir}/${e.name}`;
     return e.isDirectory() ? walk(rel) : [rel];
   });
-  const modules = walk("scripts").filter((f) => f.endsWith(".mjs") && !f.endsWith(".test.mjs"));
+  const modules = ["scripts", "hooks", "workflows"].flatMap(walk).filter((f) => /\.(mjs|cjs|js)$/.test(f) && !/\.test\.(mjs|cjs|js)$/.test(f));
   assert.ok(modules.includes("scripts/lib/archive.mjs") && modules.includes("scripts/doc-retire.mjs"));
+  assert.ok(modules.some((f) => f.startsWith("hooks/")) && modules.some((f) => f.startsWith("workflows/")), "hooks/ and workflows/ are scanned");
+  // Positive side: renaming the export must turn this red, not leave the negative scan vacuously green.
+  assert.match(read("scripts/doc-retire.mjs"), /export function landingCapability\b/);
+  assert.match(read("scripts/lib/archive.mjs"), /\blandingCapability\b/);
   const offenders = modules.filter((f) => !allowed.has(f) && /landingCapability/.test(read(f)));
   assert.deepEqual(offenders, []);
 });
