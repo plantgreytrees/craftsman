@@ -263,3 +263,45 @@ Rows retired from the live ledger by `tracker.mjs archive`.
 ## docs/plans/p.md (2026-10-25)
 
 - 2026-10-25 **p#u1** CANCELLED — test-fixture leak: docs/plans/p.md never existed (sync-docs 2026-10-25)
+
+## docs/plans/scrutinise-external-project-board.md (2026-10-25)
+
+- 2026-10-25 **scrutinise-external-project-board#amend-rules-token-and-views** COMPLETE — 6858209 on main; ARCH-DOCS-17/LAND-32 present, arch lint PASS (sync-docs 2026-10-25)
+- 2026-10-25 **scrutinise-external-project-board#decide-auto-archive-authority** COMPLETE — decision applied
+- 2026-10-25 **scrutinise-external-project-board#decide-rule-mismatches** COMPLETE — decision applied
+- 2026-10-25 **scrutinise-external-project-board#fix-capability-leftovers** COMPLETE — all 6 acceptance criteria ticked; merged direct to main 555a8da (feat/fix-capability-leftovers 9490a81); suite 1131/1131, arch-check lint PASS
+  - [x] [unit:fix-capability-leftovers] 7.1 A wiring test in scripts/views-wiring.test.mjs fails when any non-test .mjs other than scripts/lib/archive.mjs and scripts/doc-retire.mjs names landingCapability → adding an import to another module turns it red
+  - [x] [unit:fix-capability-leftovers] 7.2 indexAt requires a safe-integer size and a payload within the buffer, else throws → a test with a name holding spaces and a missing answer fails on the previous code
+  - [x] [unit:fix-capability-leftovers] 7.3 retire refuses before touching anything when it carries the capability and no archive root resolves → a test shows nothing removed and no doc_retired
+  - [x] [unit:fix-capability-leftovers] 7.4 Comments in scripts/lib/archive.mjs and scripts/repo-exec.mjs cite ARCH-DOCS-18 and ARCH-LAND-33 and document the capability argument → git grep for ARCH-DOCS-14 and ARCH-LAND-30 in scripts finds none outside history quotes
+  - [x] [unit:fix-capability-leftovers] 7.5 The liveBlockers table covers a derived descendant and a parent-level descendant with no rows, each landing in descendants → both cases pass
+  - [x] [unit:fix-capability-leftovers] 7.6 The full suite and arch-check lint pass
+- 2026-10-25 **scrutinise-external-project-board#fix-capability-wording** COMPLETE — all 2 acceptance criteria ticked; merged direct to main f56a96b (feat/fix-capability-wording a387eb7); ARCH-DOCS-18, ARCH-LAND-33; arch-check lint PASS
+  - [x] [unit:fix-capability-wording] 6.1 ARCH-DOCS-17 and ARCH-LAND-32 are superseded by ARCH-DOCS-18 and ARCH-LAND-33, which say the capability is not exported as a value and is obtainable only through landingCapability(), whose only non-test importer is scripts/lib/archive.mjs → arch-check lint passes, no other rule text changes
+  - [x] [unit:fix-capability-wording] 6.2 ARCH-DOCS-18's check: names auto-archive.test.mjs for the auto-eligibility table and the Step 7 wiring test, and each cite: resolves → arch-check lint passes
+- 2026-10-25 **scrutinise-external-project-board#fix-clear-notes-and-auto-event** COMPLETE — all 1 acceptance criteria ticked; merged direct to main; suite 1102/1102, arch lint pass
+  - [x] [unit:fix-clear-notes-and-auto-event] clearNotes unlinks nothing through a symlinked .craftsman or .craftsman/export; a real retire({auto:true}) logs exactly one doc_retired with auto true and a manual retire none; stale temp files are swept; the archive value is validated before git ls-tree; a symlinked source directory is refused by copyAndCommit
+- 2026-10-25 **scrutinise-external-project-board#fix-cycle-and-classifier-leftovers** COMPLETE — all 1 acceptance criteria ticked; direct merge 600c063d7f0af9c00a52ff50c6cef23c35a81c10; suite 1104/1104, lint PASS
+  - [x] [unit:fix-cycle-and-classifier-leftovers] tracker.mjs has no static import cycle (multi-line imports and ledger-keys included, pinned by views-wiring.test.mjs); retireCheck is built from classifyArchive hits and agrees with the dashboard; isMain comes from core in tracker.mjs and tracker-sync.mjs
+- 2026-10-25 **scrutinise-external-project-board#fix-dashboard-queue** COMPLETE — all 1 acceptance criteria ticked; direct merge to main 4c828fb; criterion ticked
+  - [x] [unit:fix-dashboard-queue] buildModel on a real project context (no injected rows or sessions) returns the ready plans and execution.maxSessions lanes; the test fails on the previous code
+- 2026-10-25 **scrutinise-external-project-board#fix-export-write-safety** COMPLETE — all 1 acceptance criteria ticked; direct merge to main
+  - [x] [unit:fix-export-write-safety] a symlinked .craftsman, .craftsman/export or target file is refused; dashboard.html, notes and .fingerprint are written through a temp file and rename; the tracker-sync main-module check works through a symlinked path; a throw or timeout still exits 0
+- 2026-10-25 **scrutinise-external-project-board#fix-landing-side-effects** COMPLETE — all 1 acceptance criteria ticked; direct merge to main c874e7b4d10214110560bc49379f30e516c6c8d0
+  - [x] [unit:fix-landing-side-effects] with no archive project, or an ineligible plan, land-feature leaves the main checkout HEAD and working tree untouched; an auto retire logs exactly one doc_retired event with auto true; a throwing retire never changes the landing result
+- 2026-10-25 **scrutinise-external-project-board#fix-one-classifier** COMPLETE — all 1 acceptance criteria ticked; landed direct on main 76b06ac; 1077 tests green
+  - [x] [unit:fix-one-classifier] one archive classifier (auto, rewrite, blocked, not-archivable) feeds the dashboard, autoArchiveEligible and retire, and a test proves the dashboard label equals the autoArchiveEligible verdict; one productIdFor is shared
+- 2026-10-25 **scrutinise-external-project-board#fix-pointer-rewrite-and-ff** COMPLETE — all 1 acceptance criteria ticked; merged direct to main; full suite 1095 pass, arch-check PASS
+  - [x] [unit:fix-pointer-rewrite-and-ff] a pointer written for one retired doc is never rewritten for another (descendant slug equal to the product id), and an open sibling, a live descendant or a referrer brought by the landed merge leaves the main checkout HEAD and working tree untouched; tests in doc-retire.test.mjs and auto-archive.test.mjs fail on the previous code
+- 2026-10-25 **scrutinise-external-project-board#fix-retire-next-and-restore** COMPLETE — all 1 acceptance criteria ticked; direct merge to main; criteria ticked
+  - [x] [unit:fix-retire-next-and-restore] a canonical `N. <slug> — <intent>` NEXT.md line for the retired plan, a sibling or a descendant is removed in the retire commit while other lines stay byte-identical; a retired sibling's lookup prints the path it was archived under; a product id equal to the slug yields one pointer
+- 2026-10-25 **scrutinise-external-project-board#fix-round5-test-and-deps-seam** COMPLETE — all 6 acceptance criteria ticked; merged direct to main 081159f (feat/fix-round5-test-and-deps-seam aca2d7c); suite 1135/1135, arch-check lint PASS
+  - [x] [unit:fix-round5-test-and-deps-seam] 8.1 The S1 indexAt test asserts the specific bad-size reason with a valid plan name → it fails on 555a8da^1 and passes now
+  - [x] [unit:fix-round5-test-and-deps-seam] 8.2 autoArchive hands caller-injected deps a non-capability marker and LANDING only to the built-in eligibility and retire → a stub that captures what it receives gets an object the real retire refuses
+  - [x] [unit:fix-round5-test-and-deps-seam] 8.3 A landing retire never deletes without a verified archive copy, even when the second archive resolve yields no root → a test shows nothing removed
+  - [x] [unit:fix-round5-test-and-deps-seam] 8.4 The wiring test asserts doc-retire.mjs exports landingCapability and lib/archive.mjs names it, and scans hooks/ and workflows/ too → renaming the export turns it red
+  - [x] [unit:fix-round5-test-and-deps-seam] 8.5 indexAt requires a three-field header with a hex oid, and the test titles cite ARCH-DOCS-18 and ARCH-LAND-33 → a malformed-header case passes and git grep for the superseded ids in scripts lists nothing
+  - [x] [unit:fix-round5-test-and-deps-seam] 8.6 The full suite and arch-check lint pass
+- 2026-10-25 **scrutinise-external-project-board#fix-suggestions** COMPLETE — all 1 acceptance criteria ticked; merged direct to main; gates green (1082 tests, arch-check PASS)
+  - [x] [unit:fix-suggestions] the Mermaid tag carries integrity and crossorigin; copyAndCommit refuses a symlinked source or path component; the tracker.mjs import graph has no cycle; disabling export clears generated notes; the prune command text is pinned by tests (no force flag, rounds of 15, never pre-approved, push retry); the CHANGELOG bullet is corrected and [Unreleased] stays under 8 KB
+- 2026-10-25 **scrutinise-external-project-board#impl-landing-token** COMPLETE — 5.1-5.6 MET in isolated scrutiny rounds 4-6; merged ab589d2, hardened by 555a8da and 081159f; suite 1135/1135, arch lint PASS
