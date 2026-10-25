@@ -98,3 +98,27 @@ test("claim: feature:<id> units are exclusive across sessions and the ':' is san
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("claim: a claim from a linked worktree shares the main checkout's lock", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-claim-")));
+  try {
+    const git = (...args) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: dir });
+    git("init", "-q", "-b", "main");
+    git("commit", "-q", "--allow-empty", "-m", "init");
+    const wt = path.join(dir, ".worktrees", "u");
+    assert.equal(git("worktree", "add", "-q", wt, "-b", "feat/u").status, 0);
+    const input = { plan: "docs/plans/example.md", unit: "unit-1", project: ".", session_id: "owner" };
+    const run = (cwd, extra = {}) => spawnSync(process.execPath, [CLAIM], {
+      cwd, env: { ...process.env, CLAUDE_PROJECT_DIR: cwd }, input: JSON.stringify({ ...input, ...extra }), encoding: "utf8",
+    });
+    assert.equal(run(dir).status, 0);
+    assert.equal(run(wt, { session_id: "other" }).status, 2, "worktree claim must collide with the root claim");
+    assert.equal(fs.existsSync(path.join(wt, ".craftsman", "claims")), false);
+    assert.equal(run(wt, { action: "release", session_id: "other" }).status, 2, "a non-owner cannot release");
+    assert.equal(run(wt, { action: "release" }).status, 0);
+    assert.equal(fs.existsSync(claimPath(input.plan, input.unit, ".", { root: dir })), false);
+    assert.equal(run(wt, { session_id: "other" }).status, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
