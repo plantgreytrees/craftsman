@@ -240,6 +240,38 @@ test("merge: approval required with featureBranches off logs approval_unenforced
   } finally { done(t); }
 });
 
+function unitWt(t, unit) {
+  const wt = prepare(t.context, { unit, slug: unit }, t.info);
+  fs.writeFileSync(path.join(wt.worktree_path, `${unit}.txt`), "z\n");
+  git(wt.worktree_path, "add", `${unit}.txt`); git(wt.worktree_path, "commit", "-q", "-m", unit);
+  return wt.worktree_path;
+}
+
+test("merge: gate on and no feature_branch is refused and pushes nothing", () => {
+  const t = setup();
+  try {
+    const before = t.baseHead();
+    const worktree_path = unitWt(t, "u7");
+    assert.throws(() => merge(t.context, { unit: "u7", slug: "u7", worktree_path }, t.info), /approval/);
+    assert.equal(t.baseHead(), before);
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+  } finally { done(t); }
+});
+
+test("merge: gate on with a feature_branch, or featureBranches off, is unchanged", () => {
+  const t = setup();
+  try {
+    const worktree_path = unitWt(t, "u8");
+    const r = merge(t.context, { unit: "u8", slug: "u8", worktree_path, push: false, feature_branch: "feature/p-f1" }, t.info);
+    assert.equal(r.merged, true);
+  } finally { done(t); }
+  const o = setup({ required: true }, { planning: { featureBranches: false } });
+  try {
+    const worktree_path = unitWt(o, "u6");
+    assert.equal(merge(o.context, { unit: "u6", slug: "u6", worktree_path, push: false }, o.info).merged, true);
+  } finally { done(o); }
+});
+
 test("tracker.publish: off, push and on-approve modes", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-pubmode-"));
   try {
