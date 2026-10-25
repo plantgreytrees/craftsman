@@ -18,19 +18,35 @@ export function noteUnenforced(cfg, context) {
   if (approvalUnenforced(cfg)) logEvent({ ev: "approval_unenforced", reason: "featureBranches off" }, context);
 }
 
-// ARCH-LAND-28: with the gate on, a unit merge is allowed only into its real feature branch
-// (pr mode retargets; direct mode needs base === feature_branch) or when it is docs-only.
-// Changed paths are read from the worktree (`-z` safe) only when no feature_branch is given.
-const DOCS_ONLY = /^docs\/(plans|ideas)\//;
-export function assertMergeAllowed(cfg, input, { info, land, worktree } = {}) {
-  if (!approvalRequired(cfg)) return;
-  if (input.feature_branch) {
-    if (land === "pr" || input.feature_branch === info.base_branch) return;
-  } else {
-    const paths = execFileSync("git", ["-C", worktree, "diff", "--name-only", "-z", `${info.base_branch}...HEAD`], { encoding: "utf8" }).split("\0").filter(Boolean);
-    if (paths.length && paths.every((f) => DOCS_ONLY.test(f))) return;
+// ARCH-LAND-28: with the gate on, the merge action refuses any feature_branch (feature work lands through
+// land-unit / land-feature) and lands directly only a docs-only change: A/M/D records of .md files under
+// docs/plans or docs/ideas, no symlink or gitlink, read raw with renames off against origin/<base> when it
+// exists (the direct path pushes the local base, so an unpushed local commit must not hide). Returns a
+// check that the worktree HEAD is still the checked sha (called before any merge or push); a no-op when the gate is off.
+const DOCS_ONLY = /^docs\/(plans|ideas)\/.+\.md$/;
+const refused = () => new Error("approval required: land feature work through land-unit or land-feature; only docs-only merges land directly");
+const git = (cwd, args, opts = {}) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", ...opts });
+export function assertMergeAllowed(cfg, input, { info, worktree } = {}) {
+  if (!approvalRequired(cfg)) return () => {};
+  if (input.feature_branch) throw refused();
+  const remote = `origin/${info.base_branch}`;
+  let hasRemote = true;
+  try { git(worktree, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}`], { stdio: "ignore" }); } catch { hasRemote = false; }
+  const head = git(worktree, ["rev-parse", "HEAD"]).trim();
+  const f = git(worktree, ["diff", "--raw", "-z", "--no-renames", `${hasRemote ? remote : info.base_branch}...${head}`]).split("\0");
+  let seen = 0;
+  for (let i = 0; i + 1 < f.length; i += 2) {
+    const m = /^:(\d+) (\d+) \w+ \w+ ([A-Z])\d*$/.exec(f[i]);
+    if (!m || !"AMD".includes(m[3]) || m[2] === "120000" || m[2] === "160000" || m[1] === "120000" || m[1] === "160000" || !DOCS_ONLY.test(f[i + 1])) throw refused();
+    seen++;
   }
-  throw new Error("approval required: this merge needs an approved page; land through land-feature (only docs/plans and docs/ideas changes merge directly)");
+  if (!seen) throw refused();
+  return () => repin(worktree, head);
+}
+
+// The pinned worktree HEAD must be unchanged (a no-op when the gate is off).
+function repin(worktree, pin) {
+  if (pin && git(worktree, ["rev-parse", "HEAD"]).trim() !== pin) throw new Error("approval required: the worktree HEAD changed after the merge check; nothing landed");
 }
 
 // A red gate after base moved in PARKs (ARCH-LAND-27).
