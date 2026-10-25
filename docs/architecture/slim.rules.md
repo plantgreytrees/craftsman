@@ -3,7 +3,7 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: 480903d33194bea8f92ced1bd5598cdcbde7b952
+verified_at: 0a2fc6fd486e12c365bb79ffb800eef251a19db4
 updated: 2026-10-25
 ---
 # ARCH slim — enforced rules
@@ -20,5 +20,6 @@ updated: 2026-10-25
 - **ARCH-SLIM-10** [decided] Always-loaded bytes are budgeted and measured: SessionStart additionalContext has a byte cap in a test beside the descriptions total (target 3 KB); telemetry records one context sample with phase "baseline" from the session's first assistant usage and stats.mjs reports baseline, peak and growth per session; prose cuts beyond ARCH-SLIM-12 wait for a week of baseline data — check: session-context.test.mjs cap, telemetry.test.mjs baseline, stats.test.mjs — cite: scripts/telemetry.mjs:63-71
 - **ARCH-SLIM-11** [superseded by ARCH-SLIM-13]
 - **ARCH-SLIM-12** [superseded by ARCH-SLIM-14]
-- **ARCH-SLIM-13** [decided] No third-party workflow plugin (Superpowers or any other) is a dependency or co-install assumption; borrowed patterns (test-driven development, systematic debugging, verification before completion) are vendored as craftsman skills with MIT attribution inside the descriptions budget and load only when their step runs — check: skills-vendored.test.mjs, skills/*/SKILL.md attribution line — cite: skills/test-driven-development/SKILL.md:1-6
+- **ARCH-SLIM-13** [superseded by ARCH-SLIM-15]
 - **ARCH-SLIM-14** [decided] The documented entry points are /idea, /architect, /auto, /investigate, /sync-docs, /merge, /init, /upgrade, /stats and /digest; the loop commands /auto drives through the Skill tool (/plan, /orchestrate, /scrutinise) stay model-invocable; a command carries disable-model-invocation only when it is user-only and no command, agent, workflow or hook invokes it (toggle, builtin-check and account-switch today), and further flags are added only after entry-surface.test.mjs proves nothing calls the command; a command is deleted only after 30 days with no invocation in telemetry; the reviewer agents listed in entry-surface.test.mjs carry maxTurns — check: entry-surface.test.mjs flagged-set and no-invoker checks — cite: scripts/entry-surface.test.mjs:1-59
+- **ARCH-SLIM-15** [decided] No third-party plugin is a dependency or co-install assumption: plugin.json declares no `dependencies`, and borrowed patterns (test-driven development, systematic debugging, verification before completion) are vendored as craftsman skills with MIT attribution inside the descriptions budget and load only when their step runs. The one named optional integration is Artist (`artist@artist-marketplace`), used only by the ui gate after scripts/ui-gate.mjs detects it (ARCH-GATES-02); its absence is never an error — check: skills-vendored.test.mjs, plugin.json has no dependencies key, ui-gate.test.mjs absent case — cite: skills/test-driven-development/SKILL.md:1-6, docs/architecture/gates.rules.md:12

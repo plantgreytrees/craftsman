@@ -63,6 +63,8 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 
 | plan | unit | module | status | evidence | updated |
 |---|---|---|---|---|---|
+| [artist-ui-gate](./artist-ui-gate.md) | ui-gate-script | scripts/ui-gate.mjs | PENDING | — | 2026-10-25 |
+| [artist-ui-gate](./artist-ui-gate.md) | ui-surface | agents/ui-ux-reviewer.md | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-cli-refusal | scripts/approval.mjs | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-floor-vs-stopgate-note | docs/architecture/safety.rules.md | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | approval-json-quoting | commands/_approval.md | PENDING | — | 2026-10-25 |
@@ -87,9 +89,9 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-cli-contract | scripts/tracker.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-gate-lookup | scripts/lib/gate-command.mjs | COMPLETE | all 5 acceptance criteria ticked; landed to main; suite green except known base… | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-helper-form | commands/_approval.md | COMPLETE | all 2 acceptance criteria ticked; root landed 59684fd; suite 1118/1118, lint PA… | 2026-10-25 |
-| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-helper-root | agents/unit-runner.md | PENDING | — | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-helper-root | agents/unit-runner.md | IN_PROGRESS | unit-runner | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-land-race | scripts/repo-exec.mjs | COMPLETE | all 4 acceptance criteria ticked; landed to main | 2026-10-23 |
-| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-approval | scripts/repo-exec.mjs | IN_PROGRESS | unit-runner | 2026-10-25 |
+| [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-approval | scripts/repo-exec.mjs | BLOCKED | Work finished and tested but left UNCOMMITTED in worktree (pre-guard blocks com… | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-merge-retire | scripts/repo-exec.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-atomic | scripts/tracker-publish.mjs | COMPLETE | all 3 acceptance criteria ticked; landed to main | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | fix-publish-cli | scripts/tracker.mjs | COMPLETE | all 2 acceptance criteria ticked; landed to main | 2026-10-23 |
@@ -112,22 +114,6 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | readme-safety-keys | README.md | PENDING | — | 2026-10-25 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | telemetry-baseline-marker | scripts/telemetry.mjs | PENDING | — | 2026-10-23 |
 | [scrutinise-dev-lifecycle-docs-plan](./scrutinise-dev-lifecycle-docs-plan.md) | workspace-key-collision | scripts/lib/ledger-keys.mjs | PENDING | — | 2026-10-23 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | amend-rules-token-and-views | docs/architecture | COMPLETE | 6858209 on main; ARCH-DOCS-17/LAND-32 present, arch lint PASS (sync-docs 2026-1… | 2026-10-25 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | decide-auto-archive-authority | docs/architecture/docs.rules.md | COMPLETE | decision applied | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | decide-rule-mismatches | docs/architecture | COMPLETE | decision applied | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-capability-leftovers | scripts/doc-retire.mjs | COMPLETE | all 6 acceptance criteria ticked; merged direct to main 555a8da (feat/fix-capab… | 2026-10-25 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-capability-wording | docs/architecture | COMPLETE | all 2 acceptance criteria ticked; merged direct to main f56a96b (feat/fix-capab… | 2026-10-25 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-clear-notes-and-auto-event | scripts/lib/export-notes.mjs | COMPLETE | all 1 acceptance criteria ticked; merged direct to main; suite 1102/1102, arch … | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-cycle-and-classifier-leftovers | scripts/tracker.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge 600c063d7f0af9c00a52ff50c6cef23c… | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-dashboard-queue | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main 4c828fb; criterion ticked | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-export-write-safety | scripts/lib/export-notes.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-landing-side-effects | scripts/lib/archive.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main c874e7b4d10214110560bc49… | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-one-classifier | scripts/lib/archive.mjs | COMPLETE | all 1 acceptance criteria ticked; landed direct on main 76b06ac; 1077 tests gre… | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-pointer-rewrite-and-ff | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; merged direct to main; full suite 1095 pass, … | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-retire-next-and-restore | scripts/doc-retire.mjs | COMPLETE | all 1 acceptance criteria ticked; direct merge to main; criteria ticked | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-round5-test-and-deps-seam | scripts/lib/archive.mjs | COMPLETE | all 6 acceptance criteria ticked; merged direct to main 081159f (feat/fix-round… | 2026-10-25 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | fix-suggestions | scripts/lib/dashboard.mjs | COMPLETE | all 1 acceptance criteria ticked; merged direct to main; gates green (1082 test… | 2026-10-24 |
-| [scrutinise-external-project-board](./scrutinise-external-project-board.md) | impl-landing-token | scripts/doc-retire.mjs | MERGED | merged direct to main ab589d2 (feat/impl-landing-token 861b841); suite 1128/112… | 2026-10-25 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-2 | scripts/pre-guard.mjs | COMPLETE | all 1 acceptance criteria ticked; commit 295ba6c on feat/scrutinise-fixes-and-s… | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | bypass-flags-3 | scripts/pre-guard.mjs | PENDING | planned from /scrutinise --deep round 2 | 2026-10-21 |
 | [scrutinise-fixes-and-safety](../../scrutinise-fixes-and-safety) | config-keys-protected | scripts/pre-guard.mjs | COMPLETE | SAFETY_CONFIG_KEYS in scripts/lib/self-protect.mjs:43-48; approval keys added i… | 2026-10-24 |
