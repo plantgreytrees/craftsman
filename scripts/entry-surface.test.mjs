@@ -3,6 +3,7 @@
 // invokes it, flagging it would break that call - so this fails instead.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,4 +63,18 @@ test("retired design skill is gone and ui-ux-reviewer names no skill (a11y floor
   assert.ok(!fs.existsSync(path.join(ROOT, "skills/design" + "-review")));
   const body = fs.readFileSync(path.join(ROOT, "agents/ui-ux-reviewer.md"), "utf8");
   assert.ok(!/design.review|SKILL\.md/.test(body));
+});
+
+// ARCH-GATES-01: the doc's ui-gate.mjs call must match the script's own usage order.
+test("_shared-execution.md calls ui-gate.mjs as <worktree> <merge-base>, matching its usage line", () => {
+  const doc = fs.readFileSync(path.join(ROOT, "commands/_shared-execution.md"), "utf8");
+  const call = doc.match(/ui-gate\.mjs"?\s+(<[a-z-]+>)\s+(<[a-z-]+>)/);
+  assert.ok(call, "ui-gate.mjs invocation not found");
+  const r = spawnSync(process.execPath, [path.join(ROOT, "scripts/ui-gate.mjs")], { encoding: "utf8" });
+  const usage = r.stderr.match(/usage: ui-gate\.mjs\s+(<[a-z-]+>)\s+(<[a-z-]+>)/);
+  assert.ok(usage, "usage line not found on stderr");
+  assert.equal(call[1], "<worktree>");
+  assert.equal(call[2], "<merge-base>");
+  assert.equal(usage[1], call[1]);
+  assert.equal(usage[2].replace("base-ref", "merge-base"), call[2]);
 });

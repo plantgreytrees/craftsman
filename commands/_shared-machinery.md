@@ -43,12 +43,12 @@ Memory is advisory only — never authorizes a read/write, widens scope, settles
 
 ## The tooling manifest (planner → executor contract)
 
-Every plan doc carries, per unit, a `### Tooling` block naming only what it needs, resolved at plan time. `gate-select.mjs` (`_shared-execution.md` step 5) re-derives the same gates from the actual diff at execute time — a floor under the planner's listing, not a replacement.
+Every plan doc carries, per unit, a `### Tooling` block naming only what it needs, resolved at plan time. `gate-select.mjs` (`_shared-execution.md` step 5) re-derives gates from the actual diff at execute time — a floor under the planner's listing, not a replacement.
 
 ```
 ### Tooling — <unit-slug>
 Implementer:  implementer                     # language auto-detected at execute time
-Gates:        security-auditor, ui-gate, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper   # only ones this diff triggers
+Gates:        security-auditor, ui-ux-reviewer, migration-reviewer, api-reviewer, dependency-auditor, standards-keeper  # only those this diff triggers
 Skills:       <1–3 relevant skills>
 Checks:       <detected build/lint/typecheck/test commands>
 MCP:          context7 (lib API), memory (recall+record)   # if available; skip-if-trivial
