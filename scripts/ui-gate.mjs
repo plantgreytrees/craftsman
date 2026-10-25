@@ -14,12 +14,52 @@ import path from "node:path";
 
 const execFileAsync = promisify(execFile);
 const KEY = "artist@artist-marketplace";
-const REUSE_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const PRUNE_AGE_MS = 7 * 24 * 3600_000;
+
+function timeoutMs() {
+  const raw = process.env.CRAFTSMAN_UI_GATE_TIMEOUT_MS;
+  return /^[1-9]\d*$/.test(raw ?? "") ? Number(raw) : DEFAULT_TIMEOUT_MS;
+}
+
+// Remove run-* dirs older than 7 days; lstat so symlinks are never followed.
+function pruneRuns(parent) {
+  let names;
+  try { names = fs.readdirSync(parent); } catch { return; }
+  for (const n of names) {
+    if (!n.startsWith("run-")) continue;
+    const p = path.join(parent, n);
+    try {
+      const st = fs.lstatSync(p);
+      if (st.isDirectory() && Date.now() - st.mtimeMs > PRUNE_AGE_MS) fs.rmSync(p, { recursive: true, force: true });
+    } catch { /* leave it */ }
+  }
+}
+
+// Exact screenshots named by report.json, resolved inside the report's directory.
+function screenshotsOf(report) {
+  const data = readJson(report);
+  const raw = data && typeof data === "object" ? data.screenshots : null;
+  if (!raw || typeof raw !== "object") return [];
+  const dir = path.dirname(report);
+  const dirReal = realOr(dir);
+  const out = [];
+  for (const v of Object.values(raw)) {
+    if (typeof v !== "string" || !v) continue;
+    const abs = path.resolve(dir, v);
+    if (!inside(dir, abs) || abs === dir) continue;
+    try {
+      if (!inside(dirReal, fs.realpathSync(abs)) || !fs.statSync(abs).isFile()) continue;
+    } catch { continue; }
+    if (!out.includes(abs)) out.push(abs);
+  }
+  return out;
+}
 
 const A11Y_STEP = "dispatch ui-ux-reviewer with the diff";
 const REUSE_STEP = "report reuse.json findings (advisory)";
 const criticStep = (c) =>
-  `dispatch artist:design-critic once with only <${path.dirname(c.report)}/ screenshots, ${c.report}, ${c.design}, ${c.rubric}>; ` +
+  `dispatch artist:design-critic once with only <${c.screenshots.join(", ")}, ${c.report}, ${c.design}, ${c.rubric}>; ` +
   "if blocked (not in execution.builtinAgents) apply its brief yourself, labelled NOT ISOLATED; never retry";
 
 function fallback(reason) {
@@ -85,7 +125,7 @@ async function git(cwd, args) {
   return (await execFileAsync("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
 }
 
-async function newestReport(worktree) {
+async function newestReport(worktree, headSec) {
   const lists = await Promise.all([
     git(worktree, ["ls-files", "-z", "--others", "--exclude-standard"]),
     git(worktree, ["ls-files", "-z", "--others", "--ignored", "--exclude-standard"]),
@@ -99,6 +139,7 @@ async function newestReport(worktree) {
     const abs = path.join(worktree, rel);
     let m;
     try { m = fs.statSync(abs).mtimeMs; } catch { continue; }
+    if (m / 1000 < headSec) continue; // stale: older than the HEAD commit
     if (!best || m > best.m || (m === best.m && abs > best.abs)) best = { abs, m };
   }
   return best?.abs ?? null;
@@ -106,6 +147,11 @@ async function newestReport(worktree) {
 
 async function route(worktreeArg, baseRef) {
   const home = os.homedir();
+  try {
+    if (!fs.statSync(worktreeArg).isDirectory()) throw new Error("not a directory");
+  } catch {
+    return fallback(`worktree not found: ${worktreeArg}`);
+  }
   const worktree = realOr(worktreeArg);
   let mainRoot;
   try {
@@ -134,13 +180,14 @@ async function route(worktreeArg, baseRef) {
   try {
     const parent = path.join(mainRoot, ".craftsman", "ui-gate");
     fs.mkdirSync(parent, { recursive: true });
+    pruneRuns(parent);
     const runDir = fs.mkdtempSync(path.join(parent, "run-"));
     const script = path.join(inst.installPath, "scripts", "reuse-check.mjs");
     const json = path.join(runDir, "reuse.json");
     let code = 0;
     let stderr = "";
     try {
-      const r = await execFileAsync(process.execPath, [script, "--project", worktree, "--run", runDir, "--base", mergeBase], { timeout: REUSE_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+      const r = await execFileAsync(process.execPath, [script, "--project", worktree, "--run", runDir, "--base", mergeBase], { timeout: timeoutMs(), maxBuffer: 16 * 1024 * 1024 });
       stderr = r.stderr;
     } catch (e) {
       if (e.killed || typeof e.code !== "number") return fallback(`reuse-check failed: ${e.killed ? "timed out" : firstLine(e)}`);
@@ -158,9 +205,14 @@ async function route(worktreeArg, baseRef) {
 
   const out = { route: "artist", reason: "artist installed, enabled, format-2 DESIGN.md", reuse, a11y: true, steps: [] };
   let report = null;
-  try { report = await newestReport(worktree); } catch { /* no report -> a11y floor */ }
-  if (report) {
-    out.critic = { report, design, rubric: path.join(inst.installPath, "skills", "create", "references", "rubric.md") };
+  let screenshots = [];
+  try {
+    const head = Number((await git(worktree, ["log", "-1", "--format=%ct"])).trim()) || 0;
+    report = await newestReport(worktree, head);
+    if (report) screenshots = screenshotsOf(report);
+  } catch { /* no report -> a11y floor */ }
+  if (report && screenshots.length > 0) {
+    out.critic = { report, screenshots, design, rubric: path.join(inst.installPath, "skills", "create", "references", "rubric.md") };
     out.a11y = false;
   }
   if (out.a11y) out.steps.push(A11Y_STEP);
