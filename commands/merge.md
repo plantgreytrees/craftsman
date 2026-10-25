@@ -6,12 +6,11 @@ allowed-tools: Bash, Read, Edit, ExitWorktree, AskUserQuestion
 
 # Merge — land a branch end to end
 
-The user saying "merge" is the go-ahead to land on the base branch and push it.
-Finish the whole job in this session. Never end with "run this to merge". Ask the user with `AskUserQuestion` (`_shared-machinery.md`), never in prose.
-Landing goes through `repo-exec.mjs merge`, the same path `/orchestrate` uses
-for units. It re-runs the project's tests in the worktree, takes the merge lock,
-merges with `--no-ff` and pushes base. It then removes the worktree and deletes
-the branch locally and on `origin`. With `repoExec.land: "pr"` it opens an
+"Merge" from the user is the go-ahead to land on base and push it.
+Finish the whole job in this session; never end with "run this to merge". Ask the user with `AskUserQuestion` (`_shared-machinery.md`), never in prose.
+Landing goes through `repo-exec.mjs merge`, as `/orchestrate` does for units. It
+re-runs the tests in the worktree, takes the merge lock, merges with `--no-ff`,
+pushes base, then removes the worktree and deletes the branch locally and on `origin`. With `repoExec.land: "pr"` it opens an
 auto-merging PR/MR instead.
 
 **It is also the loop's closing step:** PLAN → ORCHESTRATE → SCRUTINISE →
@@ -23,15 +22,15 @@ lands what's left: the session's own branch or worktree (plan doc, tracker and `
 - **`$ARGUMENTS` names a branch or worktree path** → that one.
 - **Empty** → the worktree this session is in (`git rev-parse --show-toplevel`
   is a linked worktree). Otherwise use the current branch if it isn't the base.
-  If the target is still ambiguous, `git worktree list` and ask which one.
+  If still ambiguous, `git worktree list` and ask which one.
 - **Run as the loop's last step** → the session's worktree or branch, as above,
   then every worktree or branch named for the slug that isn't merged into base
   yet (`git branch --no-merged <base>`), one at a time.
 - **Already on the base branch in the main checkout** → there is no branch to
-  land. Commit this session's doc and tracker edits with a real message, then
-  `git pull --ff-only && git push`. Never force-push. Report it and skip to step 6.
+  land. Commit this session's doc and tracker edits, then
+  `git pull --ff-only && git push`. Never force-push. Skip to step 6.
 
-Resolve its absolute worktree path, branch and the **main checkout** (first entry of `git worktree list`). If the branch has no worktree, add one from
+Resolve its absolute worktree path, branch and the **main checkout** (first entry of `git worktree list`). A branch with no worktree gets one from
 the main checkout: `git -C <main> worktree add .claude/worktrees/<branch> <branch>`.
 
 ## 2. Make it landable
@@ -67,13 +66,13 @@ Add `"base_branch":"<base>"` only when the script says it can't infer the base.
 
 - **`pre-merge gate failed`** → fix the failure in the worktree, commit, and
   rerun step 4.
-- **Merge conflict** (the merge is aborted, so base is untouched) → in the
+- **Merge conflict** (aborted, base untouched) → in the
   worktree, `git fetch origin && git merge origin/<base>`, resolve, re-run the
   tests, commit, and rerun step 4. Ask only when a conflict needs a judgement call on intent.
-- **`pull --ff-only` fails** (local base has commits origin doesn't) → report it.
-  Never force-push.
-- **Merge lock busy** → another session is landing. Wait briefly, then retry.
-- **Push rejected or protected branch** → report it, and suggest
+- **`pull --ff-only` fails** (local base has commits origin doesn't) → report it; never force-push.
+- **`approval required`** → tell the owner; land through `land-feature`, never retry with `feature_branch`.
+- **Merge lock busy** → another session is landing. Wait, then retry.
+- **Push rejected or protected branch** → report it; suggest
   `repoExec.land: "pr"` in `craftsman.config.json`.
 
 Never use `--no-verify`, `--force` or `git worktree remove --force`.
@@ -104,11 +103,10 @@ Never use `--no-verify`, `--force` or `git worktree remove --force`.
 
 ## 6. Report
 
-From the JSON result, report:
+Report from the JSON result:
 - the base branch and its new HEAD (`git -C <main> log --oneline -1 <base>`);
 - whether base was pushed;
 - `cleaned`, `branch_deleted` and `remote_branch_deleted`.
 
 In `pr` mode, report the PR URL and that it merges once checks pass. A
-`cleanup_error` means the merge landed but cleanup didn't: give the leftover
-path or branch.
+`cleanup_error` means it landed but cleanup didn't: give the leftover path or branch.

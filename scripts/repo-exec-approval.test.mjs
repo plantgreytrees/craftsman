@@ -240,10 +240,11 @@ test("merge: approval required with featureBranches off logs approval_unenforced
   } finally { done(t); }
 });
 
-function unitWt(t, unit) {
+function unitWt(t, unit, file = `${unit}.txt`) {
   const wt = prepare(t.context, { unit, slug: unit }, t.info);
-  fs.writeFileSync(path.join(wt.worktree_path, `${unit}.txt`), "z\n");
-  git(wt.worktree_path, "add", `${unit}.txt`); git(wt.worktree_path, "commit", "-q", "-m", unit);
+  fs.mkdirSync(path.dirname(path.join(wt.worktree_path, file)), { recursive: true });
+  fs.writeFileSync(path.join(wt.worktree_path, file), "z\n");
+  git(wt.worktree_path, "add", file); git(wt.worktree_path, "commit", "-q", "-m", unit);
   return wt.worktree_path;
 }
 
@@ -258,13 +259,45 @@ test("merge: gate on and no feature_branch is refused and pushes nothing", () =>
   } finally { done(t); }
 });
 
-test("merge: gate on with a feature_branch, or featureBranches off, is unchanged", () => {
+test("merge: gate on, a feature_branch that is not the real target is refused and nothing moves", () => {
   const t = setup();
   try {
+    const before = t.baseHead();
     const worktree_path = unitWt(t, "u8");
-    const r = merge(t.context, { unit: "u8", slug: "u8", worktree_path, push: false, feature_branch: "feature/p-f1" }, t.info);
-    assert.equal(r.merged, true);
+    assert.throws(() => merge(t.context, { unit: "u8", slug: "u8", worktree_path, feature_branch: "feature/p-f1" }, t.info), /approval required/);
+    assert.equal(t.baseHead(), before);
+    assert.equal(git(t.root, "rev-parse", "main"), before);
   } finally { done(t); }
+});
+
+test("merge: gate on, a merge into the real feature branch is allowed and base is unchanged", () => {
+  const t = setup();
+  try {
+    const before = t.baseHead();
+    const worktree_path = unitWt(t, "u5");
+    const r = merge(t.context, { unit: "u5", slug: "u5", worktree_path, push: false, feature_branch: "feature/p-f1" }, { ...t.info, base_branch: "feature/p-f1" });
+    assert.equal(r.merged, true);
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+    assert.equal(t.baseHead(), before);
+    assert.equal(git(t.root, "show", "feature/p-f1:u5.txt"), "z");
+  } finally { done(t); }
+});
+
+test("merge: gate on, a docs-only merge is allowed; a code merge without feature_branch is refused", () => {
+  const t = setup();
+  try {
+    const docs = unitWt(t, "u4", "docs/plans/x.md");
+    assert.equal(merge(t.context, { unit: "u4", slug: "u4", worktree_path: docs, push: false }, t.info).merged, true);
+    const mixed = unitWt(t, "u3", "docs/ideas/y.md");
+    fs.writeFileSync(path.join(mixed, "code.mjs"), "1\n");
+    git(mixed, "add", "code.mjs"); git(mixed, "commit", "-q", "-m", "code");
+    const before = git(t.root, "rev-parse", "main");
+    assert.throws(() => merge(t.context, { unit: "u3", slug: "u3", worktree_path: mixed, push: false }, t.info), (e) => /approval required/.test(e.message) && !/feature_branch/.test(e.message));
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+  } finally { done(t); }
+});
+
+test("merge: featureBranches off is unchanged", () => {
   const o = setup({ required: true }, { planning: { featureBranches: false } });
   try {
     const worktree_path = unitWt(o, "u6");

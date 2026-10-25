@@ -18,9 +18,19 @@ export function noteUnenforced(cfg, context) {
   if (approvalUnenforced(cfg)) logEvent({ ev: "approval_unenforced", reason: "featureBranches off" }, context);
 }
 
-// ARCH-LAND-28: with the gate on, a unit merge to base (no feature_branch) needs approval first.
-export function assertMergeAllowed(cfg, input) {
-  if (approvalRequired(cfg) && !input.feature_branch) throw new Error("approval required: a unit merge to base needs an approved page; land through land-feature or give feature_branch");
+// ARCH-LAND-28: with the gate on, a unit merge is allowed only into its real feature branch
+// (pr mode retargets; direct mode needs base === feature_branch) or when it is docs-only.
+// Changed paths are read from the worktree (`-z` safe) only when no feature_branch is given.
+const DOCS_ONLY = /^docs\/(plans|ideas)\//;
+export function assertMergeAllowed(cfg, input, { info, land, worktree } = {}) {
+  if (!approvalRequired(cfg)) return;
+  if (input.feature_branch) {
+    if (land === "pr" || input.feature_branch === info.base_branch) return;
+  } else {
+    const paths = execFileSync("git", ["-C", worktree, "diff", "--name-only", "-z", `${info.base_branch}...HEAD`], { encoding: "utf8" }).split("\0").filter(Boolean);
+    if (paths.length && paths.every((f) => DOCS_ONLY.test(f))) return;
+  }
+  throw new Error("approval required: this merge needs an approved page; land through land-feature (only docs/plans and docs/ideas changes merge directly)");
 }
 
 // A red gate after base moved in PARKs (ARCH-LAND-27).
