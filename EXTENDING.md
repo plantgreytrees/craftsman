@@ -242,6 +242,10 @@ change:
   that many wave units of one feature run at once, each in its own short-lived
   worktree.
 - `execution.maxSessions` — `1`; reserved, nothing reads it yet.
+- `execution.builtinAgents` — `["Explore"]`. Add the optional, read-only Artist
+  critic with `{ "execution": { "builtinAgents": ["Explore", "artist:design-critic"] } }`;
+  the guard code is unchanged. Without it the ui gate runs the critic brief
+  in-session, labelled NOT ISOLATED. Artist is optional and never required.
 
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 
