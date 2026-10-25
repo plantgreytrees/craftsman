@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Logs a specialist reviewer's dispatch + finding count, so /craftsman:stats
-// can show whether the new gate-select-triggered agents (ui-ux-reviewer,
+// can show whether the new gate-select-triggered agents (ui-gate: Artist or ui-ux-reviewer a11y,
 // migration-reviewer, api-reviewer, dependency-auditor, performance-reviewer,
 // observability-reviewer — or any other specialist) actually earn their
 // tokens, the same way log-router.mjs does for the router itself.

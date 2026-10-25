@@ -6,6 +6,10 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- The ui gate is routed through `scripts/ui-gate.mjs` to the optional Artist plugin (ARCH-SLIM-15, ARCH-GATES-01..06); `ui-ux-reviewer` is reduced to an accessibility floor and the `design-review` skill is removed.
+
 ## [2.3.0] - 2026-10-25
 
 ### Changed

@@ -140,7 +140,8 @@ flowchart LR
   gets scope, acceptance criteria, cited rules and a tooling manifest.
 - **`/orchestrate`** executes a plan one unit at a time, each in its own git
   worktree. `gate-select.mjs` reads the unit's *actual diff* and routes it to
-  the specialists that apply: `security-auditor`, `ui-ux-reviewer`,
+  the specialists that apply: `security-auditor`, the ui gate (`ui-gate.mjs`:
+  Artist when present, else the `ui-ux-reviewer` accessibility floor),
   `migration-reviewer`, `api-reviewer`, `dependency-auditor`,
   `performance-reviewer`, `observability-reviewer`. It doesn't rely on anyone
   remembering a file-pattern rule.
@@ -443,7 +444,7 @@ Every install then picks the change up through step 2 above. See
   and one isolated fresh-context agent per run of `/scrutinise`
   (`scrutineer`), `/idea` (`idea-critic`) and `/architect --deep`
   (`architect-analyst`). Each run is granted exactly one such agent. The
-  read-only built-ins in `execution.builtinAgents` (default `["Explore"]`)
+  read-only built-ins in `execution.builtinAgents` (default `["Explore"]`; add the optional `artist:design-critic`)
   also pass. `/craftsman:auto` is the other exception: it runs units in fresh
   contexts, because on a long unattended run the root context filling up is
   the real limit (ARCH-ENGINE-10). Measured, root grew ~20k tokens per
@@ -528,7 +529,6 @@ commands/                                        the workflow + engine commands 
 agents/                                          the specialist review / implement / runner agents
 workflows/run.js                                 the plugin workflow that runs plan units in fresh contexts
 skills/language-aware-planning/                  per-language idiom checklists + plan, idea and architecture templates
-skills/design-review/                            the UI/UX review checklist ui-ux-reviewer loads
 skills/deep-research/                            forked read-only repo research
 skills/{systematic-debugging, test-driven-development, verification-before-completion}/   loop disciplines
 output-styles/craftsman-terse.md                 an optional terse response style
