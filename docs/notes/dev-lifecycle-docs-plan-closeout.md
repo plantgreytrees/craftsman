@@ -47,7 +47,7 @@ Earlier follow-ups still PENDING: `approval-owner-trust`, `force-block-wordlevel
 ## Not done
 
 - A clean final `/scrutinise` (round 23: 1 Critical, 6 Warnings, above).
-- A full `/sync-docs --all` and a last `/architect --update` re-cite: `docs/architecture/approval.rules.md` cites for APPROVAL-04..07 and some landing/engine cites drifted again after the fixes; the plan doc's `units:` header has not been resynced for rounds 18-25.
+- A full verification pass of the docs: the final `/sync-docs --all` was bounded (no verifier fan-out, no new fix rounds). It re-mapped the `repo-exec.mjs` and `approval-gate.mjs` cites in `landing.rules.md` and `tracker.rules.md` by line shift (+2 to +3; a straddling range is approximate) and fixed the README protected-keys list. The approval cites were already current; `verified_at` was not bumped. The plan doc's `units:` header is not resynced for rounds 18-25, and the CHANGELOG `[Unreleased]` was not extended (8175 of 8192 bytes).
 - Acceptance 22.1 and 24.1 ("a merge with a feature_branch is allowed") are ticked but superseded by 25.2; the ledger was not edited to avoid rewriting criteria.
 
 ## Recommendation
