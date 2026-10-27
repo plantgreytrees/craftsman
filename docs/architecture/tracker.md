@@ -37,6 +37,8 @@ flowchart LR
 | ARCH-TRACKER-07 | Additive `feature`/`feature_branch` fields; manifest adds `feature_groups` | `features[]` already means units (TRACKER-01 consumers) | Rename `features[]` |
 | ARCH-TRACKER-08 | `[feature:<id>]` criteria gate a feature's landing | User decision: explicit per-feature definition of done | Untagged lines gate only the last feature |
 | ARCH-TRACKER-09 | Machine-readable archive headings + `lookup` | A retired plan is reachable only through its index line | A separate index file |
+| ARCH-TRACKER-15 | Whole-plan criteria carry `[plan:<slug>]`; they hold only their own plan's promotion and land-feature | One shared acceptance file holds many plans; an untagged line from one plan held every plan's rows (2026-10-27) | Attribute by section header (lines land under foreign headers); tag to the plan's last unit (gates MERGED, not the plan) |
+| ARCH-TRACKER-16 | Stop holds a session only to the units and plans its ledger names; untagged lines bind only plan-less sessions, otherwise appear in the Stop notice | A goal for one plan was blocked 9 times on another plan's untagged criterion (2026-10-27) | Notice only, never bind (loses a single-plan repo's gate); keep binding every owner (status quo) |
 
 ## Trade-offs & known limits
 The manifest is a cache, so a crash between a transition and regeneration

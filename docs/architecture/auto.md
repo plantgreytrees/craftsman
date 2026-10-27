@@ -46,6 +46,7 @@ sequenceDiagram
 | ARCH-AUTO-06 | The guard treats `/auto` like `/orchestrate` | Scope and acceptance enforcement apply | — |
 | ARCH-AUTO-07 | Paste fallback | `-p`, VS Code, and installs without mods | — |
 | ARCH-AUTO-08 | `FEATURE_MERGED` counts as open | Otherwise `/auto` stops granting runners before the feature lands | Count it as landed |
+| ARCH-AUTO-10 | `/auto` no longer sets scope-required; the `/orchestrate` its goal starts with does (supersedes AUTO-06) | Setting it at invocation locked Phase A's `/architect` and `/plan` out of their own docs (2026-10-27) | Exempt doc writes under a doc-write grant (widens a pre-guard bypass); keep it and tell users to run `/architect`/`/plan` first |
 
 ## Trade-offs & known limits
 Phase A can be long: by design it asks everything. Unknown decisions that
