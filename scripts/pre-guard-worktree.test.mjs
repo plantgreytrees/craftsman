@@ -159,3 +159,85 @@ test("block message names git -C and omits release/EnterWorktree", () => {
   assert.match(r.stderr, /git -C /);
   assert.doesNotMatch(r.stderr, /release|EnterWorktree/);
 });
+
+// fix-guard-chain: a cd counts only when it provably ran in the shell that runs the later git call.
+test("W1: a cd that did not provably run before a later git blocks; a plain chain still allows", () => {
+  for (const command of [
+    `cd ${W} | true; git commit -m x`,
+    `cd ${W} & true; git commit -m x`,
+    `false && cd ${W}; git commit -m x`,
+    `cd ${W} || x; git commit -m x`,
+    `(cd ${W}); git commit -m x`,
+  ]) {
+    assert.equal(guard(command, B).status, 2, command);
+  }
+  for (const command of [`cd ${W} && git commit -m x`, `cd ${W}\ngit commit -m x`]) {
+    const r = guard(command, B);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+  }
+});
+
+test("W2: git global options that move the repository or take a value", () => {
+  for (const command of [
+    `git --git-dir /O/.git commit -m x`,
+    `git --git-dir /O/.git -C ${W} add f`,
+    `git --work-tree /O add f`,
+    `git --config-env n=V commit`,
+    `git --attr-source X add f`,
+    `git --super-prefix X add f`,
+    `git --unknown-opt commit -m x`,
+    `git --unknown-opt -C ${W} add f`,
+  ]) {
+    assert.equal(guard(command, B).status, 2, command);
+  }
+  const r = guard(`git -C ${W} -c k=v --no-pager add f`, B);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("W3: read-only git under shell syntax is silent; mutating git there still blocks", () => {
+  for (const command of [
+    `for f in $(git ls-files); do wc -c "$f"; done`,
+    `if git diff --quiet; then echo ok; fi`,
+    `time git status`,
+    `! git diff --quiet`,
+  ]) {
+    const r = guard(command, B);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+  }
+  for (const command of [`for f in a; do git commit -m x; done`, `! git commit -m x`, `time git commit -m x`]) {
+    assert.equal(guard(command, B).status, 2, command);
+  }
+});
+
+test("W4: wrappers and unresolvable shell forms before a git mutation block, naming git -C", () => {
+  const wrapped = [
+    "env A=1 git commit -m x", "env -i git commit", "command git commit", "sudo -u x git commit",
+    "nice -n 5 git commit", "timeout 5 git commit", "xargs git commit", `sh -c "git commit"`,
+    `bash -lc "git commit"`, `eval "cd /other"; git commit`, "source f; git commit", ". f; git commit",
+  ];
+  for (const command of wrapped) {
+    const r = guard(command, B);
+    assert.equal(r.status, 2, command);
+    assert.match(r.stderr, /git -C /, command);
+  }
+  for (const command of [`eval "cd /other"; git commit`, "source f; git commit", ". f; git commit", "builtin cd /other && git commit -m x", `bash -lc "git commit"`]) {
+    const r = guard(command, W);
+    assert.equal(r.status, 2, `${command} from W`);
+    assert.match(r.stderr, /git -C /, command);
+  }
+  assert.equal(guard("env A=1 git status", B).status, 0);
+});
+
+test("W5: the branch check reads the resolved target, not the cwd repo", () => {
+  sh(AW, "branch", "-m", "feat/a1", "feat/w");
+  sh(W, "checkout", "-q", "-B", "other");
+  try {
+    const r = guard(`git -C ${W} add f`, AW);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /not the bound branch/);
+  } finally {
+    sh(W, "checkout", "-q", "feat/w");
+    sh(AW, "branch", "-m", "feat/w", "feat/a1");
+  }
+  assert.equal(guard(`git -C ${W} add f`, AW).status, 0);
+});
