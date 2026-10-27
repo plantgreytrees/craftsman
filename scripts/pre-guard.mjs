@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, mintNonce, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
-import { forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
+import { blankProse, forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
 import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
 import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
@@ -355,23 +355,6 @@ const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
 // sed and perl count only in their in-place form (-i, -…i, --in-place), as the word-based verb check below does.
 const INPLACE_TEXT = String.raw`\b(?:sed|perl)\b[^;&|\n]*?\s(?:-[A-Za-z]*i|--in-place)`;
 const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filter((verb) => verb !== "sed" && verb !== "perl").join("|")})\\b|${INPLACE_TEXT}`);
-const INPLACE_WORD = /^(?:-[A-Za-z]*i|--in-place)/;
-// sed/perl -i from command-position words: a quoted pattern (`grep "sed -i" f`) is not one. A multi-word argument of a
-// command that is not a plain printer (`bash -c 'sed -i …'`) is still read as text.
-function inPlaceEditor(command) {
-  const segs = shellSegments(command);
-  const isEd = (w) => w === "sed" || w === "perl";
-  return segs.some((words, si) => {
-    const safe = SAFE_HEADS.has(path.basename(words[0]));
-    return words.some((w, i) => {
-      if (isEd(w)) {
-        if (words.slice(i + 1).some((x) => INPLACE_WORD.test(x))) return true;
-        return i === words.length - 1 && INPLACE_WORD.test(segs[si + 1]?.[0] ?? "");
-      }
-      return !safe && /\s/.test(w) && new RegExp(INPLACE_TEXT).test(w);
-    });
-  });
-}
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
 const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
@@ -1476,7 +1459,7 @@ function denySelfDisable(what, advice) {
 }
 if (tool === "Bash" && command) {
   // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
-  const verb = WRITER_AT_COMMAND.test(command) || inPlaceEditor(command);
+  const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(blankProse(command));
   const never = NEVER_TEXT.test(command);
   const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
   const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });

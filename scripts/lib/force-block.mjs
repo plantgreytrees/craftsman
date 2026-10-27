@@ -177,7 +177,7 @@ const RUNS_TEXT =
 // command word that is itself an expansion runs whatever it holds. None of these is provable prose.
 const LIVE_TEXT =
   /\$\(|`|\bprintf\s+-\S*v|\b(?:read|mapfile|readarray)\b|(?:^|[;&|(\n])\s*\$[{\w]/;
-function blankProse(value) {
+export function blankProse(value) {
   if (RUNS_TEXT.test(value) || LIVE_TEXT.test(value)) return value;
   // Output written to a file (`>`, `>>`, tee, dd) can be run later: only a bare print or search is prose.
   const bare = value
