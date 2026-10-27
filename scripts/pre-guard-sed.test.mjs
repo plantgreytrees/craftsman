@@ -91,4 +91,13 @@ test("bypass attempts stay blocked", () => {
   assert.equal(run("env sed -i s/a/b/ hooks/hooks.json"), 2);
   assert.equal(run("perl -i -pe s/a/b/ .craftsman/off"), 2);
   assert.equal(run('for f in x; do s""ed -i s/a/b/ hooks/hooks.json; done'), 2);
+  // Auditor round (5.4): more spellings that must not slip past the blanked-prose verb.
+  assert.equal(run("sed -i.bak s/a/b/ craftsman.config.json"), 2);
+  assert.equal(run("sed -ni s/a/b/ craftsman.config.json"), 2);
+  assert.equal(run("sed -i -e s/a/b/ .craftsman/off"), 2);
+  assert.equal(run("echo 'x' && sed -i s/a/b/ craftsman.config.json"), 2);
+  assert.equal(run('echo "$(sed -i s/a/b/ craftsman.config.json)"'), 2);
+  assert.equal(run("`echo sed` -i s/a/b/ craftsman.config.json"), 2);
+  assert.equal(run("find . -name x | xargs perl -pi -e s/a/b/ hooks/hooks.json"), 2);
+  assert.equal(run('echo "sed -i"; sed -i s/a/b/ craftsman.config.json'), 2);
 });
