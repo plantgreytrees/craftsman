@@ -382,15 +382,19 @@ export function reconcileAcceptance(context = projectContext("."), input = {}) {
   const criteria = acceptanceCriteria(text);
   if (!criteria.length) return null;
   const planWideOpen = criteria.some((c) => !c.unit && !c.done);
+  const rowsNow = currentState(context);
+  // ARCH-TRACKER-15: an open `[plan:<slug>]` line holds only that plan's rows. A legacy untagged
+  // line (D-legacy) holds no row; it is reported through plan_wide_open only.
+  const heldBy = (row) => criteria.some((c) => !c.unit && !c.done && c.plan && c.plan === planSlug(row.plan));
   const metUnits = [...new Set(criteria.filter((c) => c.unit).map((c) => c.unit))]
     .filter((unit) => criteria.every((c) => c.unit !== unit || c.done));
   const completed = [];
   const ready = [];
-  for (const row of currentState(context)) {
+  for (const row of rowsNow) {
     const id = [row.unit, row.scope_id].find((candidate) => candidate && metUnits.includes(candidate));
     if (!id) continue;
     if (row.status === "IN_PROGRESS") ready.push({ plan: row.plan, unit: row.unit });
-    if (row.status !== "MERGED" || planWideOpen) continue;
+    if (row.status !== "MERGED" || heldBy(row)) continue;
     const count = criteria.filter((c) => c.unit === id).length;
     try {
       // The key's own project segment, not row.project: keyOf() used the

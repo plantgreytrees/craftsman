@@ -56,7 +56,7 @@ units:
     scope:
       read: [scripts/tracker.mjs, scripts/repo-exec.mjs]
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md]
-      write: [scripts/tracker.mjs, scripts/repo-exec.mjs, scripts/acceptance-plan-consumers.test.mjs]
+      write: [scripts/tracker.mjs, scripts/repo-exec.mjs, scripts/acceptance-plan-consumers.test.mjs, scripts/tracker.test.mjs, scripts/acceptance-trigger.test.mjs]
     arch: [ARCH-TRACKER-06, ARCH-TRACKER-08, ARCH-TRACKER-15, ARCH-LAND-06]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
   - id: 4
@@ -168,6 +168,7 @@ Depends on: acc-core
 - [ ] 3.1 tracker.mjs:384 `planWideOpen` becomes per row: open `[plan:<slug of row.plan>]` lines hold that row's COMPLETE promotion; legacy untagged lines hold no row (they are reported, not enforced, per D-legacy) → accept: test 3.3 case A
 - [ ] 3.2 repo-exec.mjs:577-580 pass `planSlug` to `featureCriteria`, and restrict the fail-closed untagged check to legacy untagged lines plus `[plan:<planSlug>]` lines → accept: test 3.3 case B
 - [ ] 3.3 Write `scripts/acceptance-plan-consumers.test.mjs` RED on old code: (A) plan b's row MERGED with all its unit lines ticked and plan a's open untagged/`[plan:a]` line → reconcile promotes b to COMPLETE; an open `[plan:b]` line holds it; (B) featureCriteria call shape for land-feature ignores `[plan:a]` when landing plan b → accept: `node --test scripts/acceptance-plan-consumers.test.mjs scripts/tracker.test.mjs scripts/repo-exec.test.mjs` exit 0
+- [ ] 3.4 (amendment 2026-10-28, park resolved) `scripts/tracker.test.mjs` (fixtures near lines 55 and 101-111) and `scripts/acceptance-trigger.test.mjs` (near lines 28 and 77) assert that an open untagged whole-plan line holds a MERGED row, which ARCH-TRACKER-15 retired. Retag those fixture lines `[plan:<slug of the fixture plan>]` so each test keeps asserting the same hold; delete or loosen no assertion. Grep for the lines; do not read either file whole → accept: both files pass and each still asserts the row stays MERGED while the `[plan:]` line is open
 
 ### Step 4 — acc-docs (., markdown, normal)
 Depends on: every other step (it writes CHANGELOG.md once, last)
@@ -199,6 +200,7 @@ Depends on: none
 - [ ] 7.1 `forceBlocked` (scripts/lib/force-block.mjs) matches destructive git (force push, hard reset, clean) only in command words of a git invocation, not in a quoted `grep`/`printf`/`echo` argument or heredoc prose that merely names it; real invocations (also after `&&`, `;`, `sh -c`, `env`, `git -C <dir>`) stay blocked → accept: test 7.2
 - [ ] 7.2 Write `scripts/force-block-quoted.test.mjs` RED on old code: allowed: `grep -n "git reset --hard" scripts/x.mjs`, `printf '%s' "do not git push --force"`, `echo "git clean -fd is blocked"`; blocked: `git reset --hard`, `git -C w push --force`, `a && git clean -fd`, `sh -c 'git push -f'`, `env X=1 git reset --hard HEAD~1` → accept: `node --test scripts/force-block-quoted.test.mjs scripts/lib/force-block.test.mjs scripts/pre-guard-narrow.test.mjs` exit 0
 - [ ] 7.3 security-auditor review → accept: auditor PASS; lease-push-to-own-branch behaviour (ARCH-LAND-31) unchanged
+- [ ] 7.4 (amendment 2026-10-28, review findings on b2a2099) quoted text inside a command substitution `$(…)` or backticks is live code, never prose, and `printf -v`/`read` into a variable later expanded as a command counts as an invocation: `x=$(echo "git reset --hard"); $x`, its backtick form, and `printf -v c 'git reset --hard'; $c` stay blocked; when the guard cannot prove a quoted span is a plain argument of grep/printf/echo it blocks (fail closed) → accept: each form a blocked case in `scripts/force-block-quoted.test.mjs`; auditor PASS
 
 ### Step 8 — auto-scope-flip (., javascript, HIGH)
 Tooling: implementer implementer · gates security-auditor, code-reviewer · skills test-driven-development
@@ -222,6 +224,7 @@ acc-core first (parser + pure helper, the shared contract) → acc-stop-gate and
 ## Decisions
 - **Owner decisions 2026-10-27** (answered via AskUserQuestion, recorded as rules): `[plan:<slug>]` tag → ARCH-TRACKER-15; legacy untagged lines bind only plan-less sessions → ARCH-TRACKER-16; `/auto` stops setting scope-required (supersedes AUTO-06) → ARCH-AUTO-10; sandbox block drops the rm asks → ARCH-SAFETY-12; quoted-literal false positives fixed in this run (Steps 6 and 7), not parked.
 - **D-legacy** — an untagged line (no `[unit:]`, no `[plan:]`) binds a session only when that session's ledger names no plan at all; otherwise it is reported (notice + event), not enforced. Section headers are NOT used to attribute lines: Gleam acceptance.md:707-708 (`[unit:qsc-conn-*]`, studio-core-sql) sit under the investigate-pg-query-ignores-configured-schema header. Trade-off: a legacy whole-plan line of a plan the session did work is no longer enforced; new plans avoid it by tagging `[plan:]` (Step 4).
+- **Park resolutions 2026-10-28** — acc-consumers: the two pre-rule test files join its write scope (the only option that keeps ARCH-TRACKER-15; the other edits a decided rule). force-block-quoted: the review bypasses become task 7.4. sandbox-ask-policy: the stale ARCH-SAFETY-06 cite was already fixed on main; re-run unchanged. preguard-sed: open owner decision (test 24.2 pin), asked in Phase C.
 - **C1 (whole-file ownership on Edit / on /orchestrate)** — kept as the outer gate; no code change. Once binding is per unit/plan via the ledger, ownership no longer over-blocks.
 
 ## Verification background
