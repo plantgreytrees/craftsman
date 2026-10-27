@@ -476,6 +476,9 @@ function tokenize(text, fail) {
 }
 
 function removedDocs(cmd, docPaths, { writes = false } = {}) {
+  // A quoted grep/printf/echo argument next to a loop keyword is prose: its `rm` text is not a removal (blankProse leaves
+  // anything that could run it as it is; with a backslash, which it does not read, the raw text is judged: fail closed).
+  if (/\b(?:for|while|until)\b/.test(cmd) && !cmd.includes("\\")) cmd = blankProse(cmd);
   const hits = [];
   const unsafe = (why) => { hits.push("(command the parser cannot prove safe: " + why + ")"); };
   // The gate reads the text with its quotes and backslashes removed as well as the
@@ -1499,7 +1502,14 @@ if (tool === "Bash" && command) {
   // command that sets either could borrow another session's record or point the state somewhere else.
   // CRAFTSMAN_SAFETY is read by SessionStart from the user's environment, so a command that sets it gains nothing there; it is
   // refused anyway so no script ever sees a spoofed one. A plain mention (`"$NAME"`, `printenv NAME`, a comparison) sets nothing.
-  if (SETS_SAFETY_VAR.some((re) => re.test(unquoted))) {
+  // A quoted grep/printf/echo argument (blankProse) or a plain `node -e '<code>'` literal that names `NAME=` assigns nothing; any text
+  // that could run it (pipe, redirect, substitution, eval, a node body that can spawn or load) is read as it stands.
+  const NODE_E_LITERAL = /(\bnode\s+(?:-e|-p|--eval|--print)\s+)'([^']*)'/g;
+  const NODE_E_LIVE = /require|import|process|spawn|exec|eval|Function|child|constructor|globalThis|Reflect|\bfs\b/;
+  const inertNodeE = (text) => /[|>`<]|\$\(|\b(?:eval|source)\b/.test(text) ? text
+    : text.replace(NODE_E_LITERAL, (all, head, body) => NODE_E_LIVE.test(body) ? all : head + "'x'");
+  const safetyText = command.includes("\\") ? unquoted : inertNodeE(blankProse(command)).replace(/['"\\]/g, "");
+  if (SETS_SAFETY_VAR.some((re) => re.test(unquoted) && re.test(safetyText))) {
     denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
   }
   if (invocations("goal-token").length && !commandInvoked(sidOf(input), ["instruction", "auto"], { context: { stateDir: STATE_DIR } })) {
