@@ -54,6 +54,32 @@ test("C-E: in-place writes to guarded files stay blocked", () => {
   assert.equal(run("perl -pi -e s/a/b/ hooks/hooks.json"), 2);
 });
 
+test("escaped quotes do not blank a live in-place edit", () => {
+  assert.equal(
+    run('echo \\"x; sed -i s/a/b/ craftsman.config.json; echo y\\"'),
+    2,
+  );
+  assert.equal(
+    run('echo \\"x; perl -pi -e s/a/b/ craftsman.config.json; echo y\\"'),
+    2,
+  );
+  assert.equal(run('echo \\"x; sed -i s/a/b/ .craftsman/off; echo y\\"'), 2);
+});
+
+test("backslash-escaped quotes: sed -i on hooks.json or the settings file stays blocked", () => {
+  assert.equal(run('echo \\"x; sed -i s/a/b/ hooks/hooks.json; echo y\\"'), 2);
+  assert.equal(
+    run('echo \\"x; sed -i s/a/b/ .claude/settings.json; echo y\\"'),
+    2,
+  );
+});
+
+test("an in-place edit after a real prose command stays blocked", () => {
+  assert.equal(run("echo hi; sed -i s/a/b/ craftsman.config.json"), 2);
+  assert.equal(run('grep -n "q" f; sed -i s/a/b/ craftsman.config.json'), 2);
+  assert.equal(run('grep -n "q" f; perl -pi -e s/a/b/ hooks/hooks.json'), 2);
+});
+
 test("bypass attempts stay blocked", () => {
   assert.equal(run('s""ed -i s/a/b/ craftsman.config.json'), 2);
   assert.equal(run("'sed' -i s/a/b/ craftsman.config.json"), 2);
