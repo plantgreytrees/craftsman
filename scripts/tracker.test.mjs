@@ -52,7 +52,7 @@ test("tracker: MERGED is refused while the unit's own tagged acceptance criteria
   const selected = context();
   const acPath = path.join(selected.stateDir, "acceptance.md");
   fs.mkdirSync(selected.stateDir, { recursive: true });
-  fs.writeFileSync(acPath, "- [ ] [unit:unit-1] the endpoint rejects bad input\n- [ ] [unit:unit-2] not this unit\n- [ ] whole-plan criterion\n");
+  fs.writeFileSync(acPath, "- [ ] [unit:unit-1] the endpoint rejects bad input\n- [ ] [unit:unit-2] not this unit\n- [ ] [plan:example] whole-plan criterion\n");
   transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
   transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
   assert.throws(
@@ -102,13 +102,13 @@ test("tracker: reconcile moves a MERGED unit to COMPLETE once its criteria and t
   const selected = context();
   const acPath = path.join(selected.stateDir, "acceptance.md");
   fs.mkdirSync(selected.stateDir, { recursive: true });
-  fs.writeFileSync(acPath, "- [x] [unit:unit-1] a\n- [x] [unit:unit-1] b\n- [ ] whole-plan check\n");
+  fs.writeFileSync(acPath, "- [x] [unit:unit-1] a\n- [x] [unit:unit-1] b\n- [ ] [plan:example] whole-plan check\n");
   startUnit(selected, "unit-1");
   const merged = transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123", session_id: "s1" }, selected);
   assert.equal(merged.acceptance.plan_wide_open, true);
   assert.equal(status(selected, "unit-1"), "MERGED", "an open whole-plan criterion means the request is not verified yet");
 
-  fs.writeFileSync(acPath, fs.readFileSync(acPath, "utf8").replace("- [ ] whole-plan", "- [x] whole-plan"));
+  fs.writeFileSync(acPath, fs.readFileSync(acPath, "utf8").replace("- [ ] [plan:example] whole-plan", "- [x] [plan:example] whole-plan"));
   fs.rmSync(path.join(selected.stateDir, "sessions"), { recursive: true, force: true });
   const result = reconcileAcceptance(selected, { session_id: "s1" });
   assert.deepEqual(result.completed, [{ plan: "docs/plans/example.md", unit: "unit-1" }]);
