@@ -113,8 +113,9 @@ if (!orchestrationEnabled()) process.exit(0);
 if (recorded) recordCommand(sidOf(input), recorded, typeof input?.prompt === "string" ? "prompt" : "skill", { stateDir: STATE_DIR });
 if (!invoked) process.exit(0);
 
-// /auto executes a plan exactly as /orchestrate does (ARCH-AUTO-06).
-if (invoked === "orchestrate" || invoked === "auto") {
+// Only /orchestrate arms scope-required (ARCH-AUTO-10): /auto's Phase A writes docs,
+// and the /orchestrate its goal starts with arms it before any source edit.
+if (invoked === "orchestrate") {
   // Use scope.mjs's own path function directly — this must land at EXACTLY
   // the path pre-guard.mjs's requiredFile(input) reads, and duplicating that
   // path computation by hand would risk drifting apart from it silently.
@@ -142,7 +143,7 @@ else if (invoked === "orchestrate" && autoActive(sid, context)) {
   if (slug) writeAutoMarker(sid, slug, readAutoMarker(sid).at);
 }
 
-// /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
+// /auto grants its per-unit runner dispatches (ARCH-AUTO-10): on /auto
 // itself, and on the /orchestrate its unattended /goal starts with. Sized
 // from the resolved feature plan's units, not the parent doc's; a fresh invocation re-arms, never accumulates.
 if (autoRun) grantRunnerDispatches(runnerDispatchCount(resolved.units || planUnitCount(slug, context), resolved.features || 0), sid, context);

@@ -10,8 +10,8 @@ import { sidOf } from "./lib/core.mjs";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(ROOT, "orchestrate-scope-guard.mjs");
 
-function run(dir, input) {
-  return spawnSync(process.execPath, [GUARD], {
+function run(dir, input, script = GUARD) {
+  return spawnSync(process.execPath, [script], {
     cwd: dir,
     input: JSON.stringify(input),
     encoding: "utf8",
@@ -147,8 +147,8 @@ test("orchestrate-scope-guard: a different command that merely starts with the s
   }
 });
 
-// ARCH-AUTO-06: /auto is treated like /orchestrate — scope-required, acceptance
-// ownership — and also arms the auto-active marker pre-guard reads (LAND-05).
+// ARCH-AUTO-10: /auto does not arm scope-required (Phase A writes docs); it keeps
+// acceptance ownership and arms the auto-active marker pre-guard reads (LAND-05).
 const autoPayloads = {
   typed: { session_id: "auto-typed", prompt: "/auto autonomous-e2e-loop" },
   namespaced: { session_id: "auto-ns", prompt: "/craftsman:auto autonomous-e2e-loop" },
@@ -156,19 +156,49 @@ const autoPayloads = {
   "skill-command-field": { session_id: "auto-command", tool_name: "Skill", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
 };
 for (const [shape, input] of Object.entries(autoPayloads)) {
-  test(`orchestrate-scope-guard: /auto (${shape}) arms scope-required, acceptance ownership and auto-active`, () => {
+  test(`orchestrate-scope-guard: /auto (${shape}) leaves scope-required unset but arms acceptance ownership, auto-active and runner grants`, () => {
     const dir = tmpProject();
     try {
       fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
       fs.writeFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] [unit:u1] it works\n");
       assert.equal(run(dir, input).status, 0);
       const session = path.join(dir, ".craftsman", "sessions", sidOf(input));
-      assert.equal(fs.existsSync(requiredFile(dir, input)), true, "scope-required armed");
+      assert.equal(fs.existsSync(requiredFile(dir, input)), false, "scope-required not armed by /auto");
       assert.equal(fs.existsSync(path.join(session, "acceptance.ref")), true, "acceptance adopted");
       assert.equal(fs.existsSync(path.join(session, "auto-active")), true, "auto-active armed");
+      assert.ok(fs.readdirSync(session).some((f) => /grant|runner/i.test(f)), "runners granted");
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test("orchestrate-scope-guard: a following /orchestrate after /auto writes scope-required (ARCH-AUTO-10)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "auto-then-orch";
+    assert.equal(run(dir, { session_id: sid, prompt: "/auto some-slug" }).status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, { session_id: sid })), false);
+    assert.equal(run(dir, { session_id: sid, prompt: "/orchestrate some-slug" }).status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, { session_id: sid })), true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: with /auto active, a docs edit passes pre-guard before any /orchestrate (ARCH-AUTO-10)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "auto-docs";
+    assert.equal(run(dir, { session_id: sid, prompt: "/auto some-slug" }).status, 0);
+    // /auto's Phase A runs /plan, which opens the doc-write gate (ARCH-SAFETY-05).
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_CODE_SESSION_ID: sid };
+    const go = (script, input) => spawnSync(process.execPath, [path.join(ROOT, script)], { cwd: dir, input: JSON.stringify(input), encoding: "utf8", env });
+    assert.equal(go("orchestrate-scope-guard.mjs", { session_id: sid, prompt: "/craftsman:plan some-slug" }).status, 0);
+    assert.equal(go("pre-guard.mjs", { session_id: sid, tool_name: "Bash", tool_input: { command: `node ${path.join(ROOT, "doc-write.mjs")} on` } }).status, 0);
+    assert.equal(go("doc-write.mjs", {}).status, 0);
+    for (const tool_name of ["Write", "Edit"]) {
+      const pre = go("pre-guard.mjs", { session_id: sid, tool_name, tool_input: { file_path: path.join(dir, "docs", "plans", "x.md"), content: "x" } });
+      assert.equal(pre.status, 0, pre.stderr);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("orchestrate-scope-guard: a prompt that merely mentions /auto, or /automate, arms nothing", () => {
   const dir = tmpProject();
