@@ -233,6 +233,7 @@ test("init --settings-diff shows the merge and writes nothing; declining leaves 
   const r = initCli(root, "--settings-diff");
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /\+ sandbox\.enabled: true/);
+  assert.doesNotMatch(r.stdout, /rm -r/);
   assert.match(r.stdout, /\+ permissions\.ask: Bash\(git push --force \*\)/);
   assert.equal(fs.readFileSync(settingsPath(root), "utf8"), original, "a preview never writes");
   assert.equal(fs.existsSync(path.join(root, ".craftsman", "init-backups")), false);
