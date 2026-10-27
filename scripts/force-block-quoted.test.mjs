@@ -30,6 +30,13 @@ blocked.push(
   `echo "${g}" | tee x.sh`,
   `echo "${g}" | dd of=x.sh`,
 );
+blocked.push(
+  `x=$(echo "${g}"); $x`,
+  "x=`echo \"" + g + "\"`; $x",
+  `printf -v c '${g}'; $c`,
+  `read c <<< "${g}"; $c`,
+  `x=$(echo "${g}")`,
+);
 for (const c of allowed)
   test(`allows ${c}`, async () => assert.equal(await forceBlocked(c), null));
 for (const c of blocked)
