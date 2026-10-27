@@ -9,14 +9,14 @@ import { featureGate } from "./repo-exec.mjs";
 const fixtures = new Set();
 afterEach(() => { for (const f of fixtures) fs.rmSync(f, { recursive: true, force: true }); fixtures.clear(); });
 
-function setup(acceptance) {
+function setup(acceptance, plans = ["a", "b"]) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-acc-consumers-"));
   fixtures.add(root);
   const ctx = { id: ".", root, stateDir: path.join(root, ".craftsman") };
   fs.mkdirSync(ctx.stateDir, { recursive: true });
   const acPath = path.join(ctx.stateDir, "acceptance.md");
   fs.writeFileSync(acPath, "- [ ] [unit:a1] a unit\n- [x] [unit:b1] b unit\n" + acceptance);
-  for (const [plan, unit] of [["a", "a1"], ["b", "b1"]]) {
+  for (const [plan, unit] of [["a", "a1"], ["b", "b1"]].filter(([p]) => plans.includes(p))) {
     transition({ plan: `docs/plans/${plan}.md`, unit, status: "PENDING" }, ctx);
     transition({ plan: `docs/plans/${plan}.md`, unit, status: "IN_PROGRESS", evidence: "claimed" }, ctx);
   }
@@ -32,6 +32,13 @@ test("A: plan a's open untagged or [plan:a] line does not hold plan b's MERGED r
     reconcileAcceptance(ctx, {});
     assert.equal(statusOf(ctx, "b1"), "COMPLETE", line);
   }
+});
+
+test("A: ledger naming only plan b is not held by an open untagged line", () => {
+  const ctx = setup("- [ ] legacy\n", ["b"]);
+  assert.deepEqual([...new Set(currentState(ctx).map((r) => r.plan))], ["docs/plans/b.md"]);
+  reconcileAcceptance(ctx, {});
+  assert.equal(statusOf(ctx, "b1"), "COMPLETE");
 });
 
 test("A: an open [plan:b] line holds plan b's row", () => {

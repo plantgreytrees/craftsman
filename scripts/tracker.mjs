@@ -384,11 +384,8 @@ export function reconcileAcceptance(context = projectContext("."), input = {}) {
   const planWideOpen = criteria.some((c) => !c.unit && !c.done);
   const rowsNow = currentState(context);
   // ARCH-TRACKER-15: an open `[plan:<slug>]` line holds only that plan's rows. A legacy untagged
-  // line (D-legacy) is attributable only when the ledger names a single plan; with several it is
-  // reported (plan_wide_open) but holds no row.
-  const ledgerPlans = new Set(rowsNow.map((r) => planSlug(r.plan)));
-  const legacyOpen = criteria.some((c) => !c.unit && !c.plan && !c.done);
-  const heldBy = (row) => criteria.some((c) => !c.unit && !c.done && (c.plan ? c.plan === planSlug(row.plan) : ledgerPlans.size <= 1 && legacyOpen));
+  // line (D-legacy) holds no row; it is reported through plan_wide_open only.
+  const heldBy = (row) => criteria.some((c) => !c.unit && !c.done && c.plan && c.plan === planSlug(row.plan));
   const metUnits = [...new Set(criteria.filter((c) => c.unit).map((c) => c.unit))]
     .filter((unit) => criteria.every((c) => c.unit !== unit || c.done));
   const completed = [];
