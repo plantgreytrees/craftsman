@@ -112,7 +112,7 @@ const RUNS_TEXT = /\|\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|eval|source|xargs|para
 function blankProse(value) {
   if (RUNS_TEXT.test(value)) return value;
   return value.replace(/"([^"]*)"|'([^']*)'/g, (all, dq, sq, index) => {
-    if (/\$\(|`/.test(dq ?? sq)) return all;
+    if (/\$\(|`|\n/.test(dq ?? sq) || value.slice(0, index).includes("#")) return all;
     const before = value.slice(0, index).split(/&&|\|\||[;&|\n()`]/).pop();
     const words = before.trim().split(/\s+/);
     while (words.length && /^[A-Za-z_]\w*=\S*$/.test(words[0])) words.shift();
