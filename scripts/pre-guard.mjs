@@ -348,7 +348,26 @@ const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rs
 const WRITE_VERBS = new Set(WRITER_VERBS.filter((verb) => !RM_LIKE.has(verb)));
 // Writers whose target is not a plain operand: they edit in place, patch or unpack. Read only by the self-protection scan.
 const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
-const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`);
+// sed and perl count only in their in-place form (-i, -…i, --in-place), as the word-based verb check below does.
+const INPLACE_TEXT = String.raw`\b(?:sed|perl)\b[^;&|\n]*?\s(?:-[A-Za-z]*i|--in-place)`;
+const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filter((verb) => verb !== "sed" && verb !== "perl").join("|")})\\b|${INPLACE_TEXT}`);
+const INPLACE_WORD = /^(?:-[A-Za-z]*i|--in-place)/;
+// sed/perl -i from command-position words: a quoted pattern (`grep "sed -i" f`) is not one. A multi-word argument of a
+// command that is not a plain printer (`bash -c 'sed -i …'`) is still read as text.
+function inPlaceEditor(command) {
+  const segs = shellSegments(command);
+  const isEd = (w) => w === "sed" || w === "perl";
+  return segs.some((words, si) => {
+    const safe = SAFE_HEADS.has(path.basename(words[0]));
+    return words.some((w, i) => {
+      if (isEd(w)) {
+        if (words.slice(i + 1).some((x) => INPLACE_WORD.test(x))) return true;
+        return i === words.length - 1 && INPLACE_WORD.test(segs[si + 1]?.[0] ?? "");
+      }
+      return !safe && /\s/.test(w) && new RegExp(INPLACE_TEXT).test(w);
+    });
+  });
+}
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
 const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
@@ -1419,7 +1438,7 @@ function denySelfDisable(what, advice) {
 }
 if (tool === "Bash" && command) {
   // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
-  const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
+  const verb = WRITER_AT_COMMAND.test(command) || inPlaceEditor(command);
   const never = NEVER_TEXT.test(command);
   const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
   const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });
