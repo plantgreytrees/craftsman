@@ -104,12 +104,30 @@ export function ownBranchesOf(binding, scope) {
   return own;
 }
 
+// A quoted argument of a printing or searching program (grep, printf, echo, ...) is
+// prose, not a command: it only names a git form. Blanked unless it holds $( or a
+// backtick, or the command pipes into a shell, eval or xargs that could run it.
+const PROSE_PROGRAMS = new Set(["grep", "egrep", "fgrep", "rg", "printf", "echo"]);
+const RUNS_TEXT = /\|\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|eval|source|xargs|parallel|env|python3?|node|perl|ruby)\b|<\(|\b(?:eval|source)\b/;
+function blankProse(value) {
+  if (RUNS_TEXT.test(value)) return value;
+  return value.replace(/"([^"]*)"|'([^']*)'/g, (all, dq, sq, index) => {
+    if (/\$\(|`/.test(dq ?? sq)) return all;
+    const before = value.slice(0, index).split(/&&|\|\||[;&|\n()`]/).pop();
+    const words = before.trim().split(/\s+/);
+    while (words.length && /^[A-Za-z_]\w*=\S*$/.test(words[0])) words.shift();
+    const program = (words[0] ?? "").replace(/^.*\//, "");
+    return PROSE_PROGRAMS.has(program) ? '"x"' : all;
+  });
+}
+
 // The destructive git forms /auto must never run (ARCH-LAND-31), or null.
 // Every quoted string is checked as a command (`bash -c`, `python3 -c`, …)
 // except a commit/tag message operand without $( ) or a backtick. Alias
 // definitions are checked as what they define, and an alias call as its
 // resolved words plus call-site flags.
 export function destructiveGit(value, ownBranches = []) {
+  value = blankProse(value);
   for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
     const inner = quoted[1] ?? quoted[2];
     if (MESSAGE_OPERAND.test(value.slice(0, quoted.index)) && !/\$\(|`/.test(inner)) continue;
@@ -134,6 +152,7 @@ export function destructiveGit(value, ownBranches = []) {
     if (sub === "config" && rest.some((w) => /^(?:remote\.[^.]+\.(?:push|mirror)|alias\..+)$/.test(w))) return "git config remote push, mirror or alias";
     if (sub === "push" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force-with-lease", "--force-if-includes", "--mirror") || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
     if (sub === "reset" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--hard"))) return "git reset --hard";
+    if (sub === "clean" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git clean --force";
     if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git worktree remove --force";
   }
   return null;
