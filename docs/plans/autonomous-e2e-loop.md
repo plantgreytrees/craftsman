@@ -107,7 +107,8 @@ units:
     language: JavaScript (workflow script) + Markdown
     security: normal
     scope:
-      read: [scripts/scope.mjs, scripts/repo-exec.mjs, scripts/tracker.mjs, agents/implementer.md, commands/_shared-execution.md]
+      # read list trimmed (agents/implementer.md dropped) to fit ARCH-ENGINE-08 after scope.mjs grew (plan investigate-cross-repo-worktree-git-guard); the unit had already shipped.
+      read: [scripts/scope.mjs, scripts/repo-exec.mjs, scripts/tracker.mjs, commands/_shared-execution.md]
       docs: [docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
       write: [workflows/spike.js, agents/unit-runner.md, commands/_shared-execution.md, docs/plans/autonomous-e2e-loop-evidence.md]
     arch: [ARCH-ENGINE-02, ARCH-ENGINE-03, ARCH-ENGINE-04, ARCH-ENGINE-09, ARCH-STATE-03]
