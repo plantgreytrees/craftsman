@@ -2,7 +2,12 @@
 // run, found in a Bash command by a best-effort text scan (ARCH-LAND-31; defense in depth, not a proof).
 // A plain `git push origin HEAD:<base>` (tracker publish, ARCH-LAND-17) is not
 // destructive and passes; every force flag and `+refspec` still blocks.
-import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
+import {
+  Worker,
+  isMainThread,
+  parentPort,
+  workerData,
+} from "node:worker_threads";
 import { shellSegments, UNEXPANDED } from "./shell-words.mjs";
 
 const MAX_COMMAND_BYTES = 16 * 1024;
@@ -12,7 +17,13 @@ const HEAP_MB = 128;
 const UNREADABLE = "a command the force block cannot read";
 
 const skipGlobals = (words, i) => {
-  while (i < words.length && words[i].startsWith("-")) i += /^-[Cc]$|^--(?:git-dir|work-tree|namespace|attr-source|config-env)$/.test(words[i]) ? 2 : 1;
+  while (i < words.length && words[i].startsWith("-"))
+    i +=
+      /^-[Cc]$|^--(?:git-dir|work-tree|namespace|attr-source|config-env)$/.test(
+        words[i],
+      )
+        ? 2
+        : 1;
   return i;
 };
 
@@ -24,7 +35,8 @@ const skipGlobals = (words, i) => {
 function invocationsIn(words, budget) {
   const found = [];
   const take = (list) => {
-    if ((budget.left -= list.length) < 0) throw new RangeError("too many git invocations");
+    if ((budget.left -= list.length) < 0)
+      throw new RangeError("too many git invocations");
     found.push(list);
   };
   words.forEach((word, k) => {
@@ -33,7 +45,8 @@ function invocationsIn(words, budget) {
     if (word !== "git" && !word.endsWith("/git")) return;
     const i = skipGlobals(words, k + 1);
     take(words.slice(i));
-    if (i > k + 1 && words[i - 1].startsWith("-") && i < words.length) take(words.slice(skipGlobals(words, i + 1)));
+    if (i > k + 1 && words[i - 1].startsWith("-") && i < words.length)
+      take(words.slice(skipGlobals(words, i + 1)));
   });
   return found;
 }
@@ -43,18 +56,26 @@ function invocationsIn(words, budget) {
 function gitInvocations(value) {
   const invocations = [];
   const segments = [""];
-  for (const piece of value.match(/"[^"]*"|'[^']*'|&&|\|\||&(?!>)|[;|\n()`]|(?:&>|[^"';|&\n()`])+|["']/g) || []) {
+  for (const piece of value.match(
+    /"[^"]*"|'[^']*'|&&|\|\||&(?!>)|[;|\n()`]|(?:&>|[^"';|&\n()`])+|["']/g,
+  ) || []) {
     if (/^(?:&&|\|\||[;|&\n()`])$/.test(piece)) segments.push("");
     else segments[segments.length - 1] += piece;
   }
   segments.push(...value.split(/&&|\|\||&(?!>)|[;|\n()`]/));
-  const lists = segments.map((segment) => (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || []).map((word) => word.replace(/["']/g, "")).filter(Boolean));
+  const lists = segments.map((segment) =>
+    (segment.match(/(?:"[^"]*"|'[^']*'|[^\s"'])+/g) || [])
+      .map((word) => word.replace(/["']/g, ""))
+      .filter(Boolean),
+  );
   const budget = { left: MAX_INVOCATION_WORDS };
-  for (const words of [...lists, ...shellSegments(value)]) invocations.push(...invocationsIn(words, budget));
+  for (const words of [...lists, ...shellSegments(value)])
+    invocations.push(...invocationsIn(words, budget));
   return invocations;
 }
 
-const shortFlag = (word, letter) => new RegExp(`^-[A-Za-z0-9]*${letter}[A-Za-z0-9]*$`).test(word);
+const shortFlag = (word, letter) =>
+  new RegExp(`^-[A-Za-z0-9]*${letter}[A-Za-z0-9]*$`).test(word);
 // git takes any unambiguous prefix of a long option, so `--har` is `--hard`.
 const longFlag = (word, ...options) => {
   const name = word.split("=")[0];
@@ -62,14 +83,22 @@ const longFlag = (word, ...options) => {
 };
 
 // Stops at ( ) ` $ too, so a substitution after a message is never one.
-const MESSAGE_OPERAND = /\bgit\b[^;&|\n()`$]*\s(?:commit|tag)\b[^;&|\n()`$]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
+const MESSAGE_OPERAND =
+  /\bgit\b[^;&|\n()`$]*\s(?:commit|tag)\b[^;&|\n()`$]*\s(?:-[A-Za-z]*m|--message|-F|--file)=?\s*$/;
 
 // The one exception (ARCH-LAND-31), top-level unquoted pushes only: a lease push whose every refspec names a
 // branch matching `ownBranches` (globs such as `feature/<plan>-*` and claimed
 // unit branches). Another flag, a `+` refspec, no refspec or an unexpanded
 // word is no exception.
-const LEASE_OK = new Set(["-u", "--set-upstream", "-q", "--quiet", "--force-if-includes"]);
-const CONFIG_CARRIER = /(?:^|[\s;&|(])(?:-c|--config-env\S*|--git-dir\S*|--work-tree\S*|--exec-path\S*|--namespace\S*)(?=[\s=]|$)|\bGIT_[A-Z_]+=|(?:^|[\s;&|(])env(?:\s|$)/;
+const LEASE_OK = new Set([
+  "-u",
+  "--set-upstream",
+  "-q",
+  "--quiet",
+  "--force-if-includes",
+]);
+const CONFIG_CARRIER =
+  /(?:^|[\s;&|(])(?:-c|--config-env\S*|--git-dir\S*|--work-tree\S*|--exec-path\S*|--namespace\S*)(?=[\s=]|$)|\bGIT_[A-Z_]+=|(?:^|[\s;&|(])env(?:\s|$)/;
 const SAFE_WORD = /^[A-Za-z0-9._\/:=-]+$/; // nothing the shell could expand, split or glob
 const SAFE_NAME = /^[A-Za-z0-9._\/-]+$/;
 export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
@@ -77,29 +106,55 @@ export function leaseToOwnBranch(rest, ownBranches = [], text = "") {
   if (/[$`\\]/.test(text) || rest.some((w) => !SAFE_WORD.test(w))) return false;
   // Git config can remap a push (remote.<n>.push, push.default): refuse any config-carrying global option, GIT_* variable or env prefix.
   if (CONFIG_CARRIER.test(text)) return false;
-  const own = ownBranches.filter((b) => SAFE_NAME.test(b.replace(/\*/g, "x"))).map((glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[A-Za-z0-9._-]+")}$`));
-  const isLease = (w) => w.startsWith("--force-w") && "--force-with-lease".startsWith(w.split("=")[0]);
+  const own = ownBranches
+    .filter((b) => SAFE_NAME.test(b.replace(/\*/g, "x")))
+    .map(
+      (glob) =>
+        new RegExp(
+          `^${glob.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[A-Za-z0-9._-]+")}$`,
+        ),
+    );
+  const isLease = (w) =>
+    w.startsWith("--force-w") &&
+    "--force-with-lease".startsWith(w.split("=")[0]);
   const flags = rest.filter((w) => w.startsWith("-"));
   const [remote, ...refs] = rest.filter((w) => !w.startsWith("-"));
   if (!remote || !refs.length || rest.includes(UNEXPANDED)) return false;
   if (!/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(remote)) return false; // a remote word with no path separator, never `.`/`..`, a path or a URL
   if (/(?:^|[\s;&|(])alias\s/.test(text)) return false; // a shell alias defined in the same command can rewrite the push
-  if (!flags.some(isLease) || !flags.every((w) => isLease(w) || LEASE_OK.has(w))) return false;
+  if (
+    !flags.some(isLease) ||
+    !flags.every((w) => isLease(w) || LEASE_OK.has(w))
+  )
+    return false;
   return refs.every((ref) => {
     // `src:refs/heads/<own>` only: a colon-less ref or a short destination is resolved by git through push config.
     const sides = ref.split(":");
-    if (sides.length !== 2 || !sides.every((side) => SAFE_NAME.test(side)) || !sides[1].startsWith("refs/heads/")) return false;
+    if (
+      sides.length !== 2 ||
+      !sides.every((side) => SAFE_NAME.test(side)) ||
+      !sides[1].startsWith("refs/heads/")
+    )
+      return false;
     return own.some((re) => re.test(sides[1].slice("refs/heads/".length)));
   });
 }
 
 // The branches this run owns: its bound unit branch and `feature/<plan>-*` for its plan.
 export function ownBranchesOf(binding, scope) {
-  const slug = typeof scope?.plan === "string" ? scope.plan.replace(/^.*\//, "").replace(/\.md$/, "") : "";
+  const slug =
+    typeof scope?.plan === "string"
+      ? scope.plan.replace(/^.*\//, "").replace(/\.md$/, "")
+      : "";
   // A safe name that git cannot read as another ref: not HEAD, not an option, not refs/ or heads/ qualified, never a main or master segment.
-  const named = (b) => typeof b === "string" && /^[A-Za-z0-9._\/-]+$/.test(b) && !/^(?:HEAD$|-|refs\/|heads\/)/i.test(b) && !/(?:^|\/)(?:main|master)$/i.test(b);
+  const named = (b) =>
+    typeof b === "string" &&
+    /^[A-Za-z0-9._\/-]+$/.test(b) &&
+    !/^(?:HEAD$|-|refs\/|heads\/)/i.test(b) &&
+    !/(?:^|\/)(?:main|master)$/i.test(b);
   const own = [];
-  if (named(binding?.branch) && /^(?:feat|feature)\//.test(binding.branch)) own.push(binding.branch); // exact name, never a pattern; run-created branches only
+  if (named(binding?.branch) && /^(?:feat|feature)\//.test(binding.branch))
+    own.push(binding.branch); // exact name, never a pattern; run-created branches only
   if (named(slug)) own.push(`feature/${slug}-*`);
   return own;
 }
@@ -107,16 +162,32 @@ export function ownBranchesOf(binding, scope) {
 // A quoted argument of a printing or searching program (grep, printf, echo, ...) is
 // prose, not a command: it only names a git form. Blanked unless it holds $( or a
 // backtick, or the command pipes into a shell, eval or xargs that could run it.
-const PROSE_PROGRAMS = new Set(["grep", "egrep", "fgrep", "rg", "printf", "echo"]);
-const RUNS_TEXT = /\|\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|eval|source|xargs|parallel|env|python3?|node|perl|ruby)\b|<\(|\b(?:eval|source)\b/;
+const PROSE_PROGRAMS = new Set([
+  "grep",
+  "egrep",
+  "fgrep",
+  "rg",
+  "printf",
+  "echo",
+]);
+const RUNS_TEXT =
+  /\|\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|eval|source|xargs|parallel|env|python3?|node|perl|ruby)\b|<\(|\b(?:eval|source)\b/;
 function blankProse(value) {
   if (RUNS_TEXT.test(value)) return value;
   // Output written to a file (`>`, `>>`, tee, dd) can be run later: only a bare print or search is prose.
-  const bare = value.replace(/"[^"]*"|'[^']*'/g, "").replace(/\d*>&\d|&>\s*\/dev\/null|\d*>>?\s*\/dev\/null/g, "");
+  const bare = value
+    .replace(/"[^"]*"|'[^']*'/g, "")
+    .replace(/\d*>&\d|&>\s*\/dev\/null|\d*>>?\s*\/dev\/null/g, "");
   if (/>|(?:^|[\s;&|(])(?:\S*\/)?(?:tee|dd)(?:\s|$)/.test(bare)) return value;
+  // Any unquoted pipe (`|`, `|&`) may feed a shell through a wrapper (sudo, command, nice, ...): not prose.
+  if (/\|/.test(bare.replace(/\|\|/g, ""))) return value;
   return value.replace(/"([^"]*)"|'([^']*)'/g, (all, dq, sq, index) => {
-    if (/\$\(|`|\n/.test(dq ?? sq) || value.slice(0, index).includes("#")) return all;
-    const before = value.slice(0, index).split(/&&|\|\||[;&|\n()`]/).pop();
+    if (/\$\(|`|\n/.test(dq ?? sq) || value.slice(0, index).includes("#"))
+      return all;
+    const before = value
+      .slice(0, index)
+      .split(/&&|\|\||[;&|\n()`]/)
+      .pop();
     const words = before.trim().split(/\s+/);
     while (words.length && /^[A-Za-z_]\w*=\S*$/.test(words[0])) words.shift();
     const program = (words[0] ?? "").replace(/^.*\//, "");
@@ -133,30 +204,87 @@ export function destructiveGit(value, ownBranches = []) {
   value = blankProse(value);
   for (const quoted of value.matchAll(/"([^"]*)"|'([^']*)'/g)) {
     const inner = quoted[1] ?? quoted[2];
-    if (MESSAGE_OPERAND.test(value.slice(0, quoted.index)) && !/\$\(|`/.test(inner)) continue;
+    if (
+      MESSAGE_OPERAND.test(value.slice(0, quoted.index)) &&
+      !/\$\(|`/.test(inner)
+    )
+      continue;
     const found = destructiveGit(inner, []); // the lease exception is for a top-level push only: a quoted string may be spliced from adjacent pieces
     if (found) return found;
   }
   const aliases = new Map();
-  for (const alias of value.matchAll(/\balias\.([\w.-]+)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g)) {
+  for (const alias of value.matchAll(
+    /\balias\.([\w.-]+)(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g,
+  )) {
     const defined = (alias[2] ?? alias[3] ?? alias[4]).replace(/^!\s*/, "");
-    aliases.set(alias[1], defined.replace(/^git\s+/, "").split(/\s+/).filter(Boolean));
-    const found = destructiveGit(/\bgit\b/.test(defined) ? defined : `git ${defined}`, []);
+    aliases.set(
+      alias[1],
+      defined
+        .replace(/^git\s+/, "")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    const found = destructiveGit(
+      /\bgit\b/.test(defined) ? defined : `git ${defined}`,
+      [],
+    );
     if (found) return found;
   }
   // Arguments supplied at run time (xargs, parallel) cannot be read: fail closed.
-  if (/\b(?:xargs|parallel)\b[^;&|\n]*\bgit\b/.test(value)) return "git run through xargs or parallel";
+  if (/\b(?:xargs|parallel)\b[^;&|\n]*\bgit\b/.test(value))
+    return "git run through xargs or parallel";
   for (let words of gitInvocations(value)) {
-    for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++) words = [...aliases.get(words[0]), ...words.slice(1)];
+    for (let n = 0; n <= aliases.size && aliases.has(words[0]); n++)
+      words = [...aliases.get(words[0]), ...words.slice(1)];
     const [sub, ...rest] = words;
     if (sub === "push" && leaseToOwnBranch(rest, ownBranches, value)) continue;
     // Config in the same command can make a plain push forced or a mirror (remote.<n>.push=+..., remote.<n>.mirror).
-    if (sub === "push" && CONFIG_CARRIER.test(value)) return "git push with a config override";
-    if (sub === "config" && rest.some((w) => /^(?:remote\.[^.]+\.(?:push|mirror)|alias\..+)$/.test(w))) return "git config remote push, mirror or alias";
-    if (sub === "push" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force-with-lease", "--force-if-includes", "--mirror") || shortFlag(w, "f") || w.startsWith("+"))) return "git push --force";
-    if (sub === "reset" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--hard"))) return "git reset --hard";
-    if (sub === "clean" && rest.some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git clean --force";
-    if (sub === "worktree" && rest[0] === "remove" && rest.slice(1).some((w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"))) return "git worktree remove --force";
+    if (sub === "push" && CONFIG_CARRIER.test(value))
+      return "git push with a config override";
+    if (
+      sub === "config" &&
+      rest.some((w) => /^(?:remote\.[^.]+\.(?:push|mirror)|alias\..+)$/.test(w))
+    )
+      return "git config remote push, mirror or alias";
+    if (
+      sub === "push" &&
+      rest.some(
+        (w) =>
+          w === UNEXPANDED ||
+          longFlag(
+            w,
+            "--force-with-lease",
+            "--force-if-includes",
+            "--mirror",
+          ) ||
+          shortFlag(w, "f") ||
+          w.startsWith("+"),
+      )
+    )
+      return "git push --force";
+    if (
+      sub === "reset" &&
+      rest.some((w) => w === UNEXPANDED || longFlag(w, "--hard"))
+    )
+      return "git reset --hard";
+    if (
+      sub === "clean" &&
+      rest.some(
+        (w) => w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"),
+      )
+    )
+      return "git clean --force";
+    if (
+      sub === "worktree" &&
+      rest[0] === "remove" &&
+      rest
+        .slice(1)
+        .some(
+          (w) =>
+            w === UNEXPANDED || longFlag(w, "--force") || shortFlag(w, "f"),
+        )
+    )
+      return "git worktree remove --force";
   }
   return null;
 }
@@ -167,18 +295,32 @@ export function destructiveGit(value, ownBranches = []) {
 // heap limit; anything but a clean answer in time — a throw, a crash, a miss —
 // blocks, as does a command too large to read in time. `source` (worker code
 // to eval) is the test seam for a stalled or exhausted check.
-export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS, ownBranches = [] } = {}) {
-  if (Buffer.byteLength(value) > MAX_COMMAND_BYTES) return Promise.resolve(`a command over ${MAX_COMMAND_BYTES} bytes (split it into smaller commands)`);
+export function forceBlocked(
+  value,
+  { source, deadlineMs = DEADLINE_MS, ownBranches = [] } = {},
+) {
+  if (Buffer.byteLength(value) > MAX_COMMAND_BYTES)
+    return Promise.resolve(
+      `a command over ${MAX_COMMAND_BYTES} bytes (split it into smaller commands)`,
+    );
   return new Promise((resolve) => {
-    const options = { workerData: { forceBlock: value, ownBranches }, execArgv: [], resourceLimits: { maxOldGenerationSizeMb: HEAP_MB } };
-    const worker = source ? new Worker(source, { ...options, eval: true }) : new Worker(new URL(import.meta.url), options);
+    const options = {
+      workerData: { forceBlock: value, ownBranches },
+      execArgv: [],
+      resourceLimits: { maxOldGenerationSizeMb: HEAP_MB },
+    };
+    const worker = source
+      ? new Worker(source, { ...options, eval: true })
+      : new Worker(new URL(import.meta.url), options);
     const settle = (verdict) => {
       clearTimeout(timer);
       resolve(verdict);
       worker.terminate();
     };
     const timer = setTimeout(() => settle(UNREADABLE), deadlineMs);
-    worker.once("message", (message) => settle(message.ok ? message.verdict : UNREADABLE));
+    worker.once("message", (message) =>
+      settle(message.ok ? message.verdict : UNREADABLE),
+    );
     worker.once("error", () => settle(UNREADABLE));
     worker.once("exit", () => settle(UNREADABLE));
   });
@@ -187,7 +329,10 @@ export function forceBlocked(value, { source, deadlineMs = DEADLINE_MS, ownBranc
 if (!isMainThread && typeof workerData?.forceBlock === "string") {
   let message;
   try {
-    message = { ok: true, verdict: destructiveGit(workerData.forceBlock, workerData.ownBranches) };
+    message = {
+      ok: true,
+      verdict: destructiveGit(workerData.forceBlock, workerData.ownBranches),
+    };
   } catch {
     message = { ok: false };
   }
