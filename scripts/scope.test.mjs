@@ -233,7 +233,7 @@ test("scope: release refuses a dirty worktree and succeeds once committed", () =
     assert.ok(before.some((n) => n.startsWith("scope")), "scope file exists");
     let result = release();
     assert.equal(result.status, 2, "modified tracked file");
-    assert.ok(result.stderr.includes(w) && /commit/.test(result.stderr), result.stderr);
+    assert.ok(result.stderr.includes(w) && /uncommitted changes/.test(result.stderr), result.stderr);
     assert.deepEqual(names().sort(), before, "nothing removed");
     spawnSync("git", ["checkout", "--", "tracked.txt"], { cwd: w });
     fs.writeFileSync(path.join(w, "new.txt"), "x\n");
@@ -276,5 +276,7 @@ test("scope: release on an unreadable worktree names git worktree prune, not a d
     assert.match(result.stderr, /git worktree prune/);
     assert.doesNotMatch(result.stderr, /fatal:|uncommitted changes/);
     assert.deepEqual(names(), before, "scope and binding remain");
+    const evs = fs.readFileSync(path.join(root, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(evs.some((e) => e.ev === "scope_release_refused" && e.sid === "s8"), "refused event carries sid");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
