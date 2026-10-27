@@ -48,26 +48,6 @@ function mutatesGit(value) {
   return /(?:^|[;&|]\s*)\s*git\s+(?:(?:-[A-Za-z]+\s+[^\s]+)\s+)*(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|(?:^|[;&|]\s*)\s*git\s+branch\s+-[dD]\b|(?:^|[;&|]\s*)\s*git\s+worktree\s+(?:remove|move|prune)\b/.test(command);
 }
 
-function commandDirectoryTargets(command, worktree) {
-  const targets = [];
-  for (const match of command.matchAll(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/g)) {
-    targets.push(match[1] || match[2] || match[3]);
-  }
-  for (const match of command.matchAll(/(?:^|&&|;|\|\|)\s*(?:cd|pushd)\s+(?:"([^"]+)"|'([^']+)'|(\S+))/g)) {
-    targets.push(match[1] || match[2] || match[3]);
-  }
-  return targets.some((target) => {
-    const absolute = path.resolve(process.cwd(), target);
-    let ancestor = absolute;
-    while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
-    let resolved;
-    try { resolved = path.resolve(fs.realpathSync(ancestor), path.relative(ancestor, absolute)); }
-    catch { return true; }
-    const realWorktree = fs.realpathSync(worktree);
-    return resolved !== realWorktree && !resolved.startsWith(realWorktree + path.sep);
-  });
-}
-
 function usesAlternateGitRoot(command) {
   return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_DIR\s*=|\bGIT_WORK_TREE\s*=/.test(command);
 }
@@ -1310,26 +1290,92 @@ if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=fal
   process.exit(2);
 }
 
-if (tool === "Bash" && binding && mutatesGit(command)) {
-  const cwd = path.resolve(process.cwd());
-  const worktree = path.resolve(binding.worktree_path);
-  if ((cwd !== worktree && !cwd.startsWith(worktree + path.sep)) || commandDirectoryTargets(command, worktree) || usesAlternateGitRoot(command)) {
-    logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command });
-    process.stderr.write(
-      `craftsman: Git mutation blocked outside the active worktree (${binding.worktree_path}). ` +
-      `Run implementation Git commands from that worktree, or release the binding before the locked merge.\n`
-    );
-    process.exit(2);
+// Where each mutating `git` of a command runs, proven from the text: the directory the command starts in, the
+// chained `cd`/`pushd` before it (joined only by `&&`, `;` or a newline), then each `-C`. Returns { dirs } or
+// { why }: anything it cannot prove (a variable, `~`, a subshell, a group, `&`, `|`, `popd`, a missing path) blocks.
+const GIT_RESERVED = new Set(["{", "}", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac", "function", "!", "time"]);
+const CHAINED = new Set([null, "&&", ";", "\n"]);
+function gitTargets(text, start) {
+  let why = "";
+  const cmds = tokenize(stripHeredocs(text), (w) => { why = w; });
+  if (!cmds) return { why: why || "unparsable command", unparsed: true };
+  const dynamic = (w) => /[$`~*?\[{]/.test(w);
+  const dirs = [];
+  let dir = start;
+  const stat = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
+  for (const cmd of cmds) {
+    if (cmd.substs.some((x) => mutatesGit(x))) return { why: "a git mutation inside a substitution" };
+    const words = [...cmd.words];
+    while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
+    if (!words.length) continue;
+    if (GIT_RESERVED.has(words[0])) return { why: `shell syntax "${words[0]}"` };
+    const chained = CHAINED.has(cmd.sep);
+    if (words[0] === "cd" || words[0] === "pushd") {
+      if (!chained) { dir = null; continue; }
+      const arg = words.length === 2 ? words[1] : null;
+      if (dir === null || arg === null || arg === "-" || arg.startsWith("-") || dynamic(arg)) { dir = null; continue; }
+      const next = realResolve(dir, arg);
+      dir = stat(next) ? next : null;
+      continue;
+    }
+    if (words[0] === "popd") { dir = null; continue; }
+    if (path.basename(words[0]) !== "git") {
+      if (mutatesGit(words.map((w) => w.replace(/\s/g, "_")).join(" "))) return { why: "a git mutation behind another command" };
+      continue;
+    }
+    let at = dir, i = 1;
+    for (; i < words.length && words[i].startsWith("-"); i++) {
+      if (words[i] === "-C") {
+        const arg = words[++i];
+        if (at === null || arg === undefined || dynamic(arg)) { at = null; continue; }
+        const next = realResolve(at, arg);
+        at = stat(next) ? next : null;
+      } else if (words[i] === "-c" || words[i] === "--namespace" || words[i] === "--exec-path") i++;
+    }
+    const sub = words[i];
+    const mutating = mutatesGit(["git", sub ?? ""].join(" ")) || (sub === "branch" && /^-[dD]$/.test(words[i + 1] ?? "")) || (sub === "worktree" && /^(remove|move|prune)$/.test(words[i + 1] ?? ""));
+    if (!mutating) continue;
+    if (!chained) return { why: "a mutating git call joined by & or |" };
+    if (at === null) return { why: "a git directory that cannot be proven" };
+    dirs.push(at);
   }
-  let branch = "";
-  try { branch = execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8" }).trim(); } catch {}
-  if (!branch || branch !== binding.branch) {
-    logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, branch });
-    process.stderr.write(
-      `craftsman: Git mutation blocked because the active worktree is on branch "${branch || "(detached)"}", ` +
-      `not the bound branch "${binding.branch}".\n`
-    );
-    process.exit(2);
+  return { dirs };
+}
+
+if (tool === "Bash" && binding && /\bgit\b/.test(command)) {
+  const rawMutation = mutatesGit(command);
+  const res = gitTargets(command, realDir(process.cwd()));
+  // An unparsable command is judged by the raw-text test; a parsed one by the calls found in it.
+  if (rawMutation || res.dirs?.length || (res.why && !res.unparsed)) {
+    const gitOut = (cwd, args) => { try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return ""; } };
+    let realWorktree = null;
+    try { realWorktree = fs.realpathSync(path.resolve(binding.worktree_path)); } catch {}
+    let target = null, bad = !!res.why || !res.dirs.length || realWorktree === null || usesAlternateGitRoot(command);
+    if (!bad) {
+      for (const d of res.dirs) {
+        target = d;
+        let top = "";
+        try { top = fs.realpathSync(gitOut(d, ["rev-parse", "--show-toplevel"])); } catch {}
+        if (!top || top !== realWorktree) { bad = true; break; }
+      }
+    }
+    if (bad) {
+      logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, target });
+      process.stderr.write(
+        `craftsman: Git mutation blocked outside the active worktree (${binding.worktree_path}). ` +
+        `Run each git call in it: \`git -C ${binding.worktree_path} …\`, or \`cd ${binding.worktree_path} && git …\` in the same command.\n`
+      );
+      process.exit(2);
+    }
+    const branch = gitOut(target, ["branch", "--show-current"]);
+    if (!branch || branch !== binding.branch) {
+      logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, branch, target });
+      process.stderr.write(
+        `craftsman: Git mutation blocked because the active worktree is on branch "${branch || "(detached)"}", ` +
+        `not the bound branch "${binding.branch}".\n`
+      );
+      process.exit(2);
+    }
   }
 }
 
