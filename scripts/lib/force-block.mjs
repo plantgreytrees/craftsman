@@ -111,6 +111,9 @@ const PROSE_PROGRAMS = new Set(["grep", "egrep", "fgrep", "rg", "printf", "echo"
 const RUNS_TEXT = /\|\s*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh|eval|source|xargs|parallel|env|python3?|node|perl|ruby)\b|<\(|\b(?:eval|source)\b/;
 function blankProse(value) {
   if (RUNS_TEXT.test(value)) return value;
+  // Output written to a file (`>`, `>>`, tee, dd) can be run later: only a bare print or search is prose.
+  const bare = value.replace(/"[^"]*"|'[^']*'/g, "").replace(/\d*>&\d|&>\s*\/dev\/null|\d*>>?\s*\/dev\/null/g, "");
+  if (/>|(?:^|[\s;&|(])(?:\S*\/)?(?:tee|dd)(?:\s|$)/.test(bare)) return value;
   return value.replace(/"([^"]*)"|'([^']*)'/g, (all, dq, sq, index) => {
     if (/\$\(|`|\n/.test(dq ?? sq) || value.slice(0, index).includes("#")) return all;
     const before = value.slice(0, index).split(/&&|\|\||[;&|\n()`]/).pop();

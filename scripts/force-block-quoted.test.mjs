@@ -17,6 +17,8 @@ const blocked = [
   'echo "$(git reset --hard)"',
   'echo "x" && git reset --hard',
 ];
+const g = ["git", "reset", "--hard"].join(" ");
+blocked.push(`echo "${g}" > x.sh`, `printf '${g}' >> f`, `echo "${g}" | tee x.sh`, `echo "${g}" | dd of=x.sh`);
 for (const c of allowed)
   test(`allows ${c}`, async () => assert.equal(await forceBlocked(c), null));
 for (const c of blocked)
