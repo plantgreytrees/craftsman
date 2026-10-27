@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, uncheckedAcceptance, advisorySkipped } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
@@ -319,6 +319,7 @@ if (isDirty && results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
 //    that unit (any tracker event it wrote for it) — a `--step` session is
 //    accountable for its own unit, not for the rest of the plan.
 const acPath = acceptancePath(context);
+let legacyNotice = "";
 // Same trigger as the PostToolUse one, for ticks made where no Edit/Write hook
 // fired (sed, a script): criteria that are all met move the tracker now.
 try {
@@ -339,22 +340,44 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
   const ac = fs.readFileSync(acPath, "utf8");
   if (ownsAcceptance(sid, ac, context)) {
     const touchedUnits = new Set();
+    const touchedPlans = new Set();
+    const unitPlan = new Map();
     try {
       for (const line of fs.readFileSync(ledgerPath(context), "utf8").split("\n")) {
         let event = null;
         try { event = JSON.parse(line); } catch { continue; }
         if (event?.session_id !== sid) continue;
-        if (event.unit) touchedUnits.add(event.unit);
-        if (event.scope_id) touchedUnits.add(event.scope_id);
+        const slug = event.plan ? planSlugOf(event.plan) : null;
+        if (slug) touchedPlans.add(slug);
+        for (const id of [event.unit, event.scope_id]) {
+          if (!id) continue;
+          touchedUnits.add(id);
+          if (slug) unitPlan.set(id, slug);
+        }
       }
-    } catch { /* no tracker ledger — only untagged criteria apply */ }
-    const unchecked = uncheckedAcceptance(ac).filter((c) => !c.unit || touchedUnits.has(c.unit));
+    } catch { /* no tracker ledger — both sets stay empty, untagged criteria bind */ }
+    const { binding, legacy } = bindingAcceptance(ac, { units: [...touchedUnits], plans: [...touchedPlans] });
+    const unchecked = binding.filter((c) => !c.done);
+    const legacyOpen = legacy.filter((c) => !c.done);
     if (unchecked.length) {
+      const owner = (c) => c.plan || (c.unit && unitPlan.get(c.unit)) || "untagged";
+      const groups = new Map();
+      for (const c of unchecked) {
+        const o = owner(c);
+        if (!groups.has(o)) groups.set(o, []);
+        groups.get(o).push(c.line);
+      }
+      const body = [...groups].map(([o, lines]) => `[plan: ${o}]\n${lines.map((l) => `${o}: ${l}`).join("\n")}`).join("\n");
+      const names = [...groups.keys()].filter((o) => o !== "untagged");
       problems.push(
-        `ACCEPTANCE CRITERIA not yet satisfied (from the approved plan). Verify each ` +
+        `ACCEPTANCE CRITERIA not yet satisfied (from the approved plan${names.length ? ` ${names.join(", ")}` : ""}). Verify each ` +
         `against the code you wrote; tick it in .craftsman/acceptance.md only if the ` +
-        `code genuinely satisfies it, otherwise implement it:\n${unchecked.map((c) => c.line).join("\n")}`
+        `code genuinely satisfies it, otherwise implement it:\n${body}`
       );
+    }
+    if (legacyOpen.length) {
+      legacyNotice = `craftsman: ${legacyOpen.length} untagged unchecked acceptance line(s) in ${path.relative(context?.root || process.cwd(), acPath) || acPath} are not bound to this session's plans; add [plan:<slug>] tags to scope them.`;
+      logEvent({ ev: "stop-acceptance-legacy", sid, count: legacyOpen.length });
     }
   }
 }
@@ -393,7 +416,7 @@ if (!inFlight.length) {
 //    stopGate.blockOnUnpushed is true; doc drift is informational.
 const { unpushed, unseenDocs } = stopReports();
 if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
-const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs].filter(Boolean).join("\n");
+const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs, legacyNotice].filter(Boolean).join("\n");
 
 if (!problems.length) {
   logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 });
