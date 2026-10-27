@@ -10,6 +10,12 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 - The ui gate is routed through `scripts/ui-gate.mjs` to the optional Artist plugin (ARCH-SLIM-15, ARCH-GATES-01..07); `ui-ux-reviewer` is reduced to an accessibility floor and the `design-review` skill is removed.
 
+### Fixed
+
+- **`workspace-init --update` no longer corrupts the manifest.** Existing entries were written back with the loader's
+  absolute `root` and internal fields, and the file was left on disk when post-write validation failed; they now keep
+  their declared relative root, and absolute roots are refused before writing.
+
 ## [2.3.1] - 2026-10-25
 
 ### Fixed
