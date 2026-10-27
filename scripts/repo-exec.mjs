@@ -203,6 +203,14 @@ function heartbeat(lock) {
 // Plan files the feature must find on origin/<base> before its worktree exists:
 // the plan doc and each parent ancestor (from the plan index). Generated rollups
 // (docs/plans/<slug>/TRACKER.md) are excluded: transitions rewrite them locally.
+// ARCH-TRACKER-08/15: the open criteria gating a feature landing; another plan's `[plan:]` line never counts.
+export function featureGate(text, planSlug, feature, lastCheck) {
+  const openCriteria = featureCriteria(text, feature, lastCheck.last === true, planSlug).filter((c) => !c.done);
+  // Fail closed: an unresolvable index cannot clear an open untagged (legacy or own-plan) line.
+  const unresolvedOpen = acceptanceCriteria(text).filter((c) => c.feature == null && !c.unit && !c.done && (c.plan == null || c.plan === planSlug));
+  return { openCriteria, unresolvedOpen };
+}
+
 function planGateFiles(root, planSlug) {
   let index;
   try { index = loadIndex(root); } catch (error) { throw new Error(`plan gate: plan index failed: ${error.message}`); }
@@ -574,11 +582,9 @@ function landFeature(context, input, info, deps = {}) {
   if (fs.existsSync(acceptanceFile)) {
     const text = fs.readFileSync(acceptanceFile, "utf8");
     const lastCheck = isLastFeature(planSlug, input.feature, main);
-    const openCriteria = featureCriteria(text, input.feature, lastCheck.last === true).filter((c) => !c.done);
+    const { openCriteria, unresolvedOpen } = featureGate(text, planSlug, input.feature, lastCheck);
     if (lastCheck.error !== undefined) {
-      // Fail closed: an unresolvable index cannot clear an open untagged line.
-      const untagged = acceptanceCriteria(text).filter((c) => c.feature == null && !c.unit && !c.done);
-      if (untagged.length) throw new Error(`land-feature refused: cannot resolve plan index to tell if ${input.feature} is last: ${lastCheck.error}`);
+      if (unresolvedOpen.length) throw new Error(`land-feature refused: cannot resolve plan index to tell if ${input.feature} is last: ${lastCheck.error}`);
     }
     if (openCriteria.length) throw new Error(`land-feature refused: open acceptance criteria for feature ${input.feature}: ${openCriteria.map((c) => c.line.trim()).join(" | ")}`);
   }
