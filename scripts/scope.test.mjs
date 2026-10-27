@@ -215,3 +215,49 @@ test("scope.mjs: a write entry that reaches a self-scoped file through a symlink
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Release refuses a worktree with uncommitted work (a wip: commit comes first).
+test("scope: release refuses a dirty worktree and succeeds once committed", () => {
+  const { root, trees: [w] } = repoWithWorktrees("dirty");
+  const dir = path.join(root, ".craftsman", "sessions", "s6");
+  const names = () => fs.readdirSync(dir);
+  const release = (tree = w) => hook("scope.mjs", root, root, { action: "release", session_id: "s6", project: ".", worktree_path: tree });
+  const commit = (msg) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", msg], { cwd: w });
+  try {
+    assert.equal(hook("scope.mjs", w, root, manifest("s6", "unit-a", ["a.txt"], w)).status, 0);
+    fs.writeFileSync(path.join(w, "tracked.txt"), "1\n");
+    spawnSync("git", ["add", "tracked.txt"], { cwd: w });
+    commit("t");
+    fs.writeFileSync(path.join(w, "tracked.txt"), "2\n");
+    const before = names().sort();
+    assert.ok(before.some((n) => n.startsWith("scope")), "scope file exists");
+    let result = release();
+    assert.equal(result.status, 2, "modified tracked file");
+    assert.ok(result.stderr.includes(w) && /commit/.test(result.stderr), result.stderr);
+    assert.deepEqual(names().sort(), before, "nothing removed");
+    spawnSync("git", ["checkout", "--", "tracked.txt"], { cwd: w });
+    fs.writeFileSync(path.join(w, "new.txt"), "x\n");
+    result = release();
+    assert.equal(result.status, 2, "untracked file");
+    assert.deepEqual(names().sort(), before);
+    spawnSync("git", ["add", "new.txt"], { cwd: w });
+    commit("wip: t");
+    assert.equal(release().status, 0);
+    assert.equal(names().filter((n) => n.startsWith("scope")).length, 0, "scope gone");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("scope: release ignores gitignored files, a swept worktree; fails closed on a non-repo", () => {
+  const { root, trees: [w] } = repoWithWorktrees("ign");
+  const release = (tree) => hook("scope.mjs", root, root, { action: "release", session_id: "s7", project: ".", worktree_path: tree });
+  try {
+    fs.appendFileSync(path.join(root, ".git", "info", "exclude"), "junk.log\n");
+    fs.writeFileSync(path.join(w, "junk.log"), "x\n");
+    assert.equal(release(w).status, 0, "only a gitignored file");
+    spawnSync("git", ["worktree", "remove", "--force", w], { cwd: root });
+    assert.equal(release(w).status, 0, "swept worktree");
+    const plain = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plain-"));
+    try { assert.equal(release(plain).status, 2, "not a git repo"); } finally { fs.rmSync(plain, { recursive: true, force: true }); }
+    assert.equal(hook("scope.mjs", root, root, { action: "release", session_id: "s7", project: "." }).status, 0, "no worktree_path");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

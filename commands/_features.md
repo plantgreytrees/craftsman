@@ -20,7 +20,7 @@ Prompt gives `worktree_path`, `units[]`; the unit is the feature's last. `S repo
 
 ## park and block
 Every feature-mode `S tracker` transition (IN_PROGRESS, FEATURE_MERGED, PARKED, BLOCKED) carries `feature`, `feature_branch`, `session_id` (ARCH-TRACKER-07). A land-feature park → `S tracker` `PARKED` with `decision`.
-First `S scope` release (`{action:"release", session_id, project, worktree_path}`). Park/block keep the unit branch, leave the feature worktree clean on the feature branch (ARCH-LAND-14); then publish.
+Commit `wip:`, then `S scope` release (`{action:"release", session_id, project, worktree_path}`; refuses a dirty worktree). Park/block keep the unit branch, leave it clean (ARCH-LAND-14); then publish.
 
 ## publish
 After each unit lands (`FEATURE_MERGED`), park, block and land-feature: `S tracker` `{action:"publish", project}`. Ignore `published:false`. After a land-feature that returned merged or pushed (not parked) pass `{approved:true, run}`.

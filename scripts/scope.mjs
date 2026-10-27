@@ -140,7 +140,7 @@ if (isMain(import.meta.url)) {
       let binding;
       try { binding = JSON.parse(fs.readFileSync(worktreeBindingPath(input, { ...selectedContext, worktreePath: input.worktree_path }), "utf8")); } catch {}
       if (binding && binding.session_id !== sidOf(input)) throw new Error("worktree is owned by another session");
-      clearWorktreeBinding(input, selectedContext);
+      refuseDirtyWorktree(input); clearWorktreeBinding(input, selectedContext);
       // The unit's scope and scope-required files go with its binding; the
       // session's own scope (no worktree) is never released here.
       if (input.worktree_path) {
@@ -211,4 +211,14 @@ if (isMain(import.meta.url)) {
     process.stderr.write(`craftsman: scope activation failed: ${error.message}\n`);
     process.exitCode = 2;
   }
+}
+
+function refuseDirtyWorktree({ worktree_path: w }) {
+  if (!w || !fs.existsSync(w)) return;
+  let dirty = "x";
+  try { dirty = execFileSync("git", ["-C", w, "status", "--porcelain"], { encoding: "utf8" }).trim(); } catch {}
+  if (!dirty) return;
+  logEvent({ ev: "scope_release_refused", worktree: w });
+  process.stderr.write(`craftsman: scope release refused: ${w} has uncommitted changes — commit them (wip: when parking or blocking), then release again.\n`);
+  process.exit(2);
 }
