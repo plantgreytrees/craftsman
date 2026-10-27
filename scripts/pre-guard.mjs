@@ -340,6 +340,10 @@ function findNamesMiss(names, start, cwd, docPaths) {
 // (cwd, `git -C`, `cd X &&`) outside the guarded bases and their ancestors.
 // Anything else with a removal word present is reported as a hit.
 const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval|clean)\b/;
+// `clean` alone is prose (`echo clean`); as a removal word it counts only after a `git` in the same simple command.
+const REMOVAL_GATE_NOCLEAN = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval)\b/;
+const gitThenClean = (t) => t.split(/[;&|\n]/).some((seg) => { const g = seg.search(/\bgit\b/); return g >= 0 && /\bclean\b/.test(seg.slice(g)); }); // linear: no nested scan
+const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || gitThenClean(t);
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
@@ -515,7 +519,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     };
     return walk(cmd, 0);
   };
-  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
+  if (!removalGate(cmd) && !removalGate(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
       && !(writes && WRITE_TEXT.test(bare)) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
@@ -1139,7 +1143,7 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
 // at command position counts, so a message or an argument that merely holds `-n` does not. A command the lexer
 // cannot read with certainty returns false here and meets the text check above and below.
 // Options of a wrapper that take a value: the next word is that value, not the wrapped command.
-const WRAPPER_VALUE_SHORT = { env: "uCS", sudo: "ugCDhprtUTR", doas: "uC", nice: "n", timeout: "sk", stdbuf: "ioe", ionice: "cnpt", time: "fo" };
+const WRAPPER_VALUE_SHORT = { env: "uCS", sudo: "ugCDhprtUTR", doas: "uC", nice: "n", timeout: "sk", stdbuf: "ioe", ionice: "cnpt", time: "fo", xargs: "adEILnPs" };
 const WRAPPER_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--chroot", "--signal", "--kill-after"]);
 const COMMIT_VALUE_SHORT = new Set(["m", "F", "C", "c", "t"]); // value: the rest of the cluster, else the next word
 const COMMIT_ATTACHED_SHORT = new Set(["S", "u"]); // value is attached or absent
@@ -1147,13 +1151,13 @@ const COMMIT_VALUE_LONG = new Set(["--message", "--file", "--author", "--date", 
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // The index of the first word that is one of `targets`, looking through assignments and the shared WRAPPERS
 // (with their options, and the values of those that take one).
-function commandWordIndex(words, targets) {
+function commandWordIndex(words, targets, wrappers = WRAPPERS) {
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (ASSIGNMENT_WORD.test(word)) continue;
     const base = word.split("/").pop();
     if (targets.has(base)) return i;
-    if (!WRAPPERS.has(base)) return -1;
+    if (!wrappers.has(base)) return -1;
     const valued = WRAPPER_VALUE_SHORT[base] || "";
     while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) {
       i++;
@@ -1312,8 +1316,18 @@ if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=fal
 // Where each mutating `git` of a command runs, proven from the text: the directory the command starts in, the
 // chained `cd`/`pushd` before it (joined only by `&&`, `;` or a newline), then each `-C`. Returns { dirs } or
 // { why }: anything it cannot prove (a variable, `~`, a subshell, a group, `&`, `|`, `popd`, a missing path) blocks.
-const GIT_RESERVED = new Set(["{", "}", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac", "function", "!", "time"]);
+// A `cd` counts only when it provably ran in this shell: not before `||`, `|` or `&`, and not when an earlier command of
+// its `&&` chain may have skipped it before a `;` or newline. Wrappers (`env`, `sudo`, `xargs` ...) are looked through;
+// `eval`, `source`, `.`, `builtin cd` and `sh -c` are not resolved: with a mutating git verb in the text they block.
+const GIT_RESERVED = new Set(["{", "}", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac", "function", "!"]);
 const CHAINED = new Set([null, "&&", ";", "\n"]);
+const GIT_WRAPPERS = new Set([...WRAPPERS, "xargs"]);
+const CD_WORDS = new Set(["cd", "pushd", "popd"]);
+const UNRESOLVED_HEADS = new Set(["eval", "source", "."]);
+const MUTATING_VERBS = new Set(["add", "apply", "checkout", "clean", "commit", "merge", "mv", "rebase", "revert", "rm", "restore", "reset", "stash", "switch", "cherry-pick", "push"]);
+const NAMES_MUTATION = /\bgit\b[\s\S]*?(?:\b(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|\bbranch\s+-[dD]\b|\bworktree\s+(?:remove|move|prune)\b)/;
+const GIT_VALUED_LONG = new Set(["--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source", "--super-prefix", "--exec-path"]);
+const GIT_FLAG_LONG = new Set(["--no-pager", "--paginate", "--bare", "--no-replace-objects", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch", "--html-path", "--man-path", "--info-path", "--version", "--help"]);
 function gitTargets(text, start) {
   let why = "";
   const cmds = tokenize(stripHeredocs(text), (w) => { why = w; });
@@ -1321,16 +1335,31 @@ function gitTargets(text, start) {
   const dynamic = (w) => /[$`~*?\[{]/.test(w);
   const dirs = [];
   let dir = start;
+  let cdInChain = false, softCd = false, reserved = false;
   const stat = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
-  for (const cmd of cmds) {
+  const namesMutation = NAMES_MUTATION.test(text);
+  for (let n = 0; n < cmds.length; n++) {
+    const cmd = cmds[n];
+    if (cmd.sep === ";" || cmd.sep === "\n") { if (softCd) dir = null; softCd = false; cdInChain = false; }
+    else if ((cmd.sep === "||" || cmd.sep === "|" || cmd.sep === "&") && cdInChain) dir = null;
     if (cmd.substs.some((x) => mutatesGit(x))) return { why: "a git mutation inside a substitution" };
-    const words = [...cmd.words];
-    while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
+    let words = [...cmd.words];
+    for (;;) {
+      if (words.length && ASSIGNMENT_WORD.test(words[0])) words.shift();
+      else if (words.length && GIT_RESERVED.has(words[0])) { words.shift(); reserved = true; }
+      else break;
+    }
     if (!words.length) continue;
-    if (GIT_RESERVED.has(words[0])) return { why: `shell syntax "${words[0]}"` };
+    const shellAt = commandWordIndex(words, SHELLS, GIT_WRAPPERS);
+    if (namesMutation && (UNRESOLVED_HEADS.has(words[0]) || commandWordIndex(words, CD_WORDS, GIT_WRAPPERS) > 0 || (shellAt >= 0 && shellBodyAfter(words.slice(shellAt + 1)).c))) {
+      return { why: `"${words[0]}" cannot be resolved to a directory` };
+    }
     const chained = CHAINED.has(cmd.sep);
     if (words[0] === "cd" || words[0] === "pushd") {
-      if (!chained) { dir = null; continue; }
+      const after = n + 1 < cmds.length ? cmds[n + 1].sep : "";
+      if (!chained || reserved || after === "||" || after === "|" || after === "&") { dir = null; cdInChain = true; continue; }
+      if (cmd.sep === "&&") softCd = true;
+      cdInChain = true;
       const arg = words.length === 2 ? words[1] : null;
       if (dir === null || arg === null || arg === "-" || arg.startsWith("-") || dynamic(arg)) { dir = null; continue; }
       const next = realResolve(dir, arg);
@@ -1338,19 +1367,28 @@ function gitTargets(text, start) {
       continue;
     }
     if (words[0] === "popd") { dir = null; continue; }
-    if (path.basename(words[0]) !== "git") {
+    const gitAt = commandWordIndex(words, GIT_ONLY, GIT_WRAPPERS);
+    if (gitAt < 0) {
       if (mutatesGit(words.map((w) => w.replace(/\s/g, "_")).join(" "))) return { why: "a git mutation behind another command" };
       continue;
     }
-    let at = dir, i = 1;
+    const lead = words.slice(0, gitAt);
+    words = words.slice(gitAt);
+    let at = dir, i = 1, unknown = false;
+    // a wrapper that changes directory (`env -C`, `sudo -D`, `--chdir`) moves the call somewhere unproven
+    if (lead.some((w) => /^(?:-[CDR]|--chdir|--chroot)/.test(w))) at = null;
     for (; i < words.length && words[i].startsWith("-"); i++) {
+      const name = words[i].split("=")[0];
       if (words[i] === "-C") {
         const arg = words[++i];
         if (at === null || arg === undefined || dynamic(arg)) { at = null; continue; }
         const next = realResolve(at, arg);
         at = stat(next) ? next : null;
-      } else if (words[i] === "-c" || words[i] === "--namespace" || words[i] === "--exec-path") i++;
+      } else if (words[i] === "-c") i++;
+      else if (GIT_VALUED_LONG.has(name)) { if (!words[i].includes("=")) i++; }
+      else if (words[i].startsWith("--") && !GIT_FLAG_LONG.has(name)) unknown = true;
     }
+    if (unknown && words.slice(i).some((w) => MUTATING_VERBS.has(w))) return { why: "an unknown git option before a mutating verb" };
     const sub = words[i];
     const mutating = mutatesGit(["git", sub ?? ""].join(" ")) || (sub === "branch" && /^-[dD]$/.test(words[i + 1] ?? "")) || (sub === "worktree" && /^(remove|move|prune)$/.test(words[i + 1] ?? ""));
     if (!mutating) continue;
@@ -1365,7 +1403,7 @@ if (tool === "Bash" && binding && /\bgit\b/.test(command)) {
   const rawMutation = mutatesGit(command);
   const res = gitTargets(command, realDir(process.cwd()));
   // An unparsable command is judged by the raw-text test; a parsed one by the calls found in it.
-  if (rawMutation || res.dirs?.length || (res.why && !res.unparsed)) {
+  if (rawMutation || res.dirs?.length || (res.why && !res.unparsed) || (usesAlternateGitRoot(command) && NAMES_MUTATION.test(command))) {
     const gitOut = (cwd, args) => { try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return ""; } };
     let realWorktree = null;
     try { realWorktree = fs.realpathSync(path.resolve(binding.worktree_path)); } catch {}

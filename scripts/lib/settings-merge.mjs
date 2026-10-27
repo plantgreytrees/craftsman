@@ -7,7 +7,7 @@ import path from "node:path";
 
 export const SANDBOX_BLOCK = {
   sandbox: { enabled: true },
-  permissions: { ask: ["Bash(rm -r *)", "Bash(rm -rf *)", "Bash(sudo *)", "Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(git clean *)"] },
+  permissions: { ask: ["Bash(sudo *)", "Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(git clean *)"] },
 };
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);

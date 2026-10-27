@@ -213,12 +213,15 @@ if (isMain(import.meta.url)) {
   }
 }
 
-function refuseDirtyWorktree({ worktree_path: w }) {
+function refuseDirtyWorktree(input) {
+  const w = input.worktree_path;
   if (!w || !fs.existsSync(w)) return;
-  let dirty = "x";
-  try { dirty = execFileSync("git", ["-C", w, "status", "--porcelain"], { encoding: "utf8" }).trim(); } catch {}
-  if (!dirty) return;
-  logEvent({ ev: "scope_release_refused", worktree: w });
-  process.stderr.write(`craftsman: scope release refused: ${w} has uncommitted changes — commit them (wip: when parking or blocking), then release again.\n`);
+  let dirty;
+  try { dirty = execFileSync("git", ["-C", w, "status", "--porcelain"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
+  if (dirty === "") return;
+  logEvent({ ev: "scope_release_refused", sid: sidOf(input), worktree: w });
+  process.stderr.write(dirty === undefined
+    ? `craftsman: scope release refused: ${w} is not a readable git worktree — remove it or run \`git worktree prune\`, then release again.\n`
+    : `craftsman: scope release refused: ${w} has uncommitted changes — commit them (wip: when parking or blocking), then release again.\n`);
   process.exit(2);
 }

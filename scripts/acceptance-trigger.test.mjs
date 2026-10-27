@@ -25,7 +25,7 @@ function fixture() {
     { ...base, status: "IN_PROGRESS", evidence: "claimed" },
     { ...base, status: "MERGED", evidence: "abc123" },
   ].map((e) => JSON.stringify(e)).join("\n") + "\n");
-  fs.writeFileSync(path.join(state, "acceptance.md"), "- [x] [unit:unit-1] works\n- [ ] whole-plan check\n");
+  fs.writeFileSync(path.join(state, "acceptance.md"), "- [x] [unit:unit-1] works\n- [ ] [plan:p] whole-plan check\n");
   return dir;
 }
 

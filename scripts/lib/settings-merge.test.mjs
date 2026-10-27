@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import * as sm from "./settings-merge.mjs";
 
-const ASK = ["Bash(rm -r *)", "Bash(rm -rf *)", "Bash(sudo *)", "Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(git clean *)"];
+const ASK = ["Bash(sudo *)", "Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(git clean *)"];
 
-test("SANDBOX_BLOCK: sandbox on plus ask rules for rm -r(f), sudo, force push, reset --hard and clean", () => {
+test("SANDBOX_BLOCK: sandbox on plus ask rules for sudo, force push, reset --hard and clean", () => {
   assert.deepEqual(sm.SANDBOX_BLOCK, { sandbox: { enabled: true }, permissions: { ask: ASK } });
 });
 
@@ -36,7 +36,7 @@ test("mergeSettings: existing keys, other arrays and key order are preserved; as
   assert.deepEqual(next.hooks, { Stop: [{ hooks: [] }] });
   assert.deepEqual(next.permissions.allow, ["Bash(npm test)"]);
   assert.deepEqual(next.permissions.deny, ["Read(~/.ssh/**)"]);
-  assert.deepEqual(next.permissions.ask, ["Bash(sudo *)", "Read(.env)", "Bash(rm -r *)", "Bash(rm -rf *)", "Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(git clean *)"]);
+  assert.deepEqual(next.permissions.ask, ["Bash(sudo *)", "Read(.env)", "Bash(git push --force *)", "Bash(git reset --hard *)", "Bash(git clean *)"]);
   assert.deepEqual(next.sandbox, { network: { allowedDomains: ["example.com"] }, enabled: true });
   assert.deepEqual(Object.keys(next).slice(0, 5), ["model", "env", "permissions", "sandbox", "hooks"], "existing key order is kept");
 });
@@ -68,7 +68,8 @@ test("mergeSettings: invalid JSON, or JSON that is not an object, aborts and off
 test("renderSettingsDiff: lists each addition, and says so when there is nothing to add", () => {
   const diff = sm.renderSettingsDiff(sm.mergeSettings(JSON.stringify({ permissions: { ask: ["Bash(sudo *)"] } })));
   assert.match(diff, /\+ sandbox\.enabled: true/);
-  assert.match(diff, /\+ permissions\.ask: Bash\(rm -rf \*\)/);
+  assert.match(diff, /\+ permissions\.ask: Bash\(git clean \*\)/);
+  assert.doesNotMatch(diff, /rm -r/);
   assert.doesNotMatch(diff, /permissions\.ask: Bash\(sudo \*\)/);
   assert.match(sm.renderSettingsDiff(sm.mergeSettings(sm.mergeSettings("{}").next)), /nothing to add/);
 });
@@ -113,4 +114,12 @@ test("sandboxEnabledAnywhere: an unreadable or malformed scope file counts as no
     s.put(path.join(s.dirs.user, "settings.json"), "{ broken");
     assert.equal(s.check(), false);
   } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
+});
+
+test("mergeSettings: no recursive-delete ask in the block, and one already in the file stays exactly once", () => {
+  assert.equal(sm.SANDBOX_BLOCK.permissions.ask.some((r) => /^Bash\(rm /.test(r)), false);
+  const r = sm.mergeSettings(JSON.stringify({ permissions: { ask: ["Bash(rm -rf *)"] } }));
+  const next = JSON.parse(r.next);
+  assert.equal(next.permissions.ask.filter((x) => x === "Bash(rm -rf *)").length, 1);
+  assert.equal(r.added.some((l) => /rm -r/.test(l)), false);
 });

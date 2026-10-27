@@ -56,7 +56,7 @@ units:
     scope:
       read: [scripts/tracker.mjs, scripts/repo-exec.mjs]
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md]
-      write: [scripts/tracker.mjs, scripts/repo-exec.mjs, scripts/acceptance-plan-consumers.test.mjs]
+      write: [scripts/tracker.mjs, scripts/repo-exec.mjs, scripts/acceptance-plan-consumers.test.mjs, scripts/tracker.test.mjs, scripts/acceptance-trigger.test.mjs]
     arch: [ARCH-TRACKER-06, ARCH-TRACKER-08, ARCH-TRACKER-15, ARCH-LAND-06]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
   - id: 4
@@ -80,9 +80,9 @@ units:
     language: javascript
     security: high
     scope:
-      read: [scripts/pre-guard.mjs, scripts/lib/shell-words.mjs]
+      read: [scripts/pre-guard.mjs]
       docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard-sed.test.mjs]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-sed.test.mjs, scripts/lib/force-block.mjs]
     arch: [ARCH-SAFETY-05, ARCH-SAFETY-03, ARCH-STATE-15]
     tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
   - id: 6
@@ -168,6 +168,7 @@ Depends on: acc-core
 - [ ] 3.1 tracker.mjs:384 `planWideOpen` becomes per row: open `[plan:<slug of row.plan>]` lines hold that row's COMPLETE promotion; legacy untagged lines hold no row (they are reported, not enforced, per D-legacy) → accept: test 3.3 case A
 - [ ] 3.2 repo-exec.mjs:577-580 pass `planSlug` to `featureCriteria`, and restrict the fail-closed untagged check to legacy untagged lines plus `[plan:<planSlug>]` lines → accept: test 3.3 case B
 - [ ] 3.3 Write `scripts/acceptance-plan-consumers.test.mjs` RED on old code: (A) plan b's row MERGED with all its unit lines ticked and plan a's open untagged/`[plan:a]` line → reconcile promotes b to COMPLETE; an open `[plan:b]` line holds it; (B) featureCriteria call shape for land-feature ignores `[plan:a]` when landing plan b → accept: `node --test scripts/acceptance-plan-consumers.test.mjs scripts/tracker.test.mjs scripts/repo-exec.test.mjs` exit 0
+- [ ] 3.4 (amendment 2026-10-28, park resolved) `scripts/tracker.test.mjs` (fixtures near lines 55 and 101-111) and `scripts/acceptance-trigger.test.mjs` (near lines 28 and 77) assert that an open untagged whole-plan line holds a MERGED row, which ARCH-TRACKER-15 retired. Retag those fixture lines `[plan:<slug of the fixture plan>]` so each test keeps asserting the same hold; delete or loosen no assertion. Grep for the lines; do not read either file whole → accept: both files pass and each still asserts the row stays MERGED while the `[plan:]` line is open
 
 ### Step 4 — acc-docs (., markdown, normal)
 Depends on: every other step (it writes CHANGELOG.md once, last)
@@ -180,7 +181,7 @@ Depends on: every other step (it writes CHANGELOG.md once, last)
 Tooling: implementer · gates security-auditor, code-reviewer · skills test-driven-development
 Depends on: none
 - [ ] 5.1 pre-guard.mjs:371 — `WRITE_TEXT` counts `sed`/`perl` only in their in-place form (`-i`/`-…i`), matching the 1376 test → accept: test 5.3 case A
-- [ ] 5.2 pre-guard.mjs:1376 — compute the sed/perl `-i` verb from command-position words (lib/shell-words.mjs), not raw text, so `grep -n "sed -i" … craftsman.config.json` is not a writer → accept: test 5.3 case B
+- [ ] 5.2 pre-guard.mjs:1376 — compute the sed/perl `-i` verb on `blankProse(command)`, not raw text, so `grep -n "sed -i" … craftsman.config.json` is not a writer. (Amended 2026-10-28: the first attempt added a `shellSegments` call, which test 24.2 in pre-guard.test.mjs forbids, and that test stays unchanged. Instead, export the existing fail-closed `blankProse` from scripts/lib/force-block.mjs; the only change in that file is the `export` keyword, so grep for the function and do not read the file whole. Import it in pre-guard.mjs and drop the parked branch's `inPlaceEditor`. blankProse returns the text unchanged on `$(`, backticks, pipes into a shell, redirects, and `printf -v`/`read`, so those stay blocked.) → accept: test 5.3 case B; `grep -c shellSegments scripts/pre-guard.mjs` = 2; test 24.2 unchanged and passing
 - [ ] 5.3 Write `scripts/pre-guard-sed.test.mjs` (harness: spawn `node scripts/pre-guard.mjs` in a git-init temp dir set as the project dir, stdin `{session_id, tool_name:"Bash", tool_input:{command}}`, assert exit status) RED on old code: (A) `sed -n 1,5p README.md; for f in ~/.claude/settings.json; do echo "$f"; done` → exit 0; (B) `grep -n "sed -i" scripts/x.mjs; cat craftsman.config.json` → exit 0; still blocked: (C) `sed -i s/a/b/ craftsman.config.json`, (D) `for f in x; do sed -i s/a/b/ .craftsman/off; done`, (E) `perl -pi -e s/a/b/ hooks/hooks.json` → accept: `node --test scripts/pre-guard-sed.test.mjs scripts/pre-guard.test.mjs scripts/pre-guard-narrow.test.mjs` exit 0
 - [ ] 5.4 security-auditor review: no previously denied write to SELF_NEVER/SELF_SCOPED becomes allowed (quote tricks: `s""ed -i`, `$(echo sed) -i`, `xargs sed -i`) → accept: auditor PASS, each bypass attempt a test case
 
@@ -190,6 +191,7 @@ Depends on: preguard-sed (same file; runs after it)
 Owner decision 2026-10-27: folded into this run, not parked. Split from Step 5 only because pre-guard.mjs is 93 KB and one unit may not exceed the context budget.
 - [ ] 6.1 `SETS_SAFETY_VAR` (the check that refuses a command setting the session-id, project-dir or safety variables) reads command words, not quoted string literals: a quoted `node -e` argument or a `grep` pattern that merely contains `NAME=` is allowed; a real assignment (`NAME=x cmd`, `env NAME=x cmd`, `export NAME=x`) is still refused → accept: test 6.3 cases A-D
 - [ ] 6.2 The removal-word check no longer treats the `rm` text inside a quoted `grep`/`printf`/`echo` argument as a removal when the surrounding command also has a `for`/`while` construct; a real removal inside a loop (`for f in x; do rm .craftsman/off; done`) is still refused → accept: test 6.3 cases E-F
+- [ ] 6.2a (amendment 2026-10-28) Mechanism constraint for 6.1-6.2: add no `shellSegments` call. Test 24.2 in pre-guard.test.mjs stays unchanged and passing. Use `blankProse` (exported by preguard-sed) for quoted grep/printf/echo arguments, and command-position regexes, in the style of `WRITER_AT_COMMAND`, for real assignments. Where neither can prove a span is inert, keep refusing (fail closed) → accept: `grep -c shellSegments scripts/pre-guard.mjs` = 2
 - [ ] 6.3 Write `scripts/pre-guard-quoted.test.mjs` (same harness as 5.3) RED on old code: allowed (exit 0): (A) `node -e 'console.log("NAME=1")'` with NAME each of the three variables, (B) `grep -n "NAME=" README.md`, (C) `printf '%s' "text NAME=x"`, (D) `echo "export NAME=x"`, (E) `grep -n "rm -f" README.md; for f in a b; do echo $f; done`, (F) `printf '%s' "rm .craftsman/x" | cat`; still refused (exit 2): `NAME=x node a.mjs`, `env NAME=x node a.mjs`, `export NAME=x`, `for f in x; do rm .craftsman/off; done`, `sh -c 'NAME=x node a.mjs'` → accept: `node --test scripts/pre-guard-quoted.test.mjs scripts/pre-guard.test.mjs scripts/pre-guard-narrow.test.mjs scripts/pre-guard-sed.test.mjs` exit 0
 - [ ] 6.4 security-auditor: no previously refused assignment or removal becomes allowed (quote-split names, `eval`, `$(…)`, here-strings, `xargs`) → accept: auditor PASS, each attempt a test case
 
@@ -199,6 +201,7 @@ Depends on: none
 - [ ] 7.1 `forceBlocked` (scripts/lib/force-block.mjs) matches destructive git (force push, hard reset, clean) only in command words of a git invocation, not in a quoted `grep`/`printf`/`echo` argument or heredoc prose that merely names it; real invocations (also after `&&`, `;`, `sh -c`, `env`, `git -C <dir>`) stay blocked → accept: test 7.2
 - [ ] 7.2 Write `scripts/force-block-quoted.test.mjs` RED on old code: allowed: `grep -n "git reset --hard" scripts/x.mjs`, `printf '%s' "do not git push --force"`, `echo "git clean -fd is blocked"`; blocked: `git reset --hard`, `git -C w push --force`, `a && git clean -fd`, `sh -c 'git push -f'`, `env X=1 git reset --hard HEAD~1` → accept: `node --test scripts/force-block-quoted.test.mjs scripts/lib/force-block.test.mjs scripts/pre-guard-narrow.test.mjs` exit 0
 - [ ] 7.3 security-auditor review → accept: auditor PASS; lease-push-to-own-branch behaviour (ARCH-LAND-31) unchanged
+- [ ] 7.4 (amendment 2026-10-28, review findings on b2a2099) quoted text inside a command substitution `$(…)` or backticks is live code, never prose, and `printf -v`/`read` into a variable later expanded as a command counts as an invocation: `x=$(echo "git reset --hard"); $x`, its backtick form, and `printf -v c 'git reset --hard'; $c` stay blocked; when the guard cannot prove a quoted span is a plain argument of grep/printf/echo it blocks (fail closed) → accept: each form a blocked case in `scripts/force-block-quoted.test.mjs`; auditor PASS
 
 ### Step 8 — auto-scope-flip (., javascript, HIGH)
 Tooling: implementer implementer · gates security-auditor, code-reviewer · skills test-driven-development
@@ -222,6 +225,7 @@ acc-core first (parser + pure helper, the shared contract) → acc-stop-gate and
 ## Decisions
 - **Owner decisions 2026-10-27** (answered via AskUserQuestion, recorded as rules): `[plan:<slug>]` tag → ARCH-TRACKER-15; legacy untagged lines bind only plan-less sessions → ARCH-TRACKER-16; `/auto` stops setting scope-required (supersedes AUTO-06) → ARCH-AUTO-10; sandbox block drops the rm asks → ARCH-SAFETY-12; quoted-literal false positives fixed in this run (Steps 6 and 7), not parked.
 - **D-legacy** — an untagged line (no `[unit:]`, no `[plan:]`) binds a session only when that session's ledger names no plan at all; otherwise it is reported (notice + event), not enforced. Section headers are NOT used to attribute lines: Gleam acceptance.md:707-708 (`[unit:qsc-conn-*]`, studio-core-sql) sit under the investigate-pg-query-ignores-configured-schema header. Trade-off: a legacy whole-plan line of a plan the session did work is no longer enforced; new plans avoid it by tagging `[plan:]` (Step 4).
+- **Park resolutions 2026-10-28** — acc-consumers: the two pre-rule test files join its write scope (the only option that keeps ARCH-TRACKER-15; the other edits a decided rule). force-block-quoted: the review bypasses become task 7.4. sandbox-ask-policy: the stale ARCH-SAFETY-06 cite was already fixed on main; re-run unchanged. preguard-sed: test 24.2's pin is kept as written, and 5.2 reuses force-block's fail-closed `blankProse` (already security-reviewed in force-block-quoted) instead of a second `shellSegments` call. The read scope drops lib/shell-words.mjs to fit unitContextBytes, since pre-guard.mjs grew to 99.7 KB. 6.2a applies the same constraint to Step 6.
 - **C1 (whole-file ownership on Edit / on /orchestrate)** — kept as the outer gate; no code change. Once binding is per unit/plan via the ledger, ownership no longer over-blocks.
 
 ## Verification background
