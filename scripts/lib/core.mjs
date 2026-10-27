@@ -499,23 +499,49 @@ export function ownsAcceptance(sid, text, context = null) {
     return ref.identity ? ref.identity === acceptanceIdentity(text) : ref.hash === sha1(String(text).trim());
   } catch { return false; }
 }
-// Every criterion as { line, unit, feature, done }. `- [ ] [unit:<id>] …`
-// scopes a criterion to one plan unit (its tracker unit or scope_id);
-// `[feature:<id>]` scopes it to one feature's land-feature (ARCH-TRACKER-08).
-// Lines with neither tag are untagged.
+// Every criterion as { line, unit, feature, plan, done }. Leading tags, in any
+// order: `[unit:<id>]` scopes a criterion to one plan unit, `[feature:<id>]` to
+// one feature's land-feature (ARCH-TRACKER-08), `[plan:<slug>]` to one whole
+// plan (ARCH-TRACKER-15). Lines with none are untagged.
 export function acceptanceCriteria(text) {
-  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.test(l)).map((line) => ({
-    line: line.trim(),
-    unit: /^\s*[-*]\s*\[[ xX]\]\s*(?:\[feature:[^\]\s]+\]\s*)?\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
-    feature: /^\s*[-*]\s*\[[ xX]\]\s*(?:\[unit:[^\]\s]+\]\s*)?\[feature:([^\]\s]+)\]/.exec(line)?.[1] || null,
-    done: ACCEPTANCE_LINE.exec(line)[2] !== " ",
-  }));
+  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.test(l)).map((line) => {
+    const tags = {};
+    let rest = line.replace(ACCEPTANCE_LINE, "");
+    for (let m; (m = /^\s*\[(unit|feature|plan):([^\]\s]+)\]/.exec(rest));) {
+      tags[m[1]] ??= m[2];
+      rest = rest.slice(m[0].length);
+    }
+    return {
+      line: line.trim(),
+      unit: tags.unit || null,
+      feature: tags.feature || null,
+      plan: tags.plan ? planSlugOf(tags.plan) : null,
+      done: ACCEPTANCE_LINE.exec(line)[2] !== " ",
+    };
+  });
 }
 // The criteria gating one feature's land-feature: its `[feature:<id>]` lines,
-// plus the untagged ones only when it is the plan's last feature.
-export function featureCriteria(text, featureId, isLast = false) {
-  return acceptanceCriteria(text).filter((c) =>
-    c.feature != null ? c.feature === String(featureId) : isLast && !c.unit);
+// plus the untagged ones only when it is the plan's last feature. With `plan`,
+// another plan's `[plan:]` line never matches.
+export function featureCriteria(text, featureId, isLast = false, plan = null) {
+  const mine = plan == null ? null : planSlugOf(plan);
+  return acceptanceCriteria(text).filter((c) => {
+    if (mine != null && c.plan != null && c.plan !== mine) return false;
+    return c.feature != null ? c.feature === String(featureId) : isLast && !c.unit;
+  });
+}
+// Split criteria into those a session binds to and legacy untagged ones.
+// `[unit:]` decides alone; `[plan:]` binds iff touched; untagged binds only
+// when the session touched no plan, else it is listed in `legacy`.
+export function bindingAcceptance(text, { units = [], plans = [] } = {}) {
+  const u = new Set(units), p = new Set(plans.map((x) => planSlugOf(x)));
+  const binding = [], legacy = [];
+  for (const c of acceptanceCriteria(text)) {
+    if (c.unit) { if (u.has(c.unit)) binding.push(c); }
+    else if (c.plan) { if (p.has(c.plan)) binding.push(c); }
+    else (p.size === 0 ? binding : legacy).push(c);
+  }
+  return { binding, legacy };
 }
 export function uncheckedAcceptance(text) {
   return acceptanceCriteria(text).filter((c) => !c.done);
