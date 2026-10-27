@@ -30,7 +30,7 @@ units:
     scope:
       read: []   # the write files are the only ones touched; reading pre-guard.mjs (94 KB) + pre-guard.test.mjs (143 KB) whole overflows unitContextBytes (ARCH-ENGINE-08) — read pre-guard.mjs:30-75, :124-215, :386-492 (tokenize) and :1060-1335 by range
       docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/plans/investigate-cross-repo-worktree-git-guard.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard-worktree.test.mjs]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-worktree.test.mjs, docs/architecture/safety.rules.md]   # safety.rules.md: `cite:` line ranges only (owner decision 2026-10-27)
     arch: [ARCH-STATE-06, ARCH-STATE-16, ARCH-SAFETY-03]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
   - id: account-switch-same-repo
@@ -56,7 +56,7 @@ units:
     scope:
       read: [scripts/scope.mjs, scripts/scope.test.mjs, commands/_features.md]
       docs: [docs/architecture/state.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md, docs/plans/investigate-cross-repo-worktree-git-guard.md]
-      write: [scripts/scope.mjs, scripts/scope.test.mjs, commands/_features.md]
+      write: [scripts/scope.mjs, scripts/scope.test.mjs, commands/_features.md, docs/plans/autonomous-e2e-loop.md]   # e2e plan: workflow-spike scope.read trim only (owner decision 2026-10-27)
     arch: [ARCH-STATE-09, ARCH-ENGINE-04, ARCH-SLIM-01, ARCH-SLIM-02]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check, doc-size-policy], mcp: [] }
 ---
@@ -89,6 +89,7 @@ Depends on: none
   - (k) `--git-dir` or `GIT_DIR=` combined with `-C W`
 - [ ] 1.6 Reword the block message (`:1318-1321`). Keep the prefix `Git mutation blocked outside the active worktree (<W>).` and follow it with "Run each git call in it: `git -C <W> …`, or `cd <W> && git …` in the same command." Drop the "release the binding" clause and any mention of EnterWorktree. Add the resolved `target` to the `git_guard_blocked` logEvent. → accept: a test asserts stderr contains `git -C` and contains neither `release` nor `EnterWorktree`.
 - [ ] 1.7 Run `node --test scripts/pre-guard.test.mjs scripts/pre-guard-worktree.test.mjs scripts/pre-guard-narrow.test.mjs scripts/scope.test.mjs`. → accept: everything is green, and the existing tests at `pre-guard.test.mjs:171-235` are unchanged and pass.
+- [ ] 1.8 Owner decision (2026-10-27, after the unit BLOCKED on `safety-cites.test.mjs`): in `docs/architecture/safety.rules.md`, re-point only the `cite: scripts/pre-guard.mjs:<range>` line numbers that the 1.2-1.6 edit moved (ARCH-SAFETY-05, -08 and any other range `node --test scripts/safety-cites.test.mjs` reports). Never change a rule's text, id, status or `check:`. → accept: `node --test scripts/safety-cites.test.mjs` exits 0, and `git diff` of the file touches only `cite:` ranges. If landing collides with another session's uncommitted edit to that file, PARK with a decision; never overwrite it.
 
 ### Step 2 — account-switch-same-repo (., markdown, normal)
 Tooling: implementer implementer · guards doc-size-policy
@@ -104,6 +105,7 @@ Owner decision (2026-10-27, F1): `release` refuses a dirty worktree, and feature
 - [ ] 3.3 In `commands/_features.md` § park and block, replace "First `S scope` release (…)" with an order that commits `wip:` (unit-runner park step 2) before the `S scope` release, and says the release refuses a dirty worktree. → accept: `wc -c commands/_features.md` ≤ 3496 (currently 3481; caps only ratchet down, ARCH-SLIM-02, `scripts/doc-size-policy.mjs:47`) and `node scripts/doc-size-policy.mjs` prints PASS.
 - [ ] 3.4 Confirm the other release callers need no change: land (`agents/unit-runner.md` land step 2, `commands/_shared-execution.md:42`) releases only after the implement commit, and `repo-exec.mjs:359` already refuses a dirty worktree at merge. → accept: no edit to those files (`_shared-execution.md` is exactly at its cap, 12766 bytes; `unit-runner.md` has 7 bytes of headroom).
 - [ ] 3.5 Run `node --test scripts/scope.test.mjs scripts/wiring.test.mjs scripts/doc-size-policy.test.mjs`, `node scripts/doc-size-policy.mjs` and `node scripts/arch-check.mjs lint`. → accept: all green.
+- [ ] 3.6 Owner decision (2026-10-27, after the unit PARKED on ARCH-ENGINE-08): in `docs/plans/autonomous-e2e-loop.md`, drop `agents/implementer.md` (2,217 bytes) from unit `workflow-spike`'s `scope.read`, and add a one-line YAML comment in the style of the `engine-guards` note there. The comment says the read list was trimmed to fit ARCH-ENGINE-08 after `scope.mjs` grew (plan investigate-cross-repo-worktree-git-guard), and that the unit had already shipped. Touch nothing else in that plan. → accept: `node --test scripts/arch-check.test.mjs` exits 0 and `node scripts/arch-check.mjs lint` passes.
 
 ## Sequencing
 The three steps are independent and can run in parallel (step 3 writes `scope.mjs`, `scope.test.mjs` and `_features.md`, which steps 1 and 2 do not touch). Step 1 is the root-cause fix: the new message names `git -C`, which is only true once the resolution logic exists, so the message and the logic land together (ARCH-STATE-16). Step 2 is a doc-only change with its own failure mode (the byte cap), kept separate so neither can block the other.

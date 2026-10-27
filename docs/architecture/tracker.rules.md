@@ -3,8 +3,8 @@ area: tracker
 governs: ["scripts/tracker.mjs", "scripts/tracker-publish.mjs", "scripts/tracker-sync.mjs", "scripts/digest.mjs", "scripts/run-manifest.mjs"]
 human: docs/architecture/tracker.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ca1534f838e26eba29599a9c43f690c55dd93e11
-updated: 2026-10-25
+verified_at: ab8f25f502eafe923ca6a5565024aaabf8ca91d1
+updated: 2026-10-27
 ---
 # ARCH tracker — enforced rules
 
@@ -22,3 +22,5 @@ updated: 2026-10-25
 - **ARCH-TRACKER-12** [superseded by ARCH-TRACKER-13]
 - **ARCH-TRACKER-13** [decided] publish and sync MUST refuse any render that drops a committed row key (docs/plans/TRACKER.jsonl, else the committed TRACKER.md block's plan|unit pairs) without a tracker_archived or doc_retired event for that key since the last tracker_published, logging tracker_publish_refused {dropped[]}; `tracker.mjs init` rehydrates an absent local ledger from TRACKER.jsonl, and `init --merge` adds only keys absent locally and absent from TRACKER-archive.md headings — check: tracker-publish.test.mjs 50-vs-5, jsonl-absent and merge cases — cite: scripts/lib/ledger-keys.mjs:15-75
 - **ARCH-TRACKER-14** [decided] A repo with a committed TRACKER.md block but no TRACKER.jsonl is repaired by `tracker.mjs init --from-block`: one row per block row (plan, unit, module, status), evidence "rehydrated from TRACKER.md block", never overwriting a key the local ledger holds; the next approved publish writes TRACKER.jsonl — check: tracker.test.mjs from-block case on a 50-row fixture — cite: scripts/tracker.mjs:236-268
+- **ARCH-TRACKER-15** [decided] Whole-plan criteria carry `[plan:<slug>]` (tags in any order; `[unit:]` decides) and hold only that plan's promotion and land-feature; untagged lines hold none; headers never attribute — check: acceptance-plan-scope.test.mjs — cite: scripts/lib/core.mjs:506-518
+- **ARCH-TRACKER-16** [decided] stop-gate binds an owning session to `[unit:X]`/`[plan:X]` lines only when its ledger names X; an untagged line binds only a session whose ledger names no plan (unreadable ledger = none, fail closed), else it goes in the Stop notice; the block reason names each line's plan — check: stop-gate-plan-scope.test.mjs — cite: scripts/stop-gate.mjs:340-358

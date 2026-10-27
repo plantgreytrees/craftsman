@@ -132,6 +132,19 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [example](./example.md) | unit-3 | — | IN_PROGRESS | claimed | 2026-10-25 |
 | [example](./example.md) | unit-9 (S9) | — | COMPLETE | all 1 acceptance criteria ticked; def456 | 2026-10-25 |
 | [f](./f.md) | u | — | PENDING | — | 2026-10-25 |
+| [investigate-cross-repo-worktree-git-guard](./investigate-cross-repo-worktree-git-guard.md) | account-switch-same-repo | commands/account-switch.md | COMPLETE | all 1 acceptance criteria ticked; landed direct on main 868d87fb7ccd9f11466066f… | 2026-10-27 |
+| [investigate-cross-repo-worktree-git-guard](./investigate-cross-repo-worktree-git-guard.md) | guard-target-resolution | scripts/pre-guard.mjs | IN_PROGRESS | unit-runner | 2026-10-27 |
+| [investigate-cross-repo-worktree-git-guard](./investigate-cross-repo-worktree-git-guard.md) | scope-release-clean | scripts/scope.mjs | PENDING | owner decision 2026-10-27: trim workflow-spike scope.read in autonomous-e2e-loo… | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | acc-consumers | scripts/tracker.mjs reconcile + scripts/repo-exec.mjs land-feature per-plan | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | acc-core | scripts/lib/core.mjs acceptance parser: [plan:] tag, bindingAcceptance | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | acc-docs | commands/plan\|instruction\|merge.md: [plan:<slug>] wording; CHANGELOG | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | acc-stop-gate | scripts/stop-gate.mjs: bind only touched units/plans; reason names plan | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | auto-scope-flip | scripts/orchestrate-scope-guard.mjs: /auto no longer sets scope-required (ARCH-AUTO-10) | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | force-block-quoted | scripts/lib/force-block.mjs: destructive-git match only in git command words | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | preguard-quoted-literals | scripts/pre-guard.mjs: variable-assignment and removal-word checks read words, not quoted literals | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | preguard-sed | scripts/pre-guard.mjs: sed/perl writers only with -i, from command words | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | sandbox-ask-policy | scripts/lib/settings-merge.mjs: sandbox block without the recursive-delete asks (ARCH-SAFETY-12) | PENDING | — | 2026-10-27 |
+| [investigate-stop-gate-foreign-acceptance](./investigate-stop-gate-foreign-acceptance.md) | scope-shell-sid | follow-up: scope.mjs run from a shell command without a session id writes sessions/shared, not the caller's session | PENDING | — | 2026-10-27 |
 | [live](./live.md) | a | — | PENDING | — | 2026-10-25 |
 | [other](./other.md) | zeta | — | PENDING | — | 2026-10-25 |
 | [release](./release.md) | unit-1 | — | COMPLETE | verified | 2026-10-25 |

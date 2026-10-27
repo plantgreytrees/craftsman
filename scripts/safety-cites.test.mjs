@@ -36,6 +36,7 @@ const HOLDS = {
     "scripts/lib/settings-merge.mjs": ["mergeSettings", "export function"],
   },
   "ARCH-SAFETY-11": { "hooks/run.sh": ["guard_cannot_act", "ARCH-SAFETY-11"] },
+  "ARCH-SAFETY-12": { "scripts/lib/settings-merge.mjs": ["SANDBOX_BLOCK", "function merge"] },
 };
 
 function citesOf(ruleId) {
