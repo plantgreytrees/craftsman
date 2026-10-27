@@ -233,7 +233,7 @@ test("scope: release refuses a dirty worktree and succeeds once committed", () =
     assert.ok(before.some((n) => n.startsWith("scope")), "scope file exists");
     let result = release();
     assert.equal(result.status, 2, "modified tracked file");
-    assert.ok(result.stderr.includes(w) && /commit/.test(result.stderr), result.stderr);
+    assert.ok(result.stderr.includes(w) && /uncommitted changes/.test(result.stderr), result.stderr);
     assert.deepEqual(names().sort(), before, "nothing removed");
     spawnSync("git", ["checkout", "--", "tracked.txt"], { cwd: w });
     fs.writeFileSync(path.join(w, "new.txt"), "x\n");
@@ -259,5 +259,24 @@ test("scope: release ignores gitignored files, a swept worktree; fails closed on
     const plain = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plain-"));
     try { assert.equal(release(plain).status, 2, "not a git repo"); } finally { fs.rmSync(plain, { recursive: true, force: true }); }
     assert.equal(hook("scope.mjs", root, root, { action: "release", session_id: "s7", project: "." }).status, 0, "no worktree_path");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("scope: release on an unreadable worktree names git worktree prune, not a dirty tree", () => {
+  const { root, trees: [w] } = repoWithWorktrees("unread");
+  const release = (tree) => hook("scope.mjs", root, root, { action: "release", session_id: "s8", project: ".", worktree_path: tree });
+  const names = () => fs.readdirSync(path.join(root, ".craftsman", "sessions", "s8")).sort();
+  try {
+    assert.equal(hook("scope.mjs", w, root, manifest("s8", "unit-a", ["a.txt"], w)).status, 0);
+    const before = names();
+    fs.writeFileSync(path.join(w, ".git"), "gitdir: /nonexistent/nowhere\n");
+    const result = release(w);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /is not a readable git worktree/);
+    assert.match(result.stderr, /git worktree prune/);
+    assert.doesNotMatch(result.stderr, /fatal:|uncommitted changes/);
+    assert.deepEqual(names(), before, "scope and binding remain");
+    const evs = fs.readFileSync(path.join(root, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(evs.some((e) => e.ev === "scope_release_refused" && e.sid === "s8"), "refused event carries sid");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
