@@ -340,6 +340,10 @@ function findNamesMiss(names, start, cwd, docPaths) {
 // (cwd, `git -C`, `cd X &&`) outside the guarded bases and their ancestors.
 // Anything else with a removal word present is reported as a hit.
 const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval|clean)\b/;
+// `clean` alone is prose (`echo clean`); as a removal word it counts only after a `git` in the same simple command.
+const REMOVAL_GATE_NOCLEAN = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval)\b/;
+const gitThenClean = (t) => t.split(/[;&|\n]/).some((seg) => { const g = seg.search(/\bgit\b/); return g >= 0 && /\bclean\b/.test(seg.slice(g)); }); // linear: no nested scan
+const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || gitThenClean(t);
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
@@ -496,7 +500,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     };
     return walk(cmd, 0);
   };
-  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
+  if (!removalGate(cmd) && !removalGate(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
       && !(writes && WRITE_TEXT.test(bare)) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 

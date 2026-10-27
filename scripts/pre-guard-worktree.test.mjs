@@ -197,7 +197,7 @@ test("W2: git global options that move the repository or take a value", () => {
 test("W3: read-only git under shell syntax is silent; mutating git there still blocks", () => {
   for (const command of [
     `for f in $(git ls-files); do wc -c "$f"; done`,
-    `if git diff --quiet; then echo ok; fi`,
+    `if git diff --quiet; then echo clean; fi`,
     `time git status`,
     `! git diff --quiet`,
   ]) {
