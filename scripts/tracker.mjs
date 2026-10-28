@@ -368,9 +368,9 @@ function writeTransition(input, context) {
 // acceptance.md is edited (quality-gate), when a unit lands on MERGED (above),
 // and at Stop (catches ticks made through Bash). For every `[unit:<id>]` whose
 // own criteria are all ticked:
-//   - MERGED, and no untagged whole-plan criterion is still open → COMPLETE
-//     (untagged lines are the whole-request checks /orchestrate Phase F and
-//     /scrutinise verify; "all rows MERGED" alone is not done);
+//   - MERGED, and no open `[plan:<slug>]` line of that plan remains → COMPLETE
+//     (open `[plan:<slug>]` lines hold that plan's MERGED rows; untagged lines
+//     hold none, ARCH-TRACKER-15; "all rows MERGED" alone is not done);
 //   - IN_PROGRESS → reported as ready to merge — the model's "you're done
 //     implementing" signal; a merge can't be inferred from ticks.
 // Untagged-only (legacy) files name no units, so nothing is transitioned.
