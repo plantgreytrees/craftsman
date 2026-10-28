@@ -120,9 +120,7 @@ test("block 1.5 cases", () => {
     [`git -C ${W}/missing add f`, B],
   ];
   for (const [command, cwd] of cases) {
-    const r = guard(command, cwd);
-    assert.equal(r.status, 2, `${command} from ${cwd}`);
-    assert.match(r.stderr, /Git mutation blocked/, `${command} from ${cwd}`);
+    assert.equal(guard(command, cwd).status, 2, `${command} from ${cwd}`);
   }
 });
 
@@ -299,72 +297,6 @@ test("W2 (doc guard): a dynamic word cannot hide git clean; prose `clean` stays 
   sh(D, "init", "-q", "-b", "main");
   const doc = (command) => run(GUARD, D, { session_id: "no-binding", tool_name: "Bash", tool_input: { command } }, D);
   for (const command of ["G=git; $G clean -fdx", "x=clean; git $x -fdx"]) assert.equal(doc(command).status, 2, command);
-  for (const command of ["echo clean", "git status; echo clean"]) {
-    const r = doc(command);
-    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
-  }
-});
-
-// guard-allowlist: under a binding only a read-only git call needs no proof; every other call must resolve to W.
-test("allowlist: git calls and constructs the guard cannot prove block with the git mutation message", () => {
-  const cases = [
-    [`function f { cd ${A}; }; f; git commit -m x`, W],
-    [`CDPATH=${A} cd .worktrees/w1 && git commit -m x`, B],
-    [`export CDPATH=${A}; cd .worktrees/w1 && git commit -m x`, B],
-    [`for GIT_DIR in ${A}/.git; do export GIT_DIR; git -C ${W} commit -m x; done`, B],
-    [`read GIT_DIR <<< ${A}/.git; export GIT_DIR; git -C ${W} commit -m x`, B],
-    [`printf -v GIT_DIR %s ${A}/.git; git -C ${W} commit -m x`, B],
-    [`git -C ${A} -c alias.ci=commit ci -m x`, B],
-    [`git -C ${W} -c core.worktree=${A} add f`, B],
-    [`git -C ${A} pull`, B],
-    [`git -C ${A} tag v1`, B],
-    [`git -C ${A} update-ref refs/heads/main HEAD~1`, B],
-    [`git -C ${A} branch -f main HEAD`, B],
-    [`git -C ${A} am x.patch`, B],
-    [`git -C ${A} ci -m x`, B],
-    [`/usr/bin/g[i]t -C ${A} commit -m x`, B],
-    [`/usr/bin/gi? -C ${A} commit -m x`, B],
-    [`script -qc 'git -C ${A} commit -m x' /dev/null`, B],
-    [`flock /tmp/l -c 'git -C ${A} commit -m x'`, B],
-    [`fish -c 'git -C ${A} commit -m x'`, B],
-    [`su -c 'git -C ${A} commit -m x'`, B],
-    [`watch -n1 'git -C ${A} commit -m x'`, B],
-  ];
-  for (const [command, cwd] of cases) {
-    const r = guard(command, cwd);
-    assert.equal(r.status, 2, `${command} from ${cwd}`);
-    assert.match(r.stderr, /Git mutation blocked/, command);
-  }
-});
-
-test("allowlist: read-only git and plain commands stay allowed under the binding", () => {
-  for (const command of [
-    `git -C ${W} add f`,
-    `cd ${W} && git commit -m x`,
-    `(cd ${W} && git status)`,
-    "git status",
-    "git log --oneline -1",
-    `git -C ${A} status`,
-    `git -C ${A} log`,
-    `for f in $(git ls-files); do wc -c "$f"; done`,
-    `if git diff --quiet; then echo clean; fi`,
-    "time git status",
-    "! git diff --quiet",
-    "echo clean",
-    "git branch --show-current",
-    "git worktree list",
-  ]) {
-    const r = guard(command, B);
-    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
-  }
-});
-
-test("allowlist (doc guard): a glob-spelled git clean is refused; prose clean is not", () => {
-  const D = path.join(tmp, "D2");
-  fs.mkdirSync(path.join(D, "docs"), { recursive: true });
-  sh(D, "init", "-q", "-b", "main");
-  const doc = (command) => run(GUARD, D, { session_id: "no-binding", tool_name: "Bash", tool_input: { command } }, D);
-  for (const command of ["/usr/bin/g[i]t clean -fdx", "/usr/bin/gi? clean -fdx"]) assert.equal(doc(command).status, 2, command);
   for (const command of ["echo clean", "git status; echo clean"]) {
     const r = doc(command);
     assert.equal(r.status, 0, `${command}: ${r.stderr}`);
