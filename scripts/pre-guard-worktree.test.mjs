@@ -241,3 +241,64 @@ test("W5: the branch check reads the resolved target, not the cwd repo", () => {
   }
   assert.equal(guard(`git -C ${W} add f`, AW).status, 0);
 });
+
+// fix-guard-prove-all: once a command names a git mutation it passes only when everything in it is proven.
+test("C1/W3/W4: shapes the parser cannot prove block, naming git -C", () => {
+  const A_ = A;
+  for (const command of [
+    `(git -C ${A_} commit -m x)`,
+    `( git -C ${A_} commit -m x )`,
+    `true && (git -C ${A_} commit -m x)`,
+    `case a in a) git -C ${A_} commit -m x;; esac`,
+    `f() { git -C ${A_} commit -m x; }; f`,
+    `g''it -C ${A_} commit -m x`,
+    `"git" -C ${A_} commit -m x`,
+    `setsid git -C ${A_} commit -m x`,
+    `flock /tmp/l git -C ${A_} commit -m x`,
+    `env -S 'git -C ${A_} commit -m x'`,
+    `G=git; $G -C ${A_} commit -m x`,
+    `$(command -v git) -C ${A_} commit -m x`,
+  ]) {
+    const r = guard(command, B);
+    assert.equal(r.status, 2, command);
+    assert.match(r.stderr, /git -C /, command);
+  }
+});
+
+test("W5: git environment that moves the repository blocks even with git -C W", () => {
+  for (const command of [
+    `GIT_COMMON_DIR=${A}/.git git -C ${W} commit -m x`,
+    `GIT_OBJECT_DIRECTORY=${A}/.git/objects git -C ${W} commit -m x`,
+    `GIT_INDEX_FILE=/tmp/i git -C ${W} add f`,
+  ]) {
+    assert.equal(guard(command, B).status, 2, command);
+  }
+});
+
+test("S6 and the read-only controls stay allowed under the binding", () => {
+  for (const command of [
+    `git -C ${W} add f`,
+    `cd ${W} && git commit -m x`,
+    `(cd ${W} && git status)`,
+    `for f in $(git ls-files); do wc -c "$f"; done`,
+    `if git diff --quiet; then echo clean; fi`,
+    `time git status`,
+    `! git diff --quiet`,
+    `if true; then :; fi; cd ${W} && git add f`,
+  ]) {
+    const r = guard(command, B);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+  }
+});
+
+test("W2 (doc guard): a dynamic word cannot hide git clean; prose `clean` stays allowed", () => {
+  const D = path.join(tmp, "D");
+  fs.mkdirSync(path.join(D, "docs"), { recursive: true });
+  sh(D, "init", "-q", "-b", "main");
+  const doc = (command) => run(GUARD, D, { session_id: "no-binding", tool_name: "Bash", tool_input: { command } }, D);
+  for (const command of ["G=git; $G clean -fdx", "x=clean; git $x -fdx"]) assert.equal(doc(command).status, 2, command);
+  for (const command of ["echo clean", "git status; echo clean"]) {
+    const r = doc(command);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+  }
+});
