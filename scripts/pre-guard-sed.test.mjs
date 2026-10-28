@@ -98,6 +98,40 @@ test("bypass attempts stay blocked", () => {
   assert.equal(run("echo 'x' && sed -i s/a/b/ craftsman.config.json"), 2);
   assert.equal(run('echo "$(sed -i s/a/b/ craftsman.config.json)"'), 2);
   assert.equal(run("`echo sed` -i s/a/b/ craftsman.config.json"), 2);
-  assert.equal(run("find . -name x | xargs perl -pi -e s/a/b/ hooks/hooks.json"), 2);
+  assert.equal(
+    run("find . -name x | xargs perl -pi -e s/a/b/ hooks/hooks.json"),
+    2,
+  );
   assert.equal(run('echo "sed -i"; sed -i s/a/b/ craftsman.config.json'), 2);
 });
+
+// Records of the in-place spelling probes (preguard-inplace-spellings) and the path-qualified quoted case.
+const INPLACE_BLOCKED = [
+  "sed --in s/a/b/ craftsman.config.json",
+  "sed --in-pl s/a/b/ craftsman.config.json",
+  "sed --i s/a/b/ craftsman.config.json",
+  "sed --in-place s/a/b/ craftsman.config.json",
+  "sed --in-place=.bak s/a/b/ craftsman.config.json",
+  "sed -E --i s/a/b/ hooks/hooks.json",
+  "sed -Ei s/a/b/ hooks/hooks.json",
+  "perl -0pi -e s/a/b/ craftsman.config.json",
+  "perl -0777pi -e s/a/b/ hooks/hooks.json",
+  "perl -pi -e s/a/b/ hooks/hooks.json",
+  "sed -n 's/a/b/w craftsman.config.json' README.md",
+  "sed -n '1w hooks/hooks.json' README.md",
+  "sed -n '1w craftsman.config.json' README.md",
+  "sed -n 's/a/b/gw craftsman.config.json' README.md",
+  "sed -n 's/a/b/pw hooks/hooks.json' README.md",
+  "sed -n 's/a/b/Iw hooks/hooks.json' README.md",
+  "sed -n 's/a/b/2w craftsman.config.json' README.md",
+  "sed -n '1p;1w hooks/hooks.json' README.md",
+  "sed -n '/a/{p;w craftsman.config.json}' README.md",
+  "sed -n -e 1p -e '1w hooks/hooks.json' README.md",
+  "sed -i s/a/b/ hooks/hooks.json",
+  "./sed --in s/a/b/ craftsman.config.json",
+  './echo "sed -i s/a/b/ hooks/hooks.json"',
+];
+
+for (const command of INPLACE_BLOCKED) {
+  test(`blocked (recorded): ${command}`, () => assert.equal(run(command), 2));
+}
