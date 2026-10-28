@@ -30,7 +30,7 @@ units:
     scope:
       read: []   # pre-guard.mjs is 94 KB: grep -n gitTargets, mutatesGit, usesAlternateGitRoot, NAMES_MUTATION, gitThenClean, REMOVAL_WORD, `const bare` first, then read by range (ARCH-ENGINE-08)
       docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/docs.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard-worktree.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-worktree.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/plans/autonomous-e2e-loop.md]   # rules docs: `cite:` line ranges only; e2e plan: run-manifest-land scope trim only (task 1.0, owner decision 2026-10-28)
     arch: [ARCH-STATE-06, ARCH-STATE-16, ARCH-SAFETY-03, ARCH-DOCS-07]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
   - id: fix-release-wording
@@ -77,6 +77,7 @@ Floor at round 2 (main 226ff0f): `node --test scripts/*.test.mjs` 999/999, doc-s
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
 Depends on: none
 Design (two rounds of deny-list leaks): invert the burden. Once a command names a git mutation, it passes only when everything in it is proven; anything unproven blocks.
+- [ ] 1.0 Owner decision (2026-10-28, after the unit BLOCKED on a red main): `scripts/arch-check.test.mjs` "every step of docs/plans/autonomous-e2e-loop.md fits the default budget" fails — unit `run-manifest-land` needs 123,047 bytes > 122,880 (ARCH-ENGINE-08) after another plan's commit 2982d0f grew `scripts/repo-exec.mjs`. In `docs/plans/autonomous-e2e-loop.md`, trim only `run-manifest-land`'s scope (the unit already shipped): measure it with the test's own extraction (`arch-check.test.mjs:233-247`, `checkUnitContext`), then make the smallest change that fits — e.g. `read: []` with its existing YAML comment extended to say `repo-exec.mjs` is read by range. Touch nothing else in that plan. → accept: `node --test scripts/arch-check.test.mjs` exits 0 and `node scripts/arch-check.mjs lint` PASS; `git diff` of that plan touches only `run-manifest-land`'s scope lines.
 - [ ] 1.1 Add failing tests to `scripts/pre-guard-worktree.test.mjs` (reuse its harness; A is a separate repo, binding on B's worktree W, cwd = B's main checkout unless stated). → accept: the run log shows each block case exits 0 on current main.
   - Block (C1): `(git -C A commit -m x)`, `( git -C A commit -m x )`, `true && (git -C A commit -m x)`, `case a in a) git -C A commit -m x;; esac`, `f() { git -C A commit -m x; }; f`.
   - Block (W3/W4): `g''it -C A commit -m x`, `"git" -C A commit -m x`, `setsid git -C A commit -m x`, `flock /tmp/l git -C A commit -m x`, `env -S 'git -C A commit -m x'`, `G=git; $G -C A commit -m x`, `$(command -v git) -C A commit -m x`.
