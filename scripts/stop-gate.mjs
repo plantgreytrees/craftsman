@@ -376,7 +376,7 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
       );
     }
     if (legacyOpen.length) {
-      legacyNotice = `craftsman: ${legacyOpen.length} untagged unchecked acceptance line(s) in ${path.relative(context?.root || process.cwd(), acPath) || acPath} are not bound to this session's plans; add [plan:<slug>] tags to scope them.`;
+      legacyNotice = `craftsman: ${legacyOpen.length} unscoped (untagged or feature-only) unchecked acceptance line(s) in ${path.relative(context?.root || process.cwd(), acPath) || acPath} are not bound to this session's plans; add [plan:<slug>] tags to scope them.`;
       logEvent({ ev: "stop-acceptance-legacy", sid, count: legacyOpen.length });
     }
   }

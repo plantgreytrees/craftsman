@@ -80,7 +80,7 @@ test("C: case A prints the legacy notice and logs stop-acceptance-legacy", () =>
   seed(dir, sid, "- [ ] plan a legacy criterion\n", ledgerB);
   const r = await run(dir, sid);
   assert.match(r.stdout, /systemMessage/);
-  assert.match(r.stdout, /1 untagged/);
+  assert.match(r.stdout, /1 unscoped \(untagged or feature-only\)/);
   assert.match(r.stdout, /\[plan:<slug>\]/);
   assert.ok(r.events.some((e) => e.ev === "stop-acceptance-legacy"));
 }));
