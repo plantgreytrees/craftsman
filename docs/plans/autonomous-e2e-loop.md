@@ -188,7 +188,8 @@ units:
     language: JavaScript (Node ESM, node:test)
     security: normal
     scope:
-      read: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
+      # read list trimmed (scripts/repo-exec.test.mjs dropped) to fit ARCH-ENGINE-08 after repo-exec.mjs grew (plan investigate-stop-gate-foreign-acceptance); the unit had already shipped.
+      read: [scripts/repo-exec.mjs]
       docs: [docs/architecture/landing.rules.md]
       write: [scripts/repo-exec.mjs, scripts/repo-exec.test.mjs]
     arch: [ARCH-LAND-06]
