@@ -351,8 +351,9 @@ export const autoMarkerFile = (sid) => path.join(sessionDir(sid), "auto-active")
 // ending in `<slug>.md` maps to its basename. null when it isn't slug-shaped.
 export function planSlugOf(args) {
   const word = String(args || "").trim().split(/\s+/).find((a) => !a.startsWith("-")) || "";
-  const slug = (word.includes("/") && (word.endsWith(".md") || /(^|\/)docs\/plans\/[^/]+$/.test(word)) ? word.slice(word.lastIndexOf("/") + 1) : word)
-    .replace(/\.md$/, "");
+  const inPlans = /(^|\/)docs\/plans\/[^/]+$/.test(word);
+  if (word.includes("/") && !inPlans) return null;
+  const slug = (inPlans ? word.slice(word.lastIndexOf("/") + 1) : word).replace(/\.md$/, "");
   return /^[A-Za-z0-9._-]+$/.test(slug) ? slug : null;
 }
 export function writeAutoMarker(sid, plan, at = new Date().toISOString()) {
