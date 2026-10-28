@@ -6,6 +6,7 @@ test("planSlugOf normalises paths to the basename slug", () => {
   for (const a of ["./docs/plans/x.md", "sub/docs/plans/x.md", "docs/plans/x.md", "x"]) {
     assert.equal(planSlugOf(a), "x", a);
   }
+  assert.equal(planSlugOf("docs/plans/x"), "x");
   assert.equal(planSlugOf("a b"), "a");
   assert.equal(planSlugOf("--flag x"), "x");
   assert.equal(planSlugOf("a/b"), null);
