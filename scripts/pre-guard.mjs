@@ -344,7 +344,9 @@ const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|ev
 const REMOVAL_GATE_NOCLEAN = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval)\b/;
 const gitThenClean = (t) => t.split(/[;&|\n]/).some((seg) => { const g = seg.search(/\bgit\b/); return g >= 0 && /\bclean\b/.test(seg.slice(g)); }); // linear: no nested scan
 // `clean` counts after a `git` only when the whole command tokenizes and no word is dynamic (`$G clean`, `git $x`): else any `clean` does.
-const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.every((c) => c.words.every((w) => !/[$`]/.test(w))); };
+// A command word (after reserved words and assignments) holding a glob character may spell `git` (`g?t`, `g[i]t`): not plain either.
+const leadWord = (words) => { const w = [...words]; while (w.length && (ASSIGNMENT.test(w[0]) || GIT_RESERVED.has(w[0]))) w.shift(); return w[0] ?? ""; };
+const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.every((c) => c.words.every((w) => !/[$`]/.test(w)) && !/[*?[{]/.test(leadWord(c.words))); };
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
