@@ -32,7 +32,7 @@ blocked.push(
 );
 blocked.push(
   `x=$(echo "${g}"); $x`,
-  "x=`echo \"" + g + "\"`; $x",
+  'x=`echo "' + g + '"`; $x',
   `printf -v c '${g}'; $c`,
   `read c <<< "${g}"; $c`,
   `x=$(echo "${g}")`,
@@ -64,3 +64,18 @@ for (const c of [
   `/usr/bin/grep "${rh}" x`,
 ])
   test(`allows ${c}`, async () => assert.equal(await forceBlocked(c), null));
+
+// Round 2: a prose program the same command can repoint, shadow or prefix is live.
+const repointed = [
+  `hash -p /usr/bin/env grep; grep "git" "reset" "--hard"`,
+  `hash -p /usr/bin/env grep; grep git "push" "-f" origin main`,
+  `PATH=/tmp/p:$PATH grep "${rh}"`,
+  `enable -n echo; echo "${pf}"`,
+  `alias grep=sh; grep "${cf}"`,
+  `export PATH=/tmp/p:$PATH; echo "${rh}"`,
+  `PROMPT_COMMAND='${rh}'; echo "x"`,
+  `BASH_ENV=/tmp/e grep "${rh}" x`,
+  `FOO=1 echo "${pf}"`,
+];
+for (const c of repointed)
+  test(`blocks ${c}`, async () => assert.ok(await forceBlocked(c)));

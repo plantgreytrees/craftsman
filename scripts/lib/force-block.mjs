@@ -179,7 +179,11 @@ const LIVE_TEXT =
   /\$\(|`|\bprintf\s+-\S*v|\b(?:read|mapfile|readarray)\b|(?:^|[;&|(\n])\s*\$[{\w]/;
 const SHELL_FUNCTION = /(?:^|[\s;&|(){}])function\s|[\w.-]+\s*\(\s*\)\s*\{?/;
 const RESERVED_WORDS = new Set(["do", "then", "else", "elif", "!", "{", "time"]);
+// A word that repoints, shadows or prefixes a program name makes the prose program word untrustworthy.
+const REPOINTS =
+  /\b(?:hash|enable|alias|PROMPT_COMMAND|BASH_ENV)\b|\bPATH=|\bexport\s+PATH\b/;
 export function blankProse(value) {
+  if (REPOINTS.test(value)) return value;
   if (RUNS_TEXT.test(value) || LIVE_TEXT.test(value)) return value;
   // A backslash can escape a quote, so a regex cannot pair quotes; a function definition can shadow a prose program.
   if (value.includes("\\") || SHELL_FUNCTION.test(value)) return value;
@@ -198,7 +202,7 @@ export function blankProse(value) {
       .split(/&&|\|\||[;&|\n()`]/)
       .pop();
     const words = before.trim().split(/\s+/);
-    while (words.length && /^[A-Za-z_]\w*=\S*$/.test(words[0])) words.shift();
+    if (/^[A-Za-z_]\w*=/.test(words[0])) return all; // an assignment prefix can repoint the program
     while (words.length && RESERVED_WORDS.has(words[0])) words.shift();
     // Only a bare name or a system path is a known program: `./echo` or `/tmp/p/echo` is live.
     const program = (words[0] ?? "").replace(/^(?:\/usr)?\/bin\//, "");
