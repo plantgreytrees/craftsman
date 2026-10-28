@@ -4,8 +4,8 @@ goal: The force block and pre-guard refuse every destructive git, in-place write
 level: feature
 parent: investigate-stop-gate-foreign-acceptance
 priority: P0
-classification: /scrutinise rounds 1 (main 7019c4b) and 2 (main 2637399) of investigate-stop-gate-foreign-acceptance (isolated scrutineer, 2026-10-28)
-tracker_rows: [fb-prose-fail-closed, preguard-inplace-spellings, preguard-bypass-records, plan-slug-normaliser, rules-text, r2-prose-shadow, r2-preguard-writes, r2-bypass-records, r2-plan-slug-strict]
+classification: /scrutinise rounds 1 (main 7019c4b), 2 (main 2637399) and 3 (main f0407a4) of investigate-stop-gate-foreign-acceptance (isolated scrutineer, 2026-10-28)
+tracker_rows: [fb-prose-fail-closed, preguard-inplace-spellings, preguard-bypass-records, plan-slug-normaliser, rules-text, r2-prose-shadow, r2-preguard-writes, r2-bypass-records, r2-plan-slug-strict, r3-prose-readback]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -20,6 +20,7 @@ coverage:
   interface:     N/A(no new command surface)
   docs:          4.1-4.3 (rules wording and cites; no decision change)
   round2:        5.1-5.3 (prose shadowing), 6.1-6.4 (writer detection), 7.1-7.2 (bypass records), 8.1-8.2 (planSlugOf parent check)
+  round3:        9.1-9.3 (prose read back through $_ and history)
   rollback:      revert the merge commits; each fix only narrows what blankProse treats as prose or widens what counts as a write
 units:
   - id: 1
@@ -139,6 +140,19 @@ units:
       write: [scripts/lib/core.mjs, scripts/plan-slug-normaliser.test.mjs]
     arch: [ARCH-TRACKER-15, ARCH-TRACKER-16, ARCH-STATE-04]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
+  - id: 9
+    scope_id: r3-prose-readback
+    project: .
+    depends_on: []
+    module: scripts/lib/force-block.mjs blankProse (prose read back through $_ and history)
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/force-block.mjs, scripts/force-block-quoted.test.mjs, scripts/pre-guard-quoted.test.mjs, scripts/pre-guard-sed.test.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md, docs/architecture/landing.rules.md]
+      write: [scripts/lib/force-block.mjs, scripts/force-block-quoted.test.mjs, scripts/pre-guard-quoted.test.mjs, scripts/pre-guard-sed.test.mjs]
+    arch: [ARCH-SAFETY-05, ARCH-SAFETY-03, ARCH-STATE-16, ARCH-LAND-31]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
 ---
 # Scrutinise round 1 — investigate-stop-gate-foreign-acceptance
 
@@ -224,8 +238,16 @@ Round 2 finding 8.
 - [ ] 8.1 `planSlugOf` (core.mjs:352) maps a path to its basename only when the file's parent directory is `docs/plans` (any prefix: `./docs/plans/x.md`, `sub/docs/plans/x.md`, `docs/plans/x`); any other path is null → accept: `docs/plans/x/TRACKER.md` → null, `src/notes.md` → null; the round-1 table (3.1) unchanged
 - [ ] 8.2 Extend `scripts/plan-slug-normaliser.test.mjs` RED on 2637399 with the 8.1 cases → accept: `node --test scripts/plan-slug-normaliser.test.mjs scripts/acceptance-plan-scope.test.mjs scripts/orchestrate-scope-guard.test.mjs scripts/lib/core.test.mjs scripts/stop-gate-plan-scope.test.mjs` exit 0
 
+### Step 9 — r3-prose-readback (., javascript, HIGH)
+Tooling: implementer · gates security-auditor, code-reviewer · skills test-driven-development
+Depends on: none
+Round 3 findings 1, 2. The fix lives in blankProse only; no pre-guard.mjs change, so `grep -c shellSegments scripts/pre-guard.mjs` stays 2.
+- [ ] 9.1 `blankProse` (force-block.mjs) returns its input unchanged (fail closed) when the text can read back an earlier argument or history: `$_`, `${_`, `BASH_ARGV`, `BASH_ARGC`, `BASH_COMMAND`, history expansion `!$`, `!!`, `!:`, `!*`, and the words `fc` and `history` → accept: pre-guard exits 2 for `echo "CLAUDE_PROJECT_DIR=/tmp/x"; export "$_"`, `echo "CLAUDE_PROJECT_DIR=/tmp/x"; declare -x "$_"`, `grep -n "CLAUDE_PROJECT_DIR=x" README.md; typeset -x "$_"`, `echo "CRAFTSMAN_SAFETY=off"; export "${_}"`, `echo "CLAUDE_PROJECT_DIR=/tmp/x"; readonly "$_"; node a.mjs`, `echo "CLAUDE_PROJECT_DIR=/tmp/x"; export -- "$_"; node a.mjs`, `echo x "CLAUDE_PROJECT_DIR=/tmp/x"; env "$_" node a.mjs`, `echo "CLAUDE_PROJECT_DIR=/tmp/x" && export "$_"`, `echo "CLAUDE_PROJECT_DIR=/tmp/x" || export "$_"`, `echo "CLAUDE_PROJECT_DIR=/tmp/x"; export "$BASH_ARGV"`, `echo "CLAUDE_PROJECT_DIR=/tmp/x"; export !$`, `grep -s x "rm -rf .craftsman"; for f in a; do $_; done` and `grep -s x "sed -i s/a/b/ .claude/settings.json"; for f in a; do $_; done`
+- [ ] 9.2 Record, RED on f0407a4, each 9.1 probe as a blocked case: the assignment and loop-removal forms in `scripts/pre-guard-quoted.test.mjs`, the sed form in `scripts/pre-guard-sed.test.mjs`, and `echo "git reset --hard"; $_`, `echo "git reset --hard"; eval "$_"` and `for b in x; do echo "git reset --hard"; $_; done` in the fail-closed list of `scripts/force-block-quoted.test.mjs`; the existing allowed prose cases (`echo "CLAUDE_PROJECT_DIR=/tmp/x node a.mjs"`, `grep "rm -rf .craftsman" x; for f in a; do echo; done`, `grep -n "git reset --hard" x`) stay allowed → accept: `node --test scripts/force-block-quoted.test.mjs scripts/lib/force-block.test.mjs scripts/pre-guard-quoted.test.mjs scripts/pre-guard-sed.test.mjs scripts/pre-guard-writes.test.mjs scripts/pre-guard.test.mjs scripts/pre-guard-narrow.test.mjs` exit 0
+- [ ] 9.3 security-auditor over blankProse and its two pre-guard callers (removedDocs loop blanking, safetyText): no blanked text can be read back, repointed or executed later in the same command → accept: auditor PASS, every attempt a recorded case
+
 ## Sequencing
-Steps 1 and 3 are independent. Step 2 follows step 1 (pre-guard calls blankProse). Step 4 runs last so its cites match the final code. Round 2: steps 5 and 8 are independent; step 6 follows step 5; step 7 follows both.
+Steps 1 and 3 are independent. Step 2 follows step 1 (pre-guard calls blankProse). Step 4 runs last so its cites match the final code. Round 2: steps 5 and 8 are independent; step 6 follows step 5; step 7 follows both. Round 3: step 9 alone.
 
 ## Verification background
 
@@ -258,6 +280,13 @@ Steps 1 and 3 are independent. Step 2 follows step 1 (pre-guard calls blankProse
 **Pre-existing gaps, out of scope (both versions allow; the sandbox owns them, ARCH-SAFETY-01):** `sed 's/a|b/c/' -i …`, `perl -e 'open F,">…"'`, `awk '{print > "…"}'`, non-loop `hash -p` shadowing of rm.
 
 **Round 2 residual risk (scrutineer):** alias shadowing needs `expand_aliases` (unconfirmed in Claude Code's shell); `PATH=` forms need a planted wrapper while `hash -p` needs nothing; the gitTargets guard was not probed exhaustively; /auto's live hook path was exercised only through `destructiveGit`.
+
+**Round 3 (2026-10-28, main f0407a4, floor 1418/1418, lint PASS) — NOT ISOLATED probe phase.** The isolated scrutineer read both diffs statically and found that every 625731f..f0407a4 change only adds deny branches, but it was stopped before its probe phase. Root ran the probes: a replay of the round-2 corpus (about 170 commands) at HEAD vs e6c0c55 changes only the intended prose fixes, so the new class below is the only regression found.
+1. Critical Security/Architecture — blankProse's blanked quoted text is read back in the same command through `$_`/`${_}`, so it becomes a live assignment or command; confirmed in bash (`echo "FOO=bar"; export "$_"` sets FOO). Callers pre-guard.mjs:513 and :1516-1518. ARCH-SAFETY-05, ARCH-SAFETY-03, ARCH-STATE-16. → 9.1
+2. Warning Test-coverage — none recorded. → 9.2
+3. Suggestion Correctness — force-block.mjs:185 REPOINTS matches its words anywhere, so `grep "alias" file` is no longer blanked (fails closed; usability only). Not driven.
+Disputed: "planSlugOf null for non-plan paths may break callers" — at 7019c4b planSlugOf already returned null for every path not shaped `docs/plans/x.md`, and each CONSUMERS caller predates round 1 and handles null. Dropped.
+Round 3 pre-existing gaps (allowed at e6c0c55 and HEAD; the sandbox owns them, ARCH-SAFETY-01): non-loop `hash -p` shadowing of grep naming `sed -i`/`rm -rf`, `find … -exec sed -i`, `perl -pe` without `-i`, plus round 2's list.
 
 CONSUMERS:
 - `planSlugOf` (core.mjs:352): orchestrate-scope-guard.mjs:135 (command args), stop-gate.mjs:350 (ledger plan), core.mjs:390 (ledger plan), core.mjs:510 and :516 (acceptance `[plan:]` tags), core.mjs:1191 (bindingAcceptance plans). The basename change only turns null into a slug for path-shaped inputs; existing slug and `docs/plans/<slug>.md` inputs are unchanged.
