@@ -273,7 +273,7 @@ test("scope: release on an unreadable worktree names git worktree prune, not a d
     const result = release(w);
     assert.equal(result.status, 2);
     assert.match(result.stderr, /is not a readable git worktree/);
-    assert.match(result.stderr, /remove it \(then `git worktree prune`\), then release again/);
+    assert.match(result.stderr, /remove it, run `git worktree prune`, and release again/);
     assert.doesNotMatch(result.stderr, /fatal:|uncommitted changes/);
     assert.deepEqual(names(), before, "scope and binding remain");
     const evs = fs.readFileSync(path.join(root, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
