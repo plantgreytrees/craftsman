@@ -5,7 +5,7 @@ level: feature
 parent: investigate-stop-gate-foreign-acceptance
 priority: P0
 classification: /scrutinise round 1 of investigate-stop-gate-foreign-acceptance (isolated scrutineer, 2026-10-28, main 7019c4b)
-tracker_rows: [fb-prose-fail-closed, preguard-inplace-spellings, plan-slug-normaliser, rules-text]
+tracker_rows: [fb-prose-fail-closed, preguard-inplace-spellings, preguard-bypass-records, plan-slug-normaliser, rules-text]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -44,9 +44,22 @@ units:
     scope:
       read: [scripts/pre-guard.mjs]
       docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard-sed.test.mjs, scripts/pre-guard-quoted.test.mjs]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-inplace.test.mjs]
     arch: [ARCH-SAFETY-05, ARCH-SAFETY-03, ARCH-STATE-15]
     tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
+  - id: 2b
+    scope_id: preguard-bypass-records
+    project: .
+    depends_on: [preguard-inplace-spellings]
+    module: pre-guard sed and quoted-literal test files (bypass records)
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/pre-guard-sed.test.mjs, scripts/pre-guard-quoted.test.mjs, scripts/pre-guard-inplace.test.mjs]
+      docs: [docs/architecture/safety.rules.md]
+      write: [scripts/pre-guard-sed.test.mjs, scripts/pre-guard-quoted.test.mjs]
+    arch: [ARCH-SAFETY-05]
+    tooling: { implementer: implementer, gates: [security-auditor, code-reviewer], skills: [], guards: [], mcp: [] }
   - id: 3
     scope_id: plan-slug-normaliser
     project: .
@@ -63,7 +76,7 @@ units:
   - id: 4
     scope_id: rules-text
     project: .
-    depends_on: [fb-prose-fail-closed, preguard-inplace-spellings, plan-slug-normaliser]
+    depends_on: [fb-prose-fail-closed, preguard-inplace-spellings, preguard-bypass-records, plan-slug-normaliser]
     module: docs/architecture safety, tracker and landing rules wording and cites
     language: markdown
     security: normal
@@ -96,8 +109,17 @@ Depends on: fb-prose-fail-closed (pre-guard imports blankProse)
 Findings 3 (pre-guard side), 4. Add no `shellSegments` call; test 24.2 in pre-guard.test.mjs stays unchanged. Grep pre-guard.mjs for `INPLACE`, `WRITE_TEXT` and `blankProse`; do not read it whole beyond what the edit needs.
 - [ ] 2.1 The in-place pattern (pre-guard.mjs:356-357 and its use near :1462) accepts every GNU prefix of `--in-place` (`--i`, `--in`, `--in-pl`, …) and option clusters that hold digits (`-0pi`, `-0777pi`, `-Ei`) → accept: `sed --in s/a/b/ craftsman.config.json`, `sed --in-pl s/a/b/ craftsman.config.json`, `sed -E --i s/a/b/ hooks/hooks.json`, `perl -0pi -e s/a/b/ craftsman.config.json`, `perl -0777pi -e s/a/b/ hooks/hooks.json` exit 2
 - [ ] 2.2 A sed `w` command or `w` flag naming a guarded file counts as a write of that file → accept: `sed -n 's/a/b/w craftsman.config.json' README.md` and `sed -n '1w hooks/hooks.json' README.md` exit 2; `sed -n 1,5p README.md` still exits 0
-- [ ] 2.3 Add to `scripts/pre-guard-sed.test.mjs` every 2.1-2.2 probe and `./echo "sed -i s/a/b/ hooks/hooks.json"` as blocked cases, and to `scripts/pre-guard-quoted.test.mjs` `./echo "CLAUDE_PROJECT_DIR=/tmp/x node a.mjs"` and `./grep "rm -rf .craftsman" x; for f in a; do echo $f; done` as blocked cases (RED on 7019c4b) → accept: `node --test scripts/pre-guard-sed.test.mjs scripts/pre-guard-quoted.test.mjs scripts/pre-guard.test.mjs scripts/pre-guard-narrow.test.mjs` exit 0 and `grep -c shellSegments scripts/pre-guard.mjs` = 2
-- [ ] 2.4 security-auditor: no previously refused write, assignment or removal is allowed, and every bypass it tries is a test case → accept: auditor PASS; then the parent's `[unit:preguard-sed]` and `[unit:preguard-quoted-literals]` auditor lines are proven
+- [ ] 2.3 (amended 2026-10-28: the unit-context cap leaves no room to read the existing test files) Create `scripts/pre-guard-inplace.test.mjs` with the Write tool (same harness as pre-guard-sed.test.mjs: spawn `node scripts/pre-guard.mjs` in a git-init temp dir via `fs.mkdtempSync`, cleaned up with `fs.rmSync` in node), RED on 7019c4b, holding every 2.1-2.2 probe, `./echo "sed -i s/a/b/ hooks/hooks.json"`, `./echo "CLAUDE_PROJECT_DIR=/tmp/x node a.mjs"` and `./grep "rm -rf .craftsman" x; for f in a; do echo $f; done` as blocked cases, and `sed -n 1,5p README.md` allowed → accept: `node --test scripts/pre-guard-inplace.test.mjs scripts/pre-guard-sed.test.mjs scripts/pre-guard-quoted.test.mjs scripts/pre-guard.test.mjs scripts/pre-guard-narrow.test.mjs` exit 0 and `grep -c shellSegments scripts/pre-guard.mjs` = 2
+- [ ] 2.4 security-auditor: no previously refused write, assignment or removal is allowed, and every bypass it tries is a test case in pre-guard-inplace.test.mjs → accept: auditor PASS
+Path note: use absolute paths under this unit's worktree for Read, Edit and Write; never main-checkout paths. Shell writes of test text that names craftsman state are refused by the guard by design; use the Write and Edit tools, and never assemble strings to get past a guard.
+
+### Step 2b — preguard-bypass-records (., javascript, HIGH)
+Tooling: implementer · gates security-auditor, code-reviewer
+Depends on: preguard-inplace-spellings
+The parent criteria name the files that must record each bypass: `[unit:preguard-sed]` → scripts/pre-guard-sed.test.mjs, `[unit:preguard-quoted-literals]` → scripts/pre-guard-quoted.test.mjs.
+- [ ] 2b.1 Copy into `scripts/pre-guard-sed.test.mjs` every sed/perl probe of pre-guard-inplace.test.mjs and the path-qualified `./echo "sed -i …"` case, and into `scripts/pre-guard-quoted.test.mjs` the `./echo "CLAUDE_PROJECT_DIR=…"` and `./grep "rm -rf .craftsman" …` cases, as blocked cases in each file's own harness style (Read each file, then Edit; absolute worktree paths) → accept: `node --test scripts/pre-guard-sed.test.mjs scripts/pre-guard-quoted.test.mjs scripts/pre-guard-inplace.test.mjs` exit 0
+- [ ] 2b.2 security-auditor over the merged pre-guard state (preguard-sed, preguard-quoted-literals and preguard-inplace-spellings): every bypass it tries is recorded in the parent-named file → accept: auditor PASS; then tick the parent lines `[unit:preguard-sed]` security-auditor PASS and `[unit:preguard-quoted-literals]` security-auditor PASS
+Path note: as Step 2.
 
 ### Step 3 — plan-slug-normaliser (., javascript, normal)
 Tooling: implementer · gates code-reviewer · skills test-driven-development
