@@ -221,7 +221,7 @@ function refuseDirtyWorktree(input) {
   if (dirty === "") return;
   logEvent({ ev: "scope_release_refused", sid: sidOf(input), worktree: w });
   process.stderr.write(dirty === undefined
-    ? `craftsman: scope release refused: ${w} is not a readable git worktree — remove it (then \`git worktree prune\`), then release again.\n`
+    ? `craftsman: scope release refused: ${w} is not a readable git worktree — remove it, run \`git worktree prune\`, and release again.\n`
     : `craftsman: scope release refused: ${w} has uncommitted changes — commit them (wip: when parking or blocking), then release again.\n`);
   process.exit(2);
 }
