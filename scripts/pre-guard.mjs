@@ -355,7 +355,7 @@ const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
 // sed and perl count only in their in-place form (-i, -…i, --in-place), as the word-based verb check below does.
 const INPLACE_TEXT = String.raw`\b(?:sed|perl)\b[^;&|\n]*?\s(?:-[A-Za-z0-9]*i|--i(?:n(?:-(?:p(?:l(?:a(?:c(?:e)?)?)?)?)?)?)?(?=[\s=]|$))`;
 // A sed `w` command or `w` flag writes the file it names; read from the raw text (fail closed), it only counts when a guarded name is mentioned.
-const SED_W_TEXT = /\bsed\b[^;&|\n]*?[^A-Za-z]w\s*[^\s'";}]/;
+const SED_W_TEXT = /\bsed\b[^&|\n]*?w\s*[^\s'";}]/;
 const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filter((verb) => verb !== "sed" && verb !== "perl").join("|")})\\b|${INPLACE_TEXT}`);
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
