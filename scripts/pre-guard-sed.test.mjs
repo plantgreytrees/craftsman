@@ -135,3 +135,26 @@ const INPLACE_BLOCKED = [
 for (const command of INPLACE_BLOCKED) {
   test(`blocked (recorded): ${command}`, () => assert.equal(run(command), 2));
 }
+
+// Round-2 records: every probe of pre-guard-writes.test.mjs, plus a hash -p loop probe.
+const ROUND2_BLOCKED = [
+  "sed -e 's/a/b/;s/c/d/' -i .claude/settings.json",
+  "sed 's/a/b/;s/c/d/' -i craftsman.config.json",
+  "sed '1d;2d' -i hooks/hooks.json",
+  "perl -pe 's/a/b/;' -i hooks/hooks.json",
+  "sed -e '/x/{s/a/b/;}' --in-place=.bak craftsman.config.json",
+  "sed 's/a/b/;s/c/d/' -i .craftsman/off",
+  "x=sed; $x -i 's/x/y/' .claude/settings.json",
+  "x=sed; \"$x\" -i 's/x/y/' .claude/settings.json",
+  "x=sed; ${x} --in-place 's/x/y/' .claude/settings.json",
+  "p=perl; $p -pi -e 's/x/y/' .claude/settings.json",
+  "sed 's/a/b/w.claude/settings.json' x",
+  "sed 's/a/b/whooks/hooks.json' x",
+  "sed -n 'W craftsman.config.json' x",
+  "sed -n 'Whooks/hooks.json' x",
+  "sed -n '1Wcraftsman.config.json' x",
+  'for f in a; do hash -p /usr/bin/env grep; grep "sed" "-i" \'s/x/y/\' .claude/settings.json; done',
+];
+for (const command of ROUND2_BLOCKED) {
+  test(`blocked (round 2): ${command}`, () => assert.equal(run(command), 2));
+}
