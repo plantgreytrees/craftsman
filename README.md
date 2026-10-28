@@ -194,8 +194,9 @@ every run). A legacy repo's debt stays visible instead of living only in a
 gitignored snapshot.
 
 **"Done" is a contract.** The Stop gate blocks completion on a failed secrets
-scan, a test regression or an unticked acceptance criterion. Criteria are
-written at plan time and enforced before a task can finish.
+scan, a test regression or an unticked acceptance criterion of a plan the
+session worked. Criteria are written at plan time and enforced before a task
+can finish.
 
 **Architecture is enforced, not just written down.** `/plan` cites the rules
 for each unit, and `plan-reviewer` and the scrutineer check them. `scope.mjs`
