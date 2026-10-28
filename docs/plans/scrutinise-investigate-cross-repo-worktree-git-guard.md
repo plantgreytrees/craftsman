@@ -4,7 +4,7 @@ goal: The worktree git guard allows only git calls it can prove run in the bound
 level: feature
 priority: P1
 classification: in-scope # round 3 of an isolated /scrutinise of investigate-cross-repo-worktree-git-guard (round 1: 868d87f, 0a9f48d, 2a172cb; round 2: 0d1e0a7, 226ff0f; round 3: db9bff5, c50c033)
-tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2]
+tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -58,13 +58,21 @@ Under a worktree binding, read-only git runs anywhere; every other git call pass
 |---|---|---|---|
 | 1 | 868d87f, 0a9f48d, 2a172cb | 0 Critical · 5 Warning · 3 Suggestion · 1 UNMET | fix-guard-chain (0d1e0a7), fix-release-message (226ff0f) merged |
 | 2 | 0d1e0a7, 226ff0f | 1 Critical · 4 Warning · 3 Suggestion · 1 UNMET | fix-guard-prove-all (db9bff5), fix-release-wording (c50c033) merged |
-| 3 | db9bff5, c50c033 | 0 Critical · 5 Warning · 3 Suggestion · 0 UNMET | units guard-allowlist, release-wording-2 |
+| 3 | db9bff5, c50c033 | 0 Critical · 5 Warning · 3 Suggestion · 0 UNMET | guard-allowlist (d9e257a), release-wording-2 (4147f95) merged |
+| 4 | d9e257a, 4147f95 | 1 Critical · 9 Warning · 2 Suggestion | guard-allowlist REVERTED (aa8f34d, owner decision 2026-10-28); release-wording-2 kept; follow-ups F1-F3 |
 
 Floor at round 3 (main db9bff5): `node --test scripts/*.test.mjs` 1228/1228, doc-size PASS, `arch-check lint` PASS. No disputes. Root reproduced W1, W3 and W4 (exit 0 under a binding, cwd = B's main checkout). All acceptance criteria ticked; `[unit:guard-target-resolution]` 1.5(a)-(k) MET (`pre-guard-worktree.test.mjs:87-142`).
 
 Owner decision (2026-10-28, "Allowlist round 4"): every round found new spellings of a deny-list, so the default flips — git calls are allowed by a read-only allowlist, everything else needs proof.
 
-## Round 3 findings
+## Round 4 / close-out
+Round 4 (isolated scrutineer on d9e257a, 4147f95; root reproduced the Critical and three false blocks):
+- **Critical [Security]** `scripts/pre-guard.mjs:1377-1408` (`crudeGit`) — when the tokenizer gives up, `crudeGit` does not split on backticks: `` (true) && echo `git -C A commit -m x` `` exits 0 (round-2 guard: 2). Regression.
+- **Warnings** — bypasses: nested `function` (`if …; then function f { cd A; }; fi; f; git commit`), git options that run commands (`rebase -x`, `ls-remote --upload-pack`, `-c diff.external`, `grep -O`), `trap 'cd A' DEBUG`, `alias git='git -C A'`, glob-spelled git with unlisted verbs (`stage`, `bisect`, `replace`), doc guard glob git after `{`/`if`/`!`. False blocks: any `sh`/`bash` script call, commit messages naming `CDPATH`/`GIT_*`, read-only `rev-list`, `show-ref`, `check-ignore`, `config user.name`, `branch -vv`, `remote get-url`. Release message: the binding blocks the `git worktree prune` it names.
+
+Owner decision (2026-10-28): revert guard-allowlist (merge d9e257a) — commit aa8f34d. On main after the revert: `node --test scripts/*.test.mjs` 1228/1228, lint PASS, doc-size PASS; round-2 block cases still exit 2, the backtick case exits 2 again, the three false blocks exit 0. The round-3 findings below are live again and move to follow-up F1.
+
+## Round 3 findings (live again after the revert — follow-up F1)
 - **W1 [Warning][Security]** `scripts/pre-guard.mjs:1360-1369,1380-1390` — a `cd` inside a `function NAME { … }` body is unseen (`function` shifted as reserved, `{` not words[0], `}` drops depth to -1 and clears `reserved`): from cwd W `function f { cd A; }; f; git commit -m x` exits 0; real bash commits into A.
 - **W2 [Warning][Security]** `:1385-1388` — a relative `cd` resolves against the cwd, ignoring CDPATH: `CDPATH=A cd .worktrees/w1 && git commit -m x` and `export CDPATH=A; cd …` exit 0; an inherited CDPATH misleads with nothing in the text.
 - **W3 [Warning][Security]** `:1333` (unresolvedConstruct), `:51` (usesAlternateGitRoot) — GIT_DIR caught only as `NAME=value`: `for GIT_DIR in A/.git; do export GIT_DIR; git -C W commit -m x; done`, `set -a; printf -v GIT_DIR %s A/.git; git -C W commit -m x`, `read GIT_DIR <<< A/.git; export GIT_DIR; git -C W commit -m x` exit 0.
@@ -77,6 +85,7 @@ Owner decision (2026-10-28, "Allowlist round 4"): every round found new spelling
 ## Scope Steps (executable core)
 
 ### Step 1 — guard-allowlist (., javascript, high)
+REVERTED: merged as d9e257a, reverted by aa8f34d (owner decision 2026-10-28, round 4). Not re-driven; the guard design moves to follow-up F1.
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
 Depends on: none
 - [ ] 1.1 Add failing tests to `scripts/pre-guard-worktree.test.mjs` (existing harness; A a separate repo, binding on B's worktree W, cwd = B's main checkout unless stated). Every block case asserts exit 2 AND stderr `/Git mutation blocked/`; add that stderr assertion to the existing block-case table too (S7). → accept: the run log shows each new block case exits 0 on current main.
@@ -111,6 +120,7 @@ Step 1 flips the guard's default; the risk is a false block on a legitimate non-
 ## Out of scope
 - Interpreters (`node -e`, `python -c`), renamed git binaries and gitconfig aliases are textually undetectable; ARCH-SAFETY-01 leaves them to the sandbox.
 
-## Follow-ups
-- Not registered: verify the sandbox blocks writes into a sibling repo from an interpreter (ARCH-SAFETY-01).
-- The guard's own `git rev-parse` runs in the hook's environment, not the command's (exported `GIT_*`/`GIT_CONFIG_*`); covered by 1.3's `GIT_*` rule for in-command exports only.
+## Follow-ups (PENDING tracker rows, not driven by this run)
+- **F1 `followup-guard-redesign`** — the worktree git guard reads command text, and each of four fix rounds opened new holes. Live on main: the round-3 bypasses above (nested/`function` cd, CDPATH, `for`/`read`/`printf -v` GIT_DIR, `-c alias.*`/`core.worktree`, verbs pull/tag/update-ref/branch -f/am, glob-spelled `/usr/bin/g[i]t` incl. doc-guard `git clean`, `script -c`/`flock -c`/`su -c`/`watch`) plus round 4's git-as-runner options and `trap`/`alias` rebinding. Route to `/idea` → `/architect` for a design decision (e.g. judge git after shell expansion, or rely on the sandbox per ARCH-SAFETY-01) before any more code.
+- **F2 `followup-release-message`** — `scripts/scope.mjs:224` names `git worktree prune`, which the guard blocks while the binding is still active, and prune is not needed (`refuseDirtyWorktree` returns once the directory is gone). Reword to "remove it, release again, then run `git worktree prune`".
+- **F3 `followup-sandbox-verify`** — verify the sandbox blocks writes into a sibling repo from an interpreter (`node -e`, `python -c`) under a binding (ARCH-SAFETY-01). Also note the guard's own `git rev-parse` runs in the hook's environment, not the command's.
