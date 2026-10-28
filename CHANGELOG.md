@@ -12,6 +12,7 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ### Fixed
 
+- **Stop gate scoped to its own plans; pre-guard and force-block read command words, not quoted text; `/auto` no longer locks Phase A; the sandbox block without `rm` asks.** Whole-plan criteria carry `[plan:<slug>]` and hold only that plan (`/plan`, `/instruction`, `/merge` say so); quoted literals no longer trip the guards.
 - **`workspace-init --update` no longer corrupts the manifest.** Existing entries were written back with the loader's
   absolute `root` and internal fields, and the file was left on disk when post-write validation failed; they now keep
   their declared relative root, and absolute roots are refused before writing.
