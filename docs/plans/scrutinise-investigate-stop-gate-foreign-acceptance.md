@@ -253,20 +253,7 @@ Steps 1 and 3 are independent. Step 2 follows step 1 (pre-guard calls blankProse
 
 ## Verification background
 
-**Round 1 findings (verbatim classes):**
-1. Critical Security — force-block.mjs:180-209: blankProse ignores backslash escapes; three probes return null (blocked before 88e655c). ARCH-LAND-31, ARCH-STATE-16. → 1.1
-2. Warning Security — force-block.mjs:194-199: a function defined in the command shadows a prose program; two probes null. → 1.2
-3. Suggestion (must-fix; makes parent criteria 8 and 10 UNMET) Security — force-block.mjs:198: path-qualified programs count as prose; exit 2 before bc51891, exit 0 now. → 1.3, 2.3
-4. Suggestion (must-fix; criterion 8 needs every tried bypass recorded) Security — pre-guard.mjs:356-357, 1462: GNU prefixes, digit clusters, sed `w`; pre-existing. → 2.1, 2.2
-5. Warning Architecture — safety.rules.md:15 ARCH-SAFETY-05 describes a removed false positive. → 4.1
-6. Warning Architecture — tracker.rules.md:25 ARCH-TRACKER-15 vs ARCH-TRACKER-08 wording. → 4.2
-7. Suggestion Correctness — reserved word read as program inside a loop body (fails closed). → 1.4
-8. Suggestion Correctness — tracker.mjs:370-372 stale comment. → 3.2
-9. Suggestion Correctness — feature-only line called "untagged" in the Stop notice. → 3.2
-10. Suggestion Cross-unit — planSlugOf vs basename normalisers. → 3.1
-11. Suggestion Architecture — moved cites after 88e655c's reformat. → 4.3
-
-**Residual risk (scrutineer):** ANSI-C `$'…'` and nested `${…"…"}` quoting were reasoned about, not fuzzed (1.1 covers both, since each needs a backslash or `$`); /plan-time PENDING events' `session_id` vs the acceptance owner was not confirmed; workspace ledgers with non-`docs/plans/` paths not exercised (3.1 covers the slug side).
+**Round 1 findings** (11: 1 Critical, 3 Warning, 7 Suggestion; mapped to steps 1-4) are in git history at 4f2e52b.
 
 **Round 2 findings (verbatim classes):**
 1. Critical Security/Architecture — pre-guard.mjs:356 INPLACE_TEXT stops at a quoted `;`; :359 WRITE_TEXT lost plain sed/perl (f3cde44). Six probes exit 0, were 2. ARCH-SAFETY-05. → 6.1
