@@ -4,7 +4,7 @@ goal: The worktree git guard allows only git calls it can prove run in the bound
 level: feature
 priority: P1
 classification: in-scope # round 3 of an isolated /scrutinise of investigate-cross-repo-worktree-git-guard (round 1: 868d87f, 0a9f48d, 2a172cb; round 2: 0d1e0a7, 226ff0f; round 3: db9bff5, c50c033)
-tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify]
+tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -46,6 +46,19 @@ units:
       write: [scripts/scope.mjs, scripts/scope.test.mjs]
     arch: [ARCH-STATE-16]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: doc-guard-glob-clean
+    scope_id: doc-guard-glob-clean
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: []   # pre-guard.mjs ~95 KB: grep -n gitThenClean, removalGate, REMOVAL_WORD, plainWords, globWord, leadOf first, then read by range (ARCH-ENGINE-08)
+      docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
+    arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: close the gaps the scrutiny rounds found in the worktree git guard
@@ -101,6 +114,14 @@ Depends on: none
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
 - [ ] 2.1 In `refuseDirtyWorktree` (`scripts/scope.mjs:224`) change the unreadable-worktree message to `craftsman: scope release refused: <path> is not a readable git worktree — remove it, run \`git worktree prune\`, and release again.`; update the matching `scripts/scope.test.mjs` assertion (still no `fatal:`). Keep `scope.mjs` growth to a few bytes (ARCH-ENGINE-08 headroom). Run `node --test scripts/scope.test.mjs scripts/arch-check.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: green.
+
+### Step 3 — doc-guard-glob-clean (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
+Depends on: none
+Owner decision (2026-10-28): `/architect --update` found ARCH-STATE-16 and ARCH-DOCS-07 VIOLATED on main (aa8f34d+). Round-1 commit 2cc1a84 made the doc-deletion guard count `clean` as a removal word only after a literal `git` (`gitThenClean`/`removalGate`, `scripts/pre-guard.mjs` ~:342-350), so a glob-spelled git passes; before 2cc1a84 it was refused.
+- [ ] 3.1 Add failing tests in a new `scripts/pre-guard-docclean.test.mjs` (harness pattern from `scripts/pre-guard-worktree.test.mjs`; cwd a git repo with an untracked `docs/x.md`, no binding, no doc-write grant). Block (exit 2, doc-guard message on stderr): `/usr/bin/g[i]t clean -fdx`, `/usr/bin/gi? clean -fdx`, `{ /usr/bin/g?t clean -fdx; }`, `if true; then /usr/bin/g?t clean -fdx; fi`. Still allowed (exit 0): `echo clean`, `git status; echo clean`, `if git diff --quiet; then echo clean; fi`. → accept: the run log shows the four block cases exit 0 on current main.
+- [ ] 3.2 In the doc guard: when any command word — after stripping reserved words (`{`, `if`, `then`, `!`, `do`, …) and assignments, as `leadOf` does — contains `*`, `?`, `[`, `{`, `$` or a backtick, count `clean` as a removal word (the pre-2cc1a84 `REMOVAL_WORD` test), so the command fails closed without the doc-write grant. → accept: 3.1 passes.
+- [ ] 3.3 Re-point any `cite: scripts/pre-guard.mjs:<range>` in `docs/architecture/safety.rules.md` and `docs/architecture/state.rules.md` that the edit moved (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS; the rules-doc diff touches only `cite:` ranges.
 
 ## Sequencing
 Independent: no shared files or cites. Step 1 is the security fix and goes first when run one at a time; its cite re-pointing (1.5) is last.
