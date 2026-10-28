@@ -139,3 +139,29 @@ const ROUND2_BLOCKED = [
 for (const command of ROUND2_BLOCKED) {
   test(`blocked (round 2): ${command}`, () => assert.equal(run(command), 2));
 }
+
+// Round-3 records: blanked prose read back by a later word of the same command ($_, BASH_ARGV, history).
+const ROUND3_BLOCKED = [
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export "$_"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; declare -x "$_"',
+  'grep -n "CLAUDE_PROJECT_DIR=x" README.md; typeset -x "$_"',
+  'echo "CRAFTSMAN_SAFETY=off"; export "${_}"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; readonly "$_"; node a.mjs',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export -- "$_"; node a.mjs',
+  'echo x "CLAUDE_PROJECT_DIR=/tmp/x"; env "$_" node a.mjs',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x" && export "$_"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x" || export "$_"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export "$BASH_ARGV"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export !$',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export "${BASH_ARGC}"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export "$BASH_COMMAND"',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export !!',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export !:1',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; export !*',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; fc -s',
+  'echo "CLAUDE_PROJECT_DIR=/tmp/x"; history -s x',
+  'grep -s x "rm -rf .craftsman"; for f in a; do $_; done',
+];
+for (const command of ROUND3_BLOCKED) {
+  test(`blocked (round 3): ${command}`, () => assert.equal(run(command), 2));
+}

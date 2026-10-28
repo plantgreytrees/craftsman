@@ -182,8 +182,11 @@ const RESERVED_WORDS = new Set(["do", "then", "else", "elif", "!", "{", "time"])
 // A word that repoints, shadows or prefixes a program name makes the prose program word untrustworthy.
 const REPOINTS =
   /\b(?:hash|enable|alias|PROMPT_COMMAND|BASH_ENV)\b|\bPATH=|\bexport\s+PATH\b/;
+// Blanked prose must not be readable later: the last argument (`$_`), recorded arguments and history put it back into a word.
+const READS_BACK =
+  /\$_|\$\{_|\bBASH_(?:ARGV|ARGC|COMMAND)\b|!(?:\$|!|:|\*)|\b(?:fc|history)\b/;
 export function blankProse(value) {
-  if (REPOINTS.test(value)) return value;
+  if (REPOINTS.test(value) || READS_BACK.test(value)) return value;
   if (RUNS_TEXT.test(value) || LIVE_TEXT.test(value)) return value;
   // A backslash can escape a quote, so a regex cannot pair quotes; a function definition can shadow a prose program.
   if (value.includes("\\") || SHELL_FUNCTION.test(value)) return value;

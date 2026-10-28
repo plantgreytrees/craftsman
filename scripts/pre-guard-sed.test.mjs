@@ -158,3 +158,12 @@ const ROUND2_BLOCKED = [
 for (const command of ROUND2_BLOCKED) {
   test(`blocked (round 2): ${command}`, () => assert.equal(run(command), 2));
 }
+
+// Round-3 record: a blanked quoted sed text read back by `$_` in a loop.
+test("blocked (round 3): $_ loop sed write", () =>
+  assert.equal(
+    run(
+      'grep -s x "sed -i s/a/b/ .claude/settings.json"; for f in a; do $_; done',
+    ),
+    2,
+  ));
