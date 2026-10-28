@@ -55,6 +55,11 @@ const failClosed = [
   `/tmp/p/echo "${pf}"`,
   `./grep "${rh}" x`,
   `for f in a; do ${["git", "push", "-f"].join(" ")}; done`,
+  `echo "${rh}"; $_`,
+  `echo "${rh}"; eval "$_"`,
+  `for b in x; do echo "${rh}"; $_; done`,
+  `echo "${rh}"; eval "$BASH_ARGV"`,
+  `echo "${rh}"; !!`,
 ];
 for (const c of failClosed)
   test(`blocks ${c}`, async () => assert.ok(await forceBlocked(c)));
