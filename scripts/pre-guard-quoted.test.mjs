@@ -116,3 +116,12 @@ test("bypass refused: quoted rm piped to sh in a loop", () => {
     2,
   );
 });
+test('bypass refused: path-qualified ./echo "CLAUDE_PROJECT_DIR=..."', () => {
+  assert.equal(run('./echo "CLAUDE_PROJECT_DIR=/tmp/x node a.mjs"'), 2);
+});
+test('bypass refused: path-qualified ./grep "rm -rf .craftsman" before a loop', () => {
+  assert.equal(
+    run('./grep "rm -rf .craftsman" x; for f in a; do echo $f; done'),
+    2,
+  );
+});
