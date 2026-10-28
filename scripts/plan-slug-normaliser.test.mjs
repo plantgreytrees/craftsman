@@ -10,6 +10,8 @@ test("planSlugOf normalises paths to the basename slug", () => {
   assert.equal(planSlugOf("a b"), "a");
   assert.equal(planSlugOf("--flag x"), "x");
   assert.equal(planSlugOf("a/b"), null);
+  assert.equal(planSlugOf("docs/plans/x/TRACKER.md"), null);
+  assert.equal(planSlugOf("src/notes.md"), null);
   assert.equal(planSlugOf("$x"), null);
   assert.equal(planSlugOf(""), null);
 });
