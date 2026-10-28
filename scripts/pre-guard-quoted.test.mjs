@@ -125,3 +125,17 @@ test('bypass refused: path-qualified ./grep "rm -rf .craftsman" before a loop', 
     2,
   );
 });
+
+// Round-2 records: safety assignments and loop removals behind hash -p, enable -n or a PATH override.
+const ROUND2_BLOCKED = [
+  'hash -p /usr/bin/env grep; grep "CLAUDE_PROJECT_DIR=/tmp/x" node a.mjs',
+  'hash -p /usr/bin/env grep; grep "CRAFTSMAN_SAFETY=/tmp/x" node a.mjs',
+  'PATH=/tmp/p:$PATH grep "CLAUDE_PROJECT_DIR=/tmp/x node a.mjs"',
+  'enable -n echo; hash -p /usr/bin/env echo; echo "CLAUDE_PROJECT_DIR=/tmp/x" node a.mjs',
+  'for f in a; do hash -p /usr/bin/env grep; grep "rm" "-rf" ".craftsman"; done',
+  'for f in a; do hash -p /usr/bin/env grep; grep "rm" "-rf" \'.craftsman\'; done',
+  "for f in a; do hash -p /usr/bin/env grep; grep rm -rf .craftsman; done",
+];
+for (const command of ROUND2_BLOCKED) {
+  test(`blocked (round 2): ${command}`, () => assert.equal(run(command), 2));
+}
