@@ -355,7 +355,10 @@ const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
 // sed and perl count only in their in-place form (-i, -…i, --in-place), as the word-based verb check below does.
 const INPLACE_TEXT = String.raw`\b(?:sed|perl)\b[^;&|\n]*?\s(?:-[A-Za-z0-9]*i|--i(?:n(?:-(?:p(?:l(?:a(?:c(?:e)?)?)?)?)?)?)?(?=[\s=]|$))`;
 // A sed `w` command or `w` flag writes the file it names; read from the raw text (fail closed), it only counts when a guarded name is mentioned.
-const SED_W_TEXT = /\bsed\b[^&|\n]*?w\s*[^\s'";}]/;
+const SED_W_TEXT = /\bsed\b[^&|\n]*?[wW]\s*[^\s'";}]/;
+const VARIABLE_WORD = /(?:^|[;&|(]\s*)\$\{?\w+\}?(?=\s)/; // a command word that is a variable
+const WRITE_ANY_TEXT = { test: (t) => VARIABLE_WORD.test(t) && new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`).test(t) }; // plain sed and perl too: a variable command word may be either
+const emptyQuoted = (text) => text.replace(/'[^']*'|"[^"]*"/g, '""'); // a quoted ; | & cannot end an in-place scan
 const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filter((verb) => verb !== "sed" && verb !== "perl").join("|")})\\b|${INPLACE_TEXT}`);
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
@@ -508,7 +511,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     return walk(cmd, 0);
   };
   if (!removalGate(cmd) && !removalGate(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
-      && !(writes && WRITE_TEXT.test(bare)) && !redirectsOntoDocs()) return hits;
+      && !(writes && (WRITE_TEXT.test(bare) || WRITE_ANY_TEXT.test(bare))) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
   // One removal target, resolved from every directory the command may run in.
@@ -1464,14 +1467,15 @@ function denySelfDisable(what, advice) {
 }
 if (tool === "Bash" && command) {
   // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
-  const verb = WRITER_AT_COMMAND.test(command) || new RegExp(INPLACE_TEXT).test(command.includes("\\") ? command : blankProse(command)) || SED_W_TEXT.test(command); // blankProse does not read escaped quotes: with a backslash, test the raw text (fail closed)
+  const verb = WRITER_AT_COMMAND.test(command) || new RegExp(INPLACE_TEXT).test(command.includes("\\") ? command : blankProse(command)) || new RegExp(INPLACE_TEXT).test(emptyQuoted(command)) || SED_W_TEXT.test(command); // blankProse does not read escaped quotes: with a backslash, test the raw text (fail closed)
   const never = NEVER_TEXT.test(command);
-  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
+  const sedW = SED_W_TEXT.test(command);
+  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/${sedW ? "wW" : ""}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
   const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });
   const concrete = allHits.filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
   // A "(...)" hit means the parser gave up on part of the command (a subshell, a construct it cannot read): what it
   // writes is unknown. Fail closed when such a command can write and also names craftsman state.
-  if (allHits.some((h) => h.startsWith("(")) && (command.includes(">") || WRITE_TEXT.test(command.replace(/['"\\]/g, ""))) && namesProtected(command)) {
+  if (allHits.some((h) => h.startsWith("(")) && (command.includes(">") || WRITE_TEXT.test(command.replace(/['"\\]/g, "")) || WRITE_ANY_TEXT.test(command.replace(/['"\\]/g, ""))) && namesProtected(command)) {
     denySelfDisable("a command the guard cannot read that writes and names craftsman state");
   }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
