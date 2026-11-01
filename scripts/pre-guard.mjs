@@ -1127,7 +1127,7 @@ if (tool === "Bash" && toolInput.dangerouslyDisableSandbox === true) logEvent({ 
 // in this file is safety and runs whatever enabled() says.
 const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(tool === "Read" && insideScratchRoots(file, activeRoot))) { // ARCH-STATE-17: scratch Reads pass the scope and the ambiguity refusal
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
@@ -1759,4 +1759,19 @@ function commandHead(text) {
 function bracketClass(body, any = "[^/]") {
   const cls = "[" + body + "]";
   try { new RegExp(cls); return cls; } catch { return any; }
+}
+
+// ARCH-STATE-17: the Read tool alone may read scratch evidence (screenshots, logs) under the OS temp dir or $CLAUDE_JOB_DIR/tmp.
+// Judged by the real path the OS resolves (a `..` after a symlink included). A relative path, a file that does not exist, and a
+// root that encloses the project (a TMPDIR pointing at the home dir or at /) never qualify.
+function insideScratchRoots(target, project) {
+  if (typeof target !== "string" || !path.isAbsolute(target)) return false;
+  let real, realProject;
+  try { real = fs.realpathSync.native(target); realProject = fs.realpathSync.native(project); } catch { return false; }
+  const within = (dir, entry) => entry.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+  return [os.tmpdir(), process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, "tmp") : ""].some((root) => {
+    let realRoot;
+    try { realRoot = root ? fs.realpathSync.native(root) : ""; } catch { return false; }
+    return realRoot !== "" && within(realRoot, real) && realProject !== realRoot && !within(realRoot, realProject);
+  });
 }
