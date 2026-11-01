@@ -124,23 +124,6 @@ Isolated scrutineer on 1e44f9e..1d795e1; root re-ran C1-C3 and W1 against main 1
 - **W1 [Warning][Security]** `:353` — `globMayBeGit` mistranslates POSIX classes: `env /usr/bin/g[[:alpha:]]t cl[[:alpha:]]an -fdx`.
 - **S1** `GIT_EXEC_PATH` / `--exec-path` are not in `CONFIG_INDIRECT` (or name them in the ARCH-SAFETY-05 residual). **S2** false blocks: `CONFIG_INDIRECT` is tested on the whole text (`echo HOME=/x; git lfs pull` exits 2); `GIT_BUILTINS` lacks prune, stage, init-db, pack-refs, count-objects, rerere, show-branch, var, verify-commit; an absent subcommand opens the gate (`HOME=/tmp/h git --version` exits 2). **S3** `gitSub` (`:358`) and `git()` (`:764-768`) disagree on `--exec-path`. **S4** docclean tests lack `+=`, `$'...'`, POSIX-class-in-wrapper and prose `HOME=` cases.
 
-## Round 6 findings
-Isolated scrutineer on 6e97536..72a9faf; root re-ran each bypass against main 72a9faf (untracked `docs/x.md`, no grant): each exits 0. No disputes. Approach: the recommended structural fix (the owner was asked; no answer, and the /goal loop requires 0 Warning).
-- **W1 [Warning][Security]** `scripts/pre-guard.mjs:351-352` — `globSpellsClean` converts a glob to a JS regex by substitution and skips a bare `*`: `git cl[!x]an -fdx`, `git cl[[:alpha:]]an -fdx`, `git [!x]lean -fdx`, `git * -fdx`, `git -C docs * -fdx` leave the gate closed, so `git()` (`:769`, which refuses a globbed subcommand) never runs. Bash expands each to `clean` given a matching cwd entry (scrutineer confirmed with `git clean -n`).
-- **W2 [Warning][Security]** `:352,:767-768` — autocorrect reaches git through a config file the command points at, with no `help.autocorrect` text: `git -c include.path=F claen -fdx`, `GIT_CONFIG_GLOBAL=F git claen -fdx`, `HOME=D git claen -fdx`, `XDG_CONFIG_HOME=D git claen -fdx` (scrutineer confirmed git runs `clean`). The `GIT_CONFIG` check at `:767` sits behind the closed gate.
-- **S1 [Suggestion][Test-coverage]** `scripts/pre-guard-docclean.test.mjs:50-64` — no negated-bracket, POSIX-class, bare-`*` or config-indirection cases; no controls pinning ordinary glob arguments.
-
-## Round 5 findings
-Isolated scrutineer on cb2cdf8..2112630; root re-ran every bypass against main 2112630 (repo with untracked `docs/x.md`, no grant): each exits 0. No disputes.
-- **W1 [Warning][Security]** `scripts/pre-guard.mjs:348-349` — `leadWord` skips only `GIT_RESERVED` words and assignments, not `WRAPPERS` (`:204`) or `coproc`: `command|env|nohup|time|nice|exec /usr/bin/g?t clean -fdx` and `timeout 9 /usr/bin/g?t clean -fdx` count as plain and pass (ARCH-DOCS-07, ARCH-STATE-16).
-- **W2 [Warning][Security]** `:349` — the glob test reads only the command word: `git cl?an -fdx`, `git cl[e]an -fdx` pass; bash expands them to `clean` once a file `clean` exists.
-- **W3 [Warning][Security]** `:345,:350` (pre-existing) — `git -c help.autocorrect=immediate claen -fdx` holds no `clean` word and passes; git autocorrects it to `clean`.
-- **S1 [Suggestion][Test-coverage]** `scripts/pre-guard-docclean.test.mjs:37-48` — no wrapper or subcommand-glob cases; the stderr assert `/doc/i` matches any message naming "doc".
-
-Floor at round 3 (main db9bff5): `node --test scripts/*.test.mjs` 1228/1228, doc-size PASS, `arch-check lint` PASS. No disputes. Root reproduced W1, W3 and W4 (exit 0 under a binding, cwd = B's main checkout). All acceptance criteria ticked; `[unit:guard-target-resolution]` 1.5(a)-(k) MET (`pre-guard-worktree.test.mjs:87-142`).
-
-Owner decision (2026-10-28, "Allowlist round 4"): every round found new spellings of a deny-list, so the default flips — git calls are allowed by a read-only allowlist, everything else needs proof.
-
 ## Round 4 / close-out
 Round 4 (isolated scrutineer on d9e257a, 4147f95; root reproduced the Critical and three false blocks):
 - **Critical [Security]** `scripts/pre-guard.mjs:1377-1408` (`crudeGit`) — when the tokenizer gives up, `crudeGit` does not split on backticks: `` (true) && echo `git -C A commit -m x` `` exits 0 (round-2 guard: 2). Regression.
