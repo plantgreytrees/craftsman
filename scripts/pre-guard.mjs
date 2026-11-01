@@ -344,10 +344,12 @@ const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|ev
 const REMOVAL_GATE_NOCLEAN = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval)\b/;
 const gitThenClean = (t) => t.split(/[;&|\n]/).some((seg) => { const g = seg.search(/\bgit\b/); return g >= 0 && /\bclean\b/.test(seg.slice(g)); }); // linear: no nested scan
 // `clean` counts after a `git` only when the whole command tokenizes and no word is dynamic (`$G clean`, `git $x`): else any `clean` does.
-// A command word (after reserved words and assignments) holding a glob character may spell `git` (`g?t`, `g[i]t`): not plain either.
-const leadWord = (words) => { const w = [...words]; while (w.length && (ASSIGNMENT.test(w[0]) || GIT_RESERVED.has(w[0]))) w.shift(); return w[0] ?? ""; };
-const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.every((c) => c.words.every((w) => !/[$`]/.test(w)) && !/[*?[{]/.test(leadWord(c.words))); };
-const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
+// A glob character in ANY word may spell the program, its subcommand or a wrapper's target: not plain either.
+const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.every((c) => c.words.every((w) => !/[$`*?[{]/.test(w))); };
+// The git autocorrect setting (by option or environment) lets git run a misspelt subcommand: it fails closed like a removal word.
+// A glob word (other than a bare `*`) that can expand to or match `clean` spells it (`cl?an`, `cl[e]an`): fail closed.
+const globSpellsClean = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.some((c) => c.words.some((w) => { if (w === "*" || !/[*?[{]/.test(w)) return false; try { return new RegExp("^" + w.replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".") + "$").test("clean"); } catch { return true; } })); };
+const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globSpellsClean(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
@@ -763,6 +765,8 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     }
     const sub = rest[i];
     if (/GIT_CONFIG/.test(cmd)) bad = always = "a GIT_CONFIG_* variable (a config override)";
+    if (/help\.autocorrect/i.test(cmd)) bad = always = "git autocorrect (it may run a removal subcommand)";
+    if (sub !== undefined && /[*?[{]/.test(sub)) bad = always = "a globbed git subcommand: " + sub;
     if (sub !== "rm" && sub !== "mv" && sub !== "clean") {
       if (always) return unsafe(always);
       const args = rest.slice(i + 1);
