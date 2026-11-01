@@ -350,13 +350,22 @@ const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); r
 // Structural, not a guess at what a glob matches: a simple command holding a git command word (basename `git`, or a glob word that may spell it) and any glob word opens the gate; git() then refuses a globbed subcommand.
 const GLOB_CHAR = /[*?[{]/;
 const globbedGit = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.some((c) => c.words.some((w, n) => path.basename(w) === "git" || (GLOB_CHAR.test(path.basename(w)) && (n === 0 || globMayBeGit(w)))) && c.words.some((w) => GLOB_CHAR.test(w))); };
-const globMayBeGit = (w) => { try { return new RegExp("^" + path.basename(w).replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$").test("git"); } catch { return true; } };
+const globMayBeGit = (w) => { if (/\[.+\]/.test(w)) return true; try { return new RegExp("^" + path.basename(w).replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$").test("git"); } catch { return true; } };
 // Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment) can alias a misspelt subcommand to clean.
 // Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
-const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)=/i;
-const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version whatchanged worktree write-tree".split(" "));
+const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)\+?=/i;
+// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env,
+// or an include, --config-env or GIT_CONFIG word among a git command's own words. `echo HOME=/x` is prose.
+const ENV_CONFIG = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*)\+?=/i;
+const ASSIGN_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const cmdIndex = (words) => { let k = 0; while (k < words.length && ASSIGN_WORD.test(words[k])) k++; return k; };
+const envConfigIn = (c) => { const k = cmdIndex(c.words); return c.words.slice(0, k).some((w) => ENV_CONFIG.test(w)) || (/^(?:export|declare|typeset|readonly|local|env)$/.test(path.basename(c.words[k] ?? "")) && c.words.slice(k + 1).some((w) => ENV_CONFIG.test(w))); };
+const ownConfig = (c) => c.words.some((w) => /include\.path|includeif|GIT_CONFIG|--config-env/i.test(w));
+const gitWordAt = (c, k) => path.basename(c.words[k] ?? "") === "git" || /[$`]/.test(c.words[k] ?? "");
+const configIndirectIn = (cmds) => { const env = cmds.some(envConfigIn); return cmds.some((c) => { const k = cmdIndex(c.words); if (!gitWordAt(c, k)) return false; if (!env && !ownConfig(c)) return false; const sub = gitSub(c.words.slice(k + 1)); return sub !== undefined && !GIT_BUILTINS.has(sub); }); };
+const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version whatchanged worktree write-tree bugreport checkout-index column commit-graph commit-tree count-objects credential daemon diff-files diff-index diff-tree fast-export fast-import fetch-pack filter-branch for-each-repo get-tar-commit-id index-pack interpret-trailers mailinfo mailsplit merge-file merge-index mktag mktree multi-pack-index pack-objects pack-redundant pack-refs patch-id prune prune-packed read-tree receive-pack request-pull rerere scalar send-pack show-branch stripspace unpack-file unpack-objects update-server-info upload-pack var verify-commit verify-pack verify-tag".split(" "));
 const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|exec-path))$/.test(rest[i]) ? 2 : 1; return rest[i]; };
-const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || cmds.some((c) => { const k = c.words.findIndex((w) => path.basename(w) === "git"); return k >= 0 && !GIT_BUILTINS.has(gitSub(c.words.slice(k + 1))); }); };
+const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || configIndirectIn(cmds); };
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
@@ -409,6 +418,19 @@ function matchParen(t, i) {
 // Strict tokenizer for the safe subset: [{ words, sep, redirOut, redirIn, substs }]
 // or null (after fail(why)) for anything outside it: `(` `)` a lone `&` `;;`,
 // process substitution, an unclosed quote or substitution.
+// Bash `$'...'` (ANSI-C quoting): the text between the quotes with its escapes decoded; j is the closing quote, or -1.
+function ansiCEnd(text, i) { for (let j = i + 2; j < text.length; j++) { if (text[j] === "\\") j++; else if (text[j] === "'") return j; } return -1; }
+function ansiCDecode(body) {
+  const simple = { n: "\n", t: "\t", r: "\r", a: "\x07", b: "\b", f: "\f", v: "\v", e: "\x1b", E: "\x1b", "\\": "\\", "'": "'", '"': '"', "?": "?" };
+  return body.replace(/\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c(.)|([\s\S]))/g, (m, x, u, U, o, ctl, ch) => {
+    if (x !== undefined) return String.fromCharCode(parseInt(x, 16));
+    if (u !== undefined || U !== undefined) { try { return String.fromCodePoint(parseInt(u ?? U, 16)); } catch { return ""; } }
+    if (o !== undefined) return String.fromCharCode(parseInt(o, 8) & 255);
+    if (ctl !== undefined) return String.fromCharCode(ctl.charCodeAt(0) & 31);
+    return simple[ch] ?? m;
+  });
+}
+const decodeAnsiC = (text) => { let out = "", i = 0; while (i < text.length) { const j = text[i] === "$" && text[i + 1] === "'" ? ansiCEnd(text, i) : -1; if (j === -1) out += text[i++]; else { out += ansiCDecode(text.slice(i + 2, j)); i = j + 1; } } return out; };
 function tokenize(text, fail) {
   const cmds = [], n = text.length;
   const fresh = (sep) => ({ words: [], sep, redirOut: [], redirIn: false, substs: [] });
@@ -453,6 +475,10 @@ function tokenize(text, fail) {
         } else word += d;
       }
       if (i >= n) { fail("an unclosed quote"); return null; }
+    } else if (c === "$" && text[i + 1] === "'") {
+      const j = ansiCEnd(text, i);
+      if (j === -1) { fail("an unclosed quote"); return null; }
+      word = (word ?? "") + ansiCDecode(text.slice(i + 2, j)); i = j;
     } else if (c === "$" && text[i + 1] === "(") {
       const j = matchParen(text, i + 1);
       if (j === -1) { fail("an unclosed substitution"); return null; }
@@ -503,7 +529,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // The gate reads the text with its quotes and backslashes removed as well as the
   // raw text, so `r''m`, `r\m` and `"r"m` are removal words; a `>` redirect onto a
   // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
-  const bare = cmd.replace(/['"\\]/g, "");
+  const bare = decodeAnsiC(cmd).replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
   // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
@@ -773,7 +799,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     }
     const sub = rest[i];
     if (/GIT_CONFIG/.test(cmd)) bad = always = "a GIT_CONFIG_* variable (a config override)";
-    if (sub !== undefined && !GIT_BUILTINS.has(sub) && CONFIG_INDIRECT.test(cmd)) bad = always = "a git config indirection (include, HOME or XDG_CONFIG_HOME) beside a non-builtin subcommand";
+    if (sub !== undefined && !GIT_BUILTINS.has(sub) && CONFIG_INDIRECT.test(cmd) && configIndirectGit(cmd)) bad = always = "a git config indirection (include, HOME or XDG_CONFIG_HOME) beside a non-builtin subcommand";
     if (/help\.autocorrect/i.test(cmd)) bad = always = "git autocorrect (it may run a removal subcommand)";
     if (sub !== undefined && /[*?[{]/.test(sub)) bad = always = "a globbed git subcommand: " + sub;
     if (sub !== "rm" && sub !== "mv" && sub !== "clean") {
@@ -893,6 +919,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       const w = words[i], b = path.basename(w), afterOption = i > 0 && words[i - 1].startsWith("-");
       if (CANDIDATES.has(b) || (writes && (WRITE_VERBS.has(b) || OTHER_WRITERS.has(b)))) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
       if (WRAPPERS.has(b) || w.startsWith("-") || ASSIGNMENT.test(w) || afterOption || /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
+      if (b !== "[" && b !== "[[" && GLOB_CHAR.test(b) && globMayBeGit(w)) return unsafe("a globbed command word that may spell git");
       const args = words.slice(i + 1);
       const safe = SAFE_HEADS.has(b) || (b === "node" && args.length > 0 && /(?:^|\/)scripts\/[\w.-]+\.mjs$/.test(args[0]));
       const named = args.find((a) => REMOVAL_WORD.test(a));
