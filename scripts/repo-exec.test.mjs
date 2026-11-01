@@ -8,6 +8,7 @@ import { cleanup, inspectRepo, landUnit, landFeature, merge, prepare, sync } fro
 import { plainArgs } from "./lib/land.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
+import { unpushedReport } from "./lib/unpushed.mjs";
 
 function git(root, args) {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -254,6 +255,22 @@ test("repo-exec: prepare writes no branch config for a new unit branch or a re-p
       assert.equal(again.reattached, false);
       assert.equal(branchConfig(context.root, again.branch), "");
       assert.equal(git(context.root, ["config", "--local", "--list"]), before);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: a unit branch without an upstream is unpushed work until pushed, then clean (ARCH-SAFETY-06)", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { base } = addOrigin(data.workspace, context.root);
+      const info = inspectRepo(context, { base_branch: base });
+      const prepared = commitUnit(context, info, "report-unit");
+      const mentions = () => unpushedReport(context.root).lines.filter((line) => line.startsWith(`branch ${prepared.branch} `));
+      assert.match(mentions().join("\n"), /has no upstream: 1 commit\(s\) on no remote/);
+      git(prepared.worktree_path, ["push", "-q", "origin", prepared.branch]);
+      assert.deepEqual(mentions(), [], "origin/<branch> now holds the commits, so no upstream config is needed");
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });

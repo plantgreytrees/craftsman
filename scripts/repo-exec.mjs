@@ -45,12 +45,12 @@ function fetchBase(context, root, input, info, branch = info.base_branch) {
 
 // `args` is the plain `git push` argument list; `ref` the local ref it sends
 // to refs/heads/<dst>. Returns true when pushed, false when queued for root.
-function pushOrDefer(context, input, info, { cwd, args, ref, dst, upstream = false }) {
+function pushOrDefer(context, input, info, { cwd, args, ref, dst }) {
   if (online(cwd, input)) {
     try { remote(cwd, ["push", ...args]); return true; }
     catch (error) { throw isUnreachable(error) ? networkError(error) : error; }
   }
-  const entry = enqueuePush(cwd, info, { sha: run(cwd, ["rev-parse", ref]), dst, upstream, reason: input.unit || input.slug || "" });
+  const entry = enqueuePush(cwd, info, { sha: run(cwd, ["rev-parse", ref]), dst, reason: input.unit || input.slug || "" });
   logEvent({ ev: "network_deferred", kind: "push", project: info.project, dst, id: entry.id }, context);
   return false;
 }
@@ -278,8 +278,8 @@ function prepareFeature(context, input, info) {
     fs.mkdirSync(path.dirname(worktree), { recursive: true });
     const existing = run(main, ["show-ref", "--verify", `refs/heads/${branch}`], { allowFailure: true });
     if (existing) run(main, ["worktree", "add", worktree, branch]);
-    else run(main, ["worktree", "add", "-b", branch, worktree, baseRef]);
-    if (info.has_remote) pushed = pushOrDefer(context, input, info, { cwd: worktree, args: ["-u", "origin", branch], ref: branch, dst: branch, upstream: true });
+    else run(main, ["worktree", "add", "--no-track", "-b", branch, worktree, baseRef]);
+    if (info.has_remote) pushed = pushOrDefer(context, input, info, { cwd: worktree, args: ["origin", branch], ref: branch, dst: branch });
   }
   recordSessionWorktree(input, worktree, anchored);
   logEvent({ ev: "feature_worktree", plan: planSlug, feature: input.feature, branch, worktree, reattached }, anchored);
@@ -305,7 +305,7 @@ function prepare(context, input, info) {
   fs.mkdirSync(path.dirname(worktree), { recursive: true });
   const existing = run(context.root, ["show-ref", "--verify", `refs/heads/${branch}`], { allowFailure: true });
   if (existing) run(context.root, ["worktree", "add", worktree, branch]);
-  else run(context.root, ["worktree", "add", "-b", branch, worktree, baseRef]);
+  else run(context.root, ["worktree", "add", "--no-track", "-b", branch, worktree, baseRef]);
   recordSessionWorktree(input, worktree, context);
   return { ...info, worktree_path: worktree, branch, base_ref: baseRef, reattached: false };
 }
@@ -524,7 +524,7 @@ function landUnit(context, input, info) {
     const hasRemoteFeature = info.has_remote && input.push !== false;
     let pushedFeature = true;
     if (hasRemoteFeature) {
-      try { pushedFeature = pushOrDefer(context, input, info, { cwd: worktree, args: ["-u", "origin", feature], ref: feature, dst: feature, upstream: true }); }
+      try { pushedFeature = pushOrDefer(context, input, info, { cwd: worktree, args: ["origin", feature], ref: feature, dst: feature }); }
       catch (error) {
         if (error?.needsNetwork) throw error;
         logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "rejected-push" }, context);
@@ -686,7 +686,7 @@ function landFeaturePullRequest(context, input, info, { feature, head, config, r
   };
   preflightHost(options, runner);
   const result = { ...info, branch: feature, feature_branch: feature, land: "pr", merged: false, merged_locally: false, park_unit: lastUnit, units };
-  try { remote(context.root, ["push", "-u", "origin", `${head}:refs/heads/${feature}`]); }
+  try { remote(context.root, ["push", "origin", `${head}:refs/heads/${feature}`]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
     return landingPark("rejected-push", { ...result, pushed: false }, error);
@@ -751,7 +751,7 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner, 
   const subjects = run(worktree, ["log", "--reverse", "--format=%s", `origin/${info.base_branch}..${branch}`]);
   if (!subjects) throw new Error(`${branch} has no commits beyond origin/${info.base_branch}`);
   pin();
-  try { remote(worktree, ["push", "-u", "origin", branch]); }
+  try { remote(worktree, ["push", "origin", branch]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
     return landingPark("rejected-push", { ...info, branch, land: "pr", merged: false, pushed: false, worktree_path: worktree }, error);
