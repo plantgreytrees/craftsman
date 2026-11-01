@@ -47,6 +47,22 @@ test("a glob-spelled git clean is refused by the doc guard", () => {
   }
 });
 
+test("wrapper, subcommand-glob and autocorrect spellings of git clean are refused", () => {
+  for (const command of [
+    "command /usr/bin/g?t clean -fdx",
+    "env /usr/bin/g?t clean -fdx",
+    "timeout 9 /usr/bin/g?t clean -fdx",
+    "nohup /usr/bin/g?t clean -fdx",
+    "git cl?an -fdx",
+    "git cl[e]an -fdx",
+    "git -c help.autocorrect=immediate claen -fdx",
+  ]) {
+    const r = guard(command);
+    assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+    assert.match(r.stderr, /doc-write authority/, command);
+  }
+});
+
 test("prose `clean` still passes", () => {
   for (const command of [
     "echo clean",
