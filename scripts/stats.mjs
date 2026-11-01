@@ -142,6 +142,21 @@ export function approvalSection(events) {
   return `  approvals: ${secs.length} decided · p50 ${pct(secs, 50)}s · p95 ${pct(secs, 95)}s`;
 }
 
+// Sandbox bypasses (dangerouslyDisableSandbox retries): auto mode refuses them, so each one is a likely stall.
+// pre-guard counts them from the flag alone; an event holds a session id and the first command word, never command text.
+export function sandboxBypassSection(events) {
+  const hits = events.filter((e) => e.ev === "sandbox_bypass");
+  if (!hits.length) return "Sandbox bypasses: none recorded";
+  const count = (key) => hits.reduce((map, e) => map.set(key(e), (map.get(key(e)) || 0) + 1), new Map());
+  const bySession = [...count((e) => e.sid ?? "unknown")].sort((a, b) => b[1] - a[1]);
+  const byHead = [...count((e) => e.head || "?")].sort((a, b) => b[1] - a[1]);
+  const lines = [`Sandbox bypasses: ${hits.length} calls in ${bySession.length} sessions`];
+  for (const [sid, n] of bySession.slice(0, 10)) lines.push(`  ${String(sid).padEnd(38)} ${n} calls`);
+  if (bySession.length > 10) lines.push(`  … and ${bySession.length - 10} more sessions`);
+  lines.push(`  top commands: ${byHead.slice(0, 5).map(([head, n]) => `${head} ${n}`).join(" · ")}`);
+  return lines.join("\n");
+}
+
 function main() {
   const cfg = loadConfig();
   const events = readEvents();
@@ -176,6 +191,7 @@ function main() {
   console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);
   console.log(approvalSection(events));
   console.log(`SessionStart injections: ${ss.length}`);
+  console.log(sandboxBypassSection(events));
 
   const router = events.filter((e) => e.ev === "router");
   console.log(`\nReview router: ${router.length} decisions`);

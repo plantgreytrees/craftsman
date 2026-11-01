@@ -1120,6 +1120,8 @@ const activeRoot = activeScope?.project_root || PROJECT_ROOT;
 const activeContext = { root: activeRoot, stateDir: path.join(activeRoot, ".craftsman"), offFlag: path.join(activeRoot, ".craftsman", "off") };
 const cfg = loadConfig(activeContext);
 if (!safetyEnabled()) process.exit(0); // ARCH-SAFETY-05: CRAFTSMAN_SAFETY=off in the user's environment only
+// A sandbox-bypass retry (dangerouslyDisableSandbox) is what auto mode refuses: counted for /craftsman:stats, before any verdict, never judged.
+if (tool === "Bash" && toolInput.dangerouslyDisableSandbox === true) logEvent({ ev: "sandbox_bypass", sid: sidOf(input), head: commandHead(command) });
 // The doc-write authority and tracker checks belong to the doc side, which follows enabled(): off for
 // CRAFTSMAN=off, .craftsman/off, enabled:false, and outside a git repo (ARCH-SAFETY-08). Everything else
 // in this file is safety and runs whatever enabled() says.
@@ -1737,3 +1739,16 @@ if (g.enabled !== false && writeTool && docSide) {
 
 logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);
+
+// The first command word of a Bash call, for the sandbox_bypass event: skips leading `cd <dir> &&` and plain `NAME=value`
+// prefixes and any path, and answers "?" for anything else, so an argument, a quoted value or a secret never reaches the log.
+function commandHead(text) {
+  let rest = String(text).trim();
+  for (;;) {
+    const next = rest.replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "").replace(/^[A-Za-z_][A-Za-z0-9_]*=[\w./:@+,-]*\s+/, "");
+    if (next === rest) break;
+    rest = next;
+  }
+  const word = (rest.split(/\s+/)[0] || "").split("/").pop();
+  return /^[\w.+-]{1,40}$/.test(word) ? word : "?";
+}
