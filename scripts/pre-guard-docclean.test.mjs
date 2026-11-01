@@ -215,6 +215,17 @@ test("git behind a keyword, a wrapper option, a nested shell or a substitution d
   ]);
 });
 
+test("env -S or --split-string cannot carry config indirection and git past the doc guard", () => {
+  refused([
+    "env --split-string='HOME=/tmp/h git claen -fdx'",
+    "sudo env --split-string='HOME=/tmp/h git claen -fdx'",
+    "timeout 9 env --split-string='HOME=/tmp/h git claen -fdx'",
+    "nohup env --split-string='HOME=/tmp/h git claen -fdx'",
+    "env -S'HOME=/tmp/h git claen -fdx'",
+    "HOME=/tmp/h env --split-string='git claen -fdx'",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
