@@ -232,18 +232,25 @@ test("a $' inside double quotes, an --attr-source value or HOME set by for/read/
     String.raw`echo "$'\x00"; git c\lean -fdx; echo "'"`,
     String.raw`echo "$'\0"; r''m -rf docs; echo "'"`,
     String.raw`echo "$'\0"; m''v docs /tmp/zz; echo "'"`,
+    String.raw`echo "$'"; git cle\an -fdx; echo "'"`,
+    String.raw`echo "$'"; git cl\ean -fdx; echo "'"`,
     "HOME=/tmp/h git --attr-source status claen -fdx",
     "git -c include.path=/tmp/c --attr-source status claen -fdx",
     "for HOME in /tmp/h; do git claen -fdx; done",
     "read HOME <<< /tmp/h; git claen -fdx",
     "printf -v HOME %s /tmp/h; git claen -fdx",
     "for XDG_CONFIG_HOME in /tmp/h; do git claen -fdx; done",
+    "declare -n R=HOME; R=/tmp/h; git claen -fdx",
+    "typeset -n R=XDG_CONFIG_HOME; R=/tmp/h; export R; git claen -fdx",
+    ": ${XDG_CONFIG_HOME:=/tmp/h}; git claen -fdx",
   ]);
   passes([
     String.raw`echo "$'\0"; git status; echo "'"`,
     "HOME=/tmp/h git --attr-source HEAD status",
     "for HOME in /tmp/h; do git status; done",
     "read HOME <<< /tmp/h; git log -1",
+    "cd $HOME; git lfs pull",
+    "git -C ${HOME}/r lfs pull",
   ]);
 });
 

@@ -354,11 +354,11 @@ const globMayBeGit = (w) => { if (/\[.+\]/.test(w)) return true; try { return ne
 // Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment) can alias a misspelt subcommand to clean.
 // Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
 const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)\b/i;
-// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a bare HOME or XDG_CONFIG_HOME word,
+// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a HOME or XDG_CONFIG_HOME word that is not a plain read,
 // or an include, --config-env or GIT_CONFIG word in a command that holds a git word (anywhere in it: wrappers, keywords and their options are read through,
 // a `$` or backtick word among the leading wrappers may be git, and a substitution body is judged on its own). `echo HOME=/x` is prose.
 const ENV_CONFIG = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*)\+?=/i;
-const ENV_CONFIG_NAME = /^(?:HOME|XDG_CONFIG_HOME)$/; // a bare name: what `for NAME in`, `read NAME`, `printf -v NAME` or `declare NAME` sets
+const ENV_CONFIG_NAME = /^(?:HOME|XDG_CONFIG_HOME)(?![\w}]|\+?=)|[^\w$](?:HOME|XDG_CONFIG_HOME)(?![\w}])/; // the name, not a plain `$NAME`/`${NAME}` read nor a leading `NAME=` (ENV_CONFIG judges that): `for NAME in`, `read NAME`, `printf -v NAME`, a nameref `-n R=NAME`, `${NAME:=x}`
 const ASSIGN_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 const cmdIndex = (words) => { let k = 0; while (k < words.length && (ASSIGN_WORD.test(words[k]) || KEYWORDS.has(words[k]))) k++; return k; };
 const ENV_SETTER = /^(?:export|declare|typeset|readonly|local|env)$/;
@@ -539,10 +539,10 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // The gate reads the text with its quotes and backslashes removed as well as the
   // raw text, so `r''m`, `r\m` and `"r"m` are removal words; a `>` redirect onto a
   // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
-  // decodeAnsiC does not see quotes, so a `$'` inside double quotes is decoded too: with the NUL cut that would drop the
-  // commands up to the next `'` (`echo "$'\0"; git ... ; echo "'"`), so the gate reads the uncut decoding as well (fail closed).
-  const cutText = decodeAnsiC(cmd), wholeText = decodeAnsiC(cmd, false);
-  const bare = (cutText === wholeText ? cutText : cutText + "\n" + wholeText).replace(/['"\\]/g, "");
+  // decodeAnsiC does not see quotes, so a `$'` inside double quotes is decoded too: the NUL cut would drop the commands up to
+  // the next `'` (`echo "$'\0"; git ... ; echo "'"`) and an escape would rewrite an unquoted word (`cle\an`), so the gate reads
+  // the cut decoding, the uncut decoding and the undecoded text (fail closed).
+  const bare = [...new Set([decodeAnsiC(cmd), decodeAnsiC(cmd, false), cmd])].join("\n").replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
   // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
