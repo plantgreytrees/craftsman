@@ -226,6 +226,27 @@ test("env -S or --split-string cannot carry config indirection and git past the 
   ]);
 });
 
+test("a $' inside double quotes, an --attr-source value or HOME set by for/read/printf -v cannot hide git clean (round 9)", () => {
+  refused([
+    String.raw`echo "$'\0"; git c\lean -fdx; echo "'"`,
+    String.raw`echo "$'\x00"; git c\lean -fdx; echo "'"`,
+    String.raw`echo "$'\0"; r''m -rf docs; echo "'"`,
+    String.raw`echo "$'\0"; m''v docs /tmp/zz; echo "'"`,
+    "HOME=/tmp/h git --attr-source status claen -fdx",
+    "git -c include.path=/tmp/c --attr-source status claen -fdx",
+    "for HOME in /tmp/h; do git claen -fdx; done",
+    "read HOME <<< /tmp/h; git claen -fdx",
+    "printf -v HOME %s /tmp/h; git claen -fdx",
+    "for XDG_CONFIG_HOME in /tmp/h; do git claen -fdx; done",
+  ]);
+  passes([
+    String.raw`echo "$'\0"; git status; echo "'"`,
+    "HOME=/tmp/h git --attr-source HEAD status",
+    "for HOME in /tmp/h; do git status; done",
+    "read HOME <<< /tmp/h; git log -1",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
