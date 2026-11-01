@@ -122,6 +122,87 @@ test("pre-guard: bracket text that is quoted or in a heredoc stays inert next to
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// ARCH-STATE-17: under an active unit scope the Read tool alone may read scratch evidence under the OS temp dir or
+// $CLAUDE_JOB_DIR/tmp, judged by real path; everything else keeps the scope's closed allow-list.
+function scratchProject() {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scratch-")));
+  const dir = path.join(base, "proj");
+  for (const d of ["proj", "tmp", path.join("job", "tmp"), "other"]) fs.mkdirSync(path.join(base, d), { recursive: true });
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  spawnSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir });
+  const env = { TMPDIR: path.join(base, "tmp"), CLAUDE_JOB_DIR: path.join(base, "job") };
+  const scope = (unit, worktree) => {
+    const added = spawnSync("git", ["worktree", "add", "-q", "-b", `feat/${unit}`, worktree], { cwd: dir, encoding: "utf8" });
+    assert.equal(added.status, 0, added.stderr);
+    const manifest = { session_id: "scratch", plan: "docs/plans/x.md", unit, project: ".", worktree_path: worktree, scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    const activated = run(SCOPE, dir, manifest, env);
+    assert.equal(activated.status, 0, activated.stderr);
+  };
+  const call = (tool, input, extra = {}) => run(GUARD, dir, { session_id: "scratch", tool_name: tool, tool_input: input }, { ...env, ...extra });
+  return { base, dir, env, scope, call, read: (file, extra) => call("Read", { file_path: file }, extra) };
+}
+
+test("pre-guard: a scoped Read of scratch evidence under the temp dir or the job dir passes, with one scope or several", () => {
+  const t = scratchProject();
+  try {
+    fs.writeFileSync(path.join(t.base, "tmp", "shot.png"), "png");
+    fs.writeFileSync(path.join(t.base, "job", "tmp", "run.log"), "log");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const one = t.read(path.join(t.base, "tmp", "shot.png"));
+    assert.equal(one.status, 0, `one scope: ${one.stderr}`);
+    assert.equal(t.read(path.join(t.base, "job", "tmp", "run.log")).status, 0, "the job scratch dir");
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    const two = t.read(path.join(t.base, "tmp", "shot.png"));
+    assert.equal(two.status, 0, `two scopes, past the ambiguous-scope refusal too: ${two.stderr}`);
+    const inside = t.read(path.join(t.dir, "src", "a.ts"));
+    assert.equal(inside.status, 2, "a file inside the project is still governed by the scopes");
+    assert.match(inside.stderr, /more than one active project scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: scratch Reads stay narrow: writes, Glob, Grep, other dirs, symlink escapes, env files and an enclosing temp root are refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.writeFileSync(path.join(tmp, ".env"), "K=v");
+    fs.mkdirSync(path.join(t.base, "other", "sub"));
+    fs.writeFileSync(path.join(t.base, "other", "secret.txt"), "s");
+    fs.writeFileSync(path.join(t.base, "other", "private.txt"), "p");
+    fs.writeFileSync(path.join(tmp, "private.txt"), "decoy");
+    fs.symlinkSync(path.join(t.base, "other", "sub"), path.join(tmp, "link"));
+    fs.symlinkSync(path.join(t.base, "other", "secret.txt"), path.join(tmp, "secret-link.txt"));
+    fs.writeFileSync(path.join(t.base, "job", "notes.txt"), "n");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    const refused = (what, got) => assert.equal(got.status, 2, `${what} should be refused: ${got.stderr}`);
+    refused("Write", t.call("Write", { file_path: path.join(tmp, "new.txt"), content: "x" }));
+    refused("Edit", t.call("Edit", { file_path: path.join(tmp, "shot.png"), old_string: "a", new_string: "b" }));
+    refused("NotebookEdit", t.call("NotebookEdit", { notebook_path: path.join(tmp, "n.ipynb"), new_source: "x" }));
+    refused("Glob", t.call("Glob", { pattern: "*", path: tmp }));
+    refused("Grep", t.call("Grep", { pattern: "x", path: tmp }));
+    refused("another directory", t.read(path.join(t.base, "other", "secret.txt")));
+    refused("the job dir outside its tmp", t.read(path.join(t.base, "job", "notes.txt")));
+    refused("a symlinked file", t.read(path.join(tmp, "secret-link.txt")));
+    // The OS resolves link/.. to the symlink target's parent (other/), not to tmp/: written as text, never normalised.
+    refused("a symlink followed by ..", t.read(`${tmp}/link/../private.txt`));
+    refused("an env file", t.read(path.join(tmp, ".env")));
+    refused("a temp root that encloses the project", t.read(path.join(tmp, "shot.png"), { TMPDIR: t.base }));
+    refused("a file that does not exist", t.read(path.join(tmp, "missing.png")));
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: with no scope active, the required-scope refusal still covers scratch Reads", () => {
+  const t = scratchProject();
+  try {
+    fs.writeFileSync(path.join(t.base, "tmp", "shot.png"), "png");
+    assert.equal(run(SCOPE, t.dir, { action: "require", session_id: "scratch" }, t.env).status, 0);
+    const got = t.read(path.join(t.base, "tmp", "shot.png"));
+    assert.equal(got.status, 2);
+    assert.match(got.stderr, /requires an active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
 test("pre-guard: active scope allows declared reads and blocks undeclared reads", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-"));
   try {
