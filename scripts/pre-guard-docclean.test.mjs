@@ -98,3 +98,29 @@ test("prose `clean` still passes", () => {
     assert.equal(r.status, 0, `${command}: ${r.stderr}`);
   }
 });
+
+test("ANSI-C quoting, append assignments and POSIX-class wrappers cannot spell git clean past the doc guard", () => {
+  for (const command of [
+    "HOME+=/x git claen -fdx",
+    "XDG_CONFIG_HOME+=/x git claen -fdx",
+    "export HOME+=/x; git claen -fdx",
+    "HOME=/tmp/h $'git' claen -fdx",
+    "$'git' -c include.path=/tmp/c claen -fdx",
+    "git cl$'e'an -fdx",
+    "git $'clean' -fdx",
+    "git cl$'\\x65'an -fdx",
+    "git -c alias.claen=cl$'e'an claen -fdx",
+    "env /usr/bin/g[[:alpha:]]t cl[[:alpha:]]an -fdx",
+  ]) {
+    const r = guard(command);
+    assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+    assert.match(r.stderr, /doc-write authority/, command);
+  }
+});
+
+test("a HOME word that is not git's environment, and a git without a subcommand, still pass", () => {
+  for (const command of ["echo HOME=/x; git lfs pull", "HOME=/tmp/h git --version"]) {
+    const r = guard(command);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+  }
+});
