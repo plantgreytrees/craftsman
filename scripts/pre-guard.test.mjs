@@ -82,6 +82,46 @@ test("pre-guard: a refused sandbox-bypass call is still counted, and a false or 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// A reversed bracket range (`[a-1]`, `[z-a]`) is a legal shell glob that matches nothing: the guard must read it as
+// a one-character wildcard (the safe over-approximation), never crash into "could not decide".
+test("pre-guard: a reversed bracket range in a removal or write target is read like a one-character wildcard", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-segre-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    const verdict = (command) => run(GUARD, dir, { session_id: "segre", tool_name: "Bash", tool_input: { command } });
+    for (const [command, twin] of [
+      ["rm L[a-1].txt", "rm L?.txt"],
+      ["rm out.txt L[a-1]", "rm out.txt L?"],
+      ["mv E[a-1].strip /tmp/x", "mv E?.strip /tmp/x"],
+      ["git rm L[a-1]", "git rm L?"],
+      ["rm docs/plans/L[a-1]*.md", "rm docs/plans/L?*.md"],
+      ["rm -rf docs/[z-a]", "rm -rf docs/?"],
+      ["sed -i s/a/b/ docs/plans/L[a-1].md", "sed -i s/a/b/ docs/plans/L?.md"],
+      ["echo hi > docs/plans/L[a-1].md", "echo hi > docs/plans/L?.md"],
+      ["rm docs/plans/[!a-1]x.md", "rm docs/plans/?x.md"],
+      ["rm docs/plans/[^z-a]x.md", "rm docs/plans/?x.md"],
+    ]) {
+      const got = verdict(command);
+      assert.doesNotMatch(got.stderr, /could not decide|Invalid regular expression/, command);
+      assert.equal(got.status, verdict(twin).status, `${command} reads like ${twin}`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: bracket text that is quoted or in a heredoc stays inert next to a removal word", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-segre-"));
+  try {
+    for (const command of [
+      "python3 -c 'print(L[a-1].strip())'; rm -f out.txt",
+      "grep -n 'E[a-1].strip' f.py; rm out.txt",
+      "python3 - <<'PY'\nprint(L[a-1].strip()[:110] if a<=len(L) else '')\nPY\nrm -f out.txt",
+    ]) {
+      const got = run(GUARD, dir, { session_id: "segre", tool_name: "Bash", tool_input: { command } });
+      assert.equal(got.status, 0, `${JSON.stringify(command)}: ${got.stderr}`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("pre-guard: active scope allows declared reads and blocks undeclared reads", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-"));
   try {
