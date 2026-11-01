@@ -6,8 +6,8 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 
 # Init — fit or upgrade craftsman in this repo
 
-> Init is deliberately repeatable. It audits first, then writes only the project
-> config and missing scaffolding it can justify from repository evidence.
+> Repeatable: audits first, then writes only the config and scaffolding the
+> repository's evidence justifies.
 
 ## 1. Run the deterministic audit
 
@@ -45,7 +45,7 @@ command or rewrite application dependencies.
 ## 3. Report
 
 Print a short table: languages, real test command, package manager, CI, installed
-versus missing quality tools. Flag an ambiguous command; never replace a real one with a guess.
+versus missing quality tools. Flag an ambiguous command.
 
 ## 4. Scaffold or upgrade
 
@@ -93,4 +93,4 @@ silently until installed, so installing them is optional-but-recommended.
 
 ## 6. Sandbox settings (optional)
 
-Outside-root writes and credential reads belong to the Claude Code sandbox, not craftsman. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --settings-diff`, show it, and ask with `AskUserQuestion` whether to merge it; only on a yes run `--settings-write`. It adds `sandbox.enabled: true` and ask rules for `rm -r`/`-rf`, `sudo`, `git push --force`, `git reset --hard` and `git clean` to `.claude/settings.json`, never overwriting a key, and backs the old file up. A no, or no answer, writes nothing.
+Outside-root writes and credential reads belong to the Claude Code sandbox, not craftsman. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --settings-diff`, show it, and ask with `AskUserQuestion` whether to merge it; only on a yes run `--settings-write`. It adds `sandbox.enabled: true` and ask rules for `sudo`, `git push --force`, `git reset --hard` and `git clean` to `.claude/settings.json`, never overwriting a key, and backs the old file up. A no, or no answer, writes nothing. Add network domains and a docker exclusion yourself; SessionStart names what is missing.
