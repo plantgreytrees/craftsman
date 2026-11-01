@@ -221,7 +221,7 @@ function segmentRe(seg, flags = "") {
     const c = seg[i];
     if (c === "*") re += "[^/]*";
     else if (c === "?") re += "[^/]";
-    else if (c === "[" && seg.indexOf("]", i + 2) !== -1) { const e = seg.indexOf("]", i + 2); re += "[" + seg.slice(i + 1, e).replace(/^!/, "^").replace(/\\/g, "\\\\") + "]"; i = e; }
+    else if (c === "[" && seg.indexOf("]", i + 2) !== -1) { const e = seg.indexOf("]", i + 2); re += bracketClass(seg.slice(i + 1, e).replace(/^!/, "^").replace(/\\/g, "\\\\")); i = e; }
     else if (c === "{" && seg.indexOf("}", i) !== -1) { const e = seg.indexOf("}", i); re += "(?:" + seg.slice(i + 1, e).split(",").map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")"; i = e; }
     else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -263,7 +263,7 @@ function pathspecHit(arg, cwd, docPaths) {
   let re = "";
   for (const c of (pre ? pre + "/" : "") + arg.replace(/^\.\//, "")) re += c === "*" ? ".*" : c === "?" ? "." : c === "[" || c === "]" ? c : c.replace(/[.+^${}()|\\]/g, "\\$&");
   let rx;
-  try { rx = new RegExp("^" + re + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
+  try { rx = new RegExp("^" + re.replace(/\[([^\]]*)\]/g, (whole, body) => bracketClass(body, ".")) + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
   let budget = 20000, found = null;
   const visit = (rel) => {
     if (found || --budget < 0) return;
@@ -1751,4 +1751,12 @@ function commandHead(text) {
   }
   const word = (rest.split(/\s+/)[0] || "").split("/").pop();
   return /^[\w.+-]{1,40}$/.test(word) ? word : "?";
+}
+
+// A bracket class from a glob word, for segmentRe and pathspecHit. A reversed range (`[a-1]`, `[z-a]`) is legal in a shell
+// and matches nothing, but it is not a valid RegExp class: read it as one wildcard character (`any`), the safe
+// over-approximation (it can only make the guard block more), so command text can never make the guard throw.
+function bracketClass(body, any = "[^/]") {
+  const cls = "[" + body + "]";
+  try { new RegExp(cls); return cls; } catch { return any; }
 }
