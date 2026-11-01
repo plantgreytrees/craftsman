@@ -16,7 +16,7 @@ import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
 import { compactLedger, trackerDocPath } from "./tracker.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
-import { sandboxEnabledAnywhere } from "./lib/settings-merge.mjs";
+import { sandboxEnabledAnywhere, sandboxGapLine, sandboxGaps } from "./lib/settings-merge.mjs";
 import { snapshotDocs } from "./lib/doc-snapshot.mjs";
 import { pending as pendingApprovals } from "./approval.mjs";
 
@@ -65,7 +65,7 @@ let sandboxLine = "";
 try {
   if (!sandboxEnabledAnywhere({ root: context.root })) {
     sandboxLine = "craftsman: the Claude Code sandbox is not enabled in any settings scope, so writes outside the project and credential reads are not isolated; /craftsman:init can add it.";
-  }
+  } else sandboxLine = sandboxGapLine(sandboxGaps({ root: context.root })); // on but half-configured (ARCH-SAFETY-04, advisory)
 } catch { /* unreadable settings: say nothing */ }
 
 const markers = {

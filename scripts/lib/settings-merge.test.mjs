@@ -187,6 +187,15 @@ test("sandboxGaps: looks the origin up with git when none is given, and a broken
   } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
 });
 
+test("sandboxGapLine: one line joining the gap details, and nothing when there are no gaps", () => {
+  assert.equal(sm.sandboxGapLine([]), "");
+  assert.equal(sm.sandboxGapLine(undefined), "");
+  const line = sm.sandboxGapLine([{ gap: "network", detail: "github.com is not in sandbox.network.allowedDomains" }, { gap: "docker", detail: "no docker entry" }]);
+  assert.match(line, /^craftsman: the Claude Code sandbox is on, but github\.com is not in sandbox\.network\.allowedDomains; no docker entry\. /);
+  assert.match(line, /dangerouslyDisableSandbox, which auto mode refuses/);
+  assert.equal(line.includes("\n"), false);
+});
+
 test("mergeSettings: no recursive-delete ask in the block, and one already in the file stays exactly once", () => {
   assert.equal(sm.SANDBOX_BLOCK.permissions.ask.some((r) => /^Bash\(rm /.test(r)), false);
   const r = sm.mergeSettings(JSON.stringify({ permissions: { ask: ["Bash(rm -rf *)"] } }));
