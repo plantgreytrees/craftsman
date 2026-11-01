@@ -63,6 +63,31 @@ test("wrapper, subcommand-glob and autocorrect spellings of git clean are refuse
   }
 });
 
+test("globbed git subcommands and config indirection are refused", () => {
+  for (const command of [
+    "git cl[!x]an -fdx",
+    "git cl[[:alpha:]]an -fdx",
+    "git [!x]lean -fdx",
+    "git * -fdx",
+    "git -C docs * -fdx",
+    "git -c include.path=/tmp/cfg claen -fdx",
+    "GIT_CONFIG_GLOBAL=/tmp/g git claen -fdx",
+    "HOME=/tmp/h git claen -fdx",
+    "XDG_CONFIG_HOME=/tmp/h git claen -fdx",
+  ]) {
+    const r = guard(command);
+    assert.equal(r.status, 2, `${command}: ${r.stderr}`);
+    assert.match(r.stderr, /doc-write authority/, command);
+  }
+});
+
+test("globs in ordinary commands still pass", () => {
+  for (const command of ["git add src/*.ts", "git status docs/*", "ls *.md"]) {
+    const r = guard(command);
+    assert.equal(r.status, 0, `${command}: ${r.stderr}`);
+  }
+});
+
 test("prose `clean` still passes", () => {
   for (const command of [
     "echo clean",
