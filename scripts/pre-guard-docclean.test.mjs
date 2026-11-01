@@ -328,6 +328,45 @@ test("a $ word in read's options beside a non-builtin git subcommand fails close
   refused(['read -p "$prompt" ans; git lfs pull']);
 });
 
+test("a config name set in any arithmetic context beside git cannot hide an aliased git subcommand (round 12)", () => {
+  refused([
+    "n=HO; (( (0), ${n}ME = 1 )); git claen -fdx",
+    "n=HO; : $(( (0), ${n}ME = 1 )); git claen -fdx",
+    "n=HO; s=abc; : ${s:${n}ME=1}; git claen -fdx",
+    "n=HO; s=abc; : ${s:0:${n}ME=1}; git claen -fdx",
+    "n=HO; : $[ ${n}ME = 1 ]; git claen -fdx",
+    "n=HO; a[${n}ME=1]=x; git claen -fdx",
+    "f(){ local HO${x}=/tmp/h; git claen -fdx; }",
+    "read n m <<< 'HO ME'; declare -i v; v=$n$m=1; git claen -fdx",
+    "read n m <<< 'HO ME'; local -i v=$n$m=1; git claen -fdx",
+    "(( 1 )); HOME=/tmp/h $G claen -fdx",
+    "(( 1 )); env \"A=1;x\" HOME=/tmp/h $G claen -fdx",
+    "for (( i=0; i<1; i++ )); do HOME=/tmp/h $(echo g)it claen -fdx; done",
+  ]);
+});
+
+test("git-free arithmetic and git-free text the parser cannot read still pass (round 12, regression of 9ee1c85)", () => {
+  passes([
+    "for (( i=0; i<$n; i++ )); do echo $i; done",
+    "(( count += $x )); echo ok",
+    "echo $(( a + $b )); ls",
+    "echo $(( $a + $b )); ls",
+    "x=$((x+$y)); echo $x",
+    "for (( i=0; i<${#a[*]}; i++ )); do echo ${a[i]}; done",
+    "for (( i=0; i<$n; i++ )); do (cd d$i && make); done",
+    "echo ${s:0:2}; git lfs pull",
+  ]);
+});
+
+test("the config-indirection hints stay linear on long text (round 12)", () => {
+  const time = (command) => { const start = process.hrtime.bigint(); guard(command); return Number(process.hrtime.bigint() - start) / 1e6; };
+  const base = Math.min(time("git status"), time("git status"));
+  for (const command of ["let ".repeat(20000), "(( ".repeat(20000) + "= x"]) {
+    const ms = time(command) - base;
+    assert.ok(ms < 200, command.slice(0, 8) + "... took " + Math.round(ms) + " ms over the baseline");
+  }
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
