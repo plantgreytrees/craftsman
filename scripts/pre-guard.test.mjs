@@ -47,6 +47,41 @@ function homePinned(base = os.tmpdir()) {
   return { home, dir, env };
 }
 
+// The sandbox-bypass retry (dangerouslyDisableSandbox) is what auto mode refuses: count it, never judge it.
+function bypassEvents(dir) {
+  const file = path.join(dir, ".craftsman", "events.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.ev === "sandbox_bypass");
+}
+
+test("pre-guard: a sandbox-bypass Bash call logs one sandbox_bypass with only the first command word, and the verdict is unchanged", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    const command = "cd /srv/some/where && SECRET_TOKEN=hunter2 docker ps -a";
+    const plain = run(GUARD, dir, { session_id: "bypass-a", tool_name: "Bash", tool_input: { command } });
+    assert.deepEqual(bypassEvents(dir), [], "no flag, no event");
+    const flagged = run(GUARD, dir, { session_id: "bypass-b", tool_name: "Bash", tool_input: { command, dangerouslyDisableSandbox: true } });
+    assert.equal(flagged.status, plain.status, "logging does not change the decision");
+    const events = bypassEvents(dir);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].sid, "bypass-b");
+    assert.equal(events[0].head, "docker");
+    const raw = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8");
+    assert.doesNotMatch(raw, /hunter2|SECRET_TOKEN|\/srv\/some\/where/, "no command text, no assignment value, no path");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a refused sandbox-bypass call is still counted, and a false or non-boolean flag is not", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    const refused = run(GUARD, dir, { session_id: "bypass-c", tool_name: "Bash", tool_input: { command: "git commit --no-verify -m x", dangerouslyDisableSandbox: true } });
+    assert.equal(refused.status, 2);
+    for (const flag of [false, "true", 1, null]) run(GUARD, dir, { session_id: "bypass-d", tool_name: "Bash", tool_input: { command: "git status", dangerouslyDisableSandbox: flag } });
+    run(GUARD, dir, { session_id: "bypass-e", tool_name: "Read", tool_input: { file_path: path.join(dir, "x.txt"), dangerouslyDisableSandbox: true } });
+    assert.deepEqual(bypassEvents(dir).map((e) => [e.sid, e.head]), [["bypass-c", "git"]]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("pre-guard: active scope allows declared reads and blocks undeclared reads", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-"));
   try {

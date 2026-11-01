@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { rootContextRows, rootContextSection, latencySection, renderSection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection, approvalSection } from "./stats.mjs";
+import { rootContextRows, rootContextSection, latencySection, renderSection, preguardBlocks, blocksByReason, guardUnparsedRecent, guardReasonsSection, approvalSection, sandboxBypassSection } from "./stats.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ctx = (sid, tokens, percent, unit = null) => ({ ts: 1, ev: "context", sid, phase: "orchestrate", unit, tokens, percent, cost: null });
@@ -46,6 +46,32 @@ test("stats: the CLI prints the root context section from events.jsonl", () => {
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /Root context per run: 2 sessions/);
     assert.match(r.stdout, /root-b\s+1 samples · peak 10000/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("stats: sandbox bypasses per session and the top five command heads", () => {
+  assert.equal(sandboxBypassSection([]), "Sandbox bypasses: none recorded");
+  assert.equal(sandboxBypassSection([{ ev: "gate", ts: 1 }, { ev: "sandbox_bypass", ts: 2 }]).split("\n")[0], "Sandbox bypasses: 1 calls in 1 sessions", "a missing sid and head still count");
+  const heads = ["git", "git", "git", "docker", "docker", "node", "cd", "printf", "sed"];
+  const events = heads.map((head, i) => ({ ts: i, ev: "sandbox_bypass", sid: i < 6 ? "sess-a" : "sess-b", head }));
+  const lines = sandboxBypassSection(events).split("\n");
+  assert.equal(lines[0], "Sandbox bypasses: 9 calls in 2 sessions");
+  assert.match(lines[1], /^ {2}sess-a\s+6 calls$/);
+  assert.match(lines[2], /^ {2}sess-b\s+3 calls$/);
+  assert.equal(lines[3], "  top commands: git 3 · docker 2 · node 1 · cd 1 · printf 1");
+});
+
+test("stats: the CLI prints the sandbox bypass section from events.jsonl", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-stats-")));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    fs.mkdirSync(path.join(dir, ".craftsman"));
+    const events = [{ ts: 1, ev: "sandbox_bypass", sid: "s1", head: "docker" }, { ts: 2, ev: "sandbox_bypass", sid: "s1", head: "git" }];
+    fs.writeFileSync(path.join(dir, ".craftsman", "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const r = spawnSync(process.execPath, [path.join(HERE, "stats.mjs")], { cwd: dir, env: { ...process.env, CLAUDE_PROJECT_DIR: dir }, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Sandbox bypasses: 2 calls in 1 sessions/);
+    assert.match(r.stdout, /top commands: docker 1 · git 1/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
