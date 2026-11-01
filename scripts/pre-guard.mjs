@@ -353,15 +353,16 @@ const globbedGit = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); r
 const globMayBeGit = (w) => { if (/\[.+\]/.test(w)) return true; try { return new RegExp("^" + path.basename(w).replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$").test("git"); } catch { return true; } };
 // Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment) can alias a misspelt subcommand to clean.
 // Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
-const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)\+?=/i;
-// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper,
+const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)\b/i;
+// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a bare HOME or XDG_CONFIG_HOME word,
 // or an include, --config-env or GIT_CONFIG word in a command that holds a git word (anywhere in it: wrappers, keywords and their options are read through,
 // a `$` or backtick word among the leading wrappers may be git, and a substitution body is judged on its own). `echo HOME=/x` is prose.
 const ENV_CONFIG = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*)\+?=/i;
+const ENV_CONFIG_NAME = /^(?:HOME|XDG_CONFIG_HOME)$/; // a bare name: what `for NAME in`, `read NAME`, `printf -v NAME` or `declare NAME` sets
 const ASSIGN_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 const cmdIndex = (words) => { let k = 0; while (k < words.length && (ASSIGN_WORD.test(words[k]) || KEYWORDS.has(words[k]))) k++; return k; };
 const ENV_SETTER = /^(?:export|declare|typeset|readonly|local|env)$/;
-const envConfigIn = (c) => { const k = cmdIndex(c.words); return c.words.slice(0, k).some((w) => ENV_CONFIG.test(w)) || c.words.some((w, j) => j > k && ENV_CONFIG.test(w) && c.words.slice(k, j).some((x) => ENV_SETTER.test(path.basename(x)) || WRAPPERS.has(path.basename(x)))); };
+const envConfigIn = (c) => { const k = cmdIndex(c.words); return c.words.some((w) => ENV_CONFIG_NAME.test(w)) || c.words.slice(0, k).some((w) => ENV_CONFIG.test(w)) || c.words.some((w, j) => j > k && ENV_CONFIG.test(w) && c.words.slice(k, j).some((x) => ENV_SETTER.test(path.basename(x)) || WRAPPERS.has(path.basename(x)))); };
 const ownConfig = (c) => c.words.some((w) => /include\.path|includeif|GIT_CONFIG|--config-env/i.test(w));
 const NUMERIC_ARG = /^\d+(?:\.\d+)?[smhd]?$/;
 const gitWordsIn = (words) => { const at = words.flatMap((w, i) => (path.basename(w) === "git" ? [i] : [])); for (let i = cmdIndex(words); i < words.length; i++) { const w = words[i], b = path.basename(w); if (/[$`]/.test(w)) at.push(i); else if (!(WRAPPERS.has(b) || b === "xargs" || w.startsWith("-") || ASSIGN_WORD.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) break; } return at; };
@@ -369,7 +370,7 @@ const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env
 // An alias is tried only after the builtins and the dashed externals, so these names always run as themselves. Checked against git 2.56 (`git --list-cmds=builtins`, and
 // `git -c alias.NAME='!echo X' NAME` for every name below): an alias DOES override scalar, daemon and the deprecated builtins whatchanged and pack-redundant, so they are not listed.
 const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version worktree write-tree bugreport checkout-index column commit-graph commit-tree count-objects credential diff-files diff-index diff-tree fast-export fast-import fetch-pack filter-branch for-each-repo get-tar-commit-id index-pack interpret-trailers mailinfo mailsplit merge-file merge-index mktag mktree multi-pack-index pack-objects pack-refs patch-id prune prune-packed read-tree receive-pack request-pull rerere send-pack show-branch stripspace unpack-file unpack-objects update-server-info upload-pack var verify-commit verify-pack verify-tag".split(" "));
-const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|exec-path))$/.test(rest[i]) ? 2 : 1; return rest[i]; };
+const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source|exec-path))$/.test(rest[i]) ? 2 : 1; return rest[i]; };
 const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || configIndirectIn(cmds); };
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
@@ -425,7 +426,7 @@ function matchParen(t, i) {
 // process substitution, an unclosed quote or substitution.
 // Bash `$'...'` (ANSI-C quoting): the text between the quotes with its escapes decoded; j is the closing quote, or -1.
 function ansiCEnd(text, i) { for (let j = i + 2; j < text.length; j++) { if (text[j] === "\\") j++; else if (text[j] === "'") return j; } return -1; }
-function ansiCDecode(body) {
+function ansiCDecode(body, cut = true) {
   const simple = { n: "\n", t: "\t", r: "\r", a: "\x07", b: "\b", f: "\f", v: "\v", e: "\x1b", E: "\x1b", "\\": "\\", "'": "'", '"': '"', "?": "?" };
   const out = body.replace(/\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c(.)|([\s\S]))/g, (m, x, u, U, o, ctl, ch) => {
     if (x !== undefined) return String.fromCharCode(parseInt(x, 16));
@@ -435,9 +436,9 @@ function ansiCDecode(body) {
     return simple[ch] ?? m;
   });
   const nul = out.indexOf("\0"); // bash ends a $'...' string at a NUL: a decoded \0, \x00, \u0000, \U00000000 or \c@ drops the rest of the body
-  return nul < 0 ? out : out.slice(0, nul);
+  return nul < 0 || !cut ? out : out.slice(0, nul);
 }
-const decodeAnsiC = (text) => { let out = "", i = 0; while (i < text.length) { if (text[i] === "$" && text[i + 1] === '"') { i++; continue; } const j = text[i] === "$" && text[i + 1] === "'" ? ansiCEnd(text, i) : -1; if (j === -1) out += text[i++]; else { out += ansiCDecode(text.slice(i + 2, j)); i = j + 1; } } return out; };
+const decodeAnsiC = (text, cut = true) => { let out = "", i = 0; while (i < text.length) { if (text[i] === "$" && text[i + 1] === '"') { i++; continue; } const j = text[i] === "$" && text[i + 1] === "'" ? ansiCEnd(text, i) : -1; if (j === -1) out += text[i++]; else { out += ansiCDecode(text.slice(i + 2, j), cut); i = j + 1; } } return out; };
 function tokenize(text, fail) {
   const cmds = [], n = text.length;
   const fresh = (sep) => ({ words: [], sep, redirOut: [], redirIn: false, substs: [] });
@@ -538,7 +539,10 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // The gate reads the text with its quotes and backslashes removed as well as the
   // raw text, so `r''m`, `r\m` and `"r"m` are removal words; a `>` redirect onto a
   // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
-  const bare = decodeAnsiC(cmd).replace(/['"\\]/g, "");
+  // decodeAnsiC does not see quotes, so a `$'` inside double quotes is decoded too: with the NUL cut that would drop the
+  // commands up to the next `'` (`echo "$'\0"; git ... ; echo "'"`), so the gate reads the uncut decoding as well (fail closed).
+  const cutText = decodeAnsiC(cmd), wholeText = decodeAnsiC(cmd, false);
+  const bare = (cutText === wholeText ? cutText : cutText + "\n" + wholeText).replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
   // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
@@ -803,7 +807,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       else {
         if (/^--config-env\b/.test(o)) bad = always = "git " + o + " (a config override)";
         if (/^--(?:icase-pathspecs|work-tree|git-dir|separate-git-dir)\b/.test(o)) bad = "git " + o;
-        i += /^--(?:git-dir|work-tree|namespace|super-prefix|config-env)$/.test(o) ? 2 : 1;
+        i += /^--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source)$/.test(o) ? 2 : 1;
       }
     }
     const sub = rest[i];
