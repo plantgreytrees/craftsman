@@ -347,9 +347,17 @@ const gitThenClean = (t) => t.split(/[;&|\n]/).some((seg) => { const g = seg.sea
 // A glob character in ANY word may spell the program, its subcommand or a wrapper's target: not plain either.
 const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.every((c) => c.words.every((w) => !/[$`*?[{]/.test(w))); };
 // The git autocorrect setting (by option or environment) lets git run a misspelt subcommand: it fails closed like a removal word.
-// A glob word (other than a bare `*`) that can expand to or match `clean` spells it (`cl?an`, `cl[e]an`): fail closed.
-const globSpellsClean = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.some((c) => c.words.some((w) => { if (w === "*" || !/[*?[{]/.test(w)) return false; try { return new RegExp("^" + w.replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".") + "$").test("clean"); } catch { return true; } })); };
-const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globSpellsClean(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
+// Structural, not a guess at what a glob matches: a simple command holding a git command word (basename `git`, or a glob word that may spell it) and any glob word opens the gate; git() then refuses a globbed subcommand.
+const GLOB_CHAR = /[*?[{]/;
+const globbedGit = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.some((c) => c.words.some((w, n) => path.basename(w) === "git" || (GLOB_CHAR.test(path.basename(w)) && (n === 0 || globMayBeGit(w)))) && c.words.some((w) => GLOB_CHAR.test(w))); };
+const globMayBeGit = (w) => { try { return new RegExp("^" + path.basename(w).replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$").test("git"); } catch { return true; } };
+// Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment) can alias a misspelt subcommand to clean.
+// Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
+const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)=/i;
+const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version whatchanged worktree write-tree".split(" "));
+const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|exec-path))$/.test(rest[i]) ? 2 : 1; return rest[i]; };
+const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || cmds.some((c) => { const k = c.words.findIndex((w) => path.basename(w) === "git"); return k >= 0 && !GIT_BUILTINS.has(gitSub(c.words.slice(k + 1))); }); };
+const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
@@ -765,6 +773,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     }
     const sub = rest[i];
     if (/GIT_CONFIG/.test(cmd)) bad = always = "a GIT_CONFIG_* variable (a config override)";
+    if (sub !== undefined && !GIT_BUILTINS.has(sub) && CONFIG_INDIRECT.test(cmd)) bad = always = "a git config indirection (include, HOME or XDG_CONFIG_HOME) beside a non-builtin subcommand";
     if (/help\.autocorrect/i.test(cmd)) bad = always = "git autocorrect (it may run a removal subcommand)";
     if (sub !== undefined && /[*?[{]/.test(sub)) bad = always = "a globbed git subcommand: " + sub;
     if (sub !== "rm" && sub !== "mv" && sub !== "clean") {
