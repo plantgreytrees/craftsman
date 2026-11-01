@@ -201,6 +201,42 @@ test("session-context: no sandbox line when project settings, user settings or a
   assert.equal(sandboxNotice(({ managed }) => enable(path.join(managed, "managed-settings.json"))), "");
 });
 
+// A sandbox that is on but half-configured pushes git, docker and registry calls into unsandboxed
+// retries that auto mode refuses: SessionStart names what is missing, in one line.
+function enableSandbox(dir, extra = {}) {
+  fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude", "settings.json"), JSON.stringify({ sandbox: { enabled: true, ...extra } }));
+}
+
+test("session-context: sandbox on with a git host that is not allowed gets one gap line naming the host", () => {
+  const notice = sandboxNotice(({ dir }) => {
+    enableSandbox(dir);
+    spawnSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], { cwd: dir });
+  });
+  assert.match(notice, /^craftsman: the Claude Code sandbox is on, but github\.com is not in sandbox\.network\.allowedDomains/);
+  assert.match(notice, /dangerouslyDisableSandbox/);
+  assert.equal(notice.split("\n").length, 1);
+});
+
+test("session-context: sandbox on with compose files and no docker exclusion, and a malformed exclusion, are named too", () => {
+  const notice = sandboxNotice(({ dir }) => {
+    enableSandbox(dir, { excludedCommands: ["build/, docs/plans/, src/**"] });
+    fs.writeFileSync(path.join(dir, "docker-compose.yml"), "services: {}\n");
+  });
+  assert.match(notice, /docker/);
+  assert.match(notice, /build\/, docs\/plans\//);
+  assert.equal(notice.split("\n").length, 1);
+});
+
+test("session-context: no gap line when the sandbox is on and the host, docker and exclusions are in order", () => {
+  assert.equal(sandboxNotice(({ dir }) => {
+    enableSandbox(dir, { network: { allowedDomains: ["github.com"] }, excludedCommands: ["docker compose *"] });
+    spawnSync("git", ["remote", "add", "origin", "git@github.com:o/r.git"], { cwd: dir });
+    fs.writeFileSync(path.join(dir, "compose.yaml"), "services: {}\n");
+  }), "");
+  assert.equal(sandboxNotice(({ dir }) => enableSandbox(dir)), "", "no remote and no compose file: nothing to report");
+});
+
 // 13.3a: SessionStart records the hash of every guarded doc.
 test("session-context: SessionStart snapshots the hash of every guarded doc", () => {
   withProject((dir) => {
