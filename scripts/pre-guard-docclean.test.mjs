@@ -254,6 +254,39 @@ test("a $' inside double quotes, an --attr-source value or HOME set by for/read/
   ]);
 });
 
+test("--shallow-file, a variable-built HOME name or GIT_CONFIG_* set without NAME= cannot hide an aliased git subcommand (round 10)", () => {
+  refused([
+    "HOME=/tmp/h git --shallow-file status claen -fdx",
+    "git -c include.path=/tmp/c --shallow-file status claen -fdx",
+    "x=HO; printf -v ${x}ME %s /tmp/h; git claen -fdx",
+    "n=HO; n+=ME; read $n <<< /tmp/h; git claen -fdx",
+    "n=HO; export ${n}ME=/tmp/h; git claen -fdx",
+    "n=HO; declare -n R=${n}ME; R=/tmp/h; git claen -fdx",
+    "n=HO; mapfile -t ${n}ME < /dev/null; git claen -fdx",
+    "printf -v GIT_CONFIG_GLOBAL %s /tmp/c; export GIT_CONFIG_GLOBAL; git claen -fdx",
+    "read GIT_CONFIG_GLOBAL <<< /tmp/c; export GIT_CONFIG_GLOBAL; git claen -fdx",
+    "for GIT_CONFIG_GLOBAL in /tmp/c; do export GIT_CONFIG_GLOBAL; git claen -fdx; done",
+    String.raw`echo "$'\c@"; git c\lean -fdx; echo "'"`,
+    String.raw`echo "$'\u0000"; r\m -rf docs; echo "'"`,
+    "read HO''ME <<< /tmp/h; git claen -fdx",
+    String.raw`printf -v H\OME %s /tmp/h; git claen -fdx`,
+  ]);
+  passes([
+    "read -r line <<< x; git lfs pull",
+    "for f in $(ls); do git lfs pull; done",
+    "HOME=/tmp/h git --shallow-file /tmp/s status",
+    "x=a; printf -v ${x}b %s y; git status",
+  ]);
+});
+
+test("prose naming HOME or XDG_CONFIG_HOME beside a non-builtin git subcommand fails closed (accepted cost, round 10)", () => {
+  refused([
+    "echo HOME; git lfs pull",
+    'git commit -m "fix HOME handling" && git lfs pull',
+    "grep -rn XDG_CONFIG_HOME src; git lfs pull",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
