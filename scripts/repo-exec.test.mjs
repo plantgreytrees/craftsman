@@ -8,6 +8,7 @@ import { cleanup, inspectRepo, landUnit, landFeature, merge, prepare, sync } fro
 import { plainArgs } from "./lib/land.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
+import { unpushedReport } from "./lib/unpushed.mjs";
 
 function git(root, args) {
   const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -209,6 +210,13 @@ function addOrigin(workspace, root) {
   return { origin, base };
 }
 
+// The Claude Code sandbox always write-protects the repository config file, so none of our own git calls
+// may write branch.<name>.* there (a tracking `worktree add -b <b> <dir> origin/<base>`, a `push -u`).
+function branchConfig(root, branch) {
+  const key = `^branch\\.${branch.replace(/[.]/g, "\\.")}\\.`;
+  return spawnSync("git", ["-C", root, "config", "--local", "--get-regexp", key], { encoding: "utf8" }).stdout.trim();
+}
+
 function fakeGh(existing = null) {
   const calls = [];
   const runner = (cli, args) => {
@@ -227,6 +235,45 @@ function commitUnit(context, info, slug) {
   git(prepared.worktree_path, ["commit", "-q", "-m", `feat: ${slug} through a pull request`]);
   return prepared;
 }
+
+test("repo-exec: prepare writes no branch config for a new unit branch or a re-prepared one", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { base } = addOrigin(data.workspace, context.root);
+      const info = inspectRepo(context, { base_branch: base });
+      const before = git(context.root, ["config", "--local", "--list"]);
+      const input = { unit: "no-track", slug: "no-track", session_id: "no-track-session", project: "one" };
+      const prepared = prepare(context, input, info);
+      assert.equal(prepared.base_ref, `origin/${base}`, "the unit branch starts from origin's base");
+      assert.equal(branchConfig(context.root, prepared.branch), "", "a new branch must not track origin/<base>");
+      assert.equal(git(context.root, ["config", "--local", "--list"]), before, "prepare leaves the repo config unchanged");
+      // The branch now exists: preparing it again attaches a worktree without -b and writes nothing either.
+      git(context.root, ["worktree", "remove", "--force", prepared.worktree_path]);
+      const again = prepare(context, input, info);
+      assert.equal(again.reattached, false);
+      assert.equal(branchConfig(context.root, again.branch), "");
+      assert.equal(git(context.root, ["config", "--local", "--list"]), before);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: a unit branch without an upstream is unpushed work until pushed, then clean (ARCH-SAFETY-06)", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const { base } = addOrigin(data.workspace, context.root);
+      const info = inspectRepo(context, { base_branch: base });
+      const prepared = commitUnit(context, info, "report-unit");
+      const mentions = () => unpushedReport(context.root).lines.filter((line) => line.startsWith(`branch ${prepared.branch} `));
+      assert.match(mentions().join("\n"), /has no upstream: 1 commit\(s\) on no remote/);
+      git(prepared.worktree_path, ["push", "-q", "origin", prepared.branch]);
+      assert.deepEqual(mentions(), [], "origin/<branch> now holds the commits, so no upstream config is needed");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
 
 test("repo-exec: a direct merge of a pushed branch pushes base and deletes the remote branch too", () => {
   const data = fixture();
@@ -302,6 +349,7 @@ test("repo-exec: land:pr pushes only the unit branch, opens a PR, and keeps base
       assert.deepEqual(landed.pr, { host: "github", url: "https://github.com/o/r/pull/12", id: "12", state: "opened" });
       assert.equal(landed.auto_merge, true);
       assert.equal(git(origin, ["rev-parse", prepared.branch]), unitHead, "the unit branch reached origin");
+      assert.equal(branchConfig(context.root, prepared.branch), "", "the pr push sets no upstream in the repo config");
       assert.equal(git(origin, ["rev-parse", base]), baseBefore, "origin's base branch is untouched");
       assert.equal(git(context.root, ["rev-parse", "HEAD"]), localBefore, "the primary checkout is untouched");
       assert.equal(fs.existsSync(path.join(context.root, "pr.txt")), false);
@@ -670,6 +718,7 @@ test("repo-exec: feature prepare anchors at the main checkout, pushes the branch
     assert.equal(first.reattached, false);
     assert.equal(git(first.worktree_path, ["branch", "--show-current"]), "feature/plan-a-f1");
     assert.equal(git(data.origin, ["rev-parse", "feature/plan-a-f1"]), git(first.worktree_path, ["rev-parse", "HEAD"]), "pushed at creation");
+    assert.equal(branchConfig(data.root, "feature/plan-a-f1"), "", "the feature push sets no upstream in the repo config");
     const second = prepare(context, { ...input, unit: "u2" }, info);
     assert.equal(second.reattached, true);
     assert.equal(second.worktree_path, first.worktree_path);
@@ -775,7 +824,7 @@ function landUnitFixture(data) {
   const { origin, base } = addOrigin(data.workspace, context.root);
   const info = inspectRepo(context);
   const feature = prepare(context, { unit: "feat-x", slug: "feat-x", branch: "feature/x" }, info);
-  git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/x"]);
+  git(feature.worktree_path, ["push", "-q", "origin", "feature/x"]);
   return { context, info, feature, origin, base };
 }
 
@@ -801,6 +850,7 @@ test("repo-exec land-unit: happy path merges --no-ff, pushes the feature branch,
       assert.equal(git(context.root, ["branch", "--list", "feat/u1"]), "");
       assert.equal(fs.existsSync(unit.worktree_path), false);
       assert.equal(git(origin, ["rev-parse", "feature/x"]), git(feature.worktree_path, ["rev-parse", "HEAD"]));
+      assert.equal(branchConfig(context.root, "feature/x"), "", "land-unit pushes the feature branch without setting an upstream");
       assert.ok(fs.existsSync(path.join(feature.worktree_path, "u1.txt")));
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
@@ -854,7 +904,7 @@ function landFeatureFixture(data, statuses = ["FEATURE_MERGED", "FEATURE_MERGED"
   const { origin, base } = addOrigin(data.workspace, context.root);
   const info = inspectRepo(context);
   const feature = prepare(context, { unit: "f-x", slug: "p-f1", branch: "feature/p-f1" }, info);
-  git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/p-f1"]);
+  git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
   const rows = statuses.map((status, i) => ({
     key: `.::p::u${i}`, project: ".", plan: "p", unit: `u${i}`, status: i === 0 ? "IN_PROGRESS" : status, evidence: "x",
     session_id: "s", feature: "f1", feature_branch: "feature/p-f1", updated_at: "2026-01-01T00:00:00Z",
@@ -985,6 +1035,7 @@ test("repo-exec pr mode: a unit PR targets the feature branch, the feature PR ta
       assert.equal(result.land, "pr");
       assert.equal(result.merged, false);
       assert.equal(result.pr.url, "https://github.com/o/r/pull/12");
+      assert.equal(branchConfig(context.root, "feature/p-f1"), "", "the feature pr push sets no upstream in the repo config");
       const create = featureRun.calls.find((line) => line.startsWith("gh pr create"));
       assert.match(create, new RegExp(`--base ${base}`));
       assert.match(create, /--head feature\/p-f1/);
