@@ -263,6 +263,12 @@ test("--shallow-file, a variable-built HOME name or GIT_CONFIG_* set without NAM
     "n=HO; export ${n}ME=/tmp/h; git claen -fdx",
     "n=HO; declare -n R=${n}ME; R=/tmp/h; git claen -fdx",
     "n=HO; mapfile -t ${n}ME < /dev/null; git claen -fdx",
+    "n=HO; n+=ME; : ${!n:=/tmp/h}; git claen -fdx",
+    "x=HO; getopts a ${x}ME; git claen -fdx",
+    "for $x in /tmp/h; do git claen -fdx; done",
+    "x=HO; local -n R=${x}ME; R=/tmp/h; git claen -fdx",
+    "x=HO; printf -v\"${x}ME\" %s /tmp/h; git claen -fdx",
+    "x=HO; command printf -v ${x}ME %s /tmp/h; git claen -fdx",
     "printf -v GIT_CONFIG_GLOBAL %s /tmp/c; export GIT_CONFIG_GLOBAL; git claen -fdx",
     "read GIT_CONFIG_GLOBAL <<< /tmp/c; export GIT_CONFIG_GLOBAL; git claen -fdx",
     "for GIT_CONFIG_GLOBAL in /tmp/c; do export GIT_CONFIG_GLOBAL; git claen -fdx; done",
@@ -276,6 +282,11 @@ test("--shallow-file, a variable-built HOME name or GIT_CONFIG_* set without NAM
     "for f in $(ls); do git lfs pull; done",
     "HOME=/tmp/h git --shallow-file /tmp/s status",
     "x=a; printf -v ${x}b %s y; git status",
+    "export PATH=$PATH:/x; git lfs pull",
+    "declare -a arr=($x); git status",
+    "export X=1; (cd $d && git lfs pull)",
+    "read -r x <<< \"$y\"; git lfs pull",
+    "git lfs pull origin $BRANCH",
   ]);
 });
 

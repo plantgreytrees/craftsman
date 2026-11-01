@@ -354,15 +354,33 @@ const globMayBeGit = (w) => { if (/\[.+\]/.test(w)) return true; try { return ne
 // Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment) can alias a misspelt subcommand to clean.
 // Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
 const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)\b/i;
-// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a HOME or XDG_CONFIG_HOME word that is not a plain read,
+// The raw-text hint for dynamicName: a `$` or backtick where a setter takes a variable name (a plain `$` elsewhere leaves the gate shut).
+const DYN_NAME_HINT = /\$\{!|\b(?:for|select)\s+["']?[$`]|\bgetopts\s+\S+\s+["']?[$`]|\bprintf\b[^;&|\n]*\s-v\s*["']?[$`]|\b(?:read|mapfile|readarray)\b[^;&|\n]*[$`]|\b(?:export|declare|typeset|local|readonly)\b[^;&|\n]*(?:\s["']?[$`]|\s-[A-Za-z]*n\b[^;&|\n]*[$`])/;
+// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a HOME, XDG_CONFIG_HOME or GIT_CONFIG* word that is not a plain read, a name built from a variable (dynamicName),
 // or an include, --config-env or GIT_CONFIG word in a command that holds a git word (anywhere in it: wrappers, keywords and their options are read through,
 // a `$` or backtick word among the leading wrappers may be git, and a substitution body is judged on its own). `echo HOME=/x` is prose.
 const ENV_CONFIG = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*)\+?=/i;
-const ENV_CONFIG_NAME = /^(?:HOME|XDG_CONFIG_HOME)(?![\w}]|\+?=)|[^\w$](?:HOME|XDG_CONFIG_HOME)(?![\w}])/; // the name, not a plain `$NAME`/`${NAME}` read nor a leading `NAME=` (ENV_CONFIG judges that): `for NAME in`, `read NAME`, `printf -v NAME`, a nameref `-n R=NAME`, `${NAME:=x}`
+const ENV_CONFIG_NAME = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*)(?![\w}]|\+?=)|[^\w$](?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*)(?![\w}])/; // the name, not a plain `$NAME`/`${NAME}` read nor a leading `NAME=` (ENV_CONFIG judges that): `for NAME in`, `read NAME`, `printf -v NAME`, a nameref `-n R=NAME`, `${NAME:=x}`
 const ASSIGN_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
 const cmdIndex = (words) => { let k = 0; while (k < words.length && (ASSIGN_WORD.test(words[k]) || KEYWORDS.has(words[k]))) k++; return k; };
 const ENV_SETTER = /^(?:export|declare|typeset|readonly|local|env)$/;
-const envConfigIn = (c) => { const k = cmdIndex(c.words); return c.words.some((w) => ENV_CONFIG_NAME.test(w)) || c.words.slice(0, k).some((w) => ENV_CONFIG.test(w)) || c.words.some((w, j) => j > k && ENV_CONFIG.test(w) && c.words.slice(k, j).some((x) => ENV_SETTER.test(path.basename(x)) || WRAPPERS.has(path.basename(x)))); };
+// A name built from a `$` or backtick word where a setter takes a variable name (`printf -v ${x}ME`, `read $n`, `mapfile`, `export ${n}ME=`,
+// `declare -n R=${n}ME`, `getopts s $n`, `for $n in`, `${!n:=x}`) cannot be read: it may be HOME, XDG_CONFIG_HOME or GIT_CONFIG*, so it counts (fail closed).
+const DYN = /[$`]/;
+const NAME_SETTERS = new Set(["printf", "read", "mapfile", "readarray", "export", "declare", "typeset", "local", "readonly", "getopts"]);
+const dynamicName = (words) => {
+  const k = cmdIndex(words);
+  if (words.some((w) => /\$\{![^}]*=/.test(w)) || (k > 0 && /^(?:for|select)$/.test(words[k - 1]) && DYN.test(words[k] ?? ""))) return true;
+  const s = words.findIndex((w, i) => i >= k && NAME_SETTERS.has(path.basename(w)));
+  if (s < 0) return false;
+  const name = path.basename(words[s]), rest = words.slice(s + 1);
+  if (name === "printf") return rest.some((w, i) => (w === "-v" && DYN.test(rest[i + 1] ?? "")) || (/^-v./.test(w) && DYN.test(w)));
+  if (name === "getopts") return DYN.test(rest[1] ?? "");
+  if (name !== "export" && !/^(?:declare|typeset|local|readonly)$/.test(name)) return rest.some((w) => DYN.test(w)); // read, mapfile, readarray
+  const nameref = name !== "export" && rest.some((w) => /^-[A-Za-z]*n/.test(w));
+  return rest.some((w) => !w.startsWith("-") && DYN.test(nameref ? w : w.split("=")[0]));
+};
+const envConfigIn = (c) => { const k = cmdIndex(c.words); return dynamicName(c.words) || c.words.some((w) => ENV_CONFIG_NAME.test(w)) || c.words.slice(0, k).some((w) => ENV_CONFIG.test(w)) || c.words.some((w, j) => j > k && ENV_CONFIG.test(w) && c.words.slice(k, j).some((x) => ENV_SETTER.test(path.basename(x)) || WRAPPERS.has(path.basename(x)))); };
 const ownConfig = (c) => c.words.some((w) => /include\.path|includeif|GIT_CONFIG|--config-env/i.test(w));
 const NUMERIC_ARG = /^\d+(?:\.\d+)?[smhd]?$/;
 const gitWordsIn = (words) => { const at = words.flatMap((w, i) => (path.basename(w) === "git" ? [i] : [])); for (let i = cmdIndex(words); i < words.length; i++) { const w = words[i], b = path.basename(w); if (/[$`]/.test(w)) at.push(i); else if (!(WRAPPERS.has(b) || b === "xargs" || w.startsWith("-") || ASSIGN_WORD.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) break; } return at; };
@@ -370,8 +388,10 @@ const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env
 // An alias is tried only after the builtins and the dashed externals, so these names always run as themselves. Checked against git 2.56 (`git --list-cmds=builtins`, and
 // `git -c alias.NAME='!echo X' NAME` for every name below): an alias DOES override scalar, daemon and the deprecated builtins whatchanged and pack-redundant, so they are not listed.
 const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version worktree write-tree bugreport checkout-index column commit-graph commit-tree count-objects credential diff-files diff-index diff-tree fast-export fast-import fetch-pack filter-branch for-each-repo get-tar-commit-id index-pack interpret-trailers mailinfo mailsplit merge-file merge-index mktag mktree multi-pack-index pack-objects pack-refs patch-id prune prune-packed read-tree receive-pack request-pull rerere send-pack show-branch stripspace unpack-file unpack-objects update-server-info upload-pack var verify-commit verify-pack verify-tag".split(" "));
-const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source|exec-path))$/.test(rest[i]) ? 2 : 1; return rest[i]; };
-const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || configIndirectIn(cmds); };
+// The global git options that take the next word as their value (`--opt=value` is one word), shared by gitSub and the doc guard's git().
+const GIT_VALUED_OPTS = /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source|shallow-file|exec-path))$/;
+const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += GIT_VALUED_OPTS.test(rest[i]) ? 2 : 1; return rest[i]; };
+const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t) && !DYN_NAME_HINT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || configIndirectIn(cmds); };
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
@@ -807,7 +827,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       else {
         if (/^--config-env\b/.test(o)) bad = always = "git " + o + " (a config override)";
         if (/^--(?:icase-pathspecs|work-tree|git-dir|separate-git-dir)\b/.test(o)) bad = "git " + o;
-        i += /^--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source)$/.test(o) ? 2 : 1;
+        i += GIT_VALUED_OPTS.test(o) ? 2 : 1;
       }
     }
     const sub = rest[i];
