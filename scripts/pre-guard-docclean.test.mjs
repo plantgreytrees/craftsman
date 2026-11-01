@@ -265,7 +265,6 @@ test("--shallow-file, a variable-built HOME name or GIT_CONFIG_* set without NAM
     "n=HO; mapfile -t ${n}ME < /dev/null; git claen -fdx",
     "n=HO; n+=ME; : ${!n:=/tmp/h}; git claen -fdx",
     "x=HO; getopts a ${x}ME; git claen -fdx",
-    "for $x in /tmp/h; do git claen -fdx; done",
     "x=HO; local -n R=${x}ME; R=/tmp/h; git claen -fdx",
     "x=HO; printf -v\"${x}ME\" %s /tmp/h; git claen -fdx",
     "x=HO; command printf -v ${x}ME %s /tmp/h; git claen -fdx",
@@ -296,6 +295,37 @@ test("prose naming HOME or XDG_CONFIG_HOME beside a non-builtin git subcommand f
     'git commit -m "fix HOME handling" && git lfs pull',
     "grep -rn XDG_CONFIG_HOME src; git lfs pull",
   ]);
+});
+
+test("a config name built mid-word, or set by let or arithmetic, cannot hide an aliased git subcommand (round 11)", () => {
+  refused([
+    "x=ME; printf -v HO${x} %s /tmp/h; git claen -fdx",
+    "x=ME; printf -v HO$x %s /tmp/h; git claen -fdx",
+    "x=ME; export HO${x}=/tmp/h; git claen -fdx",
+    "x=ME; declare HO${x}=/tmp/h; git claen -fdx",
+    "x=ME; typeset -x HO${x}=/tmp/h; git claen -fdx",
+    "x=ME; readonly HO${x}=/tmp/h; git claen -fdx",
+    "x=ME; export -- HO${x}=/tmp/h; git claen -fdx",
+    'x=ME; export "HO${x}=/tmp/h"; git claen -fdx',
+    "x=OM; export H${x}E=/tmp/h; git claen -fdx",
+    "x=ME; getopts a HO${x}; git claen -fdx",
+    "let HOME=1; git claen -fdx",
+    "let XDG_CONFIG_HOME=1; git claen -fdx",
+    "n=HO; let ${n}ME=1; git claen -fdx",
+    "n=HO; (( ${n}ME = 1 )); git claen -fdx",
+    "n=HO; : $(( ${n}ME = 1 )); git claen -fdx",
+    "(( HOME = 1 )); git claen -fdx",
+  ]);
+  passes([
+    "git --exec-path clean -fdx",
+    "(( i++ )); git lfs pull",
+    "let i=i+1; git lfs pull",
+    "echo $(( a + b )); git lfs pull",
+  ]);
+});
+
+test("a $ word in read's options beside a non-builtin git subcommand fails closed (accepted cost, round 11)", () => {
+  refused(['read -p "$prompt" ans; git lfs pull']);
 });
 
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
