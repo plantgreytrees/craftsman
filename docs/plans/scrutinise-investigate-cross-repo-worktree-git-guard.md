@@ -4,7 +4,7 @@ goal: The worktree git guard allows only git calls it can prove run in the bound
 level: feature
 priority: P1
 classification: in-scope # round 3 of an isolated /scrutinise of investigate-cross-repo-worktree-git-guard (round 1: 868d87f, 0a9f48d, 2a172cb; round 2: 0d1e0a7, 226ff0f; round 3: db9bff5, c50c033)
-tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob, TRACKER#doc-guard-structural]
+tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob, TRACKER#doc-guard-structural, TRACKER#doc-guard-shell-quoting]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -85,6 +85,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: doc-guard-shell-quoting
+    scope_id: doc-guard-shell-quoting
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: []   # pre-guard.mjs ~95 KB: grep -n tokenize, globbedGit, configIndirectGit, CONFIG_INDIRECT, globMayBeGit, GIT_BUILTINS, gitSub first, then read by range (ARCH-ENGINE-08)
+      docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
+    arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: close the gaps the scrutiny rounds found in the worktree git guard
@@ -100,7 +113,16 @@ Under a worktree binding, read-only git runs anywhere; every other git call pass
 | 3 | db9bff5, c50c033 | 0 Critical · 5 Warning · 3 Suggestion · 0 UNMET | guard-allowlist (d9e257a), release-wording-2 (4147f95) merged |
 | 4 | d9e257a, 4147f95 | 1 Critical · 9 Warning · 2 Suggestion | guard-allowlist REVERTED (aa8f34d, owner decision 2026-10-28); release-wording-2 kept; follow-ups F1-F3 |
 | 5 | cb2cdf8..2112630 (doc-guard-glob-clean) | 0 Critical · 3 Warning · 1 Suggestion · 0 UNMET | doc-guard-any-glob (72a9faf) merged |
-| 6 | 6e97536..72a9faf (doc-guard-any-glob) | 0 Critical · 2 Warning · 1 Suggestion · 0 UNMET | doc-guard-structural |
+| 6 | 6e97536..72a9faf (doc-guard-any-glob) | 0 Critical · 2 Warning · 1 Suggestion · 0 UNMET | doc-guard-structural (1d795e1) merged |
+| 7 | 1e44f9e..1d795e1 (doc-guard-structural) | 3 Critical · 1 Warning · 4 Suggestion · 0 UNMET | doc-guard-shell-quoting PENDING (not driven; owner decision needed) |
+
+## Round 7 findings
+Isolated scrutineer on 1e44f9e..1d795e1; root re-ran C1-C3 and W1 against main 1d795e1: each exits 0; the S2 false block reproduced. No disputes. Not driven: the /goal reached its turn stop, and seven rounds of new shell spellings make the approach an owner decision (see Step 6).
+- **C1 [Critical][Security]** `scripts/pre-guard.mjs:356` — `CONFIG_INDIRECT` misses an append assignment: `HOME+=/x git claen -fdx`, `XDG_CONFIG_HOME+=/x git claen -fdx`, `export HOME+=/x; git claen -fdx`.
+- **C2 [Critical][Security]** `:352,:359` — a git command word is recognised only by basename or glob; ANSI-C `$'git'` tokenizes to the dynamic word `$git` (`:436-439`): `HOME=/tmp/h $'git' claen -fdx`, `$'git' -c include.path=/tmp/c claen -fdx`.
+- **C3 [Critical][Security]** `:360`, `bare` at `:506` (predates this run) — ANSI-C quoting spells `clean` with no literal word: `git cl$'e'an -fdx`, `git $'clean' -fdx`, `git cl$'\x65'an -fdx`, `git -c alias.claen=cl$'e'an claen -fdx` exit 0 with no setup; bash runs `git clean` (scrutineer confirmed with `-n`).
+- **W1 [Warning][Security]** `:353` — `globMayBeGit` mistranslates POSIX classes: `env /usr/bin/g[[:alpha:]]t cl[[:alpha:]]an -fdx`.
+- **S1** `GIT_EXEC_PATH` / `--exec-path` are not in `CONFIG_INDIRECT` (or name them in the ARCH-SAFETY-05 residual). **S2** false blocks: `CONFIG_INDIRECT` is tested on the whole text (`echo HOME=/x; git lfs pull` exits 2); `GIT_BUILTINS` lacks prune, stage, init-db, pack-refs, count-objects, rerere, show-branch, var, verify-commit; an absent subcommand opens the gate (`HOME=/tmp/h git --version` exits 2). **S3** `gitSub` (`:358`) and `git()` (`:764-768`) disagree on `--exec-path`. **S4** docclean tests lack `+=`, `$'...'`, POSIX-class-in-wrapper and prose `HOME=` cases.
 
 ## Round 6 findings
 Isolated scrutineer on 6e97536..72a9faf; root re-ran each bypass against main 72a9faf (untracked `docs/x.md`, no grant): each exits 0. No disputes. Approach: the recommended structural fix (the owner was asked; no answer, and the /goal loop requires 0 Warning).
@@ -181,6 +203,18 @@ Fixes round-6 W1, W2, S1 by opening the gate structurally and letting `git()` de
 - [ ] 5.2 In `removalGate` (`scripts/pre-guard.mjs` ~:351-352): replace `globSpellsClean` with a structural test — the gate opens when a simple command holds a git command word (a word whose basename is `git`, or a glob word in command position) and any word holds `*`, `?`, `[` or `{`; `git()` (~:769) then refuses a globbed subcommand. Delete `globSpellsClean`. → accept: the five glob block cases pass; `git add src/*.ts` and `git status docs/*` still exit 0.
 - [ ] 5.3 Config indirection: the gate also opens on `include.path`, `includeIf`, `GIT_CONFIG` (any), `--config-env`, or a `HOME=`/`XDG_CONFIG_HOME=` assignment anywhere in the text; in `git()` (~:767-768) treat `include.path`/`includeIf` and a `HOME=`/`XDG_CONFIG_HOME=` prefix like `GIT_CONFIG` (`bad = always`, a config override). → accept: the four config block cases pass; controls still exit 0.
 - [ ] 5.4 Re-point any `cite: scripts/pre-guard.mjs:<range>` in `docs/architecture/safety.rules.md` and `docs/architecture/state.rules.md` the edit moved (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS; rules-doc diff touches only `cite:` ranges.
+
+### Step 6 — doc-guard-shell-quoting (., javascript, high) — PENDING, owner decision first
+Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
+Depends on: none (Step 5 merged at 1d795e1)
+Decision before execution: another round on the text guard (below), a structural answer (decode `$'...'` in `tokenize()` and fail closed on any dynamic or quoted command/subcommand word), or move the guarantee to the sandbox (follow-ups F1/F3). Acceptance lines go into `.craftsman/acceptance.md` only once this unit is driven.
+- [ ] 6.1 Failing tests in `scripts/pre-guard-docclean.test.mjs` for C1-C3 and W1 (exit 2, `/doc-write authority/`), and for the S2 false blocks (exit 0). → accept: block cases exit 0 on main 1d795e1.
+- [ ] 6.2 Decode `$'...'` in `tokenize()` and when building `bare`, or open the gate on `$'` beside a git or dynamic command word. → accept: C2/C3 cases pass.
+- [ ] 6.3 `CONFIG_INDIRECT` accepts `\+?=`; a dynamic word in command position counts as a possible git word. → accept: C1/C2 cases pass.
+- [ ] 6.4 `globMayBeGit` returns true for any word holding `[`. → accept: W1 case passes.
+- [ ] 6.5 Test `CONFIG_INDIRECT` only on the git simple command's own assignments and `-c`/`--config-env` values; extend `GIT_BUILTINS`; an absent subcommand is safe. → accept: S2 controls exit 0.
+- [ ] 6.6 Re-point moved `cite: scripts/pre-guard.mjs:` ranges (cite lines only); `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS.
+Criteria (to tag `[unit:doc-guard-shell-quoting]` when driven): every C1-C3/W1 command exits 2 with doc-write authority text and fails on main 1d795e1; the S2 commands and all earlier allow cases exit 0; cites point at the cited code; suite exits 0 and lint PASS.
 
 ## Sequencing
 Independent: no shared files or cites. Step 1 is the security fix and goes first when run one at a time; its cite re-pointing (1.5) is last.
