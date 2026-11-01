@@ -4,7 +4,7 @@ goal: The worktree git guard allows only git calls it can prove run in the bound
 level: feature
 priority: P1
 classification: in-scope # round 3 of an isolated /scrutinise of investigate-cross-repo-worktree-git-guard (round 1: 868d87f, 0a9f48d, 2a172cb; round 2: 0d1e0a7, 226ff0f; round 3: db9bff5, c50c033)
-tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean]
+tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -59,6 +59,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: doc-guard-any-glob
+    scope_id: doc-guard-any-glob
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: []   # pre-guard.mjs ~95 KB: grep -n plainWords, leadWord, removalGate, gitThenClean, REMOVAL_WORD first, then read by range (ARCH-ENGINE-08)
+      docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
+    arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: close the gaps the scrutiny rounds found in the worktree git guard
@@ -73,6 +86,14 @@ Under a worktree binding, read-only git runs anywhere; every other git call pass
 | 2 | 0d1e0a7, 226ff0f | 1 Critical · 4 Warning · 3 Suggestion · 1 UNMET | fix-guard-prove-all (db9bff5), fix-release-wording (c50c033) merged |
 | 3 | db9bff5, c50c033 | 0 Critical · 5 Warning · 3 Suggestion · 0 UNMET | guard-allowlist (d9e257a), release-wording-2 (4147f95) merged |
 | 4 | d9e257a, 4147f95 | 1 Critical · 9 Warning · 2 Suggestion | guard-allowlist REVERTED (aa8f34d, owner decision 2026-10-28); release-wording-2 kept; follow-ups F1-F3 |
+| 5 | cb2cdf8..2112630 (doc-guard-glob-clean) | 0 Critical · 3 Warning · 1 Suggestion · 0 UNMET | doc-guard-any-glob |
+
+## Round 5 findings
+Isolated scrutineer on cb2cdf8..2112630; root re-ran every bypass against main 2112630 (repo with untracked `docs/x.md`, no grant): each exits 0. No disputes.
+- **W1 [Warning][Security]** `scripts/pre-guard.mjs:348-349` — `leadWord` skips only `GIT_RESERVED` words and assignments, not `WRAPPERS` (`:204`) or `coproc`: `command|env|nohup|time|nice|exec /usr/bin/g?t clean -fdx` and `timeout 9 /usr/bin/g?t clean -fdx` count as plain and pass (ARCH-DOCS-07, ARCH-STATE-16).
+- **W2 [Warning][Security]** `:349` — the glob test reads only the command word: `git cl?an -fdx`, `git cl[e]an -fdx` pass; bash expands them to `clean` once a file `clean` exists.
+- **W3 [Warning][Security]** `:345,:350` (pre-existing) — `git -c help.autocorrect=immediate claen -fdx` holds no `clean` word and passes; git autocorrects it to `clean`.
+- **S1 [Suggestion][Test-coverage]** `scripts/pre-guard-docclean.test.mjs:37-48` — no wrapper or subcommand-glob cases; the stderr assert `/doc/i` matches any message naming "doc".
 
 Floor at round 3 (main db9bff5): `node --test scripts/*.test.mjs` 1228/1228, doc-size PASS, `arch-check lint` PASS. No disputes. Root reproduced W1, W3 and W4 (exit 0 under a binding, cwd = B's main checkout). All acceptance criteria ticked; `[unit:guard-target-resolution]` 1.5(a)-(k) MET (`pre-guard-worktree.test.mjs:87-142`).
 
@@ -122,6 +143,15 @@ Owner decision (2026-10-28): `/architect --update` found ARCH-STATE-16 and ARCH-
 - [ ] 3.1 Add failing tests in a new `scripts/pre-guard-docclean.test.mjs` (harness pattern from `scripts/pre-guard-worktree.test.mjs`; cwd a git repo with an untracked `docs/x.md`, no binding, no doc-write grant). Block (exit 2, doc-guard message on stderr): `/usr/bin/g[i]t clean -fdx`, `/usr/bin/gi? clean -fdx`, `{ /usr/bin/g?t clean -fdx; }`, `if true; then /usr/bin/g?t clean -fdx; fi`. Still allowed (exit 0): `echo clean`, `git status; echo clean`, `if git diff --quiet; then echo clean; fi`. → accept: the run log shows the four block cases exit 0 on current main.
 - [ ] 3.2 In the doc guard: when any command word — after stripping reserved words (`{`, `if`, `then`, `!`, `do`, …) and assignments, as `leadOf` does — contains `*`, `?`, `[`, `{`, `$` or a backtick, count `clean` as a removal word (the pre-2cc1a84 `REMOVAL_WORD` test), so the command fails closed without the doc-write grant. → accept: 3.1 passes.
 - [ ] 3.3 Re-point any `cite: scripts/pre-guard.mjs:<range>` in `docs/architecture/safety.rules.md` and `docs/architecture/state.rules.md` that the edit moved (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS; the rules-doc diff touches only `cite:` ranges.
+
+### Step 4 — doc-guard-any-glob (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
+Depends on: none (Step 3 merged at 2112630)
+Fixes round-5 W1-W3 and S1. Out of scope (F1/F3): autocorrect or aliases set in user/global gitconfig, shell alias expansion.
+- [ ] 4.1 Extend `scripts/pre-guard-docclean.test.mjs` with failing cases (same harness: untracked `docs/x.md`, no grant). Block (exit 2): `command /usr/bin/g?t clean -fdx`, `env /usr/bin/g?t clean -fdx`, `timeout 9 /usr/bin/g?t clean -fdx`, `nohup /usr/bin/g?t clean -fdx`, `git cl?an -fdx`, `git cl[e]an -fdx`, `git -c help.autocorrect=immediate claen -fdx`. Every block case asserts the doc-guard-specific stderr text (e.g. `doc-write authority`), not `/doc/i`. Keep the Step 3 cases; controls `echo clean`, `git status; echo clean`, `if git diff --quiet; then echo clean; fi` still exit 0. → accept: the run shows the seven new cases exit 0 on main 2112630.
+- [ ] 4.2 In `plainWords` (`scripts/pre-guard.mjs` ~:349): a command is not plain when ANY of its words holds `*`, `?`, `[` or `{` (not only `leadWord`); remove `leadWord` if nothing else uses it. → accept: the wrapper and subcommand-glob cases of 4.1 pass.
+- [ ] 4.3 Make the removal gate (`removalGate` ~:350) also fire when the command text names `help.autocorrect` (case-insensitive; covers `-c`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_KEY_<n>`), so it fails closed without the grant. → accept: the autocorrect case of 4.1 passes; controls still exit 0.
+- [ ] 4.4 Re-point any `cite: scripts/pre-guard.mjs:<range>` in `docs/architecture/safety.rules.md` and `docs/architecture/state.rules.md` the edit moved (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS; rules-doc diff touches only `cite:` ranges.
 
 ## Sequencing
 Independent: no shared files or cites. Step 1 is the security fix and goes first when run one at a time; its cite re-pointing (1.5) is last.
