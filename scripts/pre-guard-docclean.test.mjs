@@ -443,6 +443,9 @@ test("an abbreviated env --split-string and an uppercase-attribute name cannot h
     "(( HOME = 1 )); git claen -fdx",
     "(( XDG_CONFIG_HOME = 1 )); git claen -fdx",
     "for i in 1; do (( HOME = 1 )); done; git claen -fdx",
+    "(( 1 )); HOME=/tmp/h /usr/bin/g?t claen -fdx",
+    "(( 1 )); HOME=/tmp/h {g,}it claen -fdx",
+    "(( 1 )); function f { HOME=/tmp/h $G claen -fdx; }; f",
   ]);
   passes([
     "for i in 1 2; do (( n++ )); done; git status",

@@ -365,9 +365,11 @@ const firstFrom = (re, s, k) => { re.lastIndex = k; const m = re.exec(s); return
 const SETS_VALUE = /\b(?:read|mapfile|readarray|getopts|for|select|declare|typeset|local|export|readonly)\b|(?:^|\s)[A-Za-z_]\w*(?:\[[^\][]*\])?\+?=|\$\{[A-Za-z_]\w*:?=/;
 const LET_CMD = /(?:^|[\s;&|({!`])let\s/; // a `let` word anywhere (behind if, while, elif, !, time, builtin, command …), read with quotes and backslashes removed
 // A value arithmetic reads can also be set with no `$` at all: a `NAME+=` string append outside arithmetic, `printf -v`, or read, mapfile, readarray,
-// getopts, for and select, which set a name from input or a word list (`v=HO; v+=ME=1; let v`, `read v <<< HOME=1; (( v ))`).
-const V_OPT = /\s-v/g;
-const builtBy = (x) => { const p = x.search(/\bprintf\b/); return /\b(?:read|mapfile|readarray|getopts)\b|\b(?:for|select)\s+[A-Za-z_]/.test(x) || (p >= 0 && firstFrom(V_OPT, x, p) >= 0); };
+// getopts, for and select, which set a name from input or a word list, or the uppercase attribute (`declare -u v=home=1`; typeset, local)
+// (`v=HO; v+=ME=1; let v`, `read v <<< HOME=1; (( v ))`).
+const V_OPT = /\s-v/g, DECL_UPPER = /\s-[A-Za-z]*u/g;
+const upperAttr = (s) => { const d = s.search(/\b(?:declare|typeset|local)\b/); return d >= 0 && firstFrom(DECL_UPPER, s, d) >= 0; };
+const builtBy = (x) => { const p = x.search(/\bprintf\b/); return /\b(?:read|mapfile|readarray|getopts)\b|\b(?:for|select)\s+[A-Za-z_]/.test(x) || (p >= 0 && firstFrom(V_OPT, x, p) >= 0) || x.split(/[;&|\n]/).some(upperAttr); };
 const intAttr = (s) => { const d = s.search(/\b(?:declare|typeset|local)\b/); return d >= 0 && firstFrom(DECL_INT, s, d) >= 0; };
 const arithDyn = (t) => {
   const open = [];
@@ -441,7 +443,9 @@ const envConfigIn = (c) => { const k = cmdIndex(c.words); return dynamicName(c.w
 const ownConfig = (c) => c.words.some((w) => /include\.path|includeif|GIT_CONFIG|--config-env/i.test(w));
 const NUMERIC_ARG = /^\d+(?:\.\d+)?[smhd]?$/;
 const gitWordsIn = (words) => { const at = words.flatMap((w, i) => (path.basename(w) === "git" ? [i] : [])); for (let i = cmdIndex(words); i < words.length; i++) { const w = words[i], b = path.basename(w); if (/[$`]/.test(w)) at.push(i); else if (!(WRAPPERS.has(b) || b === "xargs" || w.startsWith("-") || ASSIGN_WORD.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) break; } return at; };
-const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env" && words.slice(i + 1).find((a) => !(a.startsWith("-") && !/^-[A-Za-z]*S|^--split-string/.test(a)) && !ASSIGN_WORD.test(a))?.match(/^-[A-Za-z]*S|^--split-string/)); const configIndirectIn = (cmds, inherited = false, depth = 0) => { const env = inherited || cmds.some(envConfigIn); return cmds.some((c) => envSplitString(c.words) || ((env || ownConfig(c)) && gitWordsIn(c.words).some((i) => { const sub = gitSub(c.words.slice(i + 1)); return sub !== undefined && !GIT_BUILTINS.has(sub); })) || c.substs.some((s) => { const inner = depth < 5 && tokenize(stripHeredocs(s), () => {}); return inner ? configIndirectIn(inner, env, depth + 1) : mayReachGit("$(" + s + ")"); })); };
+// env runs its -S string as a command line; GNU env takes any unambiguous prefix of --split-string (`--s` on), the value after `=` or as the next word.
+const ENV_SPLIT = /^-[A-Za-z]*S|^--s(?:p(?:l(?:i(?:t(?:-(?:s(?:t(?:r(?:i(?:ng?)?)?)?)?)?)?)?)?)?)?(?:=|$)/;
+const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env" && words.slice(i + 1).find((a) => !(a.startsWith("-") && !ENV_SPLIT.test(a)) && !ASSIGN_WORD.test(a))?.match(ENV_SPLIT)); const configIndirectIn = (cmds, inherited = false, depth = 0) => { const env = inherited || cmds.some(envConfigIn); return cmds.some((c) => envSplitString(c.words) || ((env || ownConfig(c)) && gitWordsIn(c.words).some((i) => { const sub = gitSub(c.words.slice(i + 1)); return sub !== undefined && !GIT_BUILTINS.has(sub); })) || c.substs.some((s) => { const inner = depth < 5 && tokenize(stripHeredocs(s), () => {}); return inner ? configIndirectIn(inner, env, depth + 1) : mayReachGit("$(" + s + ")"); })); };
 // An alias is tried only after the builtins and the dashed externals, so these names always run as themselves. Checked against git 2.56 (`git --list-cmds=builtins`, and
 // `git -c alias.NAME='!echo X' NAME` for every name below): an alias DOES override scalar, daemon and the deprecated builtins whatchanged and pack-redundant, so they are not listed.
 const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version worktree write-tree bugreport checkout-index column commit-graph commit-tree count-objects credential diff-files diff-index diff-tree fast-export fast-import fetch-pack filter-branch for-each-repo get-tar-commit-id index-pack interpret-trailers mailinfo mailsplit merge-file merge-index mktag mktree multi-pack-index pack-objects pack-refs patch-id prune prune-packed read-tree receive-pack request-pull rerere send-pack show-branch stripspace unpack-file unpack-objects update-server-info upload-pack var verify-commit verify-pack verify-tag".split(" "));
@@ -464,7 +468,6 @@ const blankArith = (t) => {
   }
   return out + t.slice(p);
 };
-const ENV_SPLIT = /^-[A-Za-z]*S|^--split-string/;
 const leadDyn = (seg) => {
   const words = seg.replace(/[<>]+[&|]?\s*[^\s<>;&|()]*/g, " ").split(/\s+/).filter(Boolean);
   let env = false; // an `env` among the leading words: its -S option runs its string as a command line
@@ -477,8 +480,17 @@ const leadDyn = (seg) => {
   }
   return false;
 };
-const mayReachGit = (t) => /\bgit\b|`|\b(?:sh|bash|zsh|dash|ksh|source)\b|(?:^|[\s;&|(])\.\s/.test(t) || blankArith(t).split(/[;&|\n()]|(?<![^\s;&|()])[{}](?![^\s;&|()])/).some(leadDyn);
-const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t) && !dynNameHint(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return cmds ? configIndirectIn(cmds, arithDyn(t)) : mayReachGit(t); };
+const mayReachGit = (t, gitWord = true) => (gitWord && /\bgit\b/.test(t)) || /`|\b(?:sh|bash|zsh|dash|ksh|source)\b|(?:^|[\s;&|(])\.\s/.test(t) || blankArith(t).split(/[;&|\n()]|(?<![^\s;&|()])[{}](?![^\s;&|()])/).some(leadDyn);
+// Text that only arithmetic makes unreadable (`(( n++ ))`) is read again with each plain `((…))` as `:` (blankArith): its git words are judged as if a config
+// name were set (the blanked arithmetic may have held `(( HOME = 1 ))`), so only a built-in subcommand passes, and every other way to reach git (mayReachGit
+// without its plain `git` word) still fails closed. Other unreadable text fails closed when it can reach git.
+const configIndirectGit = (t) => {
+  if (!CONFIG_INDIRECT.test(t) && !dynNameHint(t)) return false;
+  const s = stripHeredocs(t), cmds = tokenize(s, () => {});
+  if (cmds) return configIndirectIn(cmds, arithDyn(t));
+  const blanked = tokenize(blankArith(s), () => {});
+  return blanked ? configIndirectIn(blanked, true) || mayReachGit(t, false) : mayReachGit(t);
+};
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
@@ -1117,7 +1129,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         if (CANDIDATES.has(b)) break;
         if (b === "env" || b === "sudo") { wrapper = b; continue; }
         if (!a.startsWith("-") || a === "--") continue;
-        if (wrapper === "env" && /^(?:-[A-Za-z]*S|--split-string)/.test(a)) return unsafe("env -S splits a string into a command");
+        if (wrapper === "env" && ENV_SPLIT.test(a)) return unsafe("env -S splits a string into a command");
         if ((wrapper === "env" && /^(?:-[A-Za-z]*C|--chdir)/.test(a)) || (wrapper === "sudo" && /^(?:-[A-Za-z]*D|--chdir)/.test(a))) at = { cwds: null };
       }
     }
@@ -1321,7 +1333,7 @@ function commandWordIndex(words, targets, wrappers = WRAPPERS) {
     while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) {
       i++;
       const opt = words[i];
-      if ((/^-[A-Za-z]$/.test(opt) && valued.includes(opt[1])) || WRAPPER_VALUE_LONG.has(opt)) i++;
+      if ((/^-[A-Za-z]$/.test(opt) && valued.includes(opt[1])) || WRAPPER_VALUE_LONG.has(opt) || (base === "env" && opt.startsWith("--") && !opt.includes("=") && ENV_SPLIT.test(opt))) i++;
     }
   }
   return -1;
@@ -1502,7 +1514,7 @@ function unresolvedConstruct(words, all) {
   const envAt = commandWordIndex(words, ENV_ONLY, GIT_WRAPPERS);
   if (envAt >= 0) {
     for (let j = envAt + 1; j < words.length && (words[j].startsWith("-") || ASSIGNMENT_WORD.test(words[j])); j++) {
-      if (/^-[A-Za-z]*S|^--split-string/.test(words[j])) return "env -S runs a command string";
+      if (ENV_SPLIT.test(words[j])) return "env -S runs a command string";
     }
   }
   return "";
