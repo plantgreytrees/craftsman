@@ -426,6 +426,34 @@ test("env -S in text the parser cannot read, a special-parameter substring, let 
   ]);
 });
 
+test("an abbreviated env --split-string and an uppercase-attribute name cannot hide a git subcommand, and a counter loop beside a built-in git subcommand still passes (round 14)", () => {
+  refused([
+    "env --sp='git clean -fdx'",
+    "env --sp='r\u006d -rf docs'",
+    "env --s 'git clean -fdx'",
+    "HOME=1 env --sp=git\\ claen -fdx",
+    "HOME=1 env --split-strin=git\\ claen -fdx",
+    "(HOME=1 env --spl=git\\ claen -fdx)",
+    "declare -u v=home=1; let v; git claen -fdx",
+    "declare -u v; v=home=1; let v; git claen -fdx",
+    "local -u v=home=1; let v; git claen -fdx",
+    "declare -u v=home=1; : $((v)); git claen -fdx",
+    "declare -u v=home=1; s=abc; : ${s:v}; git claen -fdx",
+    "typeset -iu v=home=1; let v; git claen -fdx",
+    "(( HOME = 1 )); git claen -fdx",
+    "(( XDG_CONFIG_HOME = 1 )); git claen -fdx",
+    "for i in 1; do (( HOME = 1 )); done; git claen -fdx",
+  ]);
+  passes([
+    "for i in 1 2; do (( n++ )); done; git status",
+    "while read -r l; do (( n++ )); done < f; git status",
+    "PATH+=:/x; (( n++ )); git status",
+    "for i in 1 2; do (( n++ )); done; git log --oneline",
+    "for f in *.md; do (( n++ )); done; echo done; git diff --stat",
+    "env --sp='ls -l'",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
