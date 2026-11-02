@@ -6,8 +6,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 
 # Init — fit or upgrade craftsman in this repo
 
-> Repeatable: audits first, then writes only the config and scaffolding the
-> repository's evidence justifies.
+> Repeatable: audits first, then writes only what the repository's evidence justifies.
 
 ## 1. Run the deterministic audit
 
@@ -93,4 +92,4 @@ silently until installed, so installing them is optional-but-recommended.
 
 ## 6. Sandbox settings (optional)
 
-Outside-root writes and credential reads belong to the Claude Code sandbox, not craftsman. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --settings-diff`, show it, and ask with `AskUserQuestion` whether to merge it; only on a yes run `--settings-write`. It adds `sandbox.enabled: true` and ask rules for `sudo`, `git push --force`, `git reset --hard` and `git clean` to `.claude/settings.json`, never overwriting a key, and backs the old file up. A no, or no answer, writes nothing. Add network domains and a docker exclusion yourself; SessionStart names what is missing.
+Outside-root writes and credential reads belong to the Claude Code sandbox, not craftsman. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/init.mjs" --settings-diff`, show it, and ask with `AskUserQuestion` whether to merge it; only on a yes run `--settings-write`. It adds `sandbox.enabled: true` and ask rules for `sudo`, `git push --force`, `git reset --hard` and `git clean` to `.claude/settings.json`, never overwriting a key, and backs the old file up. A no, or no answer, writes nothing. The user adds network domains and any docker exclusion (it runs docker unsandboxed); SessionStart names what is missing.

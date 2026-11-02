@@ -105,6 +105,10 @@ const domainCovers = (entry, host) => {
   return pattern.startsWith("*.") && (host === pattern.slice(2) || host.endsWith(pattern.slice(1)));
 };
 
+// A single token that is a directory or a path glob (`src/**`, `build/`, `./out/*`) names no command. A path-spelled command
+// (`/usr/local/bin/docker *`, `./gradlew build`) is a legitimate pattern: Claude Code matches the text of the call.
+const isPathGlob = (entry) => { const t = entry.trim(); return !/\s/.test(t) && (t.endsWith("/") || /^(?!\/).*\/\*+$/.test(t)); };
+
 const COMPOSE_FILES = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"];
 
 /**
@@ -124,10 +128,10 @@ export function sandboxGaps({ root = process.cwd(), userDir = defaultUserDir(), 
     const host = originHostOf(origin === undefined ? originUrl(root) : origin);
     if (host && !allowed.some((entry) => domainCovers(entry, host))) gaps.push({ gap: "network", detail: `${host} is not in sandbox.network.allowedDomains` });
     if (COMPOSE_FILES.some((name) => fs.existsSync(path.join(root, name))) && !excluded.some((entry) => /^\s*docker\b/.test(entry))) {
-      gaps.push({ gap: "docker", detail: "this project has a compose file but sandbox.excludedCommands has no docker entry (docker does not run sandboxed)" });
+      gaps.push({ gap: "docker", detail: "this project has a compose file but sandbox.excludedCommands has no docker entry (docker does not run sandboxed; an excludedCommands entry runs docker outside the sandbox)" });
     }
     for (const entry of excluded) {
-      if (!entry.trim() || /,\s/.test(entry)) gaps.push({ gap: "excluded-malformed", detail: `sandbox.excludedCommands entry ${JSON.stringify(entry)} is not a command pattern` });
+      if (!entry.trim() || /,\s/.test(entry) || isPathGlob(entry)) gaps.push({ gap: "excluded-malformed", detail: `sandbox.excludedCommands entry ${JSON.stringify(entry)} is not a command pattern` });
     }
     return gaps;
   } catch { return []; }
@@ -136,5 +140,5 @@ export function sandboxGaps({ root = process.cwd(), userDir = defaultUserDir(), 
 /** The one SessionStart line for `sandboxGaps`, or "" when there are none. */
 export function sandboxGapLine(gaps) {
   if (!Array.isArray(gaps) || !gaps.length) return "";
-  return `craftsman: the Claude Code sandbox is on, but ${gaps.map((gap) => gap.detail).join("; ")}. Commands that need them fail sandboxed and get retried with dangerouslyDisableSandbox, which auto mode refuses; add them to the sandbox settings.`;
+  return `craftsman: the Claude Code sandbox is on, but ${gaps.map((gap) => gap.detail).join("; ")}. Commands that need them fail sandboxed and get retried with dangerouslyDisableSandbox, which auto mode refuses; ask the user to add them to the sandbox settings.`;
 }
