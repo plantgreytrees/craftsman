@@ -61,6 +61,8 @@ ARCH-AUTO-09 supersedes ARCH-AUTO-01: the stop rule covers every descendant row 
 ## Phase 2 amendment (2026-11-01, owner-approved)
 _Verified at `9e122b1`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The rest of the pass is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
+**Status: decided, not yet implemented.** The scope-required marker is still re-armed by any hand-off after a resume and cleared only by activating a scope. Code: `/plan sandbox-auto-flow phase 2`.
+
 - **ARCH-AUTO-11**: the scope-required marker belongs to the `/orchestrate` run that armed it.
   - **Re-arming:** SessionStart re-arms it only when the hand-off still lists remaining units.
   - **Ending:** a craftsman command the user types (never a model Skill call) clears the session marker and the session scope. Unit scopes keyed to a worktree are left alone, and an active `/auto` run keeps everything (ARCH-AUTO-10).
