@@ -93,8 +93,7 @@ export function scopeRequired(input) {
   });
 }
 
-// Every live scope manifest of the session, in file-name order, so what an ambiguous session resolves to never depends on the
-// directory's own listing order, and pre-guard can judge a target against every scope at once (ARCH-STATE-18).
+// Every live scope manifest of the session, in file-name order (ARCH-STATE-18).
 export function activeScopes(input) {
   let scopes = [];
   try {
