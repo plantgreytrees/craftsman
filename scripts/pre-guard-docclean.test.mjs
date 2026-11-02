@@ -512,6 +512,40 @@ test("a line-continued git config or environment word, and a read value reached 
   ]);
 });
 
+test("a word split by ANSI-C quoting and a line continuation, a read value reached through a for list, a default assignment or the positional parameters, and GIT_DIR or --git-dir cannot hide a git subcommand (round 17)", () => {
+  refused([
+    "git -c help.$'auto'c\\\norrect=1 claen -fdx",
+    "git -c help.auto$'c'\\\norrect=1 claen -fdx",
+    "git -c help.$'auto\\x63'\\\norrect=1 claen -fdx",
+    "git -c in$'clu'\\\nde.path=/tmp/c claen -fdx",
+    "read -r l < f; for z in l; do (( z )); done; git status",
+    "read -r l < f; : ${z=l}; (( z )); git status",
+    "read -r l < f; : ${z:=l}; (( z )); git status",
+    "read -r l < f; set -- l; (( $1 )); git status",
+    "GIT_DIR=/tmp/r git claen -fdx",
+    "git --git-dir=/tmp/r claen -fdx",
+    "GIT_COMMON_DIR=/tmp/r git claen -fdx",
+    "env GIT_DIR=/tmp/r git claen -fdx",
+    "r\\\nm -rf docs",
+    "git r\\\nm -r docs",
+    "gi\\\nt clean -fdx",
+  ]);
+  passes([
+    "GIT_DIR=/tmp/r git status",
+    "git --git-dir=/tmp/r status",
+    "for i in 1 2 3; do (( i > 1 )); done; git status",
+    "set -- a b; echo $1; git status",
+  ]);
+});
+
+test("a line continuation inside a safety variable's name does not hide that a command sets it (round 17)", () => {
+  // The name is assembled here, so no command that writes this file sets it.
+  const name = ["CLAUDE", "PROJECT", "DIR"].join("_");
+  const r = guard(`${name.slice(0, 10)}\\\n${name.slice(10)}=/tmp/x node scripts/tracker.mjs`);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /which the authority scripts and the state paths trust/);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
