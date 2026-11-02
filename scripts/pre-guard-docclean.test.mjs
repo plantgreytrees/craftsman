@@ -457,6 +457,36 @@ test("an abbreviated env --split-string and an uppercase-attribute name cannot h
   ]);
 });
 
+test("a current-shell substitution or a value read from input inside arithmetic, and a line-continued declare -u or let, cannot hide a git subcommand (round 15)", () => {
+  refused([
+    "(( ${ HOME=/tmp/h git claen -fdx; echo 1; } )); git status",
+    "(( ${| HOME=/tmp/h git claen -fdx; REPLY=1; } )); git status",
+    "(( n += ${ HOME=1 git claen -fdx; echo 1; } )); git status",
+    "(( ${ HOME=1 git claen -fdx; echo 1; } ))",
+    "(( ${ git -c alias.x=!true x; echo 1; } )); git status",
+    "(( ${ git claen -fdx; echo 1; } )); HOME=1 git status",
+    "read -r x < f; (( x )); git status --short",
+    "while read -r l; do (( t += l )); done < f; git status",
+    "mapfile -t a < f; (( a[0] )); git log --oneline",
+    "read -r x < f; let x; git status",
+    "read -r x < f; : $(( x )); git status",
+    "read -r l < f; (( $l )); git status",
+    "read -r l < f; y=$l; (( y )); git status",
+    "for x in $(cat f); do (( x )); done; git status",
+    "for x in *; do (( x )); done; git status",
+    "declare \\\n-u v=home=1; let v; git claen -fdx",
+    "local \\\n-u v=home=1; let v; git claen -fdx",
+    "declare -u v=home=1; l\\\net v; git claen -fdx",
+    "v=HO; v+=ME=1; l\\\net v; git claen -fdx",
+  ]);
+  passes([
+    "while read -r l; do (( n++ )); done < f; git status",
+    "for i in 1 2 3; do (( sum += i )); done; git status",
+    "while read -r line; do (( n++ )); echo \"$line\"; done < f; git status",
+    "for f in *.md; do (( n++ )); done; git status",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
