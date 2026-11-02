@@ -66,7 +66,7 @@ function heredocSubstitutions(body) {
       let j = i + 2, depth = 1;
       while (j < body.length && depth) { if (body[j] === "(") depth++; else if (body[j] === ")") depth--; j++; }
       res += "$(" + body.slice(i + 2, j) + (depth ? ")" : "") + "\n"; i = j - 1;
-    }
+    } else if (body[i] === "$" && body[i + 1] === "{" && /[\s|]/.test(body[i + 2] ?? "")) res += "${ }\n"; // a current-shell substitution (bash 5.3): the tokenizer refuses it
   }
   return res;
 }
@@ -363,23 +363,32 @@ const firstFrom = (re, s, k) => { re.lastIndex = k; const m = re.exec(s); return
 // in another. Only a context that reads a name (a letter inside it) can do the latter. One linear pass over the raw text (a stack of the open
 // brackets, each closed by its match; one left open counts), then one per simple command.
 const SETS_VALUE = /\b(?:read|mapfile|readarray|getopts|for|select|declare|typeset|local|export|readonly)\b|(?:^|\s)[A-Za-z_]\w*(?:\[[^\][]*\])?\+?=|\$\{[A-Za-z_]\w*:?=/;
-const LET_CMD = /(?:^|[;&|({\n])\s*let\s|\b(?:do|then|else)\s+let\s/;
+const LET_CMD = /(?:^|[\s;&|({!`])let\s/; // a `let` word anywhere (behind if, while, elif, !, time, builtin, command …), read with quotes and backslashes removed
+// A value arithmetic reads can also be set with no `$` at all: a `NAME+=` string append outside arithmetic, `printf -v`, or read, mapfile, readarray,
+// getopts, for and select, which set a name from input or a word list (`v=HO; v+=ME=1; let v`, `read v <<< HOME=1; (( v ))`).
+const V_OPT = /\s-v/g;
+const builtBy = (x) => { const p = x.search(/\bprintf\b/); return /\b(?:read|mapfile|readarray|getopts)\b|\b(?:for|select)\s+[A-Za-z_]/.test(x) || (p >= 0 && firstFrom(V_OPT, x, p) >= 0); };
 const intAttr = (s) => { const d = s.search(/\b(?:declare|typeset|local)\b/); return d >= 0 && firstFrom(DECL_INT, s, d) >= 0; };
 const arithDyn = (t) => {
   const open = [];
-  let arith = 0, seen = LET_CMD.test(t) || t.split(/[;&|\n]/).some(intAttr), cond = null; // cond: inside `[[ … ]]`, an arithmetic comparison (cmp), a `$` or backtick (dyn)
+  let arith = 0, seen = LET_CMD.test(t.replace(/['"\\]/g, "")) || t.split(/[;&|\n]/).some(intAttr), cond = null, inLet = false, append = false; // cond: inside `[[ … ]]`, an arithmetic comparison (cmp), a `$` or backtick (dyn)
   const closeCond = () => { const dyn = !!cond?.cmp && cond.dyn; if (cond?.cmp) seen = true; cond = null; return dyn; };
   for (let i = 0; i < t.length; i++) {
     const c = t[i], top = open[open.length - 1];
-    if (top?.param && !/[\w#!@*[]/.test(c)) { top.param = false; if (c === ":" && !/[-=+?]/.test(t[i + 1] ?? "")) { top.arith = true; arith++; } } // `${name:` or `${a[i]:`: a substring
+    if (top?.param && !/[\w#!@*[]/.test(c) && !(i === top.at && /[-$?]/.test(c))) { top.param = false; if (c === ":" && !/[-=+?]/.test(t[i + 1] ?? "")) { top.arith = true; arith++; } } // `${name:`, `${a[i]:` or `${-:` (a special parameter): a substring
     if (arith > 0 && top && /[A-Za-z_]/.test(c)) top.name = true;
+    if (arith === 0) { // outside arithmetic: a `let` makes the rest of its simple command arithmetic; a `NAME+=` elsewhere appends a string (append)
+      if (/[;&|\n]/.test(c)) inLet = false;
+      else if (c === "l" && t.startsWith("let", i) && /^[\s;&|({!`]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 3] ?? "")) inLet = true;
+      else if (c === "+" && t[i + 1] === "=" && !inLet && /[\w\]]/.test(t[i - 1] ?? "")) append = true;
+    }
     if (c === "$" || c === "`") { if (arith > 0) return true; if (cond) cond.dyn = true; }
     else if (c === "[" && t[i + 1] === "[" && /^[\s;&|(!]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 2] ?? "")) cond = { cmp: false, dyn: false };
     else if (c === "]" && t[i + 1] === "]" && cond) { if (closeCond()) return true; }
     else if (c === "-" && cond && /^-(?:eq|ne|lt|le|gt|ge)(?!\S)/.test(t.slice(i, i + 4))) cond.cmp = true;
     if (c === "(" || c === "[" || c === "{") {
       const a = c === "(" ? t[i + 1] === "(" : c === "[" && /[\w$]/.test(t[i - 1] ?? "");
-      open.push({ arith: a, param: c === "{" && t[i - 1] === "$", sub: c === "[" && a && t[i - 1] !== "$", name: false });
+      open.push({ arith: a, param: c === "{" && t[i - 1] === "$", at: i + 1, sub: c === "[" && a && t[i - 1] !== "$", name: false });
       if (a) arith++;
     } else if ((c === ")" || c === "]" || c === "}") && open.length) {
       const e = open.pop(), up = open[open.length - 1];
@@ -388,14 +397,14 @@ const arithDyn = (t) => {
       if (e.arith && e.name && (!e.sub || t[i + 1] === "=" || t.startsWith("+=", i + 1) || up?.param)) seen = true; // it reads a name (a subscript: when set or expanded)
     }
   }
-  return closeCond() || ((seen || arith > 0) && t.split(/[;&|\n]/).some((s) => /[$`]/.test(s) && (SETS_VALUE.test(s) || intAttr(s))));
+  return closeCond() || ((seen || arith > 0) && (append || builtBy(t) || builtBy(t.replace(/['"\\]/g, "")) || t.split(/[;&|\n]/).some((s) => /[$`]/.test(s) && (SETS_VALUE.test(s) || intAttr(s)))));
 };
-// The raw-text hint for dynamicName (no `$` or backtick anywhere leaves the gate shut): `${!`, `for`/`select` or `getopts` setting a `$` name, a built
-// name in arithmetic (arithDyn), or, within one simple command (split at ; & | and newlines), a `$` or backtick after `read`, `mapfile`, `readarray` or `let`,
+// The raw-text hint for dynamicName: a built name in arithmetic (arithDyn, which needs no `$`); else, with a `$` or backtick in the text, `${!`, a current-shell
+// substitution (`${ cmd; }`, `${| cmd; }`: the tokenizer refuses it), `for`/`select` or `getopts` setting a `$` name, or, within one simple command (split at ; & | and newlines), a `$` or backtick after `read`, `mapfile`, `readarray` or `let`,
 // in the `printf -v` name, in a word after export/declare/typeset/local/readonly before its `=` (`${x}ME` and `HO${x}` alike; a `NAME=$value` value does not
 // count) or after their nameref option. Each part scans once from its first keyword, so the hint is linear in the text.
-const SETTER_HINT = /\$\{!|\b(?:for|select)\s+["']?[$`]|\bgetopts\s+\S+\s+["']?[^\s;&|'"]*[$`]/;
-const dynNameHint = (t) => /[$`]/.test(t) && (SETTER_HINT.test(t) || arithDyn(t) || t.split(/[;&|\n]/).some((s) => {
+const SETTER_HINT = /\$\{!|\$\{[\s|]|\b(?:for|select)\s+["']?[$`]|\bgetopts\s+\S+\s+["']?[^\s;&|'"]*[$`]/;
+const dynNameHint = (t) => arithDyn(t) || (/[$`]/.test(t) && (SETTER_HINT.test(t) || t.split(/[;&|\n]/).some((s) => {
   const last = Math.max(s.lastIndexOf("$"), s.lastIndexOf("`"));
   const reader = s.search(/\b(?:read|mapfile|readarray|let)\b/), printf = s.search(/\bprintf\b/), decl = s.search(/\b(?:export|declare|typeset|local|readonly)\b/);
   if (reader >= 0 && reader < last) return true;
@@ -403,7 +412,7 @@ const dynNameHint = (t) => /[$`]/.test(t) && (SETTER_HINT.test(t) || arithDyn(t)
   if (decl < 0) return false;
   const nref = firstFrom(DECL_NREF, s, decl);
   return firstFrom(DECL_NAME, s, decl) >= 0 || (nref >= 0 && nref < last);
-}));
+})));
 // Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a HOME, XDG_CONFIG_HOME or GIT_CONFIG* word that is not a plain read, a name built from a variable (dynamicName),
 // or an include, --config-env or GIT_CONFIG word in a command that holds a git word (anywhere in it: wrappers, keywords and their options are read through,
 // a `$` or backtick word among the leading wrappers may be git, and a substitution body is judged on its own). `echo HOME=/x` is prose.
@@ -440,10 +449,10 @@ const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch 
 // take it as their value; bare `--exec-path` prints the exec path and ends git before any subcommand runs, so skipping its next word is harmless.
 const GIT_VALUED_OPTS = /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source|shallow-file|exec-path))$/;
 const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += GIT_VALUED_OPTS.test(rest[i]) ? 2 : 1; return rest[i]; };
-// Text the tokenizer rejects (a `(`, `((`, a function or a case) can still reach git only through a `git` word, a backtick, a shell or `source` that runs
-// a string, or a `$` or glob word where a command starts: after ; & | ( ) a newline or a lone { or }, behind keywords, assignments, wrappers, their options
-// and redirections (a quoted or escaped word keeps the scan going). Arithmetic runs no command, so a `((…))` or `$((…))` holding no substitution, quote or
-// escape reads as `:` or `0` first. Text that cannot reach git leaves the gate shut (`for (( i=0; i<$n; i++ ))`); text that can fails closed.
+// Text the tokenizer rejects (a `(`, `((`, a function, a case or a `${ cmd; }`) can still reach git only through a `git` word, a backtick, a shell or `source` that runs
+// a string, an `env -S` string (a command line), or a `$` or glob word where a command starts: after ; & | ( ) a newline or a lone { or }, behind keywords, assignments, wrappers, their options
+// and redirections (a quoted or escaped word keeps the scan going). Arithmetic itself runs no command (a value it reads may expand a substitution, `x='a[$(cmd)]'; (( x ))`,
+// but that text is scanned where the value is set), so a `((…))` or `$((…))` holding no substitution, quote or escape reads as `:` or `0` first. Text that cannot reach git leaves the gate shut (`for (( i=0; i<$n; i++ ))`); text that can fails closed.
 const blankArith = (t) => {
   let out = "", p = 0;
   for (let n = 0, i = t.indexOf("(("); i >= 0 && n < 256; i = t.indexOf("((", p), n++) {
@@ -455,12 +464,15 @@ const blankArith = (t) => {
   }
   return out + t.slice(p);
 };
+const ENV_SPLIT = /^-[A-Za-z]*S|^--split-string/;
 const leadDyn = (seg) => {
   const words = seg.replace(/[<>]+[&|]?\s*[^\s<>;&|()]*/g, " ").split(/\s+/).filter(Boolean);
+  let env = false; // an `env` among the leading words: its -S option runs its string as a command line
   for (let i = 0; i < words.length; i++) {
-    const w = words[i], b = path.basename(w);
+    const w = words[i], b = path.basename(w), bare = w.replace(/['"\\]/g, "");
     if (w === "[" || w === "[[") return false;
-    if (/[$*?[{]/.test(w)) return true;
+    if (/[$*?[{]/.test(w) || (env && ENV_SPLIT.test(bare))) return true;
+    if (path.basename(bare) === "env") env = true;
     if (!(KEYWORDS.has(w) || WRAPPERS.has(b) || b === "xargs" || /^-|['"\\=]/.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) return false;
   }
   return false;
@@ -571,6 +583,7 @@ function tokenize(text, fail) {
           const j = matchParen(text, i + 1);
           if (j === -1) { fail("an unclosed substitution"); return null; }
           cur.substs.push(text.slice(i + 2, j)); word += text.slice(i, j + 1); i = j;
+        } else if (d === "$" && text[i + 1] === "{" && /[\s|]/.test(text[i + 2] ?? "")) { fail("a current-shell substitution"); return null;
         } else if (d === "`") {
           let j = i + 1; while (j < n && text[j] !== "`") j += text[j] === "\\" ? 2 : 1;
           if (j >= n) { fail("an unclosed substitution"); return null; }
@@ -588,6 +601,7 @@ function tokenize(text, fail) {
       const j = matchParen(text, i + 1);
       if (j === -1) { fail("an unclosed substitution"); return null; }
       cur.substs.push(text.slice(i + 2, j)); word = (word ?? "") + text.slice(i, j + 1); i = j;
+    } else if (c === "$" && text[i + 1] === "{" && /[\s|]/.test(text[i + 2] ?? "")) { fail("a current-shell substitution"); return null; // bash 5.3 runs `${ cmd; }` and `${| cmd; }` in this shell
     } else if (c === "`") {
       let j = i + 1; while (j < n && text[j] !== "`") j += text[j] === "\\" ? 2 : 1;
       if (j >= n) { fail("an unclosed substitution"); return null; }

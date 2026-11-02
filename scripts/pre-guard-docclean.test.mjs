@@ -398,6 +398,7 @@ test("env -S in text the parser cannot read, a special-parameter substring, let 
     "n=HO; v=$n\"ME=1\"; builtin let v; git claen -fdx",
     "n=HO; v=$n\"ME=1\"; command let v; git claen -fdx",
     "n=HO; v=$n\"ME=1\"; 'let' v; git claen -fdx",
+    "n=HO; v=$n\"ME=1\"; echo `let v; git claen -fdx`",
     "v=HO; v+=ME=1; let v; git claen -fdx",
     "v=HO; declare v+=ME=1; let v; git claen -fdx",
     "printf -v v %s%s HO ME=1; let v; git claen -fdx",
