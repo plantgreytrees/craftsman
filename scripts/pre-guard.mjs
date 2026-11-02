@@ -166,7 +166,7 @@ function realDir(dir) { try { return fs.realpathSync(dir); } catch { return path
 function realRoot() { return realDir(activeRoot); }
 // A linked worktree keeps its session's state (scope manifests, command records, grants) in the MAIN checkout's .craftsman, shared
 // through the git common dir (scope.mjs). Paths there are not under this session's root, so every root-relative check misses them:
-// name such a path relative to the main checkout, and only when it is craftsman state a tool call must never write (ARCH-SAFETY-05).
+// name such a path relative to the main checkout, and only when it is craftsman state a tool call must never write (ARCH-SAFETY-05, and the network queue in the main .git, ARCH-SAFETY-13).
 function mainRelOf(abs) {
   let main;
   try { main = fs.realpathSync(mainCheckoutRoot(activeRoot)); } catch { return null; }
@@ -1319,7 +1319,7 @@ if (tool === "Bash" && toolInput.dangerouslyDisableSandbox === true) logEvent({ 
 // in this file is safety and runs whatever enabled() says.
 const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(tool === "Read" && insideScratchRoots(file, activeRoot, input))) { // ARCH-STATE-18 allows Read, Write and Edit scratch access; only Read is implemented: scratch Reads pass the scope and the ambiguity refusal
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(["Read", "Write", "Edit"].includes(tool) && insideScratchRoots(file, activeRoot, input))) { // ARCH-STATE-18: a scratch Read, Write or Edit passes the scope and the ambiguity refusal (NotebookEdit, Glob and Grep never); the checks below still judge a Write or Edit target
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
@@ -1954,12 +1954,13 @@ function bracketClass(body, any = "[^/]", literal = "") {
   try { new RegExp(cls); return cls; } catch { return literal ? "(?:" + any + "|" + literal + ")" : any; }
 }
 
-// ARCH-STATE-18 lets Read, Write and Edit take scratch evidence under the OS temp dir or $CLAUDE_JOB_DIR/tmp; only Read is implemented so far.
+// ARCH-STATE-18 lets Read, Write and Edit take scratch files under the OS temp dir or $CLAUDE_JOB_DIR/tmp (NotebookEdit, Glob and Grep never).
+// Passing here skips only the scope check and the ambiguous-scope refusal: protectedPaths, the doc-write guard and the self-protection of a Write or Edit target run after it.
 // Judged by the real path the OS resolves (a `..` after a symlink included), against EVERY active scope of the session, not the
 // one readScope happens to pick: a file whose real path lies inside any scope's root or the session checkout stays governed there, and a scratch
 // root that is, or encloses, any scope's root (a TMPDIR pointing at the home dir, at /, or holding a unit worktree) never
 // qualifies. A relative path, a file that does not exist and a root that cannot be resolved fail closed. The scopes are read only
-// for a target that really is under a scratch root, so an ordinary Read costs what it did before.
+// for a target that really is under a scratch root, so an ordinary Read, Write or Edit costs what it did before.
 function insideScratchRoots(target, project, hookInput) {
   if (typeof target !== "string" || !path.isAbsolute(target)) return false;
   let real;
