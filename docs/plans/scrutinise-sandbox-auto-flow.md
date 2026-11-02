@@ -5,7 +5,7 @@ level: feature
 parent: sandbox-auto-flow
 priority: P1
 classification: /scrutinise round 1 of sandbox-auto-flow (isolated scrutineer, 2026-11-02, ranges c41ad91..9e122b1, committed state 9e122b1)
-tracker_rows: [TRACKER#scratch-read-all-scopes, TRACKER#bracket-literal-fallback, TRACKER#init-gap-text, TRACKER#fixtures-no-upstream, TRACKER#followup-scratch-root-cache-names, TRACKER#followup-pre-guard-helper-layout]
+tracker_rows: [TRACKER#scratch-read-all-scopes, TRACKER#bracket-literal-fallback, TRACKER#init-gap-text, TRACKER#fixtures-no-upstream, TRACKER#followup-scratch-root-cache-names, TRACKER#followup-pre-guard-helper-layout, TRACKER#followup-e2e-loop-budget-trim, TRACKER#bypass-head-assignment, TRACKER#scratch-governed-coverage, TRACKER#origin-host-forms, TRACKER#followup-bracket-posix-classes, TRACKER#followup-round3-suggestions]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -19,6 +19,7 @@ coverage:
   observability: N/A(no new event or log; the sandbox_bypass event is unchanged)
   interface:     3.3, 3.4 (SessionStart gap line, /init text)
   docs:          1.5, 2.3 (cites), 1.6 (CHANGELOG), 3.4 (init.md)
+  round2:        5.1-5.2 (secret text never logged: contract is the sandbox_bypass event, one reader stats.mjs), 6.1-6.4 (security + tests: every governed root, mutation-checked), 7.1-7.2 (origin parsing)
   rollback:      one merge commit per unit; a revert restores the code and its cites together
 units:
   - id: 1
@@ -73,29 +74,73 @@ units:
       write: [scripts/auto-archive.test.mjs, scripts/repo-exec-approval.test.mjs]
     arch: []
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
+  - id: 5
+    scope_id: bypass-head-assignment
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs commandHead
+    language: javascript
+    security: normal
+    scope:
+      read: []   # pre-guard.mjs ~125 KB and pre-guard.test.mjs ~155 KB: grep -n "commandHead\|sandbox_bypass" first, read by range (ARCH-ENGINE-08); edit .mjs by exact-match splice
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: cite: line ranges only
+    arch: [ARCH-SAFETY-13, ARCH-STATE-18]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: 6
+    scope_id: scratch-governed-coverage
+    project: .
+    depends_on: [bypass-head-assignment]
+    module: scripts/pre-guard.mjs insideScratchRoots
+    language: javascript
+    security: high
+    scope:
+      read: []   # grep -n "insideScratchRoots\|scratchProject" first, read by range
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: cite: line ranges only
+    arch: [ARCH-STATE-18, ARCH-SAFETY-13]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: 7
+    scope_id: origin-host-forms
+    project: .
+    depends_on: []
+    module: scripts/lib/settings-merge.mjs originHostOf
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/lib/settings-merge.mjs, scripts/lib/settings-merge.test.mjs]
+      docs: [docs/architecture/safety.rules.md]
+      write: [scripts/lib/settings-merge.mjs, scripts/lib/settings-merge.test.mjs]
+    arch: [ARCH-SAFETY-04, ARCH-SAFETY-12]
+    tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
-# Plan: scrutinise sandbox-auto-flow (round 1)
+# Plan: scrutinise sandbox-auto-flow (rounds 1 and 2)
 
 ## Outcome
-A scoped Read of scratch evidence can never reach a file inside another active scope's root; the bracket fallback no longer lets a literal bracketed file name through; the SessionStart gap text and `/init` stop telling the model to edit settings the guard refuses; and the fixtures and rules cites match the merged code. Two acceptance criteria are open again (`.craftsman/acceptance.md`, scope-ambiguous-outside-read and "every unit: cites refreshed").
+A scoped Read of scratch evidence never reaches a file inside any active scope's root or the session checkout; the bracket fallback does not let a literal bracketed file name through; the SessionStart gap text, the origin-host parsing and the fixtures say what the merged code does; the sandbox-bypass log never carries any part of an assignment value; and the rules cites match the code. Round 1's four units are MERGED (47125f7, da1d703, 0923480, 46b7569); round 2 adds three.
 
-## Round 1 findings (isolated scrutineer, 0 Critical, 3 Warning, 8 Suggestion; Disputed: none)
+## Round 1 (history; the findings table is in git history, 35ed874)
+Isolated scrutineer, 0 Critical, 3 Warning, 8 Suggestion; all fixed by steps 1-4 except `followup-scratch-root-cache-names` and `followup-pre-guard-helper-layout`. The run also found `followup-e2e-loop-budget-trim`: two shipped autonomous-e2e-loop units sit within a few hundred bytes of the ARCH-ENGINE-08 budget, so growing `scope.mjs` or `CHANGELOG.md` fails `arch-check.test.mjs`.
+
+## Round 2 findings (isolated scrutineer, 2026-11-02, state 46b7569: 0 Critical, 2 Warning, 6 Suggestion kept, 1 Disputed)
 | id | class | sev | where | unit |
 |---|---|---|---|---|
-| W1 | Correctness (criterion UNMET) | Warning | safety.rules.md:18 ARCH-SAFETY-08 cites pre-guard.mjs:1120-1124; the 2 lines sandbox-bypass-stat added at 1123-1124 moved `docSide` to 1128 | 1 |
-| W2 | Architecture, ARCH-STATE-17 (criterion UNMET) | Warning | pre-guard.mjs:1130, :1767-1777 `insideScratchRoots` checks only `activeRoot`, which with an ambiguous scope is `scopes[0]` (scope.mjs:116, readdir order) | 1 |
-| W3 | Cross-unit | Warning | CHANGELOG.md:15 omits the scoped-Read loosening | 1 |
-| S1 | Correctness | Suggestion | init.md:96, settings-merge.mjs:139 tell the model to edit sandbox settings; pre-guard refuses (ARCH-SAFETY-05, now -13) | 3 |
-| S2 | Correctness | Suggestion | settings-merge.mjs:130 `excluded-malformed` misses an entry with no command word (plan step 3.1) | 3 |
-| S3 | Security | Suggestion | pre-guard.mjs:224, :266, :1756-1762 `bracketClass` fallback can turn a fail-closed crash into an allow | 2 |
-| S4 | Security | Suggestion | pre-guard.mjs:1772 scratch root is `os.tmpdir()`, all of /tmp when TMPDIR is unset | follow-up |
-| S5 | Cross-unit | Suggestion | pre-guard.mjs:1743-1777 helpers after the final `process.exit(0)`; enclosure logic repeated from scope.mjs:69-78 | follow-up |
-| S6 | Test-coverage | Suggestion | pre-guard.test.mjs:163-193 no TMPDIR-scope test; env row asserts exit 2 only | 1 |
-| S7 | Test-coverage | Suggestion | settings-merge.mjs:98 the 2 s git timeout is untested | 3 |
-| S8 | Test-coverage | Suggestion | auto-archive.test.mjs:107, repo-exec-approval.test.mjs:75 still `push -u` | 4 |
+| W1, W2, S1, S2 | Correctness, Test-coverage, Architecture | 2 Warning, 2 Suggestion | fixed: the `commandHead` value leak (criterion 319), the untested governed-root clause and the session checkout, the stale ARCH-STATE-18 comments, the origin host forms | 5, 6, 7 (042cfa1, 4751dbb, 953ad19) |
+| S3 | Security | Suggestion | pre-guard.mjs:224, :266, :1868-1871 `[[:alpha:]]`, `[]p]`, `[!]x]` still under-match with docPaths lacking `**` (pre-existing) | follow-up |
+| S4 | Cross-unit | Suggestion | network.mjs:122, :127, :156 and repo-exec.mjs:92 still write upstream config | existing `followup-set-upstream-writers` |
+| S5 | Architecture | Suggestion | init.md:95 "The user adds network domains" is wrong once ARCH-SAFETY-14 lands | phase 2 init unit |
 
-Acceptance verdicts: 7 MET (worktree-no-track x2, sandbox-gap-report x2, sandbox-bypass-stat, segmentre-range with a recorded deviation, init-doc-drift); 2 UNMET (W2, W1). Residual risk from the review: the `sandbox.network.allowedDomains` key and the `excludedCommands` semantics were not verified against Claude Code; the real TMPDIR of a hook may differ from the sandboxed shell's; a symlink swapped between check and read is not caught.
+Disputed (dropped): D1 `isPathGlob` exempts an absolute single-token path glob (`/tmp/*`). Counter-evidence: `excludedCommands` entries use the Bash(...) rule syntax and Claude Code matches the text of the call, so an absolute path with a wildcard is a legitimate pattern (https://code.claude.com/docs/en/sandboxing, "Claude Code matches the text of the call"); round 1 step 3.2 recorded the refinement and `settings-merge.test.mjs:179-192` keeps `/usr/local/bin/docker *` valid.
+
+Acceptance: `.craftsman/acceptance.md` 316 and 322 ticked (MET); 319 reopened by W1 and re-ticked in round 3; 327-334 MET.
+
+## Round 3 (isolated scrutineer, state 953ad19: 0 Critical, 0 Warning, 3 Suggestion; criterion 319 MET and ticked; no criterion open)
+No fix round. The floor was green at 953ad19 (1507 tests, lint 209 rules, doc-size). Persisted as one PENDING row, `followup-round3-suggestions`, for a later pass or the phase 2 init unit:
+- R3-S1 `settings-merge.mjs:94` `host:/srv/r.git` (no `user@`) still reads as null; make the user part optional and add the row at `settings-merge.test.mjs:131-139`. Matters once ARCH-SAFETY-14's init offer reads origin hosts (the host class also accepts `-evil` and `.`).
+- R3-S2 `settings-merge.mjs:93` `^[A-Za-z]:` is broader than step 7.2 first said (it also reads `C:r.git` and any one-letter host as a drive); intended and harmless, step 7.2 now says so; extend the comment.
+- R3-S3 `pre-guard.test.mjs:166-167` still cites ARCH-STATE-17 and "the Read tool alone"; reword in place (comment only).
+Recorded, not driven: `API_KEY= abc/Sk_live` logs `Sk_live` (by shell rules that word is the command); with only unit-worktree scopes a session started from a linked worktree does not govern the main checkout; a job dir inside the project turns its allowance off (fails closed); the runtime-only risks of round 2 (hook TMPDIR, symlink swap, hard links, case-insensitive realpath, `allowedDomains` semantics). A gitleaks hit on a made-up AWS-style fixture (`pre-guard.test.mjs:82`, step 5.1) was replaced by a placeholder (c18eb6d); the old string stays in 0ab50de and 8187ef3, not a credential.
 
 ## Scope Steps (executable core)
 
@@ -134,21 +179,45 @@ Depends on: none
 - [ ] 4.1 Drop `-u` from the `feature/p-f1` pushes at `scripts/auto-archive.test.mjs:107` and `scripts/repo-exec-approval.test.mjs:75`; leave the base-branch fixture pushes (:88, :56). If a test then fails because the code under test needs an upstream, that is a production gap (repo-exec no longer writes one): record it as a follow-up row, never restore `-u` → accept: `node --test scripts/auto-archive.test.mjs scripts/repo-exec-approval.test.mjs` exit 0 and `grep -n "push.*-u" scripts/auto-archive.test.mjs scripts/repo-exec-approval.test.mjs` shows no push of `feature/p-f1`
 - [ ] 4.2 Run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
 
+### Step 5 — bypass-head-assignment (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
+Depends on: none. Reopened criterion: acceptance 319 (sandbox-bypass-stat), which `/scrutinise` re-ticks once it is MET.
+- [ ] 5.1 Add RED rows beside `scripts/pre-guard.test.mjs:57-72`: a sandbox-bypass Bash call whose whole command is a bare assignment (`API_KEY=abc/Sk_live-123`, `TOKEN=a/b+c`, `AWS_SECRET_ACCESS_KEY=fake/abc+def`, and the first after a `cd /x && ` prefix) logs `head` "?", and the raw events file holds no fragment of any value; the docker rows stay → accept: the new rows fail on 46b7569 behaviour (head is the last segment)
+- [ ] 5.2 In `commandHead` (`pre-guard.mjs` ~1853) return "?" when the first word of the stripped command contains `=`, before the path split; edit in place so the function keeps its line count → accept: 5.1 green and `node --test scripts/pre-guard*.test.mjs` exit 0
+- [ ] 5.3 Re-point any rules cite whose `pre-guard.mjs` lines moved (cite text only; none expected) → accept: `node --test scripts/safety-cites.test.mjs scripts/safety-claims.test.mjs scripts/safety-docs.test.mjs` and `node scripts/arch-check.mjs lint` pass
+- [ ] 5.4 Run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+
+### Step 6 — scratch-governed-coverage (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
+Depends on: bypass-head-assignment (same file)
+- [ ] 6.1 Add rows to the scratch block (`scratchProject`): (a) a session scope with no worktree whose project root holds the TMPDIR (`<proj>/.tmp`), an off-list file there → Read exits 2; (b) a unit worktree with the scratch dir inside it, an off-list file → exits 2; (c) unit-worktree-only scopes with the TMPDIR inside the session checkout (`t.dir`), a file there → exits 2 → accept: (c) fails on 46b7569 behaviour (the session checkout is not governed); (a) and (b) pass on arrival and are proved by 6.4
+- [ ] 6.2 In `insideScratchRoots` (`pre-guard.mjs` ~1889) add the session checkout's real path (`PROJECT_ROOT`) to the governed set → accept: (c) green and the existing scratch rows still green
+- [ ] 6.3 Reword the comments at `pre-guard.mjs:1238` and ~1873 to say ARCH-STATE-18 allows Read, Write and Edit and only Read is implemented so far; keep their line counts → accept: no cite moves and `grep -n "Read tool alone" scripts/pre-guard.mjs` is empty
+- [ ] 6.4 Check each of (a), (b), (c) with one temporary mutation (remove the `dir !== real && !within(dir, real)` clause; remove the `PROJECT_ROOT` entry), show the row fail, restore → accept: each mutation turns its row red and the tree is clean after the restore
+- [ ] 6.5 Re-point any cite the unit moved (the ARCH-STATE-18 helper range; cite text only) → accept: lint and the three safety doc tests pass
+- [ ] 6.6 Run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+
+### Step 7 — origin-host-forms (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · skills test-driven-development · guards arch-check
+Depends on: none
+- [ ] 7.1 Add RED rows at `scripts/lib/settings-merge.test.mjs:122-128`: `originHostOf("C:\\srv\\r.git")` and `("D:/srv/r.git")` are null; `("git@git.example.com:/srv/r.git")` is `git.example.com`; the https, ssh and scp rows stay; `sandboxGaps` with origin `C:\srv\r.git` reports no network gap → accept: the new rows fail on 46b7569 behaviour
+- [ ] 7.2 In `originHostOf` (`settings-merge.mjs:87-95`) return null for `^[A-Za-z]:` (a drive path, a drive-relative path or a one-letter host) and accept `:/` after an explicit `user@host` → accept: 7.1 green and `node --test scripts/lib/settings-merge.test.mjs scripts/session-context.test.mjs` exit 0
+- [ ] 7.3 Run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0 (no rules doc is written: every cite into `settings-merge.mjs` is at lines 9-53, above the edit)
+
 ## Sequencing
 Run `/craftsman:merge` first: the Phase 2 rules docs (ARCH-STATE-18, ARCH-SAFETY-13/14/15, ARCH-AUTO-11, ARCH-LAND-34/35) and this plan must be on main, because steps 1 and 2 cite them. Then steps 1, 3 and 4 are independent (different files) and step 2 follows step 1 (same file, adjacent code). Each code unit refreshes the cites it moves (option B of the strategist's comparison: every merge leaves the rules correct and every revert is self-contained; a trailing cite unit would repeat what caused W1). The Phase 2 code plan edits the same files (`pre-guard.mjs`, `scope.mjs`, `settings-merge.mjs`): land this plan's units first and re-grep every line number in each unit, since the numbers below are from 9e122b1.
+
+Round 2: steps 5 and 7 are independent (different files); step 6 follows step 5 (same file). Each unit refreshes the cites it moves. None of them touches `scope.mjs` or `CHANGELOG.md`, so the ARCH-ENGINE-08 budgets of the shipped e2e-loop units (`followup-e2e-loop-budget-trim`) are not at risk; no changelog task is planned (the existing Fixed bullet names this area and has 2 spare bytes).
 
 ## Verification background   (citations — for the reviewer, not the executor)
 - `readScope` returns `scopes[0]` flagged ambiguous when no scope root contains the target and none is the lone session scope — `scripts/scope.mjs:98-119`; `insideScratchRoots` takes one project root — `scripts/pre-guard.mjs:1130`, `:1764-1777`.
 - W2 repro at 9e122b1: A inside the project, B under TMPDIR, `$TMPDIR/alias.ts` linked to `B/src/secret.ts` (not on B's read list); the Read exits 0 when A is listed first (2 of 4 runs), the direct path exits 2 — reviewer's reproduction, readdir order.
-- ARCH-SAFETY-08 cite — `docs/architecture/safety.rules.md:18` (`pre-guard.mjs:1120-1124`); `safetyEnabled` at :1122, the `sandbox_bypass` logEvent at :1124, `docSide` at :1128 (committed 9e122b1). `safety-cites.test.mjs:30-32` passes on `safetyEnabled` alone.
-- `state.rules.md` `verified_at: e56442b` at 9e122b1 predates the STATE-17 cite; the uncommitted Phase 2 frontmatter already sets it to 9e122b1.
-- S1: `commands/init.md:96`, `scripts/lib/settings-merge.mjs:139`; the refusal is ARCH-SAFETY-05 (`sandbox` is among the settings keys it guards; now ARCH-SAFETY-13). `init.md` is 4881 of 4890 bytes — `scripts/doc-size-policy.mjs:63`.
-- S2: plan step 3.1 asked for "an entry holding `, ` or no command word" — `docs/plans/sandbox-auto-flow.md:127`; code at `settings-merge.mjs:130`. Path-spelled commands are legitimate patterns: the sandboxing docs say "Claude Code matches the text of the call" and that `/usr/local/bin/docker` does not match an entry for `docker` — code.claude.com/docs/en/sandboxing (fetched 2026-11-01).
-- S3: `bracketClass` and its comment — `pre-guard.mjs:1756-1762`; callers `:224` (`segmentRe`), `:266` (`pathspecHit`). Reviewer's repro: `docPaths ["docs/plans/*.md"]`, file `docs/plans/L[a-1].md`, `rm` plain and quoted: exit 2 at c41ad91 ("could not decide"), exit 0 at 9e122b1; default `docPaths` use `**` and still block.
-- S7: `originUrl` timeout — `settings-merge.mjs:97-99`; no test names a timeout (grep of `settings-merge.test.mjs`).
-- S8: `scripts/auto-archive.test.mjs:107`, `scripts/repo-exec-approval.test.mjs:75`; the matching `repo-exec.test.mjs:827`, `:907` fixtures were already updated.
-- CHANGELOG `[Unreleased]` is 1995 bytes against an 8 KB cap — `scripts/changelog.test.mjs:11-17`; the bullet to edit is `CHANGELOG.md:15`.
+- Round 1's per-finding citations (W1, W3, S1-S3, S6-S8) are in git history (35ed874); steps 1-4 fixed all of them.
 - The size check counts whole files in `read` + `docs` (`scripts/arch-check.mjs:158-183`), so the 113 KB `pre-guard.mjs` and 153 KB test stay out of `read`; a Read of a file listed only under `write` is refused (`pre-guard.mjs:1139`), so they are read by range with Bash, as in sandbox-auto-flow.
+- Round 2, W1: the assignment-stripping regex `^[A-Za-z_][A-Za-z0-9_]*=[\w./:@+,-]*\s+` needs trailing whitespace, so a bare assignment reaches `split("/").pop()` — `scripts/pre-guard.mjs:1853-1862`; reproduced by running the committed function: `API_KEY=abc/Sk_live-123` gives `Sk_live-123`, `TOKEN=a/b+c` gives `b+c`.
+- Round 2, W2: the governed set is `[project, ...scope roots]` — `pre-guard.mjs:1885-1889`; the only enclosure row is `pre-guard.test.mjs:213` (the temp root enclosing the project). The reviewer deleted the clause in a copy and 346 tests stayed green; it also probed a main-checkout file under a TMPDIR nested in the checkout with unit-worktree-only scopes: exit 0.
+- Round 2, S2: the scp pattern forbids `:/` after the host (`(?!\/)`) — `settings-merge.mjs:93`; root probes: `C:\srv\r.git` gives `c`, `git@git.example.com:/srv/r.git` gives null.
+- Round 2, S4: `network.mjs:122` (`upstream` parameter), `:127` (stored on the entry), `:156` (`branch --set-upstream-to` at drain, live for legacy entries, untested) and `repo-exec.mjs:92` (`attachDetached`) belong to the existing PENDING row `followup-set-upstream-writers`.
 
 CONSUMERS:
 - `activeScopes` (new export, scope.mjs) → `scope.mjs` `readScope` and `pre-guard.mjs` only.
@@ -157,13 +226,18 @@ CONSUMERS:
 - `sandboxGaps`, `sandboxGapLine` (text only changes) → `scripts/session-context.mjs:19`, `:68`; tests `scripts/lib/settings-merge.test.mjs`, `scripts/session-context.test.mjs`.
 - Rules-doc cites into `pre-guard.mjs`, `scope.mjs` → read by `scripts/safety-cites.test.mjs` (HOLDS) and `arch-check.mjs lint`; cites live in `safety.rules.md` (:11, :13, :18, :23, :25), `state.rules.md` (:13, :19, :26, :28), `auto.rules.md` (:21).
 
+- Round 2: `commandHead` (internal) → `pre-guard.mjs:1232` only; `insideScratchRoots` (internal) → `pre-guard.mjs:1238` only; `originHostOf` → `settings-merge.mjs:124` (`sandboxGaps`) and its tests, `sandboxGaps` → `session-context.mjs:19`, `:68`; the `sandbox_bypass` event → `stats.mjs` only (its `head` field gets one more possible value, "?", which `sandboxBypassSection` already prints).
 ## Risk & rollback
 - Unit 1 narrows what a scoped Read may reach (never a file inside another scope's root) and touches `readScope`'s shape: its four consumers keep the same return value, asserted by 1.3. Revert the merge commit; the code and its cites revert together.
 - Unit 2 makes the hook deny more (a literal bracketed name under a `docPaths` pattern without `**`); revert independently of unit 1.
 - Units 3 and 4 change text and fixtures only (one added malformed-entry class in the advisory gap line). Revert the merge commit.
+
+- Round 2: step 5 changes one logged value (a leak removed). Step 6 narrows the scratch allowance further (the session checkout joins the governed set). Step 7 changes an advisory line's input. Each is one merge commit; revert independently.
 
 ## Out of scope
 - S4 `followup-scratch-root-cache-names`: limit the scratch allowance to Claude's per-user temp subdirectory, or extend `protectedPaths` (`/tmp/krb5cc_*` and similar). A decision for `/architect` (craftsman.config.json is governed by engine rules). Registered PENDING, not driven.
 - S5 `followup-pre-guard-helper-layout`: move `commandHead`, `bracketClass`, `insideScratchRoots` above the main flow and share one read-only-root helper with `insidePluginRoot`. A pure refactor that moves every pre-guard cite; run after steps 1 and 2 with its own full cite sweep. Registered PENDING, not driven.
 - Implementing ARCH-STATE-18's Write/Edit allowance and the rest of Phase 2 (queue protection, drain validation, init origin hosts): `/plan sandbox-auto-flow phase 2`.
 - For `/sync-docs`: `docs/plans/sandbox-auto-flow.md` has no acceptance section and its 16 step boxes are unticked; its acceptance lives in `.craftsman/acceptance.md:314-322`.
+- Round 2: S3 `followup-bracket-posix-classes` — ARCH-SAFETY-15 says a newly reported bypass spelling becomes a stated limit unless a model writes it in ordinary work: `/architect` records it in safety.md, or widens `bracketClass` for bodies that start with `]` or `!]` or contain `[:`. Not driven.
+- Round 2: S4 stays with `followup-set-upstream-writers` (its row should name `network.mjs:122,127,156` and `repo-exec.mjs:92`). S5: rewrite `commands/init.md:95` in the phase 2 init unit. CHANGELOG.md:15 lacks "protectedPaths still applies" (2 spare bytes against the shipped release-notes unit's budget).
