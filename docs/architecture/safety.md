@@ -65,6 +65,8 @@ uses stderr only, and Stop (which does show `systemMessage`) carries the same re
 ## Phase 2 amendments (2026-11-01, owner-approved)
 _Verified at `9e122b1`. Source: the "Open decision — phase 2" section of [sandbox-auto-flow](../plans/sandbox-auto-flow.md); `/idea` was skipped, and every claim there was checked against the code and the 2026-11-01 transcript sweep._
 
+**Status: decided, not yet implemented.** Today's code still lets a tool call write the network push queue, refuses a quoted heredoc that names a safety variable, expires every command record after an hour, offers no `allowedDomains` or `autoMode.allow` entry from `/init`, and drains whatever branch a queue entry names. Code: `/plan sandbox-auto-flow phase 2`.
+
 Unattended runs kept stopping for two reasons. First, the sandbox hides git credentials from root's network step. Second, the guards refuse harmless text. Root still runs fetch and drain outside the sandbox, but auto mode now has one explicit, user-approved entry for exactly that step. Drain refuses anything aimed at base, and its queue is protected the way approval records are. The text-scanning guards are now stated to be accident prevention. They narrow false positives where the text is provably inert, and they stop chasing unusual bypass spellings, because the boundary is the sandbox, not text matching.
 
 ```mermaid

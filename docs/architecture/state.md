@@ -81,5 +81,7 @@ ARCH-STATE-12 narrows the 18 Oct fail-closed choice, with the owner's approval. 
 ## Phase 2 amendments (2026-11-01, owner-approved)
 _Verified at `9e122b1`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The full table and diagram are in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
+**Status: ARCH-STATE-18 is decided; only its Read part is implemented.** A scoped Write or Edit to a scratch dir is still refused, as before. Code for the rest: `/plan sandbox-auto-flow phase 2`.
+
 - **ARCH-STATE-18** replaces 17: Write and Edit join Read for files whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. NotebookEdit, Glob and Grep stay refused, an enclosing root still rules a directory out, and `protectedPaths` still apply. Why: under a scope, this `/architect` run couldn't write a probe script to the job dir and had to put one in the repo root, while ARCH-SAFETY-01 already leaves outside-root writes to the sandbox. Rejected: keeping Read only, which means scratch scripts end up in the repo.
 - Two other decisions from this pass touch state but live elsewhere. The scope-required marker's lifetime is **ARCH-AUTO-11** ([auto.md](./auto.md)), and the command-record lifetime is part of **ARCH-SAFETY-13** ([safety.md](./safety.md)). They moved there so unit contexts that load `state.rules.md` stay inside the ARCH-ENGINE-08 budget.

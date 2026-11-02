@@ -77,6 +77,8 @@ ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and ext
 ## Phase 2 amendment (2026-11-01, owner-approved)
 _Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The diagram is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
+**Status: decided, not yet implemented.** ARCH-LAND-34: `drainQueue` still pushes or deletes whatever branch an entry names. ARCH-LAND-35: root's unsandboxed network step is today's behaviour; the `autoMode.allow` entry and the classifier-refusal path are not built. Code: `/plan sandbox-auto-flow phase 2`.
+
 - **ARCH-LAND-34**: root's drain checks every queue entry before it touches origin.
   - **What passes:** a push goes only to a `feat/` or `feature/` branch, never base or the plan's target branch. A delete only removes a `feat/` unit branch.
   - **Anything else** is logged as `drain_refused` and PARKs like a rejected push.
