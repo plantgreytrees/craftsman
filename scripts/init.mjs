@@ -5,8 +5,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { checkDocSizes } from "./doc-size-policy.mjs";
 import { DEFAULT_DIR, loadRules, unmanagedDocs } from "./arch-check.mjs";
-import { mergeSettings, renderSettingsDiff } from "./lib/settings-merge.mjs";
-import { isMain, loadConfig } from "./lib/core.mjs";
+import { defaultUserDir, mergeSettings, mergeUserSettings, originHostOf, originUrl, projectSettingsBlock, renderSettingsDiff } from "./lib/settings-merge.mjs";
+import { isMain, loadConfig, loadWorkspaceManifest } from "./lib/core.mjs";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultsPath = path.join(pluginRoot, "craftsman.config.json");
@@ -475,11 +475,19 @@ export function applyInitPlan(plan) {
   return result;
 }
 
+// The origin host of each registered project (ARCH-SAFETY-16): the current project and every initialised project of the workspace
+// manifest, de-duplicated. A project with no origin, a slow git (2 s limit) or an unusable manifest adds nothing and fails open.
+export function originHostsOf(root) {
+  const roots = [root];
+  try { for (const project of Object.values(loadWorkspaceManifest()?.projects ?? {})) if (project.initialized !== false) roots.push(project.root); } catch { /* an unusable manifest: the current project alone */ }
+  return [...new Set(roots.map((dir) => originHostOf(originUrl(dir))).filter(Boolean))];
+}
+
 // The sandbox settings block (ARCH-SAFETY-10): previewed first, merged into .claude/settings.json without
 // overwriting anything, and only written when asked. The old file is backed up like every other init write.
 export function previewSandboxSettings(root) {
   const file = path.join(root, ".claude", "settings.json");
-  const result = mergeSettings(textAt(file));
+  const result = mergeSettings(textAt(file), projectSettingsBlock(originHostsOf(root)));
   return { file, result, diff: renderSettingsDiff(result) };
 }
 export function applySandboxSettings(root) {
@@ -499,11 +507,64 @@ export function applySandboxSettings(root) {
   return { ...preview, written: true, backup };
 }
 
+// The user-scope offer (ARCH-SAFETY-16), apart from the project block: one autoMode.allow entry in <CLAUDE_CONFIG_DIR or ~/.claude>/settings.json.
+export function previewUserSettings(userDir = defaultUserDir()) {
+  const file = path.join(userDir, "settings.json");
+  let text = null;
+  try { text = textAt(file); } catch (error) {
+    const result = { ok: false, error: `${file} cannot be read (${error.message})` };
+    return { file, result, diff: result.error };
+  }
+  const result = mergeUserSettings(text, file);
+  return { file, result, diff: renderSettingsDiff(result) };
+}
+// The old file is copied to <root>/.craftsman/init-backups/<ts>/user/settings.json first. The file keeps its mode (a new one is 0600:
+// user settings can hold tokens) and a symlinked settings.json stays a link. A write the file mode or the sandbox refuses does not
+// throw: it comes back as `failed`, so the caller can print the path and the diff.
+export function applyUserSettings(root, userDir = defaultUserDir()) {
+  const preview = previewUserSettings(userDir);
+  if (!preview.result.ok) throw new Error(preview.result.error);
+  if (!preview.result.changed) return { ...preview, written: false, backup: null, failed: null };
+  let backup = null;
+  let temp = null;
+  try {
+    const existing = fs.existsSync(preview.file);
+    const target = existing ? fs.realpathSync(preview.file) : preview.file;
+    if (existing) {
+      backup = path.join(root, ".craftsman", "init-backups", new Date().toISOString().replaceAll(/[:.]/g, "-"), "user", "settings.json");
+      fs.mkdirSync(path.dirname(backup), { recursive: true });
+      fs.copyFileSync(target, backup);
+    }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    temp = `${target}.${process.pid}.init.tmp`;
+    const mode = existing ? fs.statSync(target).mode & 0o777 : 0o600;
+    fs.writeFileSync(temp, preview.result.next, { mode });
+    fs.chmodSync(temp, mode); // the umask can only have narrowed it
+    fs.renameSync(temp, target);
+  } catch (error) {
+    try { if (temp) fs.rmSync(temp, { force: true }); } catch { /* nothing to remove */ }
+    return { ...preview, written: false, backup, failed: error.message };
+  }
+  return { ...preview, written: true, backup, failed: null };
+}
+
 if (isMain(import.meta.url)) {
   try {
     const args = new Set(process.argv.slice(2));
-    const modes = ["--check", "--diff", "--write", "--update", "--settings-diff", "--settings-write"].filter((mode) => args.has(mode));
-    if (modes.length > 1) throw new Error("choose only one of --check, --diff, --write, --update, --settings-diff or --settings-write");
+    const modes = ["--check", "--diff", "--write", "--update", "--settings-diff", "--settings-write", "--user-settings-diff", "--user-settings-write"].filter((mode) => args.has(mode));
+    if (modes.length > 1) throw new Error("choose only one of --check, --diff, --write, --update, --settings-diff, --settings-write, --user-settings-diff or --user-settings-write");
+    if (modes[0] === "--user-settings-diff") {
+      const { result, diff } = previewUserSettings();
+      if (!result.ok) throw new Error(result.error);
+      process.stdout.write(diff + "\n");
+      process.exit(0);
+    }
+    if (modes[0] === "--user-settings-write") {
+      const done = applyUserSettings(process.cwd());
+      if (done.failed) throw new Error(`could not write ${done.file} (${done.failed}); nothing was changed there. The entry it would have added:\n${done.diff}`);
+      process.stdout.write((done.written ? `wrote ${done.file}${done.backup ? ` (previous copy: ${done.backup})` : ""}\n${done.diff}` : done.diff) + "\n");
+      process.exit(0);
+    }
     if (modes[0] === "--settings-diff" || modes[0] === "--settings-write") {
       const root = process.cwd();
       if (modes[0] === "--settings-diff") {
