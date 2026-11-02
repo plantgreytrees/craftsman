@@ -127,6 +127,29 @@ test("originHostOf: reads the host from https, ssh and scp-style remote URLs, an
   for (const none of ["", null, undefined, "/srv/git/r.git", "../r.git", "file:///srv/r.git"]) assert.equal(sm.originHostOf(none), null, String(none));
 });
 
+// S2 (scrutinise-sandbox-auto-flow round 2): a Windows drive path is no host:path remote, and the scp form may carry an absolute path.
+test("originHostOf: a Windows drive path has no host, and git@host:/absolute/path reads its host", () => {
+  for (const none of ["C:\\srv\\r.git", "c:\\r.git", "D:/srv/r.git", "C:r.git"]) assert.equal(sm.originHostOf(none), null, none);
+  assert.equal(sm.originHostOf("git@git.example.com:/srv/r.git"), "git.example.com");
+  assert.equal(sm.originHostOf("deploy@Git.Example.com:/srv/r.git"), "git.example.com");
+  // the existing forms are unchanged
+  assert.equal(sm.originHostOf("git@github.com:o/r.git"), "github.com");
+  assert.equal(sm.originHostOf("https://github.com/o/r.git"), "github.com");
+  for (const none of ["/srv/git/r.git", "../r.git", "file:///srv/r.git"]) assert.equal(sm.originHostOf(none), null, none);
+});
+
+test("sandboxGaps: a drive-path origin is no network gap, and an scp origin with an absolute path is one when its host is missing", () => {
+  const s = scopes();
+  try {
+    s.put(path.join(s.dirs.user, "settings.json"), { sandbox: { enabled: true } });
+    const gapsFor = (origin) => sm.sandboxGaps({ root: s.dirs.root, userDir: s.dirs.user, managedDirs: [s.dirs.managed], origin });
+    assert.deepEqual(gapsFor("C:\\srv\\r.git").map((g) => g.gap), [], "a path is not a host");
+    const scp = gapsFor("git@git.example.com:/srv/r.git");
+    assert.deepEqual(scp.map((g) => g.gap), ["network"]);
+    assert.match(scp[0].detail, /^git\.example\.com is not in sandbox\.network\.allowedDomains/);
+  } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
+});
+
 test("sandboxGaps: none when the sandbox is off everywhere, whatever else is missing", () => {
   const s = scopes();
   try {
