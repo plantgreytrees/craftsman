@@ -20,6 +20,8 @@ export const SELF_NEVER = Object.freeze([
   ".craftsman/sessions/**/scope*", ".craftsman/sessions/**/*worktree-binding*",
   // The approval record gateFeature and runLanded trust: approval.mjs and repo-exec.mjs write it from their own process, so a forged one would pass the gate.
   ".craftsman/approvals/**",
+  // The network push queue in the git common dir (repo-exec's enqueuePush is its only writer): root's unattended drain pushes what it holds with the user's credentials, so a forged entry must not reach it (ARCH-SAFETY-13, ARCH-LAND-36).
+  "**/.git/.craftsman/network/**",
   // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
   "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
   // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git

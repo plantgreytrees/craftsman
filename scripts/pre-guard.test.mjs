@@ -163,8 +163,8 @@ test("pre-guard: a reversed bracket range is also read as the literal file name,
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ARCH-STATE-17: under an active unit scope the Read tool alone may read scratch evidence under the OS temp dir or
-// $CLAUDE_JOB_DIR/tmp, judged by real path; everything else keeps the scope's closed allow-list.
+// ARCH-STATE-18: under an active unit scope the Read, Write and Edit tools (never Glob, Grep or NotebookEdit) may reach a file under the OS
+// temp dir or $CLAUDE_JOB_DIR/tmp, judged by real path; everything else keeps the scope's closed allow-list.
 function scratchProject() {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scratch-")));
   const dir = path.join(base, "proj");
@@ -201,7 +201,7 @@ test("pre-guard: a scoped Read of scratch evidence under the temp dir or the job
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
-test("pre-guard: scratch Reads stay narrow: writes, Glob, Grep, other dirs, symlink escapes, env files and an enclosing temp root are refused", () => {
+test("pre-guard: scratch Reads stay narrow: NotebookEdit, Glob, Grep, other dirs, symlink escapes, env files and an enclosing temp root are refused", () => {
   const t = scratchProject();
   try {
     const tmp = path.join(t.base, "tmp");
@@ -217,8 +217,6 @@ test("pre-guard: scratch Reads stay narrow: writes, Glob, Grep, other dirs, syml
     t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
     t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
     const refused = (what, got) => assert.equal(got.status, 2, `${what} should be refused: ${got.stderr}`);
-    refused("Write", t.call("Write", { file_path: path.join(tmp, "new.txt"), content: "x" }));
-    refused("Edit", t.call("Edit", { file_path: path.join(tmp, "shot.png"), old_string: "a", new_string: "b" }));
     refused("NotebookEdit", t.call("NotebookEdit", { notebook_path: path.join(tmp, "n.ipynb"), new_source: "x" }));
     refused("Glob", t.call("Glob", { pattern: "*", path: tmp }));
     refused("Grep", t.call("Grep", { pattern: "x", path: tmp }));
@@ -318,6 +316,173 @@ test("pre-guard: with no scope active, the required-scope refusal still covers s
     const got = t.read(path.join(t.base, "tmp", "shot.png"));
     assert.equal(got.status, 2);
     assert.match(got.stderr, /requires an active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// ARCH-STATE-18 (guard-paths): Write and Edit join Read, so one insideScratchRoots judges all three and the clauses the Read rows above prove
+// (the real path, every active scope, the session checkout, a root that cannot be resolved) hold for the two writers as well. A file that
+// does not exist has no real path, so a Write that would create one is refused, as a Read of a missing file is.
+const WRITERS = [
+  ["Write", (file) => ({ file_path: file, content: "x" })],
+  ["Edit", (file) => ({ file_path: file, old_string: "a", new_string: "b" })],
+];
+// Both writers' verdicts on one file, so a red run names each writer that disagrees, with the reason the guard gave.
+function expectWriters(t, file, status, what, extra) {
+  const got = {}, why = [];
+  for (const [tool, make] of WRITERS) {
+    const result = t.call(tool, make(file), extra);
+    got[tool] = result.status;
+    if (result.status !== 0) why.push(`${tool}: ${result.stderr.trim().split("\n")[0]}`);
+  }
+  assert.deepEqual(got, { Write: status, Edit: status }, `${what}${why.length ? ` (${why.join(" | ")})` : ""}`);
+}
+
+test("pre-guard: a scoped Write and Edit of a scratch file under the temp dir or the job dir pass, with one scope or several", () => {
+  const t = scratchProject();
+  try {
+    const shot = path.join(t.base, "tmp", "shot.png"), log = path.join(t.base, "job", "tmp", "run.log");
+    fs.writeFileSync(shot, "png");
+    fs.writeFileSync(log, "log");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    expectWriters(t, shot, 0, "one scope, the temp dir");
+    expectWriters(t, log, 0, "the job dir's tmp");
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    expectWriters(t, shot, 0, "two scopes, past the ambiguous-scope refusal too");
+    for (const [tool, make] of WRITERS) {
+      const inside = t.call(tool, make(path.join(t.dir, "src", "a.ts")));
+      assert.equal(inside.status, 2, `${tool}: a file inside the project is still governed by the scopes`);
+      assert.match(inside.stderr, /more than one active project scope/);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: NotebookEdit, Glob and Grep stay outside the scratch allowance while Write and Edit pass it", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.writeFileSync(path.join(tmp, "n.ipynb"), "{}");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    expectWriters(t, path.join(tmp, "shot.png"), 0, "control: the writers pass under the same scope");
+    for (const [what, got] of [["NotebookEdit", t.call("NotebookEdit", { notebook_path: path.join(tmp, "n.ipynb"), new_source: "x" })],
+      ["Glob", t.call("Glob", { pattern: "*", path: tmp })], ["Grep", t.call("Grep", { pattern: "x", path: tmp })]]) {
+      assert.equal(got.status, 2, `${what} of an existing scratch path should be refused: ${got.stderr}`);
+      assert.match(got.stderr, /outside active unit scope/, `${what} is refused by the scope itself`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: scratch Writes and Edits stay narrow: other dirs, symlink escapes, a missing or relative path, env files and an enclosing temp root are refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.writeFileSync(path.join(tmp, ".env"), "K=v");
+    fs.mkdirSync(path.join(t.base, "other", "sub"));
+    fs.writeFileSync(path.join(t.base, "other", "secret.txt"), "s");
+    fs.writeFileSync(path.join(t.base, "other", "private.txt"), "p");
+    fs.writeFileSync(path.join(tmp, "private.txt"), "decoy");
+    fs.symlinkSync(path.join(t.base, "other", "sub"), path.join(tmp, "link"));
+    fs.symlinkSync(path.join(t.base, "other", "secret.txt"), path.join(tmp, "secret-link.txt"));
+    fs.writeFileSync(path.join(t.base, "job", "notes.txt"), "n");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    expectWriters(t, path.join(tmp, "shot.png"), 0, "control: the scratch file itself passes with two scopes");
+    expectWriters(t, path.join(t.base, "other", "secret.txt"), 2, "another directory");
+    expectWriters(t, path.join(t.base, "job", "notes.txt"), 2, "the job dir outside its tmp");
+    expectWriters(t, path.join(tmp, "secret-link.txt"), 2, "a symlinked file");
+    // The OS resolves link/.. to the symlink target's parent (other/), not to tmp/: written as text, never normalised.
+    expectWriters(t, `${tmp}/link/../private.txt`, 2, "a symlink followed by ..");
+    expectWriters(t, path.join(tmp, "shot.png"), 2, "a temp root that encloses the project", { TMPDIR: t.base });
+    expectWriters(t, path.join(tmp, "new.txt"), 2, "a file that does not exist");
+    expectWriters(t, path.relative(t.dir, path.join(tmp, "shot.png")), 2, "a relative path, though it names the scratch file from the working directory");
+    for (const [tool, make] of WRITERS) {
+      const none = t.call(tool, { ...make("x"), file_path: undefined });
+      assert.equal(none.status, 2, `${tool} with no path: ${none.stderr}`);
+    }
+    for (const [tool, make] of WRITERS) {
+      const envFile = t.call(tool, make(path.join(tmp, ".env")));
+      assert.equal(envFile.status, 2, `${tool} of an env file should be refused: ${envFile.stderr}`);
+      assert.match(envFile.stderr, /is a protected path/, `${tool}: the allowance passes an env file on to protectedPaths, which names it; a refusal by the ambiguous-scope check would not`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// Each row proves one clause of insideScratchRoots for the writers: a scope root under the temp dir, the active root, a unit worktree, the session checkout.
+test("pre-guard: a scratch Write or Edit never reaches a file inside a governed root, whichever root it is", () => {
+  let t = scratchProject();
+  try { // another active scope's worktree sits under the temp dir
+    const tmp = path.join(t.base, "tmp");
+    const bWorktree = path.join(tmp, "b-wt");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", bWorktree);
+    fs.mkdirSync(path.join(bWorktree, "src"), { recursive: true });
+    fs.writeFileSync(path.join(bWorktree, "src", "a.ts"), "listed");
+    fs.writeFileSync(path.join(bWorktree, "src", "secret.ts"), "not on the write list");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.symlinkSync(path.join(bWorktree, "src", "secret.ts"), path.join(tmp, "alias.ts"));
+    expectWriters(t, path.join(tmp, "alias.ts"), 2, "a symlink under the temp dir into scope B's tree, off B's write list");
+    expectWriters(t, path.join(bWorktree, "src", "secret.ts"), 2, "the direct path is refused by B's write list");
+    expectWriters(t, path.join(bWorktree, "src", "a.ts"), 0, "a file on B's write list still writes, B governs it");
+    expectWriters(t, path.join(tmp, "shot.png"), 2, "with a scope root under the temp dir the scratch allowance is off, the ambiguous-scope refusal stands");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // the active root: a scratch dir inside the session scope's project root
+    const session = { session_id: "scratch", plan: "docs/plans/x.md", unit: "u-session", project: ".", scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    assert.equal(run(SCOPE, t.dir, session, t.env).status, 0);
+    const tmp = path.join(t.dir, ".tmp");
+    expectWriters(t, offListFile(tmp), 2, "a file under the project is the scope's, scratch dir or not", { TMPDIR: tmp });
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // a unit worktree
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    const tmp = path.join(worktree, ".tmp");
+    expectWriters(t, offListFile(tmp), 2, "a file under the unit's worktree is the unit's scope, scratch dir or not", { TMPDIR: tmp });
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // the session checkout, with only unit-worktree scopes
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const tmp = path.join(t.dir, ".tmp");
+    expectWriters(t, offListFile(tmp), 2, "the session checkout is outside every unit worktree, scratch dir or not", { TMPDIR: tmp });
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the checks after the scope still judge a scratch Write or Edit: protectedPaths, the doc-write guard and hooks.json", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "note.txt"), "n");
+    fs.writeFileSync(path.join(tmp, "note.md"), "# n");
+    fs.writeFileSync(path.join(tmp, ".env"), "K=v");
+    fs.mkdirSync(path.join(tmp, "hooks"));
+    fs.writeFileSync(path.join(tmp, "hooks", "hooks.json"), "{}");
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    // the unit's own root is the active root, so its config is the one the guard reads
+    fs.writeFileSync(path.join(worktree, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["**/*.md"] } }));
+    expectWriters(t, path.join(tmp, "note.txt"), 0, "control: a scratch file no later check names");
+    const later = [[path.join(tmp, ".env"), /is a protected path/], [path.join(tmp, "note.md"), /docWriteGuard\.docPaths/], [path.join(tmp, "hooks", "hooks.json"), /editing .*hooks\.json/]];
+    for (const [file, message] of later) {
+      for (const [tool, make] of WRITERS) {
+        const got = t.call(tool, make(file));
+        assert.equal(got.status, 2, `${tool} ${path.basename(file)}: ${got.stderr}`);
+        assert.match(got.stderr, message, `${tool} ${path.basename(file)}`);
+      }
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: with no scope active, the required-scope refusal still covers scratch Writes and Edits", () => {
+  const t = scratchProject();
+  try {
+    fs.writeFileSync(path.join(t.base, "tmp", "shot.png"), "png");
+    assert.equal(run(SCOPE, t.dir, { action: "require", session_id: "scratch" }, t.env).status, 0);
+    for (const [tool, make] of WRITERS) {
+      const got = t.call(tool, make(path.join(t.base, "tmp", "shot.png")));
+      assert.equal(got.status, 2, tool);
+      assert.match(got.stderr, /requires an active unit scope/, tool);
+    }
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
