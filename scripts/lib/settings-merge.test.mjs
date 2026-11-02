@@ -174,6 +174,58 @@ test("sandboxGaps: an excludedCommands entry that is a comma-separated path list
   } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
 });
 
+// S2 (scrutinise-sandbox-auto-flow): plan step 3.1 also asked for an entry with no command word. A single-token path glob is that; a path-spelled
+// command is not: Claude Code matches the text of the call, so `/usr/local/bin/docker *` and `./gradlew build` are legitimate patterns.
+test("sandboxGaps: a single-token path glob in excludedCommands is malformed, a path-spelled command is not", () => {
+  const s = scopes();
+  try {
+    const malformed = (entries) => {
+      s.put(path.join(s.dirs.user, "settings.json"), { sandbox: { enabled: true, excludedCommands: entries } });
+      return sm.sandboxGaps({ root: s.dirs.root, userDir: s.dirs.user, managedDirs: [s.dirs.managed], origin: null }).filter((g) => g.gap === "excluded-malformed").map((g) => g.detail);
+    };
+    const bad = ["src/**", "build/", "./out/*"];
+    const found = malformed(bad);
+    assert.equal(found.length, bad.length, `reported: ${found.join(" | ")}`);
+    for (const entry of bad) assert.ok(found.some((detail) => detail.includes(JSON.stringify(entry))), `${entry} is reported`);
+    assert.deepEqual(malformed(["docker *", "docker compose *", "/usr/local/bin/docker *", "/usr/local/bin/docker", "./gradlew build", "npm run *"]), []);
+  } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
+});
+
+// S1: the gap line is read by the model, which cannot edit the sandbox settings (pre-guard refuses it, ARCH-SAFETY-13): it asks the user.
+test("sandboxGapLine and the docker gap tell the model to ask the user, and say what an exclusion does", () => {
+  const s = scopes();
+  try {
+    fs.writeFileSync(path.join(s.dirs.root, "compose.yaml"), "services: {}\n");
+    s.put(path.join(s.dirs.user, "settings.json"), { sandbox: { enabled: true } });
+    const gaps = sm.sandboxGaps({ root: s.dirs.root, userDir: s.dirs.user, managedDirs: [s.dirs.managed], origin: null });
+    const docker = gaps.find((g) => g.gap === "docker");
+    assert.ok(docker, "a compose file with no docker entry is a gap");
+    assert.match(docker.detail, /an excludedCommands entry runs docker outside the sandbox/);
+    const line = sm.sandboxGapLine(gaps);
+    assert.match(line, /ask the user to add them to the sandbox settings\.$/);
+    assert.doesNotMatch(line, /; add them to the sandbox/);
+  } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
+});
+
+// Criterion 4 of sandbox-auto-flow promised a 2 s limit on the git lookup that SessionStart runs: a git that hangs must not stall it.
+test("sandboxGaps: a git that hangs is cut off after about two seconds, with no network gap and no throw", () => {
+  const s = scopes();
+  const savedPath = process.env.PATH;
+  try {
+    const bin = path.join(s.base, "bin");
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "git"), "#!/bin/sh\nexec sleep 5\n", { mode: 0o755 });
+    s.put(path.join(s.dirs.user, "settings.json"), { sandbox: { enabled: true } });
+    process.env.PATH = `${bin}${path.delimiter}${savedPath}`;
+    const started = Date.now();
+    let gaps;
+    assert.doesNotThrow(() => { gaps = sm.sandboxGaps({ root: s.dirs.root, userDir: s.dirs.user, managedDirs: [s.dirs.managed] }); });
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 4000, `the lookup returned after ${elapsed} ms, not the 5 s the stub sleeps`);
+    assert.equal(gaps.some((g) => g.gap === "network"), false, "no origin could be read, so no network gap");
+  } finally { process.env.PATH = savedPath; fs.rmSync(s.base, { recursive: true, force: true }); }
+});
+
 test("sandboxGaps: looks the origin up with git when none is given, and a broken scope file never throws", () => {
   const s = scopes();
   try {
