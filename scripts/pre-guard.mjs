@@ -456,13 +456,13 @@ const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWi
 // Text the tokenizer rejects (a `(`, `((`, a function, a case or a `${ cmd; }`) can still reach git only through a `git` word, a backtick, a shell or `source` that runs
 // a string, an `env -S` string (a command line), or a `$` or glob word where a command starts: after ; & | ( ) a newline or a lone { or }, behind keywords, assignments, wrappers, their options
 // and redirections (a quoted or escaped word keeps the scan going). Arithmetic itself runs no command (a value it reads may expand a substitution, `x='a[$(cmd)]'; (( x ))`,
-// but that text is scanned where the value is set), so a `((…))` or `$((…))` holding no substitution, quote or escape reads as `:` or `0` first. Text that cannot reach git leaves the gate shut (`for (( i=0; i<$n; i++ ))`); text that can fails closed.
+// but that text is scanned where the value is set), so a `((…))` or `$((…))` holding no substitution (`$(`, a backtick, a current-shell `${ `), quote or escape reads as `:` or `0` first. Text that cannot reach git leaves the gate shut (`for (( i=0; i<$n; i++ ))`); text that can fails closed.
 const blankArith = (t) => {
   let out = "", p = 0;
   for (let n = 0, i = t.indexOf("(("); i >= 0 && n < 256; i = t.indexOf("((", p), n++) {
     const j = matchParen(t, i);
     if (j < 0) break;
-    const dollar = t[i - 1] === "$", arith = matchParen(t, i + 1) === j - 1 && !/\$\(|[`'"\\]/.test(t.slice(i + 2, j - 1));
+    const dollar = t[i - 1] === "$", arith = matchParen(t, i + 1) === j - 1 && !/\$\(|\$\{[\s|]|[`'"\\]/.test(t.slice(i + 2, j - 1));
     out += arith ? t.slice(p, dollar ? i - 1 : i) + (dollar ? "0" : ":") : t.slice(p, j + 1);
     p = j + 1;
   }
@@ -481,15 +481,62 @@ const leadDyn = (seg) => {
   return false;
 };
 const mayReachGit = (t, gitWord = true) => (gitWord && /\bgit\b/.test(t)) || /`|\b(?:sh|bash|zsh|dash|ksh|source)\b|(?:^|[\s;&|(])\.\s/.test(t) || blankArith(t).split(/[;&|\n()]|(?<![^\s;&|()])[{}](?![^\s;&|()])/).some(leadDyn);
-// Text that only arithmetic makes unreadable (`(( n++ ))`) is read again with each plain `((…))` as `:` (blankArith): its git words are judged as if a config
-// name were set (the blanked arithmetic may have held `(( HOME = 1 ))`), so only a built-in subcommand passes, and every other way to reach git (mayReachGit
-// without its plain `git` word) still fails closed. Other unreadable text fails closed when it can reach git.
+// The text bash evaluates as arithmetic: `((…))`, `$((…))`, `$[…]`, a subscript `a[…]`, a `${x:…}` offset or length, the rest of a `let` command, a `[[ … ]]`
+// test holding -eq, -ne, -lt, -le, -gt or -ge, and the whole text once an integer attribute is set (declare -i). One linear pass with arithDyn's bracket stack.
+const arithText = (t) => {
+  if (t.split(/[;&|\n]/).some(intAttr)) return t;
+  const open = [];
+  let out = "", arith = 0, inLet = false, cond = -1;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i], top = open[open.length - 1];
+    if (top?.param && !/[\w#!@*[]/.test(c) && !(i === top.at && /[-$?]/.test(c))) { top.param = false; if (c === ":" && !/[-=+?]/.test(t[i + 1] ?? "")) { top.arith = true; arith++; } }
+    if (arith > 0 || inLet) out += c;
+    if (arith === 0) {
+      if (/[;&|\n]/.test(c)) inLet = false;
+      else if (c === "l" && t.startsWith("let", i) && /^[\s;&|({!`]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 3] ?? "")) inLet = true;
+    }
+    if (c === "[" && t[i + 1] === "[" && cond < 0 && /^[\s;&|(!]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 2] ?? "")) { cond = i + 2; i++; continue; }
+    if (c === "]" && t[i + 1] === "]" && cond >= 0) { const body = t.slice(cond, i); if (/\s-(?:eq|ne|lt|le|gt|ge)\b/.test(body)) out += " " + body; cond = -1; i++; continue; }
+    if (c === "(" || c === "[" || c === "{") {
+      const a = c === "(" ? t[i + 1] === "(" : c === "[" && /[\w$]/.test(t[i - 1] ?? "");
+      open.push({ arith: a, param: c === "{" && t[i - 1] === "$", at: i + 1 });
+      if (a) arith++;
+    } else if ((c === ")" || c === "]" || c === "}") && open.length && open.pop().arith) arith--;
+  }
+  return out;
+};
+// Names whose value comes from outside the text: read, mapfile and readarray (every name-like word after them, REPLY, MAPFILE), getopts (and OPTARG), and
+// for or select over a list holding a `$`, backtick or glob, or over the positional parameters; a name assigned from one of them inherits it. Arithmetic
+// evaluates a value it reads, and a `$(…)` in an array subscript there runs (`a[$(cmd)]`), so arithmetic that reads such a name may run a command the
+// text never shows. Linear: one pass per simple command, then a bounded fixpoint over the assignments that read a name.
+const readArith = (t) => {
+  const segs = t.split(/[;&|\n]/), names = new Set();
+  for (const s of segs) {
+    const m = /\b(read|mapfile|readarray|getopts)\b/.exec(s);
+    if (m) { for (const w of s.slice(m.index + m[0].length).match(/[A-Za-z_]\w*/g) ?? []) names.add(w); names.add({ read: "REPLY", getopts: "OPTARG" }[m[1]] ?? "MAPFILE"); }
+    const f = /\b(?:for|select)\s+([A-Za-z_]\w*)(?:\s+in\b(.*))?/.exec(s);
+    if (f && (f[2] === undefined || /[$`*?[]/.test(f[2]))) names.add(f[1]);
+  }
+  if (!names.size) return false;
+  const flows = segs.map((s) => ({ refs: (s.match(/\$\{?[A-Za-z_]\w*/g) ?? []).map((r) => r.replace(/^\$\{?/, "")), sets: [...s.matchAll(/(?:^|\s)([A-Za-z_]\w*)(?:\[[^\][]*\])?\+?=|\s-v\s*([A-Za-z_]\w*)/g)].map((x) => x[1] ?? x[2]) })).filter((x) => x.refs.length && x.sets.length);
+  let grew = true;
+  for (let k = 0; grew && k < 16; k++) { grew = false; for (const x of flows) if (x.refs.some((r) => names.has(r))) for (const n of x.sets) if (!names.has(n)) { names.add(n); grew = true; } }
+  if (grew) return true; // a longer chain than the bound: fail closed
+  return (arithText(t).match(/[A-Za-z_]\w*/g) ?? []).some((n) => names.has(n));
+};
+// Bash joins a backslash-newline before it reads a word, so every hint reads that joined text as well as the raw one. A current-shell substitution, or
+// arithmetic reading a value from outside the text (readArith), fails closed whenever the text can reach git. Text that only arithmetic makes unreadable
+// (`(( n++ ))`) is read again with each plain `((…))` as `:` (blankArith): its git words are judged as if a config name were set (the blanked arithmetic
+// may have held `(( HOME = 1 ))`), so only a built-in subcommand passes, and every other way to reach git (mayReachGit without its plain `git` word) still
+// fails closed. Other unreadable text fails closed when it can reach git.
 const configIndirectGit = (t) => {
-  if (!CONFIG_INDIRECT.test(t) && !dynNameHint(t)) return false;
+  const j = t.includes("\\\n") ? t.replace(/\\\n/g, "") : t, both = (f) => f(t) || (j !== t && f(j));
+  if (!both((x) => CONFIG_INDIRECT.test(x)) && !both(dynNameHint)) return false;
+  if (both((x) => /\$\{[\s|]/.test(x)) || both(readArith)) return both((x) => mayReachGit(x));
   const s = stripHeredocs(t), cmds = tokenize(s, () => {});
-  if (cmds) return configIndirectIn(cmds, arithDyn(t));
+  if (cmds) return configIndirectIn(cmds, both(arithDyn));
   const blanked = tokenize(blankArith(s), () => {});
-  return blanked ? configIndirectIn(blanked, true) || mayReachGit(t, false) : mayReachGit(t);
+  return blanked ? configIndirectIn(blanked, true) || both((x) => mayReachGit(x, false)) : both((x) => mayReachGit(x));
 };
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
