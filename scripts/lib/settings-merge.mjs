@@ -90,7 +90,8 @@ export function originHostOf(url) {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
     try { return new URL(text).hostname.toLowerCase() || null; } catch { return null; }
   }
-  const scp = /^(?:[^@\s/]+@)?([A-Za-z0-9.-]+):(?!\/)\S+$/.exec(text);
+  if (/^[A-Za-z]:/.test(text)) return null; // a Windows drive path (`C:\srv\r.git`), not host:path
+  const scp = /^(?:[^@\s/]+@)?([A-Za-z0-9.-]+):(?!\/)\S+$/.exec(text) || /^[^@\s/]+@([A-Za-z0-9.-]+):\/\S*$/.exec(text); // `host:path`, or `user@host:/absolute/path`
   return scp ? scp[1].toLowerCase() : null;
 }
 
