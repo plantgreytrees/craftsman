@@ -93,16 +93,22 @@ export function scopeRequired(input) {
   });
 }
 
+// Every live scope manifest of the session, in file-name order, so what an ambiguous session resolves to never depends on the
+// directory's own listing order, and pre-guard can judge a target against every scope at once (ARCH-STATE-18).
+export function activeScopes(input) {
+  let scopes = [];
+  try {
+    scopes = fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).sort().map((n) => {
+      try { return JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), n), "utf8")); } catch { return null; }
+    }).filter((scope) => scope && (!scope.worktree_path || fs.existsSync(scope.worktree_path)));
+  } catch { return []; }
+  return input?.project ? scopes.filter((scope) => (scope.project || ".") === input.project) : scopes;
+}
+
 // A unit scope whose worktree is gone is stale: it must never be enforced on
 // root or make the remaining scopes ambiguous.
 export function readScope(input) {
-  let scopes = [];
-  try {
-    scopes = fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).map((n) => {
-      try { return JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), n), "utf8")); } catch { return null; }
-    }).filter((scope) => scope && (!scope.worktree_path || fs.existsSync(scope.worktree_path)));
-  } catch { return null; }
-  if (input?.project) scopes = scopes.filter((scope) => (scope.project || ".") === input.project);
+  const scopes = activeScopes(input);
   if (!scopes.length) return null;
   const absolute = targetOf(input);
   const matching = scopes.filter((scope) => inside(path.resolve(scope.worktree_path || scope.project_root), absolute));
