@@ -495,7 +495,7 @@ The Claude Code **sandbox** owns writes and deletes outside the project and read
 | subagent dispatch | `agent-mode-guard` (root-only by default) |
 | lint and type gates, the Stop gate | craftsman's advisory hooks |
 
-`/craftsman:init --settings-diff` previews and `--settings-write` merges `sandbox.enabled: true` and ask rules for `rm -r`/`-rf`, `sudo`, `git push --force`, `git reset --hard` and `git clean` into the project's `.claude/settings.json`. It never overwrites a key, backs the old file up, and writes nothing until you say so. SessionStart notes when no settings scope enables the sandbox.
+`/craftsman:init --settings-diff` previews and `--settings-write` merges `sandbox.enabled: true` and ask rules for `sudo`, `git push --force`, `git reset --hard` and `git clean` into the project's `.claude/settings.json`. It never overwrites a key, backs the old file up, and writes nothing until you say so. SessionStart notes when no settings scope enables the sandbox.
 
 **Off switches.**
 - `CRAFTSMAN_SAFETY=off` in **your own environment** is the only switch that turns the safety guards off; SessionStart says so when it is set.
