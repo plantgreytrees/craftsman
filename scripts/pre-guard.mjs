@@ -354,9 +354,56 @@ const globMayBeGit = (w) => { if (/\[.+\]/.test(w)) return true; try { return ne
 // Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment) can alias a misspelt subcommand to clean.
 // Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
 const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|\b(?:HOME|XDG_CONFIG_HOME)\b/i;
-// The raw-text hint for dynamicName: a `$` or backtick in a word where a setter takes a variable name (`${x}ME` and `HO${x}` alike; a `NAME=$value` value
-// does not count), in `let`, or in an assigning `((…))`/`$((…))` (a plain `$` elsewhere leaves the gate shut).
-const DYN_NAME_HINT = /\$\{!|\b(?:for|select)\s+["']?[$`]|\bgetopts\s+\S+\s+["']?[^\s;&|'"]*[$`]|\bprintf\b[^;&|\n]*\s-v\s*["']?[^\s;&|'"]*[$`]|\b(?:read|mapfile|readarray|let)\b[^;&|\n]*[$`]|\b(?:export|declare|typeset|local|readonly)\b[^;&|\n]*(?:\s["']?[^\s=;&|'"(]*[$`]|\s-[A-Za-z]*n\b[^;&|\n]*[$`])|\(\((?=[^)]*[$`])(?=[^)]*(?:[^=!<>]=(?!=)|\+\+|--))/;
+const PRINTF_V = /\s-v\s*["']?[^\s;&|'"]*[$`]/g, DECL_NAME = /\s["']?[^\s=;&|'"(]*[$`]/g, DECL_NREF = /\s-[A-Za-z]*n\b/g, DECL_INT = /\s-[A-Za-z]*i/g;
+const firstFrom = (re, s, k) => { re.lastIndex = k; const m = re.exec(s); return m ? m.index : -1; };
+// Bash evaluates arithmetic in `((…))`, `$((…))`, `$[…]`, `let`, an array subscript `a[…]` set or expanded, a `${x:…}` substring offset or length, the
+// operands of `[[ … -eq … ]]` and an assignment to an integer (`declare -i`), and an arithmetic `NAME = …` sets any variable. A `$` or backtick inside one
+// may build HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`${n}ME = 1`); arithmetic also evaluates the value of each name it reads, which a `$` in a value set
+// elsewhere may have built (`v=${n}ME=1; (( v ))`). Either counts as a built name, for the whole text: the value can be set in one simple command and read
+// in another. Only a context that reads a name (a letter inside it) can do the latter. One linear pass over the raw text (a stack of the open
+// brackets, each closed by its match; one left open counts), then one per simple command.
+const SETS_VALUE = /\b(?:read|mapfile|readarray|getopts|for|select|declare|typeset|local|export|readonly)\b|(?:^|\s)[A-Za-z_]\w*(?:\[[^\][]*\])?\+?=|\$\{[A-Za-z_]\w*:?=/;
+const LET_CMD = /(?:^|[;&|({\n])\s*let\s|\b(?:do|then|else)\s+let\s/;
+const intAttr = (s) => { const d = s.search(/\b(?:declare|typeset|local)\b/); return d >= 0 && firstFrom(DECL_INT, s, d) >= 0; };
+const arithDyn = (t) => {
+  const open = [];
+  let arith = 0, seen = LET_CMD.test(t) || t.split(/[;&|\n]/).some(intAttr), cond = null; // cond: inside `[[ … ]]`, an arithmetic comparison (cmp), a `$` or backtick (dyn)
+  const closeCond = () => { const dyn = !!cond?.cmp && cond.dyn; if (cond?.cmp) seen = true; cond = null; return dyn; };
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i], top = open[open.length - 1];
+    if (top?.param && !/[\w#!@*[]/.test(c)) { top.param = false; if (c === ":" && !/[-=+?]/.test(t[i + 1] ?? "")) { top.arith = true; arith++; } } // `${name:` or `${a[i]:`: a substring
+    if (arith > 0 && top && /[A-Za-z_]/.test(c)) top.name = true;
+    if (c === "$" || c === "`") { if (arith > 0) return true; if (cond) cond.dyn = true; }
+    else if (c === "[" && t[i + 1] === "[" && /^[\s;&|(!]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 2] ?? "")) cond = { cmp: false, dyn: false };
+    else if (c === "]" && t[i + 1] === "]" && cond) { if (closeCond()) return true; }
+    else if (c === "-" && cond && /^-(?:eq|ne|lt|le|gt|ge)(?!\S)/.test(t.slice(i, i + 4))) cond.cmp = true;
+    if (c === "(" || c === "[" || c === "{") {
+      const a = c === "(" ? t[i + 1] === "(" : c === "[" && /[\w$]/.test(t[i - 1] ?? "");
+      open.push({ arith: a, param: c === "{" && t[i - 1] === "$", sub: c === "[" && a && t[i - 1] !== "$", name: false });
+      if (a) arith++;
+    } else if ((c === ")" || c === "]" || c === "}") && open.length) {
+      const e = open.pop(), up = open[open.length - 1];
+      if (e.arith) arith--;
+      if (e.name && up) up.name = true;
+      if (e.arith && e.name && (!e.sub || t[i + 1] === "=" || t.startsWith("+=", i + 1) || up?.param)) seen = true; // it reads a name (a subscript: when set or expanded)
+    }
+  }
+  return closeCond() || ((seen || arith > 0) && t.split(/[;&|\n]/).some((s) => /[$`]/.test(s) && (SETS_VALUE.test(s) || intAttr(s))));
+};
+// The raw-text hint for dynamicName (no `$` or backtick anywhere leaves the gate shut): `${!`, `for`/`select` or `getopts` setting a `$` name, a built
+// name in arithmetic (arithDyn), or, within one simple command (split at ; & | and newlines), a `$` or backtick after `read`, `mapfile`, `readarray` or `let`,
+// in the `printf -v` name, in a word after export/declare/typeset/local/readonly before its `=` (`${x}ME` and `HO${x}` alike; a `NAME=$value` value does not
+// count) or after their nameref option. Each part scans once from its first keyword, so the hint is linear in the text.
+const SETTER_HINT = /\$\{!|\b(?:for|select)\s+["']?[$`]|\bgetopts\s+\S+\s+["']?[^\s;&|'"]*[$`]/;
+const dynNameHint = (t) => /[$`]/.test(t) && (SETTER_HINT.test(t) || arithDyn(t) || t.split(/[;&|\n]/).some((s) => {
+  const last = Math.max(s.lastIndexOf("$"), s.lastIndexOf("`"));
+  const reader = s.search(/\b(?:read|mapfile|readarray|let)\b/), printf = s.search(/\bprintf\b/), decl = s.search(/\b(?:export|declare|typeset|local|readonly)\b/);
+  if (reader >= 0 && reader < last) return true;
+  if (printf >= 0 && firstFrom(PRINTF_V, s, printf) >= 0) return true;
+  if (decl < 0) return false;
+  const nref = firstFrom(DECL_NREF, s, decl);
+  return firstFrom(DECL_NAME, s, decl) >= 0 || (nref >= 0 && nref < last);
+}));
 // Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a HOME, XDG_CONFIG_HOME or GIT_CONFIG* word that is not a plain read, a name built from a variable (dynamicName),
 // or an include, --config-env or GIT_CONFIG word in a command that holds a git word (anywhere in it: wrappers, keywords and their options are read through,
 // a `$` or backtick word among the leading wrappers may be git, and a substitution body is judged on its own). `echo HOME=/x` is prose.
@@ -385,7 +432,7 @@ const envConfigIn = (c) => { const k = cmdIndex(c.words); return dynamicName(c.w
 const ownConfig = (c) => c.words.some((w) => /include\.path|includeif|GIT_CONFIG|--config-env/i.test(w));
 const NUMERIC_ARG = /^\d+(?:\.\d+)?[smhd]?$/;
 const gitWordsIn = (words) => { const at = words.flatMap((w, i) => (path.basename(w) === "git" ? [i] : [])); for (let i = cmdIndex(words); i < words.length; i++) { const w = words[i], b = path.basename(w); if (/[$`]/.test(w)) at.push(i); else if (!(WRAPPERS.has(b) || b === "xargs" || w.startsWith("-") || ASSIGN_WORD.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) break; } return at; };
-const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env" && words.slice(i + 1).find((a) => !(a.startsWith("-") && !/^-[A-Za-z]*S|^--split-string/.test(a)) && !ASSIGN_WORD.test(a))?.match(/^-[A-Za-z]*S|^--split-string/)); const configIndirectIn = (cmds, inherited = false, depth = 0) => { const env = inherited || cmds.some(envConfigIn); return cmds.some((c) => envSplitString(c.words) || ((env || ownConfig(c)) && gitWordsIn(c.words).some((i) => { const sub = gitSub(c.words.slice(i + 1)); return sub !== undefined && !GIT_BUILTINS.has(sub); })) || c.substs.some((s) => { const inner = depth < 5 && tokenize(stripHeredocs(s), () => {}); return !inner || configIndirectIn(inner, env, depth + 1); })); };
+const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env" && words.slice(i + 1).find((a) => !(a.startsWith("-") && !/^-[A-Za-z]*S|^--split-string/.test(a)) && !ASSIGN_WORD.test(a))?.match(/^-[A-Za-z]*S|^--split-string/)); const configIndirectIn = (cmds, inherited = false, depth = 0) => { const env = inherited || cmds.some(envConfigIn); return cmds.some((c) => envSplitString(c.words) || ((env || ownConfig(c)) && gitWordsIn(c.words).some((i) => { const sub = gitSub(c.words.slice(i + 1)); return sub !== undefined && !GIT_BUILTINS.has(sub); })) || c.substs.some((s) => { const inner = depth < 5 && tokenize(stripHeredocs(s), () => {}); return inner ? configIndirectIn(inner, env, depth + 1) : mayReachGit("$(" + s + ")"); })); };
 // An alias is tried only after the builtins and the dashed externals, so these names always run as themselves. Checked against git 2.56 (`git --list-cmds=builtins`, and
 // `git -c alias.NAME='!echo X' NAME` for every name below): an alias DOES override scalar, daemon and the deprecated builtins whatchanged and pack-redundant, so they are not listed.
 const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version worktree write-tree bugreport checkout-index column commit-graph commit-tree count-objects credential diff-files diff-index diff-tree fast-export fast-import fetch-pack filter-branch for-each-repo get-tar-commit-id index-pack interpret-trailers mailinfo mailsplit merge-file merge-index mktag mktree multi-pack-index pack-objects pack-refs patch-id prune prune-packed read-tree receive-pack request-pull rerere send-pack show-branch stripspace unpack-file unpack-objects update-server-info upload-pack var verify-commit verify-pack verify-tag".split(" "));
@@ -393,7 +440,33 @@ const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch 
 // take it as their value; bare `--exec-path` prints the exec path and ends git before any subcommand runs, so skipping its next word is harmless.
 const GIT_VALUED_OPTS = /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source|shallow-file|exec-path))$/;
 const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += GIT_VALUED_OPTS.test(rest[i]) ? 2 : 1; return rest[i]; };
-const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t) && !DYN_NAME_HINT.test(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return !cmds || configIndirectIn(cmds); };
+// Text the tokenizer rejects (a `(`, `((`, a function or a case) can still reach git only through a `git` word, a backtick, a shell or `source` that runs
+// a string, or a `$` or glob word where a command starts: after ; & | ( ) a newline or a lone { or }, behind keywords, assignments, wrappers, their options
+// and redirections (a quoted or escaped word keeps the scan going). Arithmetic runs no command, so a `((…))` or `$((…))` holding no substitution, quote or
+// escape reads as `:` or `0` first. Text that cannot reach git leaves the gate shut (`for (( i=0; i<$n; i++ ))`); text that can fails closed.
+const blankArith = (t) => {
+  let out = "", p = 0;
+  for (let n = 0, i = t.indexOf("(("); i >= 0 && n < 256; i = t.indexOf("((", p), n++) {
+    const j = matchParen(t, i);
+    if (j < 0) break;
+    const dollar = t[i - 1] === "$", arith = matchParen(t, i + 1) === j - 1 && !/\$\(|[`'"\\]/.test(t.slice(i + 2, j - 1));
+    out += arith ? t.slice(p, dollar ? i - 1 : i) + (dollar ? "0" : ":") : t.slice(p, j + 1);
+    p = j + 1;
+  }
+  return out + t.slice(p);
+};
+const leadDyn = (seg) => {
+  const words = seg.replace(/[<>]+[&|]?\s*[^\s<>;&|()]*/g, " ").split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i], b = path.basename(w);
+    if (w === "[" || w === "[[") return false;
+    if (/[$*?[{]/.test(w)) return true;
+    if (!(KEYWORDS.has(w) || WRAPPERS.has(b) || b === "xargs" || /^-|['"\\=]/.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) return false;
+  }
+  return false;
+};
+const mayReachGit = (t) => /\bgit\b|`|\b(?:sh|bash|zsh|dash|ksh|source)\b|(?:^|[\s;&|(])\.\s/.test(t) || blankArith(t).split(/[;&|\n()]|(?<![^\s;&|()])[{}](?![^\s;&|()])/).some(leadDyn);
+const configIndirectGit = (t) => { if (!CONFIG_INDIRECT.test(t) && !dynNameHint(t)) return false; const cmds = tokenize(stripHeredocs(t), () => {}); return cmds ? configIndirectIn(cmds, arithDyn(t)) : mayReachGit(t); };
 const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);

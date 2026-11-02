@@ -342,7 +342,15 @@ test("a config name set in any arithmetic context beside git cannot hide an alia
     "(( 1 )); HOME=/tmp/h $G claen -fdx",
     "(( 1 )); env \"A=1;x\" HOME=/tmp/h $G claen -fdx",
     "for (( i=0; i<1; i++ )); do HOME=/tmp/h $(echo g)it claen -fdx; done",
+    "read n m <<< 'HO ME'; v=$n$m=1; (( v )); git claen -fdx",
+    "read n m <<< 'HO ME'; v=$n$m=1; let v; git claen -fdx",
+    "read n m <<< 'HO ME'; v=$n$m=1; s=abc; : ${s:v}; git claen -fdx",
+    "n=HO; : $((\n${n}ME=1)); git claen -fdx",
   ]);
+});
+
+test("arithmetic beside a $ and a non-builtin git subcommand fails closed (accepted cost, round 12)", () => {
+  refused(["echo $(( $x + 1 )); git lfs pull", "x=$1; echo $(( x + 1 )); git lfs pull"]);
 });
 
 test("git-free arithmetic and git-free text the parser cannot read still pass (round 12, regression of 9ee1c85)", () => {
@@ -355,6 +363,9 @@ test("git-free arithmetic and git-free text the parser cannot read still pass (r
     "for (( i=0; i<${#a[*]}; i++ )); do echo ${a[i]}; done",
     "for (( i=0; i<$n; i++ )); do (cd d$i && make); done",
     "echo ${s:0:2}; git lfs pull",
+    "ls file[0-9]*; echo $x; git lfs pull",
+    "echo \"${a[@]}\"; read -r x <<< \"$y\"; git lfs pull",
+    "echo \"${a[1]}\"; read -r x <<< \"$y\"; git lfs pull",
   ]);
 });
 
