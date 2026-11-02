@@ -546,6 +546,21 @@ test("a line continuation inside a safety variable's name does not hide that a c
   assert.match(r.stderr, /which the authority scripts and the state paths trust/);
 });
 
+test("an array element set by a default assignment carries a read value into arithmetic, and the round-17 git-dir and positional-parameter forms stay refused (round 18)", () => {
+  refused([
+    "read -r l < f; : ${z[0]=l}; (( z )); git status",
+    "read -r l < f; : ${z[1]:=l}; (( z[1] )); git status",
+    "git --git-dir /tmp/r claen -fdx",
+    "export GIT_DIR=/tmp/r; git claen -fdx",
+    "read GIT_DIR < f; git claen -fdx",
+    "read -r l < f; select z in l; do (( z )); done; git status",
+    "read -r l < f; set -- l; (( ${1} )); git status",
+    "read -r l < f; set -- l; (( $@ )); git status",
+    "read -r l < f; set -- l; (( ${@:1:1} )); git status",
+    "read -r l < f; set -- l; : $(( $1 )); git status",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
