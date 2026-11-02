@@ -5,11 +5,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { atomicWrite } from "./core.mjs";
+import { atomicWrite, logEvent } from "./core.mjs";
 
 const NET_ENV = { ...process.env, LC_ALL: "C", GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_ASKPASS: "true", SSH_ASKPASS: "true" };
 
-export const FIX = "run the network step from the root session OUTSIDE the sandbox (`repo-exec` action \"network\": step fetch before a run, step drain after it); do not allowlist credential directories such as ~/.config/gh";
+export const FIX = "run the network step from the root session OUTSIDE the sandbox (`repo-exec` action \"network\": step fetch before a run, step drain after it); unattended, auto mode passes it only through the user-scope autoMode.allow entry that `/craftsman:init --user-settings-diff` shows, and if the classifier refuses the call, stop, name this one command and park nothing; do not allowlist credential directories such as ~/.config/gh";
 
 // Credentials never reach a log, evidence line or transcript: URL userinfo and
 // well-known token shapes are removed from every message built here.
@@ -119,12 +119,12 @@ let counter = 0;
 // Queue a plain push of <sha> to refs/heads/<dst> (never forced). The sha is
 // pinned under refs/craftsman/pending so a deleted branch or removed temp
 // worktree cannot lose it before root drains.
-export function enqueuePush(root, info, { sha, dst, upstream = false, reason = "" }) {
+export function enqueuePush(root, info, { sha, dst, reason = "" }) {
   const id = `${Date.now().toString(36)}-${process.pid}-${counter++}`;
   const pin = `refs/craftsman/pending/${id}`;
   const result = spawnSync("git", ["-C", root, "update-ref", pin, sha], { encoding: "utf8" });
   if (result.status !== 0) throw new Error(`cannot pin ${sha} for deferred push: ${result.stderr}`);
-  const entry = { id, kind: "push", dst, upstream, pin, sha, reason, queued_at: new Date().toISOString() };
+  const entry = { id, kind: "push", dst, pin, sha, reason, queued_at: new Date().toISOString() };
   fs.mkdirSync(netDir(info), { recursive: true });
   fs.appendFileSync(queueFile(info), JSON.stringify(entry) + "\n");
   return entry;
@@ -139,31 +139,57 @@ export function enqueueDelete(info, branch) {
 
 export const pendingCount = (info) => readQueue(info).length;
 
+// ARCH-LAND-36. Pure: {ok:true} or {ok:false, reason}. The queue is plain JSONL, so any process that can
+// write the state directory can forge an entry; root judges each one before it touches origin or a local ref.
+// A push goes to feat/ or feature/, or to base only in direct-land mode; a delete removes only a feat/ branch.
+const PIN = /^refs\/craftsman\/pending\/[A-Za-z0-9_-]+$/;
+const BAD_BRANCH = /[\x00-\x20\x7f~^:?*[\\]|\.\.|\/\/|@\{|^[-+./]|[./]$|\/\.|\.lock(?:\/|$)/;
+const plainBranch = (name) => typeof name === "string" && name !== "@" && name.length > 0 && name.length <= 200 && !BAD_BRANCH.test(name) && !name.startsWith("refs/");
+
+export function drainVerdict(entry, { baseBranch, directLand = false } = {}) {
+  const refuse = (reason) => ({ ok: false, reason });
+  const dst = entry?.dst;
+  if (entry?.kind !== "push" && entry?.kind !== "delete") return refuse("unknown entry kind");
+  if (!plainBranch(dst)) return refuse("dst is not a plain branch name");
+  if (entry.kind === "delete") return dst.startsWith("feat/") && dst !== baseBranch ? { ok: true } : refuse("only a feat/ unit branch may be deleted");
+  if (!PIN.test(String(entry.pin))) return refuse("pin is not a refs/craftsman/pending ref");
+  if (dst.startsWith("feat/") || dst.startsWith("feature/")) return { ok: true };
+  if (dst !== baseBranch) return refuse("dst is outside feat/ and feature/");
+  return directLand ? { ok: true } : refuse("base is pushed only by a unit merge in direct-land mode (planning.featureBranches is on)");
+}
+
 // Root only. Replays the queue in order; an entry leaves the queue once it has
-// pushed or origin refused it (`rejected`, for the caller to PARK). An auth or
-// reachability failure stops the drain and keeps that entry and everything after.
-export function drainQueue(root, info) {
+// pushed, was refused by drainVerdict, or origin refused it (`rejected`, for the
+// caller to PARK; `refused` holds the verdict's reason). An auth or reachability
+// failure stops the drain and keeps that entry and everything after.
+export function drainQueue(root, info, { directLand = false } = {}) {
   const entries = readQueue(info);
   const pushed = [];
   const rejected = [];
   let remaining = entries;
   for (const entry of entries) {
-    try {
-      if (entry.kind === "delete") {
-        try { remote(root, ["push", "--quiet", "origin", "--delete", entry.dst]); } catch (error) { if (isUnreachable(error)) throw error; }
-      } else {
-        remote(root, ["push", "origin", `${entry.pin}:refs/heads/${entry.dst}`]);
-        if (entry.upstream) spawnSync("git", ["-C", root, "branch", "--set-upstream-to", `origin/${entry.dst}`, entry.dst], { stdio: "ignore" });
-        pushed.push(entry);
+    const verdict = drainVerdict(entry, { baseBranch: info.base_branch, directLand });
+    if (!verdict.ok) {
+      const state = info.project_root ? { root: info.project_root, stateDir: path.join(info.project_root, ".craftsman") } : null;
+      logEvent({ ev: "drain_refused", project: info.project, kind: String(entry?.kind).slice(0, 40), dst: String(entry?.dst).slice(0, 200), reason: verdict.reason }, state);
+      rejected.push({ entry, error: new Error(verdict.reason), refused: verdict.reason });
+    } else {
+      try {
+        if (entry.kind === "delete") {
+          try { remote(root, ["push", "--quiet", "origin", "--delete", entry.dst]); } catch (error) { if (isUnreachable(error)) throw error; }
+        } else {
+          remote(root, ["push", "origin", `${entry.pin}:refs/heads/${entry.dst}`]);
+          pushed.push(entry);
+        }
+      } catch (error) {
+        if (isUnreachable(error)) {
+          writeQueue(info, remaining);
+          throw networkError(error);
+        }
+        rejected.push({ entry, error });
       }
-    } catch (error) {
-      if (isUnreachable(error)) {
-        writeQueue(info, remaining);
-        throw networkError(error);
-      }
-      rejected.push({ entry, error });
     }
-    if (entry.pin) spawnSync("git", ["-C", root, "update-ref", "-d", entry.pin], { stdio: "ignore" });
+    if (PIN.test(String(entry.pin))) spawnSync("git", ["-C", root, "update-ref", "-d", entry.pin], { stdio: "ignore" });
     remaining = remaining.slice(1);
   }
   writeQueue(info, []);

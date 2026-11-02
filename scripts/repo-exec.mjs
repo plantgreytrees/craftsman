@@ -701,6 +701,9 @@ function landFeaturePullRequest(context, input, info, { feature, head, config, r
   return { ...result, pushed: true, pr: request, auto_merge };
 }
 
+// A queued ref name is untrusted text (ARCH-LAND-36): bound it and drop control characters before it reaches a question.
+const shownRef = (name) => scrub(String(name)).replace(/[^\x20-\x7e]/g, "?").slice(0, 80);
+
 // Landing failures that PARK (ARCH-LAND-06): {parked:true, decision}, branch kept.
 const PARK_DECISIONS = {
   "conflict": (r) => ({
@@ -719,6 +722,11 @@ const PARK_DECISIONS = {
       : `origin rejected the push of ${r.base_branch} after ${r.branch} was merged locally (local ${r.base_branch} holds the unpushed merge). How should it land?`,
     options: ["Fix the remote's refusal (permissions, hooks, protection) and push again", "Land through a pull request instead (repoExec.land: \"pr\")", "Leave it unpushed for the user"],
     recommended: "Land through a pull request instead (repoExec.land: \"pr\")",
+  }),
+  "drain-refused": (r) => ({
+    question: `The network drain refused the queued ${shownRef(r.kind)} of ${shownRef(r.branch)} (${r.refused}); nothing was sent to origin and the entry left the queue. How should it be handled?`,
+    options: [`Check where the entry came from, then push or delete ${shownRef(r.branch)} yourself if it was meant`, "Land the change through the run's own mode (a feature branch merge or a pull request) instead", "Drop it"],
+    recommended: "Land the change through the run's own mode (a feature branch merge or a pull request) instead",
   }),
   gate: gatePark,
   "auto-merge": (r) => ({
@@ -824,12 +832,14 @@ function networkAction(context, input, info) {
     }
     return { ...info, step, fetched: [info.base_branch, ...(input.branches || [])] };
   }
-  const { pushed, rejected } = drainQueue(context.root, info);
+  const { pushed, rejected } = drainQueue(context.root, info, { directLand: loadConfig(context).planning?.featureBranches !== true });
   logEvent({ ev: "network_drain", project: info.project, pushed: pushed.length, rejected: rejected.length }, context);
   return {
     ...info, step,
     pushed: pushed.map(({ dst, sha }) => ({ branch: dst, sha })),
-    parked: rejected.map(({ entry, error }) => landingPark("rejected-push", { ...info, branch: entry.dst, base_branch: entry.dst, land: "direct", merged: false, merged_locally: true }, error)),
+    parked: rejected.map(({ entry, error, refused }) => refused
+      ? landingPark("drain-refused", { ...info, branch: shownRef(entry.dst), kind: shownRef(entry.kind), refused, merged: false }, error)
+      : landingPark("rejected-push", { ...info, branch: entry.dst, base_branch: entry.dst, land: "direct", merged: false, merged_locally: true }, error)),
   };
 }
 
