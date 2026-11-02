@@ -486,6 +486,32 @@ test("a current-shell substitution or a value read from input inside arithmetic,
   ]);
 });
 
+test("a line-continued git config or environment word, and a read value reached through a bare name, a nameref or a declare/printf -v substitution, cannot hide a git subcommand; a length in arithmetic still passes (round 16)", () => {
+  const chain = Array.from({ length: 20 }, (_, k) => `v${20 - k}=$v${19 - k}`).join("; ");
+  refused([
+    "git -c help.auto\\\ncorrect=1 claen -fdx",
+    "GIT_CONF\\\nIG_GLOBAL=g git claen -fdx",
+    "GIT_WORK_TR\\\nEE=/tmp/w git clean -n src",
+    "read -r l < f; y=l; (( y )); git status --short",
+    "read -r l < f; declare -n z=l; (( z )); git status --short",
+    "declare w=\"$(cat f)\"; (( w )); git status --short",
+    "printf -v v %s \"$(cat f)\"; (( v )); git status --short",
+    "read -r l < f; printf -v v %s l; (( v )); git status --short",
+    "(( ${\tHOME=1 git claen -fdx; echo 1; } )); git status",
+    "(( ${\nHOME=1 git claen -fdx; echo 1; } )); git status",
+    "re\\\nad -r x < f; (( x )); git status --short",
+    "mapf\\\nile -t a < f; (( a[0] )); git log --oneline",
+    "f\\\nor x in $(cat f); do (( x )); done; git status",
+    `read -r v0 < f; ${chain}; (( v20 )); git status`,
+  ]);
+  passes([
+    "for f in *.txt; do n=$(( ${#f} + 1 )); done; git status",
+    "for f in *.txt; do (( ${#f} > 3 )) && echo \"$f\"; done; git status",
+    "i=0; while (( i < 3 )); do i=$((i+1)); done; git status",
+    "x=5; y=x; (( y )); git status",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
