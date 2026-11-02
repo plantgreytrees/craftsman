@@ -378,6 +378,53 @@ test("the config-indirection hints stay linear on long text (round 12)", () => {
   }
 });
 
+test("env -S in text the parser cannot read, a special-parameter substring, let behind a keyword, a value set without a $ and a current-shell substitution cannot hide an aliased git subcommand (round 13)", () => {
+  refused([
+    "(HOME=1 env -Sgit\\ claen -fdx)",
+    "f() { HOME=1 env -Sgit\\ claen -fdx; }; f",
+    "(export HOME=1; env -Sgit\\ claen -fdx)",
+    "(n=HO; (( ${n}ME = 1 )); env -Sgit\\ claen -fdx)",
+    "(HOME=1 env -u X --split-string='git claen -fdx')",
+    "n=HO; : ${-:${n}ME=1}; git claen -fdx",
+    "n=HO; : ${$:${n}ME=1}; git claen -fdx",
+    "n=HO; : ${?:${n}ME=1}; git claen -fdx",
+    "n=HO; : ${-:$n'ME=1'}; git claen -fdx",
+    "n=HO; v=$n\"ME=1\"; if let v; then git claen -fdx; fi",
+    "n=HO; v=$n\"ME=1\"; while let v; do git claen -fdx; break; done",
+    "n=HO; v=$n\"ME=1\"; until let v; do git claen -fdx; break; done",
+    "n=HO; v=$n\"ME=1\"; if false; then :; elif let v; then git claen -fdx; fi",
+    "n=HO; v=$n\"ME=1\"; ! let v; git claen -fdx",
+    "n=HO; v=$n\"ME=1\"; time let v; git claen -fdx",
+    "n=HO; v=$n\"ME=1\"; builtin let v; git claen -fdx",
+    "n=HO; v=$n\"ME=1\"; command let v; git claen -fdx",
+    "n=HO; v=$n\"ME=1\"; 'let' v; git claen -fdx",
+    "v=HO; v+=ME=1; let v; git claen -fdx",
+    "v=HO; declare v+=ME=1; let v; git claen -fdx",
+    "printf -v v %s%s HO ME=1; let v; git claen -fdx",
+    "v=HO; v+=ME=1; s=abc; : ${s:v}; git claen -fdx",
+    "v=HO; v+=ME=1; : $((v)); git claen -fdx",
+    "read v <<< HOME=1; let v; git claen -fdx",
+    "for v in HOME=1; do let v; done; git claen -fdx",
+    "for v in HO'ME=1'; do let v; done; git claen -fdx",
+    "getopts a: o -a HOME=1; let OPTARG; git claen -fdx",
+    ": ${ HOME=1; }; git claen -fdx",
+    ": ${| HOME=1; }; git claen -fdx",
+    "echo \"${ HOME=1; }\"; git claen -fdx",
+    ": ${ HOME=1; $G claen -fdx; }",
+    "cat <<E\n${ HOME=1; }\nE\ngit claen -fdx",
+  ]);
+  passes([
+    "(( i++ )); git lfs pull",
+    "let i=i+1; git lfs pull",
+    "(( count+=1 )); git lfs pull",
+    "let count+=1; git lfs pull",
+    "for (( i=0; i<3; i++ )); do git lfs pull; done",
+    "for f in a b; do echo $f; done; git lfs pull",
+    "while read -r line; do echo \"$line\"; done < f; git lfs pull",
+    "(HOME=/tmp/h env -i ls)",
+  ]);
+});
+
 test("a wrapper, an alias-proof builtin, NUL and locale quoting in ordinary commands still pass", () => {
   passes([
     "env HOME=/tmp/h git status",
