@@ -71,6 +71,26 @@ test("pre-guard: a sandbox-bypass Bash call logs one sandbox_bypass with only th
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// W1 (scrutinise-sandbox-auto-flow round 2): a bare NAME=value is not followed by whitespace, so the prefix strip skipped it and the path split
+// logged the tail of the value. No part of an assignment's value may reach the log.
+test("pre-guard: a sandbox-bypass call that is only an assignment logs head \"?\", never a fragment of the value", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    const secrets = [
+      "API_KEY=abc/Sk_live-123",
+      "TOKEN=a/b+c",
+      "AWS_SECRET_ACCESS_KEY=wJalr/K7MDENG+bPxRfiCY",
+      "cd /x && API_KEY=abc/Sk_live-123",
+    ];
+    secrets.forEach((command, n) => run(GUARD, dir, { session_id: `bypass-assign-${n}`, tool_name: "Bash", tool_input: { command, dangerouslyDisableSandbox: true } }));
+    const events = bypassEvents(dir);
+    assert.equal(events.length, secrets.length, "one event per call");
+    assert.deepEqual(events.map((e) => e.head), secrets.map(() => "?"), "every bare assignment logs the unknown head");
+    const raw = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8");
+    assert.doesNotMatch(raw, /Sk_live|b\+c|K7MDENG|wJalr/, "no fragment of any value reaches the log");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("pre-guard: a refused sandbox-bypass call is still counted, and a false or non-boolean flag is not", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
   try {
