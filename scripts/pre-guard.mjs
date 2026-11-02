@@ -363,7 +363,7 @@ const firstFrom = (re, s, k) => { re.lastIndex = k; const m = re.exec(s); return
 // elsewhere may have built (`v=${n}ME=1; (( v ))`). Either counts as a built name, for the whole text: the value can be set in one simple command and read
 // in another. Only a context that reads a name (a letter inside it) can do the latter. One linear pass over the raw text (a stack of the open
 // brackets, each closed by its match; one left open counts), then one per simple command.
-const SETTER = String.raw`(?:^|\s)([A-Za-z_]\w*)(?:\[[^\][]*\])?\+?=|\$\{([A-Za-z_]\w*):?=`; // an assignment or a default assignment; readArith's SETS shares it
+const SETTER = String.raw`(?:^|\s)([A-Za-z_]\w*)(?:\[[^\][]*\])?\+?=|\$\{([A-Za-z_]\w*)(?:\[[^\]]*\])?:?=`; // an assignment or a default assignment (an array element too); readArith's SETS shares it
 const SETS_VALUE = new RegExp(String.raw`\b(?:read|mapfile|readarray|getopts|for|select|declare|typeset|local|export|readonly)\b|` + SETTER);
 const LET_CMD = /(?:^|[\s;&|({!`])let\s/; // a `let` word anywhere (behind if, while, elif, !, time, builtin, command …), read with quotes and backslashes removed
 // A value arithmetic reads can also be set with no `$` at all: a `NAME+=` string append outside arithmetic, `printf -v`, or read, mapfile, readarray,
