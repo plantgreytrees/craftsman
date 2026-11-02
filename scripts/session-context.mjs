@@ -163,7 +163,10 @@ let handoff = null;
 try {
   handoff = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, context), "handoff.json"), "utf8"));
 } catch { /* no hand-off yet, or it was partially written */ }
-if (handoff) {
+// ARCH-AUTO-11: a resume re-arms scope-required only while the hand-off still lists units to run. A closing
+// hand-off (remaining_units empty) or one without the field has nothing left to scope, and arming it
+// locked a later /architect out of every Read until it activated a scope.
+if (Array.isArray(handoff?.remaining_units) && handoff.remaining_units.length > 0) {
   fs.mkdirSync(path.dirname(requiredFile(input)), { recursive: true });
   fs.writeFileSync(requiredFile({ session_id: input.session_id }), "resume requires fresh scope activation\n");
 }

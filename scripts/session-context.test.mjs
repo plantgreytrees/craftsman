@@ -96,6 +96,40 @@ test("session-context: the HAND-OFF line carries the plan's level and adds no li
   });
 });
 
+// ARCH-AUTO-11: SessionStart re-arms scope-required on resume only for a hand-off that still lists
+// units to run; a closing hand-off (nothing left) used to lock a later /architect out of every Read.
+function resumeMarker(dir, sid, handoff) {
+  const session = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(session, { recursive: true });
+  if (handoff) fs.writeFileSync(path.join(session, "handoff.json"), JSON.stringify(handoff));
+  const result = run(SESSION_CONTEXT, dir, { session_id: sid });
+  assert.equal(result.status, 0, result.stderr);
+  return fs.existsSync(path.join(session, "scope-required"));
+}
+
+test("session-context: a hand-off listing remaining units re-arms scope-required (ARCH-AUTO-11)", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const handoff = { plan: "p", unit: "u1", next_action: "go", completed_units: [], remaining_units: ["u2"] };
+    assert.equal(resumeMarker(dir, "resume-open", handoff), true);
+  });
+});
+
+const closing = { plan: "p", unit: "u1", next_action: "done", completed_units: ["u1"] };
+for (const [name, handoff] of [
+  ["a closing hand-off (remaining_units is empty)", { ...closing, remaining_units: [] }],
+  ["a hand-off without the remaining_units field", closing],
+  ["a hand-off whose remaining_units is not an array", { ...closing, remaining_units: "u2" }],
+  ["no hand-off at all", null],
+]) {
+  test(`session-context: ${name} arms nothing (ARCH-AUTO-11)`, () => {
+    withProject((dir) => {
+      spawnSync("git", ["init", "-q"], { cwd: dir });
+      assert.equal(resumeMarker(dir, "resume-none", handoff), false);
+    });
+  });
+}
+
 // 7.2: SessionStart says whether the guards are on, and if not, why (ARCH-SAFETY-04).
 function startState(dir, { env = {}, setup } = {}) {
   spawnSync("git", ["init", "-q"], { cwd: dir });
