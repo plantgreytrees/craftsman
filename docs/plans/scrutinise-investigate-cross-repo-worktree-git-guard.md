@@ -4,7 +4,7 @@ goal: The worktree git guard allows only git calls it can prove run in the bound
 level: feature
 priority: P1
 classification: in-scope # round 3 of an isolated /scrutinise of investigate-cross-repo-worktree-git-guard (round 1: 868d87f, 0a9f48d, 2a172cb; round 2: 0d1e0a7, 226ff0f; round 3: db9bff5, c50c033)
-tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob, TRACKER#doc-guard-structural, TRACKER#doc-guard-shell-quoting, TRACKER#doc-guard-wrapper-config, TRACKER#doc-guard-nul-quote, TRACKER#doc-guard-name-forms, TRACKER#doc-guard-name-anywhere, TRACKER#doc-guard-arith-context]
+tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob, TRACKER#doc-guard-structural, TRACKER#doc-guard-shell-quoting, TRACKER#doc-guard-wrapper-config, TRACKER#doc-guard-nul-quote, TRACKER#doc-guard-name-forms, TRACKER#doc-guard-name-anywhere, TRACKER#doc-guard-arith-context, TRACKER#doc-guard-arith-reach]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -163,6 +163,19 @@ units:
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: doc-guard-arith-reach
+    scope_id: doc-guard-arith-reach
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: []   # pre-guard.mjs ~95 KB: grep -n arithDyn, LET_CMD, dynNameHint, mayReachGit, leadDyn, function tokenize first, then read by range (ARCH-ENGINE-08)
+      docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
+    arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: close the gaps the scrutiny rounds found in the worktree git guard
@@ -184,15 +197,18 @@ Under a worktree binding, read-only git runs anywhere; every other git call pass
 | 9 | 9e122b1..96c8740 (doc-guard-wrapper-config) | 1 Critical · 3 Warning · 3 Suggestion · 0 UNMET | doc-guard-nul-quote (b6d932a) merged |
 | 10 | 068b974..b6d932a (doc-guard-nul-quote) | 0 Critical · 3 Warning · 2 Suggestion · 0 UNMET | doc-guard-name-forms (1824ffd) merged |
 | 11 | bb64c17..1824ffd (doc-guard-name-forms) | 0 Critical · 2 Warning · 2 Suggestion · 0 UNMET | doc-guard-name-anywhere (c4a7988) merged |
-| 12 | e2548f4..c4a7988 (doc-guard-name-anywhere) | 0 Critical · 3 Warning · 2 Suggestion · 0 UNMET | doc-guard-arith-context |
+| 12 | e2548f4..c4a7988 (doc-guard-name-anywhere) | 0 Critical · 3 Warning · 2 Suggestion · 0 UNMET | doc-guard-arith-context (1f2339c) merged |
+| 13 | dbfe758..1f2339c (doc-guard-arith-context) | 0 Critical · 5 Warning · 2 Suggestion · 0 UNMET | doc-guard-arith-reach |
 
-## Round 12 findings
-Isolated scrutineer on e2548f4..c4a7988; root re-ran each on a c4a7988 extract. No disputes. Real bash 5.3.9 and git 2.56 ran a planted alias for W1 and W2.
-- **W1 [Security]** `scripts/pre-guard.mjs:359` — the `((…))` part of `DYN_NAME_HINT` stops at the first `)`: `n=HO; (( (0), ${n}ME = 1 )); git claen -fdx`, `n=HO; : $(( (0), ${n}ME = 1 )); git claen -fdx` → 0 (e2548f4 also 0).
-- **W2 [Security]** `:359`, `:372-383` — a substring offset or length is arithmetic: `n=HO; s=abc; : ${s:${n}ME=1}; git claen -fdx`, `n=HO; s=abc; : ${s:0:${n}ME=1}; git claen -fdx` → 0 (e2548f4 also 0). `$[ ]`, array subscripts, `[[ -eq ]]` and `declare -i` are refused only by chance.
-- **W3 [Correctness] REGRESSION of 9ee1c85** `:359` with `:396` (`configIndirectGit` returns `!cmds || …`) — git-free arithmetic is refused: `for (( i=0; i<$n; i++ )); do echo $i; done`, `(( count += $x )); echo ok` → 2 (e2548f4: 0).
-- **S1** `:359` — the `let`/`((` hint parts are quadratic on long text (`"let ".repeat(20000)` takes 2 s). **S2 [Test-coverage]** `scripts/pre-guard-docclean.test.mjs:300-324` — no mid-word `local` case, no git-free arithmetic pass pin, no paren-first or substring-offset cases.
-- Decision (root, 2026-11-02): a structural rule instead of another spelling. (a) Any arithmetic context holding a `$`/backtick (`((…))`, `$((…))`, `$[…]`, a `${x:…}` offset/length, an array subscript) counts as possible config indirection. (b) `configIndirectGit` and every hint apply only when the text could reach git (a `git` word, or a `$`/backtick/glob word in command position); git-free text stays open.
+## Round 13 findings
+Isolated scrutineer on dbfe758..1f2339c; root re-ran one case per Warning on c4a7988 and 1f2339c extracts. No disputes. Real bash 5.3.9 and git 2.56 ran a planted alias for W1-W4.
+- **W1 [Security] REGRESSION** `scripts/pre-guard.mjs:468` (`mayReachGit`, with `:469`, `:435`) — unparseable text with `env -S` passes: `\bgit\b` cannot match inside `-Sgit` and `leadDyn` skips the option. `(HOME=1 env -Sgit\ claen -fdx)`, `f() { HOME=1 env -Sgit\ claen -fdx; }; f`, `(export HOME=1; env -Sgit\ claen -fdx)`, `(n=HO; (( ${n}ME = 1 )); env -Sgit\ claen -fdx)` → 2 on c4a7988, 0 on 1f2339c.
+- **W2 [Security]** `:374` — the parameter-name class `[\w#!@*[]` omits `-`, `$`, `?`: `n=HO; : ${-:${n}ME=1}; git claen -fdx`, `${$:…}`, `${?:…}`, `n=HO; : ${-:$n'ME=1'}; git claen -fdx` → 0 (c4a7988 also 0).
+- **W3 [Security]** `:366` — `LET_CMD` sees `let` only at a command start or after do/then/else: `n=HO; v=$n"ME=1"; if let v; then git claen -fdx; fi` and `while`/`until`/`elif`/`!`/`time`/`builtin`/`command let v` → 0 (c4a7988 also 0).
+- **W4 [Security]** `:391`, `:398` — a value arithmetic reads, built without `$`, is not seen: `v=HO; v+=ME=1; let v; git claen -fdx`, `printf -v v %s%s HO ME=1; let v; git claen -fdx`, `v=HO; v+=ME=1; s=abc; : ${s:v}; git claen -fdx`, `v=HO; v+=ME=1; : $((v)); git claen -fdx`, `read v <<< HOME=1; let v; git claen -fdx` → 0 (c4a7988 also 0).
+- **W5 [Security]** tokenizer (`:469` path) — bash 5.3 `${ cmd; }` runs `cmd` in the current shell but is not read as commands: `: ${ HOME=1; }; git claen -fdx` → 0 (c4a7988 also 0).
+- **S1 [Test-coverage]** `scripts/pre-guard-docclean.test.mjs:331-370` lacks the W1-W5 cases. **S2** `:446` — "Arithmetic runs no command" is false for a value arithmetic reads (`x='a[$(cmd)]'; (( x ))`); no impact found.
+- Residual (not this range): slow paths that cost the same on c4a7988 (`"${s:".repeat(20000)+"$"` ~10 s, `"$((".repeat(20000)` ~14 s, `"a[".repeat(20000)+"$"` ~2.5 s); `trap '…'` strings are F1.
 
 ## Earlier rounds
 Rounds 1-4 (worktree git guard: guard-allowlist merged d9e257a and reverted aa8f34d, owner decision 2026-10-28; release-wording-2 merged 4147f95) and their findings are in git history. The round-3/4 bypasses still live on main are follow-up F1 below.
@@ -230,14 +246,19 @@ MERGED 1824ffd (round 10). One value-option list (`GIT_VALUED_OPTS`, with `--sha
 MERGED c4a7988 (round 11). A `$` anywhere in a setter's name word, `let`, and an assigning `((…))` open the config-indirection check. Task text: git history.
 
 ### Step 11 — doc-guard-arith-context (., javascript, high)
+MERGED 1f2339c (round 12). Any arithmetic context holding a `$`, or reading a name beside a `$`-built value, opens the config-indirection check; unparseable text fails closed only when it can reach git (`mayReachGit`); the hint scans are linear. Task text: git history.
+
+### Step 12 — doc-guard-arith-reach (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
-Depends on: none (Step 10 merged at c4a7988)
-Fixes round-12 W1-W3, S1, S2. Out of scope (F1/F3): user/global gitconfig, shell aliases, persistent-shell exports from earlier calls, sourced files, unlisted wrappers, `wait -p`/`coproc` names.
-- [ ] 11.1 Failing tests in `scripts/pre-guard-docclean.test.mjs` (same harness): refuse (exit 2, `/doc-write authority/`) every round-12 W1, W2 command plus `n=HO; : $[ ${n}ME = 1 ]; git claen -fdx`, `n=HO; a[${n}ME=1]=x; git claen -fdx`, `f(){ local HO${x}=/tmp/h; git claen -fdx; }`; pass (exit 0) the W3 commands and `echo $(( a + $b )); ls`; keep all earlier cases. → accept: the W1/W2 cases exit 0 on c4a7988; the W3 cases exit 2 on c4a7988.
-- [ ] 11.2 An `ARITH_DYN` test (`((`/`$((`/`$[` with a `$`/backtick anywhere up to the matching close or the end of the line; `${name:` with a `$`/backtick in the offset/length; a `[…$…]` subscript in an assignment or expansion) feeds `DYN_NAME_HINT` and `dynamicName`. → accept: W1, W2 pass.
-- [ ] 11.3 `configIndirectGit` (`:396`): return false unless the text could reach git (a `git` word, or a `$`/backtick/glob word in command position); fail closed on unparseable text only then. → accept: W3 passes; every earlier refused case is still refused.
-- [ ] 11.4 Anchor or bound the `let`/`((` hint scans. → accept: a timing test shows `"let ".repeat(20000)` and `"(( ".repeat(20000) + "= x"` each finish under 200 ms.
-- [ ] 11.5 Re-point every moved `cite: scripts/pre-guard.mjs:` range (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS.
+Depends on: none (Step 11 merged at 1f2339c)
+Fixes round-13 W1-W5, S1, S2. Out of scope (F1/F3): user/global gitconfig, shell aliases, persistent-shell exports, sourced files, unlisted wrappers and string runners (`trap`, `watch`), `wait -p`/`coproc` names, the pre-existing slow paths.
+- [ ] 12.1 Failing tests in `scripts/pre-guard-docclean.test.mjs` (same harness): refuse (exit 2, `/doc-write authority/`) every round-13 W1-W5 command; keep all earlier cases. → accept: the W1 cases exit 2 on c4a7988 and 0 on 1f2339c; the W2-W5 cases exit 0 on 1f2339c.
+- [ ] 12.2 `mayReachGit` (`:468`): an `env` word with a `-…S` or `--split-string` option can reach git. → accept: W1 refused.
+- [ ] 12.3 `arithDyn` (`:374`): a one-character special parameter (`-` `$` `?` `!` `#` `@` `*` or a digit) right after `${`, then a `:` not followed by `-` `=` `+` `?`, is a substring; `LET_CMD` (`:366`) matches `let` as a word anywhere (`(?:^|[\s;&|({!])let\s`). → accept: W2, W3 refused.
+- [ ] 12.4 When arithmetic reads a name, a `NAME+=` append outside arithmetic, `printf -v`, or `read`/`mapfile`/`readarray` counts as a possibly built value with no `$` required; `dynNameHint` (`:398`) runs `arithDyn` before its `$`/backtick precheck. → accept: W4 refused; `(( i++ )); git lfs pull` and `let i=i+1; git lfs pull` still pass.
+- [ ] 12.5 The tokenizer fails on `${` followed by whitespace or `|` (a current-shell substitution) and the hint treats it as dynamic. → accept: W5 refused.
+- [ ] 12.6 Reword the `:446` comment: arithmetic runs a command held in a value it reads. → accept: the comment no longer says arithmetic runs no command.
+- [ ] 12.7 Re-point every moved `cite: scripts/pre-guard.mjs:` range (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS.
 
 ## Sequencing
 Independent: no shared files or cites. Step 1 is the security fix and goes first when run one at a time; its cite re-pointing (1.5) is last.
