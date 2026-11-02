@@ -122,6 +122,27 @@ test("pre-guard: bracket text that is quoted or in a heredoc stays inert next to
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+// S3 (scrutinise-sandbox-auto-flow): in a shell a glob that matches nothing is passed on literally, so `rm docs/plans/L[a-1].md` deletes
+// a file that really is named that. Reading the reversed class only as one wildcard character cannot match such a name; both readings count.
+test("pre-guard: a reversed bracket range is also read as the literal file name, so a bracketed guarded doc stays guarded (no ** in docPaths)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-segre-"));
+  try {
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["docs/plans/*.md"] } }));
+    for (const sub of ["plans", "other"]) fs.mkdirSync(path.join(dir, "docs", sub), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "L[a-1].md"), "x");
+    fs.writeFileSync(path.join(dir, "docs", "other", "L[a-1].md"), "x");
+    const verdict = (command) => run(GUARD, dir, { session_id: "segre-literal", tool_name: "Bash", tool_input: { command } });
+    for (const command of ["rm docs/plans/L[a-1].md", "rm 'docs/plans/L[a-1].md'", 'rm "docs/plans/L[a-1].md"', "git rm docs/plans/L[a-1].md"]) {
+      const got = verdict(command);
+      assert.equal(got.status, 2, `${command} removes a guarded doc: ${got.stderr}`);
+      assert.doesNotMatch(got.stderr, /could not decide|Invalid regular expression/, command);
+    }
+    // the wildcard reading still holds, and a file outside the guarded path is not caught by either reading
+    assert.equal(verdict("rm docs/plans/L[a-1]*.md").status, 2, "the wildcard twin of the guarded name");
+    assert.equal(verdict("rm docs/other/L[a-1].md").status, 0, "the same name outside docs/plans/*.md is not guarded");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ARCH-STATE-17: under an active unit scope the Read tool alone may read scratch evidence under the OS temp dir or
 // $CLAUDE_JOB_DIR/tmp, judged by real path; everything else keeps the scope's closed allow-list.
 function scratchProject() {
