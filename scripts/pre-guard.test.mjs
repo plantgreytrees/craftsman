@@ -79,7 +79,7 @@ test("pre-guard: a sandbox-bypass call that is only an assignment logs head \"?\
     const secrets = [
       "API_KEY=abc/Sk_live-123",
       "TOKEN=a/b+c",
-      "AWS_SECRET_ACCESS_KEY=wJalr/K7MDENG+bPxRfiCY",
+      "AWS_SECRET_ACCESS_KEY=fake/abc+def",
       "cd /x && API_KEY=abc/Sk_live-123",
     ];
     secrets.forEach((command, n) => run(GUARD, dir, { session_id: `bypass-assign-${n}`, tool_name: "Bash", tool_input: { command, dangerouslyDisableSandbox: true } }));
@@ -87,7 +87,7 @@ test("pre-guard: a sandbox-bypass call that is only an assignment logs head \"?\
     assert.equal(events.length, secrets.length, "one event per call");
     assert.deepEqual(events.map((e) => e.head), secrets.map(() => "?"), "every bare assignment logs the unknown head");
     const raw = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8");
-    assert.doesNotMatch(raw, /Sk_live|b\+c|K7MDENG|wJalr/, "no fragment of any value reaches the log");
+    assert.doesNotMatch(raw, /Sk_live|b\+c|abc\+def/, "no fragment of any value reaches the log");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
