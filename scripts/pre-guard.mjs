@@ -14,7 +14,7 @@ import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, m
 import { blankProse, forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
 import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
-import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
+import { activeScopes, insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
 
@@ -1235,7 +1235,7 @@ if (tool === "Bash" && toolInput.dangerouslyDisableSandbox === true) logEvent({ 
 // in this file is safety and runs whatever enabled() says.
 const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(tool === "Read" && insideScratchRoots(file, activeRoot))) { // ARCH-STATE-17: scratch Reads pass the scope and the ambiguity refusal
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(tool === "Read" && insideScratchRoots(file, activeRoot, activeScopes(input)))) { // ARCH-STATE-18: scratch Reads pass the scope and the ambiguity refusal
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
@@ -1869,17 +1869,24 @@ function bracketClass(body, any = "[^/]") {
   try { new RegExp(cls); return cls; } catch { return any; }
 }
 
-// ARCH-STATE-17: the Read tool alone may read scratch evidence (screenshots, logs) under the OS temp dir or $CLAUDE_JOB_DIR/tmp.
-// Judged by the real path the OS resolves (a `..` after a symlink included). A relative path, a file that does not exist, and a
-// root that encloses the project (a TMPDIR pointing at the home dir or at /) never qualify.
-function insideScratchRoots(target, project) {
+// ARCH-STATE-18: the Read tool alone may read scratch evidence (screenshots, logs) under the OS temp dir or $CLAUDE_JOB_DIR/tmp.
+// Judged by the real path the OS resolves (a `..` after a symlink included), against EVERY active scope of the session, not the
+// one readScope happens to pick: a file whose real path lies inside any scope's root stays governed by that scope, and a scratch
+// root that is, or encloses, any scope's root (a TMPDIR pointing at the home dir, at /, or holding a unit worktree) never
+// qualifies. A relative path, a file that does not exist and a root that cannot be resolved fail closed.
+function insideScratchRoots(target, project, scopes = []) {
   if (typeof target !== "string" || !path.isAbsolute(target)) return false;
-  let real, realProject;
-  try { real = fs.realpathSync.native(target); realProject = fs.realpathSync.native(project); } catch { return false; }
+  let real;
+  const governed = [];
+  try {
+    real = fs.realpathSync.native(target);
+    for (const dir of [project, ...scopes.map((scope) => scope.worktree_path || scope.project_root)]) governed.push(fs.realpathSync.native(dir));
+  } catch { return false; }
   const within = (dir, entry) => entry.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
   return [os.tmpdir(), process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, "tmp") : ""].some((root) => {
     let realRoot;
     try { realRoot = root ? fs.realpathSync.native(root) : ""; } catch { return false; }
-    return realRoot !== "" && within(realRoot, real) && realProject !== realRoot && !within(realRoot, realProject);
+    return realRoot !== "" && within(realRoot, real)
+      && governed.every((dir) => dir !== realRoot && !within(realRoot, dir) && dir !== real && !within(dir, real));
   });
 }
