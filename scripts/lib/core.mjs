@@ -638,24 +638,28 @@ export function orchestrationEnabled(env = process.env) {
 export const DOC_WRITER_COMMANDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check"];
 // `instruction` writes nothing under docs/, so it is not a doc writer; it is recorded because goal-token.mjs mints only after it (or /auto).
 export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle", "instruction"];
-const COMMAND_TTL_MS = 3600000;
+// How long a record is honoured is a function of the command. A record lasts the session, because a model Skill call can create a
+// doc writer's anyway, so expiring it protects nothing; /toggle's is the exception: only the user's typed command creates it, and
+// it expires after one hour (ARCH-SAFETY-13). An unparsable `at` is never honoured.
+const TOGGLE_TTL_MS = 3600000;
+const commandTtlMs = (command) => (command === "toggle" ? TOGGLE_TTL_MS : Infinity);
 const commandsFile = (sid, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), "commands.json");
 export function recordCommand(sid, command, via, context = null) {
   const file = commandsFile(sid, context);
   let known = {};
   try { known = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
-  // The user's typed command outranks a model's Skill call for the same command while it is fresh.
+  // The user's typed command outranks a model's Skill call for the same command for as long as that record is honoured.
   const held = known[command];
-  if (via !== "prompt" && held?.via === "prompt" && Date.now() - Date.parse(held.at) < COMMAND_TTL_MS) return;
+  if (via !== "prompt" && held?.via === "prompt" && Date.now() - Date.parse(held.at) < commandTtlMs(command)) return;
   known[command] = { via, at: new Date().toISOString() };
   atomicWrite(file, JSON.stringify(known) + "\n");
 }
-export function commandInvoked(sid, names, { context = null, via = null, ttlMs = COMMAND_TTL_MS, now = Date.now() } = {}) {
+export function commandInvoked(sid, names, { context = null, via = null, ttlMs = null, now = Date.now() } = {}) {
   let known;
   try { known = JSON.parse(fs.readFileSync(commandsFile(sid, context), "utf8")); } catch { return false; }
   return names.some((name) => {
     const entry = known?.[name];
-    return entry && (!via || entry.via === via) && now - Date.parse(entry.at) < ttlMs;
+    return entry && (!via || entry.via === via) && now - Date.parse(entry.at) < (ttlMs ?? commandTtlMs(name));
   });
 }
 

@@ -831,6 +831,89 @@ test("recordCommand / commandInvoked: per session, by command, by route, and not
   }
 });
 
+// A command record's lifetime is a function of the command: the doc writers and `instruction` keep theirs for the session (a
+// model Skill call can create one anyway, so expiring it protects nothing), while /toggle's, which only the user's typed command
+// creates, lasts one hour (ARCH-SAFETY-13).
+const HOUR_MS = 3600000;
+const SESSION_RECORDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check", "instruction"];
+// Rewrites the age of every record held for a session, as if each had been made `ageMs` ago.
+function ageRecords(dir, sid, ageMs) {
+  const file = path.join(dir, "sessions", sid, "commands.json");
+  const held = JSON.parse(fs.readFileSync(file, "utf8"));
+  for (const entry of Object.values(held)) entry.at = new Date(Date.now() - ageMs).toISOString();
+  fs.writeFileSync(file, JSON.stringify(held));
+}
+
+test("commandInvoked: every record but toggle's is still honoured 25 hours after it was made", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-life-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    assert.deepEqual(coreNs.RECORDED_COMMANDS.filter((name) => name !== "toggle").sort(), [...SESSION_RECORDS].sort(), "a new recorded command needs a lifetime decision here");
+    for (const name of SESSION_RECORDS) {
+      for (const via of ["skill", "prompt"]) {
+        const sid = `life-${name}-${via}`;
+        coreNs.recordCommand(sid, name, via, ctx);
+        ageRecords(dir, sid, 25 * HOUR_MS);
+        assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx }), true, `${name} (${via}) is honoured at 25 hours`);
+        assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx, via }), true, `${name} is honoured at 25 hours by its own route (${via})`);
+        assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx, now: Date.now() + 25 * HOUR_MS }), true, `${name} (${via}) is honoured 50 hours on`);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commandInvoked: toggle's record expires after one hour and still needs the typed command", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-toggle-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    coreNs.recordCommand("t1", "toggle", "prompt", ctx);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt" }), true, "fresh");
+    ageRecords(dir, "t1", HOUR_MS - 60000);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt" }), true, "just inside the hour");
+    ageRecords(dir, "t1", HOUR_MS + 60000);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt" }), false, "just past the hour");
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx }), false, "just past the hour, whatever the route");
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt", ttlMs: 3 * HOUR_MS }), true, "an explicit ttlMs still wins, longer");
+    ageRecords(dir, "t1", 30 * 60000);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt", ttlMs: 10 * 60000 }), false, "an explicit ttlMs still wins, shorter");
+    coreNs.recordCommand("t2", "toggle", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("t2", ["toggle"], { context: ctx, via: "prompt" }), false, "a Skill call is not the typed command");
+    coreNs.recordCommand("t3", "plan", "prompt", ctx);
+    ageRecords(dir, "t3", 2 * HOUR_MS);
+    assert.equal(coreNs.commandInvoked("t3", ["plan"], { context: ctx, ttlMs: HOUR_MS }), false, "an explicit ttlMs still wins over a record that would not expire");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("recordCommand: a typed record outranks a later skill record at any age, except toggle's once its hour is over", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-outrank-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    const via = (sid, name) => JSON.parse(fs.readFileSync(path.join(dir, "sessions", sid, "commands.json"), "utf8"))[name].via;
+    for (const name of SESSION_RECORDS) {
+      const sid = `outrank-${name}`;
+      coreNs.recordCommand(sid, name, "prompt", ctx);
+      ageRecords(dir, sid, 25 * HOUR_MS);
+      coreNs.recordCommand(sid, name, "skill", ctx);
+      assert.equal(via(sid, name), "prompt", `${name}: the typed record survives a skill call 25 hours on`);
+      assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx, via: "prompt" }), true, `${name}: and is still honoured as typed`);
+    }
+    coreNs.recordCommand("o1", "toggle", "prompt", ctx);
+    ageRecords(dir, "o1", HOUR_MS - 60000);
+    coreNs.recordCommand("o1", "toggle", "skill", ctx);
+    assert.equal(via("o1", "toggle"), "prompt", "toggle: kept inside its hour");
+    ageRecords(dir, "o1", HOUR_MS + 60000);
+    coreNs.recordCommand("o1", "toggle", "skill", ctx);
+    assert.equal(via("o1", "toggle"), "skill", "toggle: an expired typed record is replaced");
+    assert.equal(coreNs.commandInvoked("o1", ["toggle"], { context: ctx, via: "prompt" }), false, "and the Skill call is not the typed command");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // 11.1: not being in a git repo turns the quality machinery off and leaves safety on.
 test("safetyEnabled vs enabled: a non-git project root leaves safety on and the quality side off, and logEvent writes nothing", () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-core-nongit-")));
