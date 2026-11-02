@@ -73,3 +73,21 @@ ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and ext
 - **ARCH-LAND-31** replaces 23 (after review rounds 9 to 12): the lease exception is unchanged in intent but must be written `src:refs/heads/<own>`. The force block is described honestly as a best-effort text scan: round 12 reproduced older ways around it (quoted flags, `read`-set `GIT_CONFIG_*`, `git send-pack`, `$()` arguments, delete-then-recreate). Base protection is the remote's branch protection plus the approval gate; the structural fix is the follow-up row `force-block-wordlevel`.
 - **ARCH-LAND-32** replaces 30 (2026-10-25, owner decision D1 of external-project-board): `land-feature` reaches the automatic archive only through the in-process capability of ARCH-DOCS-17, and `autoArchiveEligible` refuses without it before the main checkout moves.
 - **ARCH-LAND-33** replaces 32 (2026-10-25, scrutinise round 4): same wording fix as ARCH-DOCS-18; cites ARCH-DOCS-18 and keeps everything else of ARCH-LAND-32.
+
+## Phase 2 amendment (2026-11-01, owner-approved)
+_Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The diagram is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+
+- **ARCH-LAND-34**: root's drain checks every queue entry before it touches origin.
+  - **What passes:** a push goes only to a `feat/` or `feature/` branch, never base or the plan's target branch. A delete only removes a `feat/` unit branch.
+  - **Anything else** is logged as `drain_refused` and PARKs like a rejected push.
+  - **Why:** `drainQueue` (`scripts/lib/network.mjs:145-171`) pushed or deleted whatever `dst` an entry named, and a tool call could write the queue (probe, 2026-11-01). Once the network step runs unattended (ARCH-LAND-35), that would have been a path to base outside the approval gate (ARCH-LAND-28).
+  - **Rejected:** relying only on the queue's protection (ARCH-SAFETY-13). Runner processes still write the queue, and the guard doesn't read them.
+- **ARCH-LAND-35**: root's network step (fetch, drain, status) stays outside the sandbox.
+  - **Why outside:** a sandboxed git can't read the `gh` credential store; Gleam logged 99 `could not read Username`. Masking the token would give every sandboxed command, runners included, a working credential, against ARCH-LAND-19.
+  - **Unattended:** the call passes auto mode through the one user-scope `autoMode.allow` entry that `/init` offers (ARCH-SAFETY-14). Without that entry, the user approves it. A classifier refusal stops the run like `needs_network`, naming the one command, with nothing parked.
+  - **Still human steps:** every other `needs_network` action (pr-mode host API, `land-feature`, any base push), under ARCH-LAND-28.
+  - **Rejected:**
+    - a `permissions.allow` rule: the path changes on every upgrade, and it approves with no review;
+    - an `excludedCommands` entry: it loosens the sandbox for a whole command text;
+    - keeping today's behaviour: unattended runs stall.
+  - **Placement:** it sits here rather than in `engine.rules.md`, beside ARCH-LAND-19, so the engine units' context budget (ARCH-ENGINE-08) holds.

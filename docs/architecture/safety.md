@@ -61,3 +61,30 @@ documents for the user at exit. `claude plugin test` only runs mod tests, so it 
 the hook fires (`SessionEnd:other`, exit 0) and the JSON is parsed, but **neither channel appears in `stream-json` output**
 (there is no UI in `-p`). Whether an interactive session shows `systemMessage` at exit is therefore **unconfirmed**; the report
 uses stderr only, and Stop (which does show `systemMessage`) carries the same report every turn.
+
+## Phase 2 amendments (2026-11-01, owner-approved)
+_Verified at `9e122b1`. Source: the "Open decision — phase 2" section of [sandbox-auto-flow](../plans/sandbox-auto-flow.md); `/idea` was skipped, and every claim there was checked against the code and the 2026-11-01 transcript sweep._
+
+Unattended runs kept stopping for two reasons. First, the sandbox hides git credentials from root's network step. Second, the guards refuse harmless text. Root still runs fetch and drain outside the sandbox, but auto mode now has one explicit, user-approved entry for exactly that step. Drain refuses anything aimed at base, and its queue is protected the way approval records are. The text-scanning guards are now stated to be accident prevention. They narrow false positives where the text is provably inert, and they stop chasing unusual bypass spellings, because the boundary is the sandbox, not text matching.
+
+```mermaid
+flowchart LR
+  runner["unit runner (sandboxed, no credentials)"] -->|enqueuePush| queue[("git common dir: .craftsman/network/queue.jsonl<br/>tool writes refused, ARCH-SAFETY-13")]
+  root["root session"] -->|"repo-exec network drain<br/>sandbox disabled for this call"| drain["drainQueue<br/>validates dst, ARCH-LAND-34"]
+  queue --> drain
+  drain -->|"feat/*, feature/*"| origin[("origin")]
+  drain -->|"base or anything else"| park["drain_refused, PARKED"]
+  entry{{"autoMode.allow entry in ~/.claude/settings.json<br/>offered by /init, ARCH-SAFETY-14"}} -.->|"clears Safety Bypass Flag, Auto-Mode Bypass"| root
+```
+
+| id | decision | why | rejected alternatives |
+|---|---|---|---|
+| ARCH-SAFETY-13 (replaces 05) | Same rule with three changes. The network push queue becomes protected state. A quoted-delimiter heredoc body fed to cat, tee, python3 or node no longer trips the setter rule. A command record now lasts the session, except `/craftsman:toggle`'s, which still expires after one hour. | A probe wrote `{"kind":"delete","dst":"main"}` into the queue with a Write and with `echo >>`, and drain would have run it with the user's credentials. Refusing heredoc prose gained nothing, because an interpreter's own environment changes were already outside what the guard reads. 211 of 237 "doc-write.mjs on outside /plan…" refusals came more than an hour into a run, and every doc writer except `/builtin-check` is model-invocable, so the hour bounded nothing. (The plan blamed chaining, and that was wrong: chained `doc-write.mjs on; …` passes on main and on the installed plugin.) | Drain validation alone: kept as ARCH-LAND-34, but a forged queue would still feed an unattended step. Keeping the heredoc false positive: the Write-tool workaround cost turns in every long run. |
+| ARCH-SAFETY-14 | /init's project block adds origin hosts to `allowedDomains` and no `excludedCommands`. A separate user-scope offer adds one `autoMode.allow` entry for the network step. | Gleam logged 62 `CONNECT tunnel failed, response 403` because github.com wasn't allowed, plus 13 auto-mode denials of the unsandboxed retry (`[Safety Bypass Flag]`, `[Auto-Mode Bypass]`). Both are soft-deny rules that an allow entry can clear, and auto mode reads `autoMode` only from user, managed or `--settings` scope. | A docker exclusion: the docker socket is root-equivalent, and craftsman would be the one proposing that loosening. A `permissions.allow` rule: the exact plugin path changes every upgrade, and a `*` in its place would match `../`. Masked credentials with TLS termination: every sandboxed command, runners included, could then push as the user, which ARCH-LAND-19 rules out. |
+| ARCH-SAFETY-15 | The text-scanning guards are accident prevention and the sandbox is the boundary. A newly reported bypass spelling becomes a stated limit instead of a patch. | Follow-up F1 found new holes in each of four fix rounds. The guard already leaves interpreters, script files and text built at run time to the sandbox. | Staying fail-closed and patching round by round: unbounded work. Moving state protection into a sandbox `denyWrite`: large and unproven, since craftsman's own scripts would then need `excludedCommands`. It can go to `/idea` if wanted. |
+
+Trade-offs and known limits:
+- The allow entry is prose that the classifier reads, so the classifier can still refuse a call. A refusal stops the run the way `needs_network` does (ARCH-LAND-35). `/craftsman:stats` "Sandbox bypasses" shows how often that happens.
+- A fetch from a private repo needs credentials, so `allowedDomains` alone can't make a sandboxed fetch work: Gleam logged 99 `could not read Username for 'https://github.com'`. A public repo fetches fine.
+- **Stated limits of the worktree git guard** (F1; live and accepted under ARCH-SAFETY-15): a nested or `function` cd, CDPATH, a GIT_DIR set by `for`, `read` or `printf -v`, `-c alias.*` or `core.worktree`, a glob-spelled git path, the wrappers `script -c`, `flock -c`, `su -c` and `watch`, git-as-runner options, and rebinding by `trap` or `alias`.
+- Still refused on purpose: `echo` prose that names a setter next to a safety variable, an unquoted `<<EOF` body, and any unreadable command that can write and names craftsman state.

@@ -57,3 +57,12 @@ only surface mid-run still park, which costs a Phase C round.
 
 ## Plan-hierarchy additions (2026-10-18)
 ARCH-AUTO-09 supersedes ARCH-AUTO-01: the stop rule covers every descendant row of the slug. See [plan](./plan.md) for the reasoning and rejected alternatives.
+
+## Phase 2 amendment (2026-11-01, owner-approved)
+_Verified at `9e122b1`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The rest of the pass is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+
+- **ARCH-AUTO-11**: the scope-required marker belongs to the `/orchestrate` run that armed it.
+  - **Re-arming:** SessionStart re-arms it only when the hand-off still lists remaining units.
+  - **Ending:** a craftsman command the user types (never a model Skill call) clears the session marker and the session scope. Unit scopes keyed to a worktree are left alone, and an active `/auto` run keeps everything (ARCH-AUTO-10).
+  - **Why:** SessionStart re-armed the marker after compaction from a closing hand-off with nothing left to run, so a later `/architect` couldn't Read anything until it activated a scope. The sweep counted 126 blocks of this kind, mostly `/plan` and `/investigate` edits of `docs/plans/**` after an `/orchestrate`.
+  - **Rejected:** limiting the marker to writes, which would let Reads in a unit skip the boundary analysis; leaving it as is.

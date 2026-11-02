@@ -3,8 +3,8 @@ area: auto
 governs: ["commands/auto.md", "commands/instruction.md", "scripts/orchestrate-scope-guard.mjs"]
 human: docs/architecture/auto.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ab8f25f502eafe923ca6a5565024aaabf8ca91d1
-updated: 2026-10-27
+verified_at: 9e122b185051f279778b956746840d9253d32ae4
+updated: 2026-11-01
 ---
 # ARCH auto — enforced rules
 
@@ -18,3 +18,4 @@ updated: 2026-10-27
 - **ARCH-AUTO-08** [decided] FEATURE_MERGED is open for grants, turn caps, force block; +1 grant/feature — check: core.test — cite: scripts/lib/core.mjs:302-305,346-347
 - **ARCH-AUTO-09** [decided] /craftsman:auto is the single entry: Phase A asks every open decision (idea → architect → plan), Phase B runs unattended under /goal, Phase C asks one consolidated round; repeat until every row of every plan the slug resolves to through plan-index is COMPLETE, and autoActive, autoForceBlock and runner grants read the resolved feature plan, so an epic or story slug never holds the marker for 24 h — check: core.test.mjs descendant rows, auto-command.test.mjs — cite: scripts/lib/core.mjs:372-406, scripts/orchestrate-scope-guard.mjs:133-148
 - **ARCH-AUTO-10** [decided] /auto MUST NOT set scope-required (Phase A writes docs); its goal's /orchestrate sets it; /auto keeps the marker, ownership and runner grants — check: orchestrate-scope-guard.test.mjs — cite: scripts/orchestrate-scope-guard.mjs:116-148
+- **ARCH-AUTO-11** [decided] The session's scope-required marker MUST belong to the /orchestrate run that armed it: /orchestrate arms it, /auto never does and keeps it while its run is active (ARCH-AUTO-10); SessionStart re-arms it on resume or compaction only when the session's hand-off still lists remaining units (a closing hand-off arms nothing); a craftsman command the user types (a prompt, never a model Skill call) other than /orchestrate or /auto, outside an active /auto run, clears the session-level marker and session scope, never a worktree-keyed unit scope, binding or marker (scope.mjs release, ARCH-STATE-03); scope activation still clears it — check: orchestrate-scope-guard.test.mjs a typed /plan after /orchestrate clears them, a Skill call does not, an active /auto run keeps them; session-context.test.mjs a closing hand-off arms nothing — cite: scripts/orchestrate-scope-guard.mjs:116-127, scripts/session-context.mjs:166-169, scripts/scope.mjs:205-207

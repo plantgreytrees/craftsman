@@ -180,7 +180,7 @@ test("ARCH-SAFETY-05 and -11 and safety.md state the round-5 behaviour", () => {
   const human = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.md"), "utf8");
   const rule = (id) => rules.split("\n").find((l) => l.includes(`**${id}**`)) || "";
   for (const needle of ["never skipped", "no-op", "permission prompt", "read, printf -v", "allowlist", "refused outright", "select NAME in", "always requires", "no list-only skip", "TAR_OPTIONS", "best-effort", "quality gates", "linked worktree"]) {
-    assert.ok(rule("ARCH-SAFETY-05").includes(needle), `ARCH-SAFETY-05 names: ${needle}`);
+    assert.ok(rule("ARCH-SAFETY-13").includes(needle), `ARCH-SAFETY-13 names: ${needle}`);
   }
   for (const needle of ["craftsman.project.json", "PROJECT_CONFIG_FILES"]) assert.ok(rule("ARCH-SAFETY-11").includes(needle), `ARCH-SAFETY-11 names: ${needle}`);
   for (const needle of ["no-op", "permission prompt", "allowlist", "refused outright", "doc-retire", "select NAME in", "no list-only skip", "TAR_OPTIONS", "best-effort", "quality gates", "linked worktree"]) assert.ok(human.includes(needle), `safety.md names: ${needle}`);
@@ -228,13 +228,13 @@ test("the rule names every limit this file pins, and safety.md repeats them", ()
   const here = path.dirname(fileURLToPath(import.meta.url));
   const rules = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.rules.md"), "utf8");
   const human = fs.readFileSync(path.join(here, "..", "docs", "architecture", "safety.md"), "utf8");
-  const line = rules.split("\n").find((l) => l.includes("**ARCH-SAFETY-05**")) || "";
+  const line = rules.split("\n").find((l) => l.includes("**ARCH-SAFETY-13**")) || "";
   const start = line.indexOf("the guard reads shell words");
-  assert.ok(start > 0, "ARCH-SAFETY-05 has a limits clause");
+  assert.ok(start > 0, "ARCH-SAFETY-13 has a limits clause");
   const clause = line.slice(start, line.indexOf(" — check:"));
   const limitsSection = human.slice(human.indexOf("Anything they cannot read stays with the sandbox"));
   for (const needle of ["interpreter", "built at run time", "archive", "patch", "for NAME in", "include path", "prose"]) {
-    assert.ok(clause.includes(needle), `the limits clause of ARCH-SAFETY-05 names: ${needle}`);
+    assert.ok(clause.includes(needle), `the limits clause of ARCH-SAFETY-13 names: ${needle}`);
     assert.ok(limitsSection.includes(needle), `safety.md's limits section names: ${needle}`);
   }
 });
