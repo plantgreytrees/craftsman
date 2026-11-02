@@ -1,5 +1,5 @@
-// Merge, never overwrite, the sandbox settings /craftsman:init offers for a project's
-// .claude/settings.json (ARCH-SAFETY-10), and find out whether the sandbox is on in any scope
+// Merge, never overwrite, the sandbox settings /craftsman:init offers for a project's .claude/settings.json and the one
+// user-scope autoMode.allow entry it offers apart (ARCH-SAFETY-10, -16), and find out whether the sandbox is on in any scope
 // (ARCH-SAFETY-01 leaves outside-root writes, deletes and credential reads to it).
 import fs from "node:fs";
 import os from "node:os";
@@ -15,6 +15,19 @@ const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v)
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
+// ARCH-SAFETY-16: SANDBOX_BLOCK plus the origin host of each registered project in sandbox.network.allowedDomains (`merge` skips a
+// host the file already covers). Never an excludedCommands entry: docker stays a gap SessionStart names, the user's to accept.
+export function projectSettingsBlock(hosts = []) {
+  const block = clone(SANDBOX_BLOCK);
+  const allowedDomains = [...new Set((Array.isArray(hosts) ? hosts : []).filter((host) => typeof host === "string").map((host) => host.trim().toLowerCase()).filter((host) => /^[a-z0-9][a-z0-9.-]*$/.test(host)))];
+  if (allowedDomains.length) block.sandbox.network = { allowedDomains };
+  return block;
+}
+
+// The one autoMode.allow entry of the separate user-scope offer (ARCH-SAFETY-16, ARCH-LAND-35, ARCH-LAND-36). Prose the auto-mode
+// classifier reads; it names no plugin path, which changes with every upgrade.
+export const NETWORK_STEP_ALLOW = "Running craftsman's repo-exec.mjs with the network action (step fetch, drain or status) with the sandbox disabled is allowed: the step needs the user's git credentials, which the sandbox hides. It fetches origin and pushes only the run's own unit and feature branches, plus the base branch only in direct-land mode (planning.featureBranches off). Pushes are never forced.";
+
 function leaves(prefix, value, added) {
   if (isObject(value)) for (const [k, v] of Object.entries(value)) leaves(`${prefix}.${k}`, v, added);
   else if (Array.isArray(value)) for (const item of value) added.push(`${prefix}: ${typeof item === "string" ? item : JSON.stringify(item)}`);
@@ -29,32 +42,52 @@ function merge(target, source, prefix, added, kept) {
     else if (isObject(out[key]) && isObject(value)) out[key] = merge(out[key], value, at, added, kept);
     else if (Array.isArray(out[key]) && Array.isArray(value)) {
       out[key] = [...out[key]];
-      for (const item of value) if (!out[key].some((existing) => same(existing, item))) { out[key].push(clone(item)); added.push(`${at}: ${typeof item === "string" ? item : JSON.stringify(item)}`); }
+      // a host the file's own entry or `*.` wildcard already covers is present (the same reading as the gap check, domainCovers)
+      const present = (item) => out[key].some((existing) => same(existing, item) || (at === "sandbox.network.allowedDomains" && typeof existing === "string" && typeof item === "string" && domainCovers(existing, item.toLowerCase())));
+      for (const item of value) if (!present(item)) { out[key].push(clone(item)); added.push(`${at}: ${typeof item === "string" ? item : JSON.stringify(item)}`); }
     } else if (!same(out[key], value)) kept.push(`${at} stays ${JSON.stringify(out[key])} (set in your file)`);
   }
   return out;
 }
 
-/** `currentText` is the file's text (or null). Never throws; `ok: false` means write nothing. */
-export function mergeSettings(currentText, block = SANDBOX_BLOCK) {
+// `block` is an object, or a function of the parsed file that returns one. `label` names the file in errors and in the diff.
+function mergeInto(currentText, block, label, kind) {
   let current = {};
   if (currentText !== null && currentText !== undefined && String(currentText).trim() !== "") {
     try { current = JSON.parse(currentText); }
-    catch (error) { return { ok: false, error: `.claude/settings.json is not valid JSON (${error.message}); fix it, then run init again` }; }
-    if (!isObject(current)) return { ok: false, error: ".claude/settings.json must hold a JSON object; fix it, then run init again" };
+    catch (error) { return { ok: false, error: `${label} is not valid JSON (${error.message}); fix it, then run init again` }; }
+    if (!isObject(current)) return { ok: false, error: `${label} must hold a JSON object; fix it, then run init again` };
   }
   const added = [];
   const kept = [];
-  const merged = merge(current, block, "", added, kept);
+  const merged = merge(current, typeof block === "function" ? block(current) : block, "", added, kept);
   const changed = added.length > 0;
-  return { ok: true, changed, added, kept, next: changed ? JSON.stringify(merged, null, 2) + "\n" : currentText ?? "" };
+  return { ok: true, changed, added, kept, next: changed ? JSON.stringify(merged, null, 2) + "\n" : currentText ?? "", label, kind };
 }
+
+/** `currentText` is the file's text (or null). Never throws; `ok: false` means write nothing. */
+export function mergeSettings(currentText, block = SANDBOX_BLOCK) {
+  return mergeInto(currentText, block, ".claude/settings.json", "sandbox");
+}
+
+/**
+ * The user-scope offer (ARCH-SAFETY-16), kept apart from SANDBOX_BLOCK: one autoMode.allow entry for root's network step in the user's own
+ * settings.json, the only file auto mode reads. A new list starts with "$defaults" so the built-in rules stay; a list the file has gets
+ * the entry appended and no "$defaults". Nothing else is added: no credential mask, no tlsTerminate, no permissions.allow rule.
+ */
+export function mergeUserSettings(currentText, label = "settings.json") {
+  return mergeInto(currentText, (current) => ({ autoMode: { allow: Array.isArray(current.autoMode?.allow) ? [NETWORK_STEP_ALLOW] : ["$defaults", NETWORK_STEP_ALLOW] } }), label, "user");
+}
+
+const WORDS = { sandbox: { what: "sandbox settings", has: "the sandbox block" }, user: { what: "auto mode entry", has: "the auto mode entry" } };
 
 export function renderSettingsDiff(result) {
   if (!result.ok) return result.error;
   const notes = result.kept.map((line) => `= ${line}`);
-  if (!result.changed) return ["nothing to add: .claude/settings.json already has the sandbox block", ...notes].join("\n");
-  return ["craftsman: sandbox settings to merge into .claude/settings.json (nothing already in the file is changed):",
+  const { what, has } = WORDS[result.kind] ?? WORDS.sandbox;
+  const label = result.label ?? ".claude/settings.json";
+  if (!result.changed) return [`nothing to add: ${label} already has ${has}`, ...notes].join("\n");
+  return [`craftsman: ${what} to merge into ${label} (nothing already in the file is changed):`,
     ...result.added.map((line) => `+ ${line}`), ...notes].join("\n");
 }
 
@@ -66,7 +99,7 @@ const readSettings = (file) => {
   try { const value = JSON.parse(fs.readFileSync(file, "utf8")); return isObject(value) ? value : null; } catch { return null; }
 };
 
-const defaultUserDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+export const defaultUserDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
 
 // The settings files Claude Code merges for a project: user, project, local, then every managed file and drop-in.
 function settingsFiles({ root, userDir, managed }) {
@@ -91,11 +124,11 @@ export function originHostOf(url) {
     try { return new URL(text).hostname.toLowerCase() || null; } catch { return null; }
   }
   if (/^[A-Za-z]:/.test(text)) return null; // a Windows drive path (`C:\srv\r.git`), not host:path
-  const scp = /^(?:[^@\s/]+@)?([A-Za-z0-9.-]+):(?!\/)\S+$/.exec(text) || /^[^@\s/]+@([A-Za-z0-9.-]+):\/\S*$/.exec(text); // `host:path`, or `user@host:/absolute/path`
+  const scp = /^(?:[^@\s/]+@)?([A-Za-z0-9.-]+):(?!\/)\S+$/.exec(text) || /^(?:[^@\s/]+@)?([A-Za-z0-9.-]+):\/\S*$/.exec(text); // `host:path`, or `[user@]host:/absolute/path`
   return scp ? scp[1].toLowerCase() : null;
 }
 
-const originUrl = (root) => {
+export const originUrl = (root) => {
   try { return execFileSync("git", ["-C", root, "remote", "get-url", "origin"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return null; }
 };
 
