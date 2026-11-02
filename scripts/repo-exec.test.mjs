@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { cleanup, inspectRepo, landUnit, landFeature, merge, prepare, sync } from "./repo-exec.mjs";
+import { cleanup, inspectRepo, landUnit, landFeature, merge, networkAction, prepare, sync } from "./repo-exec.mjs";
+import { drainVerdict, readQueue } from "./lib/network.mjs";
 import { plainArgs } from "./lib/land.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
@@ -1153,6 +1154,37 @@ test("repo-exec land-unit: a held feature lock refuses; the lock is gone after s
       git(feature.worktree_path, ["commit", "-q", "-m", "feat: feature side"]);
       assert.equal(landUnit(context, { unit: "l2", worktree_path: feature.worktree_path }, info).parked, true);
       assert.equal(fs.existsSync(lock), false);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// ARCH-LAND-36: an offline sandboxed runner's direct-land merge is what queues a push of base, so the drain must let it through.
+test("repo-exec: an offline direct-land unit merge queues one push of base, which root's drain accepts in direct-land mode only", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const base = git(context.root, ["branch", "--show-current"]);
+      const origin = path.join(data.workspace, "one-origin.git");
+      git(data.workspace, ["init", "-q", "--bare", origin]);
+      git(context.root, ["remote", "add", "origin", origin]);
+      git(context.root, ["push", "-q", origin, base]);
+      const info = inspectRepo(context, { base_branch: base });
+      networkAction(context, { step: "fetch", base_branch: base }, info);
+      const input = { network: "offline", unit: "u1", slug: "u1" };
+      const prepared = prepare(context, input, info);
+      fs.writeFileSync(path.join(prepared.worktree_path, "u1.txt"), "u1\n");
+      git(prepared.worktree_path, ["add", "u1.txt"]);
+      git(prepared.worktree_path, ["commit", "-q", "-m", "feat: u1"]);
+      const merged = merge(context, { ...input, ...prepared }, info);
+      assert.equal(merged.network_pending, true);
+      const queue = readQueue(info);
+      assert.deepEqual(queue.map(({ kind, dst }) => [kind, dst]), [["push", base]]);
+      assert.deepEqual(drainVerdict(queue[0], { baseBranch: base, directLand: true }), { ok: true });
+      assert.equal(drainVerdict(queue[0], { baseBranch: base, directLand: false }).ok, false);
+      assert.equal(git(origin, ["rev-parse", base]) === git(context.root, ["rev-parse", base]), false, "the runner pushed nothing");
+      assert.deepEqual(networkAction(context, { step: "drain" }, info).pushed.map(({ branch }) => branch), [base]);
+      assert.equal(git(origin, ["rev-parse", base]), git(context.root, ["rev-parse", base]));
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
