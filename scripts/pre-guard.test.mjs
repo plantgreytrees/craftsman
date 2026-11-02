@@ -186,9 +186,42 @@ test("pre-guard: scratch Reads stay narrow: writes, Glob, Grep, other dirs, syml
     refused("a symlinked file", t.read(path.join(tmp, "secret-link.txt")));
     // The OS resolves link/.. to the symlink target's parent (other/), not to tmp/: written as text, never normalised.
     refused("a symlink followed by ..", t.read(`${tmp}/link/../private.txt`));
-    refused("an env file", t.read(path.join(tmp, ".env")));
+    const envFile = t.read(path.join(tmp, ".env"));
+    refused("an env file", envFile);
+    assert.match(envFile.stderr, /is a protected path/, "the allowance passes an env file on to protectedPaths, which names it; a refusal by the ambiguous-scope check would not");
     refused("a temp root that encloses the project", t.read(path.join(tmp, "shot.png"), { TMPDIR: t.base }));
     refused("a file that does not exist", t.read(path.join(tmp, "missing.png")));
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// W2 (scrutinise-sandbox-auto-flow): the allowance is judged against every active scope, not the one readScope happens to list first.
+test("pre-guard: a scratch Read never reaches a file inside another active scope's root, whichever scope is listed first", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    const bWorktree = path.join(tmp, "b-wt");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", bWorktree);
+    fs.mkdirSync(path.join(bWorktree, "src"), { recursive: true });
+    fs.writeFileSync(path.join(bWorktree, "src", "a.ts"), "listed");
+    fs.writeFileSync(path.join(bWorktree, "src", "secret.ts"), "not on the read list");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.symlinkSync(path.join(bWorktree, "src", "secret.ts"), path.join(tmp, "alias.ts"));
+    // Swap the two manifests' contents between their two file names: the directory order of the names never changes, so
+    // each scope is listed first in exactly one of the two rounds, on any filesystem.
+    const sessionDir = path.join(t.dir, ".craftsman", "sessions", "scratch");
+    const files = fs.readdirSync(sessionDir).filter((n) => /^scope-[0-9a-f]{16}\.json$/.test(n)).sort().map((n) => path.join(sessionDir, n));
+    assert.equal(files.length, 2, "two session scopes");
+    const [first, second] = files.map((f) => fs.readFileSync(f, "utf8"));
+    for (const [round, [one, two]] of [["as activated", [first, second]], ["swapped", [second, first]]]) {
+      fs.writeFileSync(files[0], one);
+      fs.writeFileSync(files[1], two);
+      const alias = t.read(path.join(tmp, "alias.ts"));
+      assert.equal(alias.status, 2, `${round}: a symlink under the temp dir into scope B's tree, off B's read list, is refused: ${alias.stderr}`);
+      assert.equal(t.read(path.join(bWorktree, "src", "secret.ts")).status, 2, `${round}: the direct path is refused by B's read list`);
+      assert.equal(t.read(path.join(bWorktree, "src", "a.ts")).status, 0, `${round}: a file on B's read list still reads, B governs it`);
+      assert.equal(t.read(path.join(tmp, "shot.png")).status, 2, `${round}: with a scope root under the temp dir the scratch allowance is off, the ambiguous-scope refusal stands`);
+    }
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
