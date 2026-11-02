@@ -108,7 +108,7 @@ units:
     security: normal
     scope:
       # read list trimmed (agents/implementer.md dropped) to fit ARCH-ENGINE-08 after scope.mjs grew (plan investigate-cross-repo-worktree-git-guard); the unit had already shipped.
-      read: [scripts/scope.mjs, scripts/repo-exec.mjs, scripts/tracker.mjs, commands/_shared-execution.md]
+      read: [scripts/scope.mjs, scripts/repo-exec.mjs, commands/_shared-execution.md]   # scripts/tracker.mjs dropped too (33 KB): the unit had shipped and scope.mjs/repo-exec.mjs keep growing (plan sandbox-auto-flow-phase-2)
       docs: [docs/architecture/engine.rules.md, docs/architecture/state.rules.md]
       write: [workflows/spike.js, agents/unit-runner.md, commands/_shared-execution.md, docs/plans/autonomous-e2e-loop-evidence.md]
     arch: [ARCH-ENGINE-02, ARCH-ENGINE-03, ARCH-ENGINE-04, ARCH-ENGINE-09, ARCH-STATE-03]
@@ -217,7 +217,7 @@ units:
     language: Markdown
     security: normal
     scope:
-      read: [README.md, EXTENDING.md, CHANGELOG.md, docs/plans/autonomous-e2e-loop-evidence.md]
+      read: [README.md, EXTENDING.md, CHANGELOG.md]   # autonomous-e2e-loop-evidence.md dropped (11 KB): the unit had shipped and README.md/CHANGELOG.md keep growing (plan sandbox-auto-flow-phase-2)
       docs: [docs/architecture/engine.rules.md]
       write: [README.md, EXTENDING.md, CHANGELOG.md]
     arch: [ARCH-ENGINE-10]
