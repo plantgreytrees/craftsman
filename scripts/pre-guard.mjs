@@ -1858,7 +1858,7 @@ function commandHead(text) {
     rest = next;
   }
   const word = (rest.split(/\s+/)[0] || "").split("/").pop();
-  return /^[\w.+-]{1,40}$/.test(word) ? word : "?";
+  return !rest.split(/\s+/)[0].includes("=") && /^[\w.+-]{1,40}$/.test(word) ? word : "?";
 }
 
 // A bracket class from a glob word, for segmentRe and pathspecHit. A reversed range (`[a-1]`, `[z-a]`) is legal in a shell, where it
