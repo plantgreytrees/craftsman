@@ -72,7 +72,7 @@ function setup(approval = { required: true }, extra = {}) {
   fs.writeFileSync(path.join(feature.worktree_path, "a.txt"), "a\n");
   git(feature.worktree_path, "add", "a.txt");
   git(feature.worktree_path, "commit", "-q", "-m", "feat a");
-  git(feature.worktree_path, "push", "-q", "-u", "origin", "feature/p-f1");
+  git(feature.worktree_path, "push", "-q", "origin", "feature/p-f1");
   const rows = ["u0", "u1"].map((unit) => ({
     key: `.::p::${unit}`,
     project: ".",

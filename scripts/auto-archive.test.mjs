@@ -104,7 +104,7 @@ function scenario(deps, { dirtyMain = false, mainFiles = {}, featureFiles = {}, 
     if (Object.keys(mainFiles).length) git(context.root, ["push", "-q", "origin", git(context.root, ["branch", "--show-current"])]);
     const info = inspectRepo(context);
     const feature = prepare(context, { unit: "f-x", slug: "p-f1", branch: "feature/p-f1" }, info);
-    git(feature.worktree_path, ["push", "-q", "-u", "origin", "feature/p-f1"]);
+    git(feature.worktree_path, ["push", "-q", "origin", "feature/p-f1"]);
     fs.writeFileSync(path.join(feature.worktree_path, "a.txt"), "a\n");
     git(feature.worktree_path, ["add", "a.txt"]);
     git(feature.worktree_path, ["commit", "-q", "-m", "feat: a"]);
