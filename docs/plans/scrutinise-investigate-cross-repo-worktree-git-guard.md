@@ -4,7 +4,7 @@ goal: The worktree git guard allows only git calls it can prove run in the bound
 level: feature
 priority: P1
 classification: in-scope # round 3 of an isolated /scrutinise of investigate-cross-repo-worktree-git-guard (round 1: 868d87f, 0a9f48d, 2a172cb; round 2: 0d1e0a7, 226ff0f; round 3: db9bff5, c50c033)
-tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob, TRACKER#doc-guard-structural, TRACKER#doc-guard-shell-quoting, TRACKER#doc-guard-wrapper-config, TRACKER#doc-guard-nul-quote, TRACKER#doc-guard-name-forms, TRACKER#doc-guard-name-anywhere, TRACKER#doc-guard-arith-context, TRACKER#doc-guard-arith-reach, TRACKER#doc-guard-env-abbrev, TRACKER#doc-guard-blank-reach, TRACKER#doc-guard-join-flow]
+tracker_rows: [TRACKER#fix-guard-chain, TRACKER#fix-release-message, TRACKER#fix-guard-prove-all, TRACKER#fix-release-wording, TRACKER#guard-allowlist, TRACKER#release-wording-2, TRACKER#followup-guard-redesign, TRACKER#followup-release-message, TRACKER#followup-sandbox-verify, TRACKER#doc-guard-glob-clean, TRACKER#doc-guard-any-glob, TRACKER#doc-guard-structural, TRACKER#doc-guard-shell-quoting, TRACKER#doc-guard-wrapper-config, TRACKER#doc-guard-nul-quote, TRACKER#doc-guard-name-forms, TRACKER#doc-guard-name-anywhere, TRACKER#doc-guard-arith-context, TRACKER#doc-guard-arith-reach, TRACKER#doc-guard-env-abbrev, TRACKER#doc-guard-blank-reach, TRACKER#doc-guard-join-flow, TRACKER#doc-guard-decode-flow]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -28,7 +28,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs is ~95 KB: grep -n gitTargets, MUTATING_VERBS, NAMES_MUTATION, namesMutation, unresolvedConstruct, usesAlternateGitRoot, plainWords, removalGate first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/docs.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-worktree.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-06, ARCH-STATE-16, ARCH-SAFETY-03, ARCH-DOCS-07]
@@ -54,7 +54,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n gitThenClean, removalGate, REMOVAL_WORD, plainWords, globWord, leadOf first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -67,7 +67,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n plainWords, leadWord, removalGate, gitThenClean, REMOVAL_WORD first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -80,7 +80,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n globSpellsClean, removalGate, plainWords, GIT_CONFIG, config-env first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -93,7 +93,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n tokenize, globbedGit, configIndirectGit, CONFIG_INDIRECT, globMayBeGit, GIT_BUILTINS, gitSub first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -106,7 +106,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n configIndirectIn, configIndirectGit, cmdIndex, gitWordAt, GIT_BUILTINS, ansiCDecode, decodeAnsiC, tokenize first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -119,7 +119,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n ansiCDecode, decodeAnsiC, tokenize, bare, gitSub, super-prefix, CONFIG_INDIRECT, configIndirectIn first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -132,7 +132,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n gitSub, super-prefix, CONFIG_INDIRECT, ENV_CONFIG_NAME, envConfigIn, ownConfig, ENV_SETTER first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -145,7 +145,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n DYN_NAME_HINT, dynamicName, NAME_SETTERS, ENV_CONFIG_NAME, ENV_SETTER, envConfigIn, GIT_VALUED_OPTS first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -158,7 +158,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n DYN_NAME_HINT, dynamicName, configIndirectGit, configIndirectIn, envConfigIn, tokenize first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -171,7 +171,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n arithDyn, LET_CMD, dynNameHint, mayReachGit, leadDyn, function tokenize first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -184,7 +184,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n ENV_SPLIT, envSplitString, split-string, builtBy, configIndirectGit, blankArith first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -197,7 +197,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~95 KB: grep -n blankArith, configIndirectGit, mayReachGit, LET_CMD, upperAttr, builtBy, intAttr, dynNameHint first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -210,7 +210,20 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~97 KB: grep -n readArith, arithText, removalGate, "const bare", autocorrect first, then read by range (ARCH-ENGINE-08)
+      read: []
+      docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
+    arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: doc-guard-decode-flow
+    scope_id: doc-guard-decode-flow
+    project: .
+    depends_on: []
+    module: scripts/pre-guard.mjs
+    language: javascript
+    security: high
+    scope:
+      read: []   # pre-guard.mjs ~97 KB: grep -n "const bare", configIndirectGit, readArith, SETS, CONFIG_INDIRECT, "const unquoted" first, then read by range (ARCH-ENGINE-08)
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -240,15 +253,16 @@ Under a worktree binding, read-only git runs anywhere; every other git call pass
 | 13 | dbfe758..1f2339c (doc-guard-arith-context) | 0 Critical · 5 Warning · 2 Suggestion · 0 UNMET | doc-guard-arith-reach (654fd72) merged |
 | 14 | ceb060b..654fd72 (doc-guard-arith-reach) | 1 Critical · 2 Warning · 2 Suggestion · 0 UNMET | doc-guard-env-abbrev (03a1b5c) merged |
 | 15 | f8cb084..a054c0f (doc-guard-env-abbrev) | 1 Critical · 2 Warning · 1 Suggestion · 0 UNMET | doc-guard-blank-reach (2215ff1) merged |
-| 16 | ac527a1..2215ff1 (doc-guard-blank-reach) | 0 Critical · 2 Warning · 2 Suggestion · 0 UNMET | doc-guard-join-flow |
+| 16 | ac527a1..2215ff1 (doc-guard-blank-reach) | 0 Critical · 2 Warning · 2 Suggestion · 0 UNMET | doc-guard-join-flow (17a58d1) merged |
+| 17 | c4a4857..17a58d1 (doc-guard-join-flow) | 0 Critical · 3 Warning · 3 Suggestion · 0 UNMET | doc-guard-decode-flow |
 
-## Round 16 findings
-Isolated scrutineer on ac527a1..2215ff1; root re-ran each case on ac527a1 and 2215ff1 extracts. No disputes. Real bash 5.3.9 ran the W2 subscript (`a[$(…)]` in `f`).
-- **W1 [Warning][Security]** `scripts/pre-guard.mjs:713` (`bare`), `:541` (`removalGate`), `:983`, `:984`, `:995` — the backslash-newline join lives only inside `configIndirectGit`; `bare` drops backslashes but keeps the newline, so `git -c help.auto\⏎correct=1 claen -fdx` → 0 on ac527a1 and 2215ff1 (the joined form → 2 on both). Pre-existing; the round-15 W2 class.
-- **W2 [Warning][Security]** `:512-529` (`readArith`, `flows` at `:521`) — a name inherits a read value only through `$name`/`${name`; arithmetic re-evaluates a bare name and follows a nameref, and a `declare`/`printf -v` value from a substitution is never a seed: `read -r l < f; y=l; (( y )); git status --short`, `read -r l < f; declare -n z=l; (( z )); git status --short`, `declare w="$(cat f)"; (( w )); git status --short`, `printf -v v %s "$(cat f)"; (( v )); git status --short` → 0 on both.
-- **S1 [Suggestion][Correctness] REGRESSION** `:486-509` (`arithText`), `:528` — `${#name}` counts as arithmetic reading `name`: `for f in *.txt; do n=$(( ${#f} + 1 )); done; git status`, `for f in *.txt; do (( ${#f} > 3 )) && echo "$f"; done; git status` → 0 on ac527a1, 2 on 2215ff1.
-- **S2 [Test-coverage]** `scripts/pre-guard-docclean.test.mjs:460-487` lacks `${` + tab/newline, joined readers (`re\⏎ad`, `mapf\⏎ile`, `f\⏎or`), a reverse assignment chain over 16 hops (the `:526` fail-closed), the S1 passes.
-- Residual: `read -r x < f; (( x ))` without a git word, and `env -S` in a string run by `find -exec`, pass on both (sourced files, string runners: F1/F3); bash before 5.3 untested; the autocorrect case was not run against real git.
+## Round 17 findings
+Isolated scrutineer on c4a4857..17a58d1, plus R1 found by root; root re-ran each case on c4a4857 and 17a58d1 extracts. No disputes. Real bash ran W2's three flows (`a[$(…)]` in `f`).
+- **W1 [Warning][Security]** `scripts/pre-guard.mjs:718` (`bare`), `:537-538` (`configIndirectGit`) — the join and the ANSI-C decoding never apply together: `git -c help.$'auto'c\⏎orrect=1 claen -fdx`, `git -c help.auto$'c'\⏎orrect=1 claen -fdx`, `git -c help.$'auto\x63'\⏎orrect=1 claen -fdx`, `git -c in$'clu'\⏎de.path=/tmp/c claen -fdx` → 0 on both.
+- **W2 [Warning][Security]** `:514` (`SETS`), `:521` (`for`/`select`), `:526` — a bare-name `for` list, a default assignment and the positional parameters carry a read value: `read -r l < f; for z in l; do (( z )); done; git status`, `read -r l < f; : ${z=l}; (( z )); git status` (and `${z:=l}`), `read -r l < f; set -- l; (( $1 )); git status` → 0 on both.
+- **R1 [Warning][Security]** pre-existing — `GIT_DIR` and `--git-dir` pick a config that can define an alias, as `HOME`'s gitconfig can, yet are not config indirection: `GIT_DIR=/tmp/r git claen -fdx`, `git --git-dir=/tmp/r claen -fdx` → 0 on both (`HOME=/tmp/h git claen -fdx` → 2).
+- **S1 [Cross-unit]** `SETS` (`:514`) lacks the `${NAME:=` arm of `SETS_VALUE` (`:365`) and `SETS_SAFETY_VAR` (`:1428`). **S2 [Cross-unit]** the self-disable scan (`unquoted`, `:1763`) does not join backslash-newline (not probed). **S3 [Test-coverage]** the join's closures (`r\⏎m -rf docs`, `git r\⏎m -r docs`, `gi\⏎t` before a removal subcommand: 0 on c4a4857, 2 on 17a58d1) are not pinned.
+- Residual: autocorrect not run against real git; the widened refs not timed on very large text; a contrived bare-name copy (`count=line`) now fails closed.
 
 ## Earlier rounds
 Rounds 1-4 (worktree git guard: guard-allowlist merged d9e257a and reverted aa8f34d, owner decision 2026-10-28; release-wording-2 merged 4147f95) and their findings are in git history. The round-3/4 bypasses still live on main are follow-up F1 below.
@@ -298,14 +312,18 @@ MERGED 03a1b5c (round 14). One `ENV_SPLIT` reads every abbreviation of `env --sp
 MERGED 2215ff1 (round 15). `blankArith` never blanks a current-shell substitution, which fails closed with `mayReachGit`; `readArith` fails closed when arithmetic reads a name set by `read`/`mapfile`/`readarray`/`getopts` or an expanded `for` list; `configIndirectGit`'s hints also read backslash-newline-joined text. Task text: git history.
 
 ### Step 15 — doc-guard-join-flow (., javascript, high)
+MERGED 17a58d1 (round 16). `bare` reads the backslash-newline-joined command; `readArith` seeds names set beside a command substitution and lets every word of an assigning command flow into its names; `${#name}` is not a value read. Task text: git history.
+
+### Step 16 — doc-guard-decode-flow (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
-Depends on: none (Step 14 merged at 2215ff1)
-Fixes round-16 W1, W2, S1, S2. Out of scope (F1/F3): as Step 14 — user/global gitconfig, shell aliases, persistent-shell exports, sourced files, unlisted wrappers and string runners (`find -exec` included), `wait -p`/`coproc` names, `BASH_REMATCH`, function-body prefix assignments, `env --chdir` abbreviations, the pre-existing slow paths.
-- [ ] 15.1 Failing tests in `scripts/pre-guard-docclean.test.mjs` (same harness): refuse (exit 2, `/doc-write authority/`) the round-16 W1 and W2 commands; pass both S1 commands; pin the S2 rows. → accept: the W1 and W2 cases exit 0 on 2215ff1; the S1 cases exit 2 on 2215ff1; every earlier case keeps its verdict.
-- [ ] 15.2 The hook reads the backslash-newline-joined command beside `cmd` and `bare` (`:713`), so `removalGate` (`:734`) and the git-word hints at `:983`, `:984`, `:995` see it. → accept: W1 refused.
-- [ ] 15.3 `readArith`'s `flows` (`:521`) count every bare name on an assignment's right side and every `-n` nameref target as a ref, and a `$(`/backtick in a `declare`/`typeset`/`local`/`export`/`readonly` or `printf -v` value seeds the assigned name. → accept: W2 refused; the round-14/15 counter-loop passes still pass.
-- [ ] 15.4 `readArith`'s name match (`:528`) skips a name directly after `${#`. → accept: S1 passes.
-- [ ] 15.5 Re-point every moved `cite: scripts/pre-guard.mjs:` range (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS.
+Depends on: none (Step 15 merged at 17a58d1)
+Fixes round-17 W1, W2, R1, S1-S3. Out of scope (F1/F3): user/global gitconfig, shell aliases, persistent-shell exports, sourced files, unlisted wrappers and string runners, `wait -p`/`coproc` names, `BASH_REMATCH`, function-body prefix assignments, `env --chdir` abbreviations, the pre-existing slow paths.
+- [ ] 16.1 Failing tests in `scripts/pre-guard-docclean.test.mjs` (same harness): refuse (exit 2, `/doc-write authority/`) every round-17 W1, W2 and R1 command; pin the S3 closures. → accept: the W1, W2 and R1 cases exit 0 on 17a58d1; every earlier case keeps its verdict.
+- [ ] 16.2 `bare` (`:718`) and `configIndirectGit` (`:537`) also read both ANSI-C decodings of the joined text. → accept: W1 refused.
+- [ ] 16.3 One shared setter pattern: `SETS` gains `${NAME=`/`${NAME:=` (S1); `flows` read `for|select NAME in <list>` as setting NAME from the list words; a `set` command reading a tainted name taints the positional parameters, so arithmetic reading `$1`-`$9`, `$@` or `$*` fails closed. → accept: W2 refused; the counter-loop passes still pass.
+- [ ] 16.4 `GIT_DIR` and `--git-dir` count as config indirection beside a non-built-in subcommand. → accept: R1 refused; `GIT_DIR=x git status` still passes.
+- [ ] 16.5 The self-disable scan (`:1763`) also reads the joined text. → accept: a test in the same file pins it.
+- [ ] 16.6 Re-point every moved `cite: scripts/pre-guard.mjs:` range (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS.
 
 ## Sequencing
 Independent: no shared files or cites. Step 1 is the security fix and goes first when run one at a time; its cite re-pointing (1.5) is last.
