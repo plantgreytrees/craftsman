@@ -37,7 +37,7 @@ const HOLDS = {
   },
   "ARCH-SAFETY-11": { "hooks/run.sh": ["guard_cannot_act", "ARCH-SAFETY-11"] },
   "ARCH-SAFETY-12": { "scripts/lib/settings-merge.mjs": ["SANDBOX_BLOCK", "function merge"] },
-  "ARCH-SAFETY-14": { "scripts/lib/settings-merge.mjs": ["SANDBOX_BLOCK"] },
+  "ARCH-SAFETY-16": { "scripts/lib/settings-merge.mjs": ["SANDBOX_BLOCK"] },
   "ARCH-SAFETY-15": { "scripts/pre-guard.mjs": ["gitTargets", "Git mutation blocked"] },
 };
 

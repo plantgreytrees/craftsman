@@ -77,16 +77,16 @@ ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and ext
 ## Phase 2 amendment (2026-11-01, owner-approved)
 _Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The diagram is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
-**Status: decided, not yet implemented.** ARCH-LAND-34: `drainQueue` still pushes or deletes whatever branch an entry names. ARCH-LAND-35: root's unsandboxed network step is today's behaviour; the `autoMode.allow` entry and the classifier-refusal path are not built. Code: `/plan sandbox-auto-flow phase 2`.
+**Status: decided, not yet implemented.** ARCH-LAND-36: `drainQueue` still pushes or deletes whatever branch an entry names. ARCH-LAND-35: root's unsandboxed network step is today's behaviour; the `autoMode.allow` entry and the classifier-refusal path are not built. Code: `/plan sandbox-auto-flow phase 2`.
 
-- **ARCH-LAND-34**: root's drain checks every queue entry before it touches origin.
-  - **What passes:** a push goes only to a `feat/` or `feature/` branch, never base or the plan's target branch. A delete only removes a `feat/` unit branch.
-  - **Anything else** is logged as `drain_refused` and PARKs like a rejected push.
-  - **Why:** `drainQueue` (`scripts/lib/network.mjs:145-171`) pushed or deleted whatever `dst` an entry named, and a tool call could write the queue (probe, 2026-11-01). Once the network step runs unattended (ARCH-LAND-35), that would have been a path to base outside the approval gate (ARCH-LAND-28).
-  - **Rejected:** relying only on the queue's protection (ARCH-SAFETY-13). Runner processes still write the queue, and the guard doesn't read them.
+- **ARCH-LAND-36** replaces 34 (2026-11-02, owner decision): root's drain checks every queue entry before it touches origin.
+  - **What passes:** a push goes to a `feat/` or `feature/` branch, or to base only in direct-land mode (`planning.featureBranches` off). A delete only removes a `feat/` unit branch. A push is never forced.
+  - **Anything else** (base in feature mode, any other branch, a delete of base) is logged as `drain_refused` and PARKs like a rejected push.
+  - **Why:** `drainQueue` (`scripts/lib/network.mjs:145-171`) pushed or deleted whatever `dst` an entry named, and a tool call could write the queue (probe, 2026-11-01). The first wording refused base outright, but the runner runs `repo-exec merge` (`agents/unit-runner.md:28`), whose push to base (`scripts/repo-exec.mjs:411`) an offline sandboxed runner queues; in direct-land mode that merge is allowed on standing approval (ARCH-LAND-28, ARCH-APPROVAL-08), so refusing it would stall every unattended run.
+  - **Rejected:** refusing base always (direct-land under a sandbox could never finish); relying only on the queue's protection (ARCH-SAFETY-13), since runner processes still write the queue and the guard doesn't read them.
 - **ARCH-LAND-35**: root's network step (fetch, drain, status) stays outside the sandbox.
   - **Why outside:** a sandboxed git can't read the `gh` credential store; Gleam logged 99 `could not read Username`. Masking the token would give every sandboxed command, runners included, a working credential, against ARCH-LAND-19.
-  - **Unattended:** the call passes auto mode through the one user-scope `autoMode.allow` entry that `/init` offers (ARCH-SAFETY-14). Without that entry, the user approves it. A classifier refusal stops the run like `needs_network`, naming the one command, with nothing parked.
+  - **Unattended:** the call passes auto mode through the one user-scope `autoMode.allow` entry that `/init` offers (ARCH-SAFETY-16). Without that entry, the user approves it. A classifier refusal stops the run like `needs_network`, naming the one command, with nothing parked.
   - **Still human steps:** every other `needs_network` action (pr-mode host API, `land-feature`, any base push), under ARCH-LAND-28.
   - **Rejected:**
     - a `permissions.allow` rule: the path changes on every upgrade, and it approves with no review;
