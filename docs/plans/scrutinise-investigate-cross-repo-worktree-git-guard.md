@@ -236,7 +236,7 @@ units:
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs ~97 KB: grep -n "const SETTER" first, then read by range (ARCH-ENGINE-08)
+      read: []
       docs: [docs/architecture/state.rules.md, docs/architecture/docs.rules.md, docs/architecture/safety.rules.md, docs/plans/scrutinise-investigate-cross-repo-worktree-git-guard.md]
       write: [scripts/pre-guard.mjs, scripts/pre-guard-docclean.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: `cite:` line ranges only
     arch: [ARCH-STATE-16, ARCH-DOCS-07, ARCH-SAFETY-03]
@@ -268,15 +268,15 @@ Under a worktree binding, read-only git runs anywhere; every other git call pass
 | 15 | f8cb084..a054c0f (doc-guard-env-abbrev) | 1 Critical · 2 Warning · 1 Suggestion · 0 UNMET | doc-guard-blank-reach (2215ff1) merged |
 | 16 | ac527a1..2215ff1 (doc-guard-blank-reach) | 0 Critical · 2 Warning · 2 Suggestion · 0 UNMET | doc-guard-join-flow (17a58d1) merged |
 | 17 | c4a4857..17a58d1 (doc-guard-join-flow) | 0 Critical · 3 Warning · 3 Suggestion · 0 UNMET | doc-guard-decode-flow (b9d8709) merged |
-| 18 | 325443e..b9d8709 (doc-guard-decode-flow) | 0 Critical · 2 Warning · 3 Suggestion · 0 UNMET | doc-guard-array-default; owner: stated limits |
+| 18 | 325443e..b9d8709 (doc-guard-decode-flow) | 0 Critical · 2 Warning · 3 Suggestion · 0 UNMET | doc-guard-array-default (c313905) merged; owner: stated limits |
+| 19 | 94bf285..c313905 (doc-guard-array-default) | 0 Critical · 1 Warning · 2 Suggestion · 0 UNMET | owner: stated limit (none driven) |
 
-## Round 18 findings
-Isolated scrutineer on 325443e..b9d8709; root re-ran W1 and W2 on 325443e and b9d8709 extracts. No disputes. Real bash and git confirmed W1 and W2.
-- **W1 [Warning][Correctness]** `scripts/pre-guard.mjs:366` (`SETTER`) — the default-assignment arm takes no subscript: `read -r l < f; : ${z[0]=l}; (( z )); git status`, `read -r l < f; : ${z[1]:=l}; (( z[1] )); git status` → 0 on both.
-- **W2 [Warning][Security]** `:357` (`CONFIG_INDIRECT`), `:445` (`ownConfig`) — `git -C /tmp/r claen -fdx`, `cd /tmp/r; git claen -fdx` → 0 on both: another repository's config may alias a misspelt subcommand. **Owner decision 2026-11-02: stated limit** (closing it would refuse an ordinary `cd sub && git lfs pull`); not fixed.
-- **S1 [Security]** `:1769` (`unquoted`), `:1435-1440` (`SETS_SAFETY_VAR`) — the self-disable scan never decodes `$'…'`/`$"…"` (pre-existing). **S2 [Cross-unit]** `:545` (`views`), `:724` (`bare`), `:1769` build the bash-reading views three ways. **S3 [Test-coverage]** `scripts/pre-guard-docclean.test.mjs:515-539` lacks `git --git-dir /tmp/r claen -fdx`, `export GIT_DIR=/tmp/r; git claen -fdx`, `read GIT_DIR < f; git claen -fdx`, a `select` list, and `${1}`, `$@`, `${@:1:1}`, `$(( $1 ))` after `set -- l` (2 on b9d8709, 0 on 325443e).
-- **Owner decision 2026-11-02 (loop end):** ship W1 and the S3 pins, record W2, S1, S2 and positional parameters set other than by `set` as stated limits (Out of scope), then go on to /sync-docs and /craftsman:merge. A later finding in a stated-limit class is out of scope.
-- Residual: `help.autocorrect` not run against real git; the views not timed on very large text.
+## Round 19 findings
+Isolated scrutineer on 94bf285..c313905; root re-ran W1 on 94bf285 and c313905 extracts. No disputes. Real bash confirmed W1.
+- **W1 [Warning][Security]** `scripts/pre-guard.mjs:366` (`SETTER`) — the subscript class `[^\]]*` stops at the first `]`, so a nested subscript in a default assignment is not a setter: `read -r l < f; : ${z[a[1]]=l}; (( z )); git status`, `: ${z[a[0]+1]=l}; (( z[1] ))`, `${z[b[c[0]]]=l}`, quoted `"${z[a[1]]=l}"` → 0 on both. **Owner decision 2026-11-02: stated limit** (ARCH-SAFETY-15); not fixed.
+- **S1 [Correctness]** `:366` — `[^\]]*` runs over `[`, so `"${a[".repeat(n)` is quadratic (the regex alone 712 ms at n=20000; the whole guard 10.4 s against 9.9 s before, on an 80 KB input it already refused): a stated limit with the pre-existing slow paths. **S2 [Test-coverage]** `scripts/pre-guard-docclean.test.mjs:549-562` pins no nested subscript and no passing `: ${opts[verbose]:=0}; git log --oneline` (0 on both): not driven.
+- Floor: the round-12 linearity test (`:372`, 200 ms) failed once under full-suite load (220 ms) and passed on re-run; `"let ".repeat(20000)` costs 60-80 ms over baseline since b9d8709, against 50-57 ms before.
+- **Owner decision 2026-11-02 ends the scrutinise loop.** Next: `/sync-docs --all investigate-cross-repo-worktree-git-guard`, then `/craftsman:merge`.
 
 ## Earlier rounds
 Rounds 1-4 (worktree git guard: guard-allowlist merged d9e257a and reverted aa8f34d, owner decision 2026-10-28; release-wording-2 merged 4147f95) and their findings are in git history. The round-3/4 bypasses still live on main are follow-up F1 below.
@@ -332,12 +332,7 @@ MERGED 17a58d1 (round 16). `bare` reads the backslash-newline-joined command; `r
 MERGED b9d8709 (round 17). The gate and `configIndirectGit` read both ANSI-C decodings of the joined text; `SETS` shares `SETTER` and reads a `for` list, a default assignment and `set`'s positional parameters; `GIT_DIR`, `GIT_COMMON_DIR` and `--git-dir` are config indirection; the self-disable scan reads joined text. Task text: git history.
 
 ### Step 17 — doc-guard-array-default (., javascript, high)
-Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development · guards arch-check
-Depends on: none (Step 16 merged at b9d8709)
-Fixes round-18 W1 and S3. Out of scope: the stated limits below, and F1/F3.
-- [ ] 17.1 Failing tests in `scripts/pre-guard-docclean.test.mjs` (same harness): refuse (exit 2, `/doc-write authority/`) both W1 commands; pin every S3 command as refused. → accept: the W1 cases exit 0 on b9d8709; the S3 rows are pinned; every earlier case keeps its verdict.
-- [ ] 17.2 `SETTER`'s default-assignment arm takes an optional subscript (`\$\{([A-Za-z_]\w*)(?:\[[^\]]*\])?:?=`). → accept: W1 refused.
-- [ ] 17.3 Re-point every moved `cite: scripts/pre-guard.mjs:` range (cite lines only). Run `node --test scripts/*.test.mjs` and `node scripts/arch-check.mjs lint`. → accept: exit 0 and PASS.
+MERGED c313905 (round 18). `SETTER`'s default-assignment arm takes an optional subscript. Task text: git history.
 
 ## Sequencing
 Independent: no shared files or cites. Step 1 is the security fix and goes first when run one at a time; its cite re-pointing (1.5) is last.
@@ -357,7 +352,7 @@ Step 1 flips the guard's default; the risk is a false block on a legitimate non-
 
 ## Out of scope
 - Interpreters (`node -e`, `python -c`), renamed git binaries and gitconfig aliases are textually undetectable; ARCH-SAFETY-01 leaves them to the sandbox.
-- Stated limits (owner, 2026-11-02, ARCH-SAFETY-15) of the doc guard: an alias in another repository's config reached through `git -C <dir>` or an earlier `cd`/`pushd`; the self-disable scan reading `$'…'`/`$"…"`-decoded names; one shared "as bash reads it" views helper; positional parameters set other than by `set` (a function call). A scrutinise finding in one of these classes is out of scope.
+- Stated limits (owner, 2026-11-02, ARCH-SAFETY-15) of the doc guard: an alias in another repository's config reached through `git -C <dir>` or an earlier `cd`/`pushd`; the self-disable scan reading `$'…'`/`$"…"`-decoded names; one shared "as bash reads it" views helper; positional parameters set other than by `set` (a function call); a nested array subscript in a default assignment (`${z[a[1]]=l}`); the cost of the `${a[` subscript scan. A scrutinise finding in one of these classes is out of scope.
 
 ## Follow-ups (PENDING tracker rows, not driven by this run)
 - **F1 `followup-guard-redesign`** — the worktree git guard reads command text, and each of four fix rounds opened new holes. Live on main: the round-3 bypasses above (nested/`function` cd, CDPATH, `for`/`read`/`printf -v` GIT_DIR, `-c alias.*`/`core.worktree`, verbs pull/tag/update-ref/branch -f/am, glob-spelled `/usr/bin/g[i]t` incl. doc-guard `git clean`, `script -c`/`flock -c`/`su -c`/`watch`) plus round 4's git-as-runner options and `trap`/`alias` rebinding. Route to `/idea` → `/architect` for a design decision (e.g. judge git after shell expansion, or rely on the sandbox per ARCH-SAFETY-01) before any more code.
