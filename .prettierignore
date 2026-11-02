@@ -1,0 +1,6 @@
+# These sources are hand-formatted and the repo has no prettier config.
+# The quality gate runs `prettier --write` on every Edit or Write, which
+# rewrote whole files (a 1,000+ line diff for a one-line change).
+scripts/
+workflows/
+hooks/
