@@ -508,7 +508,11 @@ const arithText = (t) => {
 // Names whose value comes from outside the text: read, mapfile and readarray (every name-like word after them, REPLY, MAPFILE), getopts (and OPTARG), and
 // for or select over a list holding a `$`, backtick or glob, or over the positional parameters; a name assigned from one of them inherits it. Arithmetic
 // evaluates a value it reads, and a `$(…)` in an array subscript there runs (`a[$(cmd)]`), so arithmetic that reads such a name may run a command the
-// text never shows. Linear: one pass per simple command, then a bounded fixpoint over the assignments that read a name.
+// text never shows. A name set beside a command substitution (`declare w="$(cat f)"`, `printf -v v %s "$(cat f)"`) holds such a value too, and arithmetic
+// re-evaluates a bare name (`y=l; (( y ))`) and follows a nameref (`declare -n z=l`), so every name-like word of a command that sets a name flows into it.
+// `${#name}` is a length: bash never evaluates the value. Linear: one pass per simple command, then a bounded fixpoint over the assignments.
+const SETS = /(?:^|\s)([A-Za-z_]\w*)(?:\[[^\][]*\])?\+?=|\s-v\s*([A-Za-z_]\w*)/g, setsOf = (s) => [...s.matchAll(SETS)].map((x) => x[1] ?? x[2]);
+const lengthless = (s) => s.replace(/\$\{#[A-Za-z_]\w*/g, "");
 const readArith = (t) => {
   const segs = t.split(/[;&|\n]/), names = new Set();
   for (const s of segs) {
@@ -516,13 +520,14 @@ const readArith = (t) => {
     if (m) { for (const w of s.slice(m.index + m[0].length).match(/[A-Za-z_]\w*/g) ?? []) names.add(w); names.add({ read: "REPLY", getopts: "OPTARG" }[m[1]] ?? "MAPFILE"); }
     const f = /\b(?:for|select)\s+([A-Za-z_]\w*)(?:\s+in\b(.*))?/.exec(s);
     if (f && (f[2] === undefined || /[$`*?[]/.test(f[2]))) names.add(f[1]);
+    if (/\$\((?!\()|`/.test(s)) for (const n of setsOf(s)) names.add(n);
   }
   if (!names.size) return false;
-  const flows = segs.map((s) => ({ refs: (s.match(/\$\{?[A-Za-z_]\w*/g) ?? []).map((r) => r.replace(/^\$\{?/, "")), sets: [...s.matchAll(/(?:^|\s)([A-Za-z_]\w*)(?:\[[^\][]*\])?\+?=|\s-v\s*([A-Za-z_]\w*)/g)].map((x) => x[1] ?? x[2]) })).filter((x) => x.refs.length && x.sets.length);
+  const flows = segs.map((s) => ({ refs: lengthless(s).match(/[A-Za-z_]\w*/g) ?? [], sets: setsOf(s) })).filter((x) => x.refs.length && x.sets.length);
   let grew = true;
   for (let k = 0; grew && k < 16; k++) { grew = false; for (const x of flows) if (x.refs.some((r) => names.has(r))) for (const n of x.sets) if (!names.has(n)) { names.add(n); grew = true; } }
   if (grew) return true; // a longer chain than the bound: fail closed
-  return (arithText(t).match(/[A-Za-z_]\w*/g) ?? []).some((n) => names.has(n));
+  return (lengthless(arithText(t)).match(/[A-Za-z_]\w*/g) ?? []).some((n) => names.has(n));
 };
 // Bash joins a backslash-newline before it reads a word, so every hint reads that joined text as well as the raw one. A current-shell substitution, or
 // arithmetic reading a value from outside the text (readArith), fails closed whenever the text can reach git. Text that only arithmetic makes unreadable
@@ -709,8 +714,8 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
   // decodeAnsiC does not see quotes, so a `$'` inside double quotes is decoded too: the NUL cut would drop the commands up to
   // the next `'` (`echo "$'\0"; git ... ; echo "'"`) and an escape would rewrite an unquoted word (`cle\an`), so the gate reads
-  // the cut decoding, the uncut decoding and the undecoded text (fail closed).
-  const bare = [...new Set([decodeAnsiC(cmd), decodeAnsiC(cmd, false), cmd])].join("\n").replace(/['"\\]/g, "");
+  // the cut decoding, the uncut decoding, the undecoded text and the text with each backslash-newline joined, as bash reads it (fail closed).
+  const bare = [...new Set([decodeAnsiC(cmd), decodeAnsiC(cmd, false), cmd, cmd.replace(/\\\n/g, "")])].join("\n").replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
   // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
@@ -995,7 +1000,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     noteRemoval(sub, after, env);
     if (env.unseen) return unsafe("git " + sub + " with input the parser cannot see");
     if (bad) return unsafe(bad);
-    if (/GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(cmd)) return unsafe("a git environment variable that changes pathspec matching or the work tree");
+    if (/GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(cmd) || /GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(bare)) return unsafe("a git environment variable that changes pathspec matching or the work tree");
     if (after.some((a) => /^--pathspec-from-file/.test(a))) return unsafe("git pathspecs read from a file");
     const specs = targetsOf(after);
     if (sub === "clean" && !specs.length) specs.push(".");
