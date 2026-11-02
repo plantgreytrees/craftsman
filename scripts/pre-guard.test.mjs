@@ -266,6 +266,50 @@ test("pre-guard: a scratch Read never reaches a file inside another active scope
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
+// W2 (scrutinise-sandbox-auto-flow round 2): a scratch dir that sits inside a root the session governs gives no allowance; the file stays under that
+// root's own scope check. Each row proves one clause of insideScratchRoots: the first two the "inside a governed root" clause, the third the session checkout.
+function offListFile(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "off.txt"), "on no read list");
+  return path.join(dir, "off.txt");
+}
+
+test("pre-guard: a scratch dir inside a session scope's project root gives no allowance", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.dir, ".tmp");
+    const session = { session_id: "scratch", plan: "docs/plans/x.md", unit: "u-session", project: ".", scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    const activated = run(SCOPE, t.dir, session, t.env);
+    assert.equal(activated.status, 0, activated.stderr);
+    const got = t.read(offListFile(tmp), { TMPDIR: tmp });
+    assert.equal(got.status, 2, `a file under the project is the scope's, scratch dir or not: ${got.stderr}`);
+    assert.match(got.stderr, /outside active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a scratch dir inside a unit worktree gives no allowance", () => {
+  const t = scratchProject();
+  try {
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    const tmp = path.join(worktree, ".tmp");
+    const got = t.read(offListFile(tmp), { TMPDIR: tmp });
+    assert.equal(got.status, 2, `a file under the unit's worktree is the unit's scope, scratch dir or not: ${got.stderr}`);
+    assert.match(got.stderr, /outside active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: with only unit-worktree scopes, a scratch dir inside the session checkout gives no allowance either", () => {
+  const t = scratchProject();
+  try {
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const tmp = path.join(t.dir, ".tmp");
+    const got = t.read(offListFile(tmp), { TMPDIR: tmp });
+    assert.equal(got.status, 2, `the session checkout is outside every unit worktree, scratch dir or not: ${got.stderr}`);
+    assert.match(got.stderr, /outside active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
 test("pre-guard: with no scope active, the required-scope refusal still covers scratch Reads", () => {
   const t = scratchProject();
   try {
