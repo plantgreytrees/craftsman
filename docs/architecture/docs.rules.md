@@ -3,8 +3,8 @@ area: docs
 governs: ["scripts/doc-retire.mjs", "scripts/doc-retire.test.mjs", "commands/sync-docs.md", "scripts/arch-check.mjs", "commands/scrutinise.md", "commands/_scrutinise-deep.md"]
 human: docs/architecture/docs.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: 0a2fc6fd486e12c365bb79ffb800eef251a19db4
-updated: 2026-10-25
+verified_at: 4527cf15f470f1eb0895f02b589d99545bf93f09
+updated: 2026-11-03
 ---
 # ARCH docs — enforced rules
 
