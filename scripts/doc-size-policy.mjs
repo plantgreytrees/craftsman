@@ -36,7 +36,7 @@ export const FILE_CAPS = {
   "agents/plan-reviewer.md": 2187,
   "agents/plan-strategist.md": 1753,
   "agents/review-router.md": 1187,
-  "agents/scrutineer.md": 3590,
+  "agents/scrutineer.md": 3700,
   "agents/security-auditor.md": 2184,
   "agents/standards-keeper.md": 2608,
   "agents/ui-ux-reviewer.md": 886,
@@ -67,7 +67,7 @@ export const FILE_CAPS = {
   "commands/merge.md": 6173,
   "commands/orchestrate.md": 9051,
   "commands/plan.md": 8988,
-  "commands/scrutinise.md": 8169,
+  "commands/scrutinise.md": 8030,
   "commands/stats.md": 348,
   "commands/sync-docs.md": 8604,
   "commands/toggle.md": 397,
@@ -204,7 +204,10 @@ export function raisedCaps(base, current) {
 // Recorded cap trades (ARCH-SLIM-16). A per-file cap may rise only when an entry names the file as `raise`, the
 // rise is at most `bytes`, and the `lower` file, one an invocation loads, had its cap fall by at least `bytes`
 // against the merge-base. Each entry cites the owner-approved rule and the date it was decided.
-export const CAP_TRADES = [];
+export const CAP_TRADES = [
+  // guard-redesign: the ARCH-SAFETY-17 severity bullet, paid by trimming the /scrutinise command that dispatches the scrutineer.
+  { raise: "agents/scrutineer.md", lower: "commands/scrutinise.md", bytes: 110, rule: "ARCH-SLIM-16", decided: "2026-11-03" },
+];
 
 const loadedByInvocation = (rel) =>
   /^commands\/[^/]+\.md$/.test(rel) || Object.values(INVOCATION_DOCS).some((docs) => docs.includes(rel));
