@@ -22,6 +22,11 @@ export function normalizeHandoff(value, context = null) {
       throw new Error(`handoff.${key} must be a non-empty string`);
     }
   }
+  // SessionStart and adopt arm scope-required from remaining_units (ARCH-AUTO-11): a unit hand-off must say
+  // whether any units are left, and the last unit says [] rather than leaving the field out.
+  if (value.unit && !Array.isArray(value.remaining_units)) {
+    throw new Error("handoff.remaining_units must be an array of the unit ids still to run ([] on the last unit) when handoff.unit is set");
+  }
   const state = {
     plan: value.plan,
     unit: value.unit || null,

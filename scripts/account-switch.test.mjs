@@ -127,7 +127,7 @@ test("account-switch: adopt moves the old session's hand-off, claims and worktre
     assert.equal(spawnSync(process.execPath, [CLAIM], { cwd: f.repo, env: f.env, input: JSON.stringify(claim), encoding: "utf8" }).status, 0);
     const oldDir = path.join(f.repo, ".craftsman", "sessions", "old");
     fs.mkdirSync(oldDir, { recursive: true });
-    fs.writeFileSync(path.join(oldDir, "handoff.json"), JSON.stringify({ plan: "p", unit: "u1", next_action: "go", session_id: "old" }));
+    fs.writeFileSync(path.join(oldDir, "handoff.json"), JSON.stringify({ plan: "p", unit: "u1", next_action: "go", session_id: "old", remaining_units: ["u2"] }));
     const ledger = (sid) => path.join(f.repo, ".git", ".craftsman", "sessions", sid, "worktrees.json");
     fs.mkdirSync(path.dirname(ledger("old")), { recursive: true });
     fs.writeFileSync(ledger("old"), JSON.stringify([path.join(f.repo, "wt")]));
@@ -252,3 +252,29 @@ test("account-switch: a claim made from a linked worktree is snapshotted and ado
     f.cleanup();
   }
 });
+
+// ARCH-AUTO-11: adopt copies the hand-off whole but re-arms scope-required by the rule SessionStart uses
+// (handoffArmsScope in lib/core.mjs), so a closing hand-off arms nothing in either place.
+for (const [name, extra, armed] of [
+  ["a hand-off listing remaining units", { remaining_units: ["u2"] }, true],
+  ["a closing hand-off (remaining_units is empty)", { remaining_units: [] }, false],
+  ["a hand-off without the remaining_units field", {}, false],
+  ["a hand-off whose remaining_units is not an array", { remaining_units: "u2" }, false],
+]) {
+  test(`account-switch: adopt ${armed ? "arms" : "does not arm"} scope-required for ${name} (ARCH-AUTO-11)`, () => {
+    const f = fixture();
+    try {
+      const oldDir = path.join(f.repo, ".craftsman", "sessions", "old");
+      fs.mkdirSync(oldDir, { recursive: true });
+      const written = { plan: "p", unit: "u1", next_action: "go", session_id: "old", ...extra };
+      fs.writeFileSync(path.join(oldDir, "handoff.json"), JSON.stringify(written));
+      const done = f.cli(["adopt", "--from", "old", "--confirm"]);
+      assert.equal(done.status, 0, done.stderr);
+      const newDir = path.join(f.repo, ".craftsman", "sessions", "new");
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(newDir, "handoff.json"), "utf8")), { ...written, session_id: "new" });
+      assert.equal(fs.existsSync(path.join(newDir, "scope-required")), armed);
+    } finally {
+      f.cleanup();
+    }
+  });
+}
