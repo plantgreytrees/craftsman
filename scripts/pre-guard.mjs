@@ -1456,12 +1456,12 @@ const HOME_ASSIGN = /^(?:HOME|XDG_CONFIG_HOME)=(?!\/dev\/null$)(?=.)/;
 // so it counts as set (a `read` of /dev/null is refused too).
 const HOME_SETTER = /^(?:read|mapfile|readarray|getopts|printf)$/;
 const setsHomeByName = (words) => HOME_SETTER.test(words[0]) && (words[0] !== "printf" || words.includes("-v")) && words.some((w) => w === "HOME" || w === "XDG_CONFIG_HOME");
-// The names the authority scripts and the state paths trust. A command sets one by assignment (`NAME=`, `${NAME:=}`), by a builtin
-// that takes the name (`read NAME`, `printf -v NAME`, `declare/export NAME`, `env NAME=`), or by naming it in a variable for a later
-// `"$X=value"`. A `$NAME` or `${NAME}` expansion, `printenv NAME` and a comparison set nothing.
+// The names the authority scripts and the state paths trust. A command sets one by assignment (`NAME=`, `${NAME:=}`, a program's `.NAME =`
+// or `[NAME] =`), by a builtin that takes the name (`read NAME`, `printf -v NAME`, `declare/export NAME`, `env NAME=`), or by naming it in a
+// variable for a later `"$X=value"`. A `$NAME` or `${NAME}` expansion, `printenv NAME` and a comparison set nothing.
 const SAFETY_VARS = "CLAUDE_CODE_SESSION_ID|CLAUDE_PROJECT_DIR|CRAFTSMAN_SAFETY";
 const SETS_SAFETY_VAR = [
-  new RegExp(`(?<![\\w$])(?:${SAFETY_VARS})\\+?=`),
+  new RegExp(`(?<![\\w$])(?:${SAFETY_VARS})\\+?=|[.\\[](?:${SAFETY_VARS})\\]?[ \\t]*\\+?=(?!=)`),
   new RegExp(`\\$\\{(?:${SAFETY_VARS}):?=`),
   new RegExp(`(?:^|[\\s;&|(])\\w+\\+?=(?:${SAFETY_VARS})(?!\\w)`),
   new RegExp(`\\b(?:read|mapfile|readarray|getopts|declare|typeset|export|readonly|local|env|printf\\s+-v)\\b[^;&|\\n]*(?<![\\w\${])(?:${SAFETY_VARS})\\b`),
@@ -1810,8 +1810,8 @@ if (tool === "Bash" && command) {
   const NODE_E_LIVE = /require|import|process|spawn|exec|eval|Function|child|constructor|globalThis|Reflect|\bfs\b/;
   const inertNodeE = (text) => /[|>`<]|\$\(|\b(?:eval|source)\b/.test(text) ? text
     : text.replace(NODE_E_LITERAL, (all, head, body) => NODE_E_LIVE.test(body) ? all : head + "'x'");
-  // A quoted-delimiter heredoc body fed to cat, tee, python3, python or node is inert as well (blankInertHeredocs); the bypass scan above reads it.
-  const live = blankInertHeredocs(command);
+  // A quoted-delimiter heredoc body fed to cat or tee, or to node or python with no NODE_E_LIVE-like word, is inert (blankInertHeredocs); the bypass scan reads it.
+  const live = blankInertHeredocs(command, NODE_E_LIVE);
   const safetyText = live.includes("\\") ? unquotedOf(live) : inertNodeE(blankProse(live)).replace(/['"\\]/g, "");
   if (SETS_SAFETY_VAR.some((re) => re.test(unquoted) && re.test(safetyText))) {
     denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
@@ -2041,37 +2041,71 @@ function createdPath(target) {
 //   - its command word is cat, tee, python3, python or node, bare (no path, no assignment prefix, no bash, sh, eval, source, env or wrapper),
 //     alone on its line up to the operator, or after `cd DIR &&`, with plain words and redirects before it and nothing else (no separator,
 //     no second heredoc, no substitution);
+//   - fed to node or python, which RUN the body, it also holds none of the words that let code set a variable (nodeLive, the `node -e` live-word
+//     test, and PY_LIVE, its python counterpart): `process.env.X = 'off'` there is a setter and stays in the text, a printed line is prose;
 //   - the body has a terminator line (an unterminated one is not provably a body);
-//   - the rest of the command, those bodies aside, has no pipe, no process substitution and no way to shadow a program name (a function, alias,
-//     hash, enable or a PATH change), so neither a pipeline nor a redefined `cat` can carry the body to a shell.
-// The tracking of quotes, comments, arithmetic and $(...) follows stripHeredocs. Files an interpreter writes stay with the sandbox (ARCH-SAFETY-01).
-function blankInertHeredocs(text) {
+//   - the rest of the command, those bodies aside, has no pipe, no process substitution, no way to shadow a program name (a function, alias,
+//     hash, enable or a PATH change) and no command word that makes the shell read text it holds (source, a lone dot, eval, coproc), so neither
+//     a pipeline, a redefined `cat` nor `cat <<'EOF' > f` followed by `. f` can carry the body to a shell.
+// The tracking of quotes, comments, arithmetic and $(...) follows stripHeredocs; a `case` pattern's `)` ends the pattern, not a substitution, and a first pattern spelled esac ends the list (a bash syntax error, so nothing in it runs).
+// Stated limits (ARCH-SAFETY-15), not read: a stored body run by file name (bash f, ./f, node f) or by a later command, a call that is not an
+// assignment (os.putenv, os.environ.update) and a name built at run time. Files an interpreter writes stay with the sandbox (ARCH-SAFETY-01).
+function blankInertHeredocs(text, nodeLive) {
   const INERT = new Set(["cat", "tee", "python3", "python", "node"]);
+  const PY_LIVE = /import|exec|eval|compile|open|environ|putenv|system|popen|spawn|subprocess|getattr|globals|locals|builtins|ctypes|\bos\b|\bsys\b/;
+  const RUNS_BODY = { node: nodeLive, python3: PY_LIVE, python: PY_LIVE };
   const WORD = String.raw`(?:[\w./:=@%+,~$-]|'[^'\n]*'|"(?:[^"\\\`$\n]|\$(?=[\w"]))*")+`;
   const HEAD = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+${WORD}[ \t]*&&[ \t]*)*([\w-]+)(?:[ \t]+(?:\d?>>?[ \t]*)?${WORD})*[ \t]*$`);
-  const REACHES_SHELL = /\||[<>]\(|(?<![\w.-])(?:alias|unalias|function|hash|enable)(?=\s)|\bPATH\+?=|\w\s*\(\s*\)/;
-  const stack = ["cmd"], pending = [], bodies = [];
+  // Where a command word stands: after a separator, a brace, a subshell or a case pattern, after then, do, else, if, time, `!`, and after assignment prefixes.
+  const AT_COMMAND = String.raw`(?:^|[;&|(){\n\x60]|(?<![\w.-])(?:then|do|else|elif|if|while|until|time|command|builtin|!)(?=\s))[ \t]*(?:\w+=(?:[^\s;&|()\x60"']|"[^"\n]*"|'[^'\n]*')*[ \t]+)*`;
+  const REACHES_SHELL = new RegExp(String.raw`\||[<>]\(|(?<![\w.-])(?:alias|unalias|function|hash|enable)(?=\s)|\bPATH\+?=|\w\s*\(\s*\)|${AT_COMMAND}(?:source|eval|coproc|\.)(?=[ \t\n]|$)`);
+  const stack = ["cmd"], pending = [], bodies = [], cases = [];
   let sq = false, stmt = 0, depth = 0, ticks = false;
+  // An open `case`: its pattern list ends each pattern with a `)` that closes nothing, so the depth count must not take it for a substitution's end.
+  // state: head (up to `in`), pat (between a pattern's start and its `)`), body (up to `;;` or `esac`); frame: the stack height it opened at.
+  const atCommand = (at) => new RegExp(`${AT_COMMAND}$`).test(text.slice(0, at));
+  const unwind = () => { while (cases.length && cases[cases.length - 1].frame > stack.length) cases.pop(); };
   for (let i = 0; i < text.length; i++) {
     const c = text[i], top = stack[stack.length - 1];
     if (sq) { if (c === "'") sq = false; continue; }
     if (c === "\\" && i + 1 < text.length) { i++; continue; }
     if (top === "dq") {
       if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { i = arithmeticEnd(text, i); continue; }
-      if (c === '"') stack.pop();
+      if (c === '"') { stack.pop(); unwind(); }
       else if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; }
       continue;
     }
     if (c === "'") { sq = true; continue; }
     if (c === '"') { stack.push("dq"); continue; }
+    const kase = cases[cases.length - 1], here = kase && kase.frame === stack.length;
+    const opens = here && kase.state === "pat" && kase.fresh; // nothing yet in this pattern: an esac here ends the list, after `(` or `|` it is a word
+    if (here && kase.state === "pat") {
+      if (c === "(") { if (kase.fresh) kase.fresh = false; else kase.paren++; continue; } // a leading `(`, else an extglob group
+      if (c === ")") { if (kase.paren) kase.paren--; else kase.state = "body"; continue; }
+      if (!/\s/.test(c) && !(c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1])))) kase.fresh = false; // a comment is no pattern
+    }
+    if (here && kase.state === "body" && c === ";" && (text[i + 1] === ";" || text[i + 1] === "&")) { // `;;`, `;&` or `;;&`: the next pattern
+      i += text[i + 1] === ";" && text[i + 2] === "&" ? 2 : 1;
+      kase.state = "pat"; kase.fresh = true; kase.paren = 0;
+      continue;
+    }
+    if (c >= "a" && c <= "z" && (i === 0 || /[\s;&|(){}`]/.test(text[i - 1]))) {
+      const word = /[a-z]+(?![\w.\/=$@%+,:~-])/y;
+      word.lastIndex = i;
+      const found = word.exec(text)?.[0];
+      if (found === "case" && !(here && kase.state === "pat") && atCommand(i)) cases.push({ frame: stack.length, state: "head", paren: 0, fresh: true });
+      else if (found === "in" && here && kase.state === "head") { kase.state = "pat"; kase.fresh = true; kase.paren = 0; }
+      else if (found === "esac" && here && (opens || (kase.state === "body" && atCommand(i)))) cases.pop();
+      if (found) { i += found.length - 1; continue; }
+    }
     if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
       i = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1); continue;
     }
     if (c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) { const j = text.indexOf("\n", i); i = (j === -1 ? text.length : j) - 1; continue; }
     if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; continue; }
     if (c === "`") { ticks = !ticks; continue; }
-    if (c === "(") { depth++; continue; }
-    if (c === ")") { if (stack.length > 1) stack.pop(); if (depth) depth--; continue; }
+    if (c === "(") { stack.push("sub"); depth++; continue; } // a subshell, an array literal or an extglob group: its own `)` pops it
+    if (c === ")") { if (stack.length > 1) { stack.pop(); unwind(); } if (depth) depth--; continue; }
     if (c === "<" && text.startsWith("<<<", i)) { i += 2; continue; }
     if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
       const op = /<<(-?)[ \t]*/y;
@@ -2093,7 +2127,7 @@ function blankInertHeredocs(text) {
           if ((tabs ? line.replace(/^\t+/, "") : line) === tag) { found = true; break; }
         }
         const word = HEAD.exec(head);
-        if (quoted && !nested && found && word && INERT.has(word[1])) bodies.push([start, end]);
+        if (quoted && !nested && found && word && INERT.has(word[1]) && !RUNS_BODY[word[1]]?.test(text.slice(start, end))) bodies.push([start, end]);
       }
       pending.length = 0;
       stmt = pos;
