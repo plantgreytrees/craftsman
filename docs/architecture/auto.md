@@ -3,7 +3,7 @@
 > and `/architect --update auto` should be run.
 
 # Auto architecture
-_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 `/craftsman:auto <request>` is the one command that takes work from an idea
@@ -59,9 +59,9 @@ only surface mid-run still park, which costs a Phase C round.
 ARCH-AUTO-09 supersedes ARCH-AUTO-01: the stop rule covers every descendant row of the slug. See [plan](./plan.md) for the reasoning and rejected alternatives.
 
 ## Phase 2 amendment (2026-11-01, owner-approved)
-_Verified at `9e122b1`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The rest of the pass is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+_Verified at `a0cb8a2`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The rest of the pass is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
-**Status: decided, not yet implemented.** The scope-required marker is still re-armed by any hand-off after a resume and cleared only by activating a scope. Code: `/plan sandbox-auto-flow phase 2`.
+**Status: implemented (2026-11-03).** SessionStart and the account-switch `adopt` re-arm the marker only for a hand-off that lists remaining units (one predicate, `handoffArmsScope`), a typed craftsman command ends the run's marker and session scope, and `handoff.mjs` refuses a unit hand-off without a `remaining_units` array.
 
 - **ARCH-AUTO-11**: the scope-required marker belongs to the `/orchestrate` run that armed it.
   - **Re-arming:** SessionStart re-arms it only when the hand-off still lists remaining units.

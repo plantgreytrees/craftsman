@@ -3,7 +3,7 @@
 > and `/architect --update safety` should be run.
 
 # Safety architecture
-_Last verified: 2026-10-21 at `96a029c` · Source plan: [fixes-and-safety](../plans/fixes-and-safety.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source plan: [fixes-and-safety](../plans/fixes-and-safety.md)_
 
 ## In plain English
 Craftsman's guards are Claude Code hooks, so they only protect you while they
@@ -63,9 +63,9 @@ the hook fires (`SessionEnd:other`, exit 0) and the JSON is parsed, but **neithe
 uses stderr only, and Stop (which does show `systemMessage`) carries the same report every turn.
 
 ## Phase 2 amendments (2026-11-01, owner-approved)
-_Verified at `9e122b1`. Source: the "Open decision — phase 2" section of [sandbox-auto-flow](../plans/sandbox-auto-flow.md); `/idea` was skipped, and every claim there was checked against the code and the 2026-11-01 transcript sweep._
+_Verified at `a0cb8a2`. Source: the "Open decision — phase 2" section of [sandbox-auto-flow](../plans/sandbox-auto-flow.md); `/idea` was skipped, and every claim there was checked against the code and the 2026-11-01 transcript sweep._
 
-**Status: decided, not yet implemented.** Today's code still lets a tool call write the network push queue, refuses a quoted heredoc that names a safety variable, expires every command record after an hour, offers no `allowedDomains` or `autoMode.allow` entry from `/init`, and drains whatever branch a queue entry names. Code: `/plan sandbox-auto-flow phase 2`.
+**Status: implemented (2026-11-03; plans [sandbox-auto-flow-phase-2](../plans/sandbox-auto-flow-phase-2.md) and [its review rounds](../plans/scrutinise-sandbox-auto-flow-phase-2.md)).** The network push queue is protected state, a quoted heredoc that merely names a safety variable passes, command records last the session, `/init` offers the origin hosts and the user-scope `autoMode.allow` entry, and the drain validates every entry. Five isolated review rounds also hardened the surface around it; the gaps they left open are listed first under the limits below.
 
 Unattended runs kept stopping for two reasons. First, the sandbox hides git credentials from root's network step. Second, the guards refuse harmless text. Root still runs fetch and drain outside the sandbox, but auto mode now has one explicit, user-approved entry for exactly that step. Drain refuses anything aimed at base, and its queue is protected the way approval records are. The text-scanning guards are now stated to be accident prevention. They narrow false positives where the text is provably inert, and they stop chasing unusual bypass spellings, because the boundary is the sandbox, not text matching.
 
@@ -90,4 +90,5 @@ Trade-offs and known limits:
 - A fetch from a private repo needs credentials, so `allowedDomains` alone can't make a sandboxed fetch work: Gleam logged 99 `could not read Username for 'https://github.com'`. A public repo fetches fine.
 - **Stated limits of the worktree git guard** (F1; live and accepted under ARCH-SAFETY-15): a nested or `function` cd, CDPATH, a GIT_DIR set by `for`, `read` or `printf -v`, `-c alias.*` or `core.worktree`, a glob-spelled git path, the wrappers `script -c`, `flock -c`, `su -c` and `watch`, git-as-runner options, and rebinding by `trap` or `alias`.
 - **Stated limits of the doc-deletion guard** (owner, 2026-11-02, under ARCH-SAFETY-15; the guard of ARCH-DOCS-07 and ARCH-STATE-16): an alias in another repository's config reached through `git -C <dir>` or an earlier `cd`/`pushd`; the self-protection scan reading `$'…'`/`$"…"`-decoded names; positional parameters set other than by `set` (a function call); a nested array subscript in a default assignment (`${z[a[1]]=l}`); and the cost of the `${a[` subscript scan on very long text. Each was found by a scrutinise round and left to the sandbox.
+- **Known gaps after review round 5** (PENDING follow-up rows, not yet stated limits; ARCH-SAFETY-13 does not hold in these respects until they are fixed or the owner records them as limits): `find -delete` and `-exec rm` miss the queue, `.git/modules/**` and commondir/gitdir (`followup-find-delete-stale-consumer`); a glob in the last path segment onto a `**/`-anchored never-written file (`followup-last-segment-glob`); the gitfile refusal reads literal targets only (`followup-gitfile-spellings`); a link source built from `$PWD`, `$(pwd)` or `~+` (`followup-dynamic-link-source`); several `-t` options with a large source can push the guard past its 10 s hook timeout (`followup-multi-target-latency`).
 - Still refused on purpose: `echo` prose that names a setter next to a safety variable, an unquoted `<<EOF` body, and any unreadable command that can write and names craftsman state.

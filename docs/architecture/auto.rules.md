@@ -3,8 +3,8 @@ area: auto
 governs: ["commands/auto.md", "commands/instruction.md", "scripts/orchestrate-scope-guard.mjs"]
 human: docs/architecture/auto.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: 9e122b185051f279778b956746840d9253d32ae4
-updated: 2026-11-01
+verified_at: a0cb8a2647753febf3b75da1a856f70150cc52ae
+updated: 2026-11-03
 ---
 # ARCH auto — enforced rules
 

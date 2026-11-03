@@ -3,7 +3,7 @@
 > and `/architect --update landing` should be run.
 
 # Landing architecture
-_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Running `/auto` gives it full authority to commit, branch, merge, push, land
@@ -77,7 +77,7 @@ ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and ext
 ## Phase 2 amendment (2026-11-01, owner-approved)
 _Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The diagram is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
-**Status: decided, not yet implemented.** ARCH-LAND-36: `drainQueue` still pushes or deletes whatever branch an entry names. ARCH-LAND-35: root's unsandboxed network step is today's behaviour; the `autoMode.allow` entry and the classifier-refusal path are not built. Code: `/plan sandbox-auto-flow phase 2`.
+**Status: implemented (2026-11-03).** ARCH-LAND-36: `drainVerdict` judges every queue entry before it touches origin; a refusal is logged `drain_refused` and parks, also when a later push in the same drain loses the network (the exit-3 payload carries `parked[]`, `commands/_network.md`). ARCH-LAND-35: `/init` offers the `autoMode.allow` entry (ARCH-SAFETY-16) and a classifier refusal stops the run like `needs_network`.
 
 - **ARCH-LAND-36** replaces 34 (2026-11-02, owner decision): root's drain checks every queue entry before it touches origin.
   - **What passes:** a push goes to a `feat/` or `feature/` branch, or to base only in direct-land mode (`planning.featureBranches` off). A delete only removes a `feat/` unit branch. A push is never forced.

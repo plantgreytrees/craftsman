@@ -238,7 +238,7 @@ candidate list: `code-reviewer` owns the verdict.
 
 | Command | What it's for |
 |---|---|
-| `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair the required project structure (`--check`, `--diff`, `--write`, `--update`, `--settings-diff`) |
+| `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair the required project structure (`--check`, `--diff`, `--write`, `--update`, `--settings-diff`, `--user-settings-diff`) |
 | `/craftsman:upgrade` | update every Craftsman install (user and per-project) to the latest commit, then tell you what to reload and re-init (`--dry-run`) |
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
 | `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
@@ -351,8 +351,9 @@ It backs up every managed file under `.craftsman/init-backups/` first, then
 refreshes the project's `craftsman.config.json`, `.claude/CLAUDE.md`,
 `.claudeignore` and the `craftsman_version` stamp on each plan. It audits every
 shipped command, agent, hook, script and skill, and reports missing quality
-tools. It also offers `--settings-diff`, which adds the Claude Code sandbox and
-ask rules, and writes nothing until you agree.
+tools. It also offers `--settings-diff`, which adds the Claude Code sandbox,
+ask rules and each registered project's origin host, plus `--user-settings-diff` for one
+user-scope auto-mode entry; nothing is written until you agree.
 
 **5. Re-check the wrapped built-ins** after a Claude Code update:
 
@@ -495,7 +496,7 @@ The Claude Code **sandbox** owns writes and deletes outside the project and read
 | subagent dispatch | `agent-mode-guard` (root-only by default) |
 | lint and type gates, the Stop gate | craftsman's advisory hooks |
 
-`/craftsman:init --settings-diff` previews and `--settings-write` merges `sandbox.enabled: true` and ask rules for `sudo`, `git push --force`, `git reset --hard` and `git clean` into the project's `.claude/settings.json`. It never overwrites a key, backs the old file up, and writes nothing until you say so. SessionStart notes when no settings scope enables the sandbox.
+`/craftsman:init --settings-diff` previews and `--settings-write` merges `sandbox.enabled: true` and ask rules for `sudo`, `git push --force`, `git reset --hard` and `git clean` into the project's `.claude/settings.json`, with each registered project's origin host in `sandbox.network.allowedDomains`. It never overwrites a key, backs the old file up, and writes nothing until you say so. `--user-settings-diff` and `--user-settings-write` offer one user-scope `autoMode.allow` entry for root's network step, shown as a diff first. SessionStart notes when no settings scope enables the sandbox.
 
 **Off switches.**
 - `CRAFTSMAN_SAFETY=off` in **your own environment** is the only switch that turns the safety guards off; SessionStart says so when it is set.

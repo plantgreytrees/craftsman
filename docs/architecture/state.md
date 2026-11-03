@@ -3,7 +3,7 @@
 > and `/architect --update state` should be run.
 
 # State architecture
-_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Craftsman's guards keep their state under `.craftsman/sessions/<session-id>/`.
@@ -79,9 +79,9 @@ ARCH-STATE-12 narrows the 18 Oct fail-closed choice, with the owner's approval. 
 - **ARCH-STATE-17** replaces 10: the same state-resolution rule, plus one allowance. Under an active unit scope the `Read` tool (never Glob, Grep or a write) may read a file whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. It passes the scope check and the ambiguous-scope refusal, but `protectedPaths` still apply, and a symlink or `..` is judged by where it leads. Why: models read evidence (screenshots, logs) there while verifying a unit, and the project-boundary check refused every such Read: 32 of them in the 2026-11-01 sweep with the misleading "more than one active project scope". Rejected: keeping it fail-closed (the manifest cannot list a path outside the project as a relative entry), and allowing any Read outside every git repo (credential reads would then rest entirely on the sandbox and deny rules, ARCH-SAFETY-01). Not covered, on purpose: a Read when no scope is active ("requires an active unit scope"), directories such as `~/scratch`, and Claude Code's own tool-result spill files.
 
 ## Phase 2 amendments (2026-11-01, owner-approved)
-_Verified at `9e122b1`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The full table and diagram are in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+_Verified at `a0cb8a2`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The full table and diagram are in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
 
-**Status: ARCH-STATE-18 is decided; only its Read part is implemented.** A scoped Write or Edit to a scratch dir is still refused, as before. Code for the rest: `/plan sandbox-auto-flow phase 2`.
+**Status: implemented (2026-11-03).** ARCH-STATE-18 covers Write and Edit as well as Read. A scoped Write may create a scratch file (judged by its nearest existing ancestor, a `..` in the missing part refused), and a Write or Edit target with more than one hard link is refused.
 
-- **ARCH-STATE-18** replaces 17: Write and Edit join Read for files whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. NotebookEdit, Glob and Grep stay refused, an enclosing root still rules a directory out, and `protectedPaths` still apply. Why: under a scope, this `/architect` run couldn't write a probe script to the job dir and had to put one in the repo root, while ARCH-SAFETY-01 already leaves outside-root writes to the sandbox. Rejected: keeping Read only, which means scratch scripts end up in the repo.
+- **ARCH-STATE-18** replaces 17: Write and Edit join Read for files whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. NotebookEdit, Glob and Grep stay refused, an enclosing root still rules a directory out, and `protectedPaths` still apply. A new file is judged by its nearest existing ancestor, and an existing target with more than one hard link is refused, because a link can carry a write to protected state. Why: under a scope, this `/architect` run couldn't write a probe script to the job dir and had to put one in the repo root, while ARCH-SAFETY-01 already leaves outside-root writes to the sandbox. Rejected: keeping Read only, which means scratch scripts end up in the repo.
 - Two other decisions from this pass touch state but live elsewhere. The scope-required marker's lifetime is **ARCH-AUTO-11** ([auto.md](./auto.md)), and the command-record lifetime is part of **ARCH-SAFETY-13** ([safety.md](./safety.md)). They moved there so unit contexts that load `state.rules.md` stay inside the ARCH-ENGINE-08 budget.
