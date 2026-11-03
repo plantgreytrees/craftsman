@@ -1,6 +1,6 @@
 ---
 slug: guard-redesign
-status: pursue-with-changes
+status: architected
 verdict: pursue-with-changes
 confidence: medium
 depth: standard
@@ -72,6 +72,7 @@ touches: [agents/scrutineer.md, commands/scrutinise.md, commands/instruction.md,
 
 ## Open questions
 - What strength should the two protections have? **Answered 2026-11-03: accident prevention.**
+- Amend ARCH-SAFETY-15? **Answered 2026-11-03: yes, as ARCH-SAFETY-17.** Which bypass findings are Suggestions? **Answered 2026-11-03: any spelling a model would not write in ordinary work, new classes included.**
 
 ## Next step
 `/architect guard-redesign` — the ARCH-SAFETY-15 amendment, then `/plan` for recommendations 1–2.
