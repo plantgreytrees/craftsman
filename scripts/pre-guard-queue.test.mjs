@@ -556,3 +556,64 @@ test("pre-guard: the other files of the admin dirs (HEAD, logs, a lock to remove
     }
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
+
+// bash-writer-gaps (scrutinise-sandbox-auto-flow phase 2, round 4, R4-W4). `cp forged -t.git/.craftsman/network` is GNU cp with the queue directory as its target directory: the option can be attached to its value
+// (-tDIR) or end a cluster of letters (-ft DIR, -ft.git/x), and the guard read only the word `-t`. cp, mv and install are refused with every spelling, from the main checkout and from both linked worktrees.
+test("pre-guard: a cp, mv or install whose attached -tDIR or letter cluster names the queue directory is refused from the main checkout and from both linked worktrees", () => {
+  const r = repoWithQueue();
+  try {
+    const net = path.dirname(r.queue), forged = path.join(r.base, "forged.jsonl");
+    fs.writeFileSync(forged, "{}\n");
+    const spellings = (dir) => [
+      `cp ${forged} -t${dir}`, `cp -ft${dir} ${forged}`, `cp -vt${dir} ${forged}`, `cp -ft ${dir} ${forged}`, `cp ${forged} -ft${dir}`, `mv ${forged} -t${dir}`, `mv -ft${dir} ${forged}`, `install ${forged} -t${dir}`,
+      `install -Dt${dir} ${forged}`, `install -m 644 -t${dir} ${forged}`, `cp ${forged} -t ${dir}`, `cp ${forged} --target-directory=${dir}`, `cp ${forged} --target-directory ${dir}`,
+    ];
+    for (const [where, cwd] of [["the main checkout", r.main], ["the linked worktree inside it", r.worktree], ["the linked worktree beside it", r.sibling]]) {
+      const calls = [net, path.relative(cwd, net)].flatMap(spellings).map((command) => ["Bash", { command }]);
+      assert.deepEqual(notRefused(cwd, calls, "queue-guard-attached"), [], `allowed from ${where}`);
+      for (const command of [`cp ${forged} -t${r.base}`, `cp -ft${r.base} ${forged}`, `install -Dt${r.base} ${forged}`]) assert.equal(run(cwd, "Bash", { command }, "queue-guard-attached").status, 0, `${where}: an ordinary directory, ${command}`);
+    }
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+// bash-writer-gaps (round 4, R4-W3). A linked worktree's or a submodule's `.git` is a regular file, `gitdir: <path>`, that tells git where the repository is: a rewritten one hands every git command, and the lookup of the
+// queue that the guard itself makes, a forged directory's config, hooks and queue. The directory `.git` is the repository and keeps its patterns; a regular file by that name is refused to every writer by its real path
+// (a symlink, or a symlinked directory, that leads to it is the same file), from every root that reaches it. Reading it is not a write.
+test("pre-guard: a tool call that writes a regular file named .git is refused from every root, and a Read of it is not", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const gitfiles = [r.sub, r.inWt, r.besideWt, r.superWt, r.subInWt].map((dir) => path.join(dir, ".git"));
+    for (const file of gitfiles) assert.ok(fs.statSync(file).isFile(), `the fixture: ${file} is a regular file`);
+    const before = gitfiles.map((file) => fs.readFileSync(file, "utf8"));
+    // Write and Edit, then the Bash writers: a redirect, an append, cp, mv and rm. Every root tries the first three on every gitfile; the rest are tried from one root.
+    const writes = (file) => [
+      ["Write", { file_path: file, content: "gitdir: /x\n" }], ["Edit", { file_path: file, old_string: "gitdir", new_string: "gitdir" }], ["Bash", { command: `echo 'gitdir: /x' > ${file}` }],
+    ];
+    const moreWrites = (file) => [
+      ["Bash", { command: `printf 'gitdir: /x' >> ${file}` }], ["Bash", { command: `cp forged.txt ${file}` }], ["Bash", { command: `rm -f ${file}` }], ["Bash", { command: `mv ${file} ${r.base}/moved` }],
+      ["Bash", { command: `echo 'gitdir: /x' | tee ${file}` }], ["Bash", { command: `sed -i s/gitdir/gitdir/ ${file}` }], ["Bash", { command: `ln -sf forged.txt ${file}` }],
+    ];
+    for (const [where, dir] of surfaceRoots(r)) {
+      for (const file of gitfiles) {
+        assert.deepEqual(notRefused(dir, writes(file), "gitfile-write"), [], `allowed from ${where}, path ${file}`);
+        if (dir === r.sup) assert.deepEqual(notRefused(dir, moreWrites(file), "gitfile-write"), [], `allowed from ${where}, path ${file}`);
+        assert.equal(run(dir, "Read", { file_path: file }, "gitfile-read").status, 0, `Read ${file} from ${where}`);
+        assert.equal(run(dir, "Bash", { command: `cat ${file}` }, "gitfile-read").status, 0, `cat ${file} from ${where}`);
+      }
+      const relative = path.relative(dir, gitfiles[0]);
+      assert.deepEqual(notRefused(dir, writes(relative), "gitfile-write"), [], `allowed from ${where}, relative path ${relative}`);
+    }
+    // The same file by another name: a symlink to it, and a symlinked directory that holds it. Every other write to a gitfile's name stays a write.
+    fs.symlinkSync(gitfiles[0], path.join(r.base, "gitlink"));
+    fs.symlinkSync(r.sub, path.join(r.base, "subdir-link"));
+    for (const file of [path.join(r.base, "gitlink"), path.join(r.base, "subdir-link", ".git")]) assert.deepEqual(notRefused(r.sup, writes(file), "gitfile-write"), [], `allowed through ${file}`);
+    assert.deepEqual(gitfiles.map((file) => fs.readFileSync(file, "utf8")), before, "no gitfile was changed");
+    // Controls: the repository directory itself, and names that only look like it.
+    const ordinary = [path.join(r.sup, ".git", "info", "exclude"), path.join(r.sup, ".gitignore"), path.join(r.sup, ".gitmodules"), path.join(r.sup, ".github", "x.yml"), path.join(r.sup, "a.git"), path.join(r.sub, "dotgit.txt")];
+    for (const file of ordinary) {
+      assert.equal(run(r.sup, "Write", { file_path: file, content: "x" }, "gitfile-ordinary").status, 0, `Write ${file}`);
+      assert.equal(run(r.sup, "Bash", { command: `echo x >> ${file}` }, "gitfile-ordinary").status, 0, `echo >> ${file}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});

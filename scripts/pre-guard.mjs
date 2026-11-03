@@ -205,6 +205,30 @@ function outerRelWhere(abs, test) {
   return common && test(common) ? common : null;
 }
 const mainStateRel = (abs) => outerRelWhere(abs, (rel) => selfKind(rel) === "never");
+// The directories that hold craftsman state for this session: its own root, the main checkout it shares session state with, the git common dir (the push queue) and the superprojects of a submodule. A link whose
+// source is, or lies above, one of them makes a second name for every file of its state; holds() does not count the project root itself, so they are asked for directly. Asked once: a guard process judges one command.
+let stateHoldersMemo;
+function stateHolders() {
+  if (stateHoldersMemo) return stateHoldersMemo;
+  const out = new Set([realRoot()]);
+  try { out.add(fs.realpathSync(mainCheckoutRoot(activeRoot))); } catch { /* no main checkout to name */ }
+  const common = gitCommonDir(activeRoot);
+  if (common) out.add(common);
+  for (const sup of superprojectRoots()) out.add(sup);
+  return (stateHoldersMemo = [...out]);
+}
+// The directories whose contents are state: the state directory and the .git of each holder, and the git common dir itself (a git dir under no `.git`).
+let stateAreasMemo;
+const stateAreas = () => (stateAreasMemo ??= [...new Set([...stateHolders().flatMap((holder) => [path.join(holder, ".craftsman"), path.join(holder, ".git")]), ...[gitCommonDir(activeRoot)].filter(Boolean)])]);
+// A regular file named .git is a gitfile, `gitdir: <path>`: it tells git where the repository is, so a rewritten one hands every git command, and the guard's own lookup of the queue, a forged directory's config, hooks and
+// queue (ARCH-SAFETY-13). Judged by real path, so a symlink to one is the same file; the directory `.git` is the repository itself, and a name that does not exist yet is no file to rewrite.
+const GITFILE_HIT = ".git (a file that names the repository)";
+function isGitFile(abs) {
+  if (path.basename(abs).toLowerCase() !== ".git") return false;
+  try { return fs.statSync(abs).isFile(); } catch { return false; }
+}
+// The hit a link source gets when it holds state (linkSourceHoldsState); the loop over the hits in the Bash check names it.
+const LINKED_STATE_HIT = ".craftsman (linked source)";
 
 // `p` resolved from `cwd`, each component through realpath while it exists, so a
 // symlink (`d -> docs`) is followed; the rest of a missing tail stays lexical.
@@ -601,7 +625,8 @@ const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((v
 const AT_COMMAND = String.raw`(?:^|[;&|(){\n\x60]|(?<![\w.-])(?:then|do|else|elif|if|while|until|time|command|builtin|!)(?=\s))[ \t]*(?:\w+=(?:[^\s;&|()\x60"']|"[^"\n]*"|'[^'\n]*')*[ \t]+)*`;
 // A link into the state directory, read from the text: `ln` or `link` as a whole word, wherever it stands, in a command that names `.craftsman` is refused, so a wrapper no list names (`setsid`, `chrt`, `flock`, `taskset`,
 // `strace`, `unshare`, `fakeroot`, `watch`) hides nothing. A command that only searches for or prints the word is exempt: it is cut at `;`, `&`, `|`, a newline, a backtick and a parenthesis, and every piece that holds the word
-// must start with a read-only head. Plain string operations and one linear pattern, with no backtracking: this runs in front of every Bash call. The parser still judges a link it can read, whatever this check says.
+// must start with a read-only head. Plain string operations and one linear pattern, with no backtracking: this runs in front of every Bash call. The parser still judges a link it can read, whatever this check says. The name of the state directory is compared case-folded, as selfKind compares (a case-insensitive filesystem reaches `.Craftsman` as it), and the caller
+// passes the command with the bodies of inert heredocs left out (blankInertHeredocs): prose in a quoted heredoc that names the word and the directory is not a link, a real link beside it is.
 const LINK_WORD = /(?:^|[\s;&|(){\x60])(?:ln|link)(?=\s)/;
 const SEGMENT_BREAK = /[;&|\n\r()\x60]/;
 const READ_ONLY_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "git log"]);
@@ -610,12 +635,43 @@ const readOnlySegment = (segment) => {
   const words = segment.trim().split(/[ \t]+/);
   return READ_ONLY_HEADS.has(words[0] === "git" ? `git ${words[1]}` : words[0]) && !words.some((w) => ACTING_OPTIONS.some((o) => w === o || w.startsWith(o + "=")));
 };
-const linksIntoState = (command) => command.includes(".craftsman") && LINK_WORD.test(command)
+const linksIntoState = (command) => /\.craftsman/i.test(command) && LINK_WORD.test(command)
   && !command.split(SEGMENT_BREAK).every((segment) => !LINK_WORD.test(segment + " ") || readOnlySegment(segment));
-// Does this `cp` make links instead of copies: -l / --link (hard links), -s / --symbolic-link (symlinks), alone, in a cluster of short options (-al, -sl) or as an
-// abbreviation getopt reads (--li, --sy)? Options end at `--`. A cluster that holds the letter over-reads (-t and -S take a value): the cost is a source judged that need not be.
-const linksNotCopies = (rest) => (rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest).some((a) => /^-[A-Za-z]*[ls][A-Za-z]*$/.test(a)
+// Does this `cp` make links instead of copies: -l / --link (hard links), -s / --symbolic-link (symlinks), alone, in a cluster of short options (-al, -sl, -alt../d) or as an abbreviation getopt
+// reads (--li, --sy)? Options end at `--`. A letter that takes a value (-t, -S) ends the letters of its cluster, the rest of it being that value: `-St` holds no `l` or `s`, and `-alt../d` holds both.
+const linksNotCopies = (rest) => (rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest).some((a) => (/^-[^-]/.test(a) && /[ls]/.test(a.slice(1).split(/[tS]/)[0]))
   || (a.startsWith("--") && a.length > 2 && ("link".startsWith(a.slice(2)) || (a.length > 3 && "symbolic-link".startsWith(a.slice(2))))));
+// The short options of cp, mv, ln and install that take a value, as GNU getopt reads them: `-S SUFFIX`, `-t DIR`, and for install `-m MODE`, `-o OWNER`, `-g GROUP`. rsync is not here: its `-t` keeps times and takes no value.
+const VALUED_SHORT = { cp: "tS", mv: "tS", ln: "tS", install: "tSmog" };
+// The target-directory option of `cp`, `mv`, `ln` and `install`, read the way getopt reads it: `-t DIR`, an attached `-tDIR`, a cluster that ends in t (`-ft DIR`) or carries the directory (`-ft.git/x`), and
+// `--target-directory=DIR`, `--target-directory DIR` or an abbreviation of it (`--target`, `--t`). A letter that takes a value swallows the rest of its cluster, or the next word when it ends one, so `-St` is a suffix
+// and `-m 644 src dst` has no operand 644. Options end at `--`. Every -t is returned (the last wins in cp, but a reading that differs from getopt's in an odd spelling must not hide one). `used` holds the indexes of
+// the words that these options took (a `--target-directory=DIR` word, a value given as the next word), which are no operands.
+function targetDirOptions(rest, valued) {
+  const dirs = [], used = new Set();
+  if (!valued) return { dirs, used };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === "--") break;
+    if (a.startsWith("--")) {
+      const name = a.slice(2).split("=")[0];
+      if (name === "" || !"target-directory".startsWith(name)) continue;
+      used.add(i);
+      if (a.includes("=")) dirs.push(a.slice(a.indexOf("=") + 1));
+      else if (i + 1 < rest.length) { used.add(i + 1); dirs.push(rest[++i]); }
+      continue;
+    }
+    if (!/^-[^-]/.test(a)) continue;
+    for (let k = 1; k < a.length; k++) {
+      if (!valued.includes(a[k])) continue;
+      let value = a.slice(k + 1);
+      if (value === "" && i + 1 < rest.length) { used.add(i + 1); value = rest[++i]; }
+      if (a[k] === "t" && value !== "") dirs.push(value);
+      break;
+    }
+  }
+  return { dirs, used };
+}
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
 const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
@@ -777,7 +833,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const foldedSelf = (t) => {
     const abs = realResolve(process.cwd(), expandHome(t));
     const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
-    return (rel !== "" && !rel.startsWith("..") && !!selfKind(rel)) || !!mainStateRel(abs);
+    return (rel !== "" && !rel.startsWith("..") && !!selfKind(rel)) || !!mainStateRel(abs) || isGitFile(abs); // a redirect onto a gitfile reaches the parser, which refuses it in target()
   };
   const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))) || (writes && foldedSelf(t)));
   const redirectsOntoDocs = () => {
@@ -821,6 +877,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         if (rel !== "" && !rel.startsWith("..") && selfKind(rel) && !hits.includes(rel)) hits.push(rel);
         const stateRel = mainStateRel(abs); // the main checkout's session state, reached from a linked worktree
         if (stateRel && !hits.includes(stateRel)) hits.push(stateRel);
+        if (isGitFile(abs) && !hits.includes(GITFILE_HIT)) hits.push(GITFILE_HIT); // a gitfile rewritten, replaced or moved away: whatever it named is no longer the repository the guards found
       }
     }
     // Self-protection only: a path that is removed or moved takes everything under it along, so a directory that
@@ -870,27 +927,59 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const isDirAt = (abs) => { try { return fs.statSync(abs).isDirectory(); } catch { return false; } };
   // `recursive` is true for cp -r/-R/-a, for rsync and for mv: a directory source then brings every file under it, so
   // DEST/<each file> is judged as well as DEST/basename(SOURCE). A directory that cannot be listed is `unlisted`.
-  function placements(rest, st, recursive = false) {
-    const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
-    const dirOpt = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
-    const operands = targetsOf(t < 0 ? rest : rest.filter((_, i) => i !== t && !(i === t + 1 && !rest[t].includes("="))));
-    const sources = dirOpt !== undefined ? operands : operands.slice(0, -1);
-    const dest = dirOpt !== undefined ? dirOpt : operands[operands.length - 1];
+  function placements(rest, st, recursive = false, verb = "cp") {
+    const { dirs: dirOpts, used } = targetDirOptions(rest, VALUED_SHORT[verb]);
+    const operands = targetsOf(rest.filter((_, i) => !used.has(i)));
+    // `ln TARGET`, with one operand and no -t, makes a link named for TARGET in the working directory: that name is where the link lands.
+    const single = verb === "ln" && dirOpts.length === 0 && operands.length === 1;
+    const sources = dirOpts.length || single ? operands : operands.slice(0, -1);
+    const dests = dirOpts.length ? dirOpts : single ? [path.basename(operands[0].replace(/\/+$/, "")) || operands[0]] : operands.slice(-1);
+    const dest = dests[dests.length - 1];
     if (dest === undefined) return { sources: [], placed: [], unlisted: [], dest: undefined };
-    const asDir = dirOpt !== undefined || destIsDir(dest, st);
-    const dd = dest.replace(/\/+$/, "") || dest;
-    const join = (s) => dd + "/" + path.basename(s.replace(/\/+$/, ""));
-    const placed = !sources.length ? [dest] : asDir ? sources.map(join) : [dest];
-    const unlisted = [];
+    const placed = [], unlisted = [];
     const deep = recursive || rest.some((a) => (/^-[A-Za-z]*[rRa]/.test(a) && !a.startsWith("--")) || a === "--recursive" || a === "--archive");
-    if (deep) for (const s of sources) {
-      const dirs = (st.cwds || []).map((cwd) => realResolve(cwd, expandHome(s))).filter(isDirAt);
-      if (!dirs.length) continue;
-      const listing = dirs.map((d) => listTree(d)).find(Boolean);
-      if (!listing) { unlisted.push(dd, join(s)); continue; }
-      for (const e of listing) { placed.push(dd + "/" + e); if (asDir) placed.push(join(s) + "/" + e); }
+    for (const d of dests) { // every -t is judged: a second one is read as getopt might not
+      const asDir = dirOpts.length > 0 || (!single && destIsDir(d, st));
+      const dd = d.replace(/\/+$/, "") || d;
+      const join = (s) => dd + "/" + path.basename(s.replace(/\/+$/, ""));
+      for (const p of !sources.length ? [d] : asDir ? sources.map(join) : [d]) placed.push(p);
+      if (deep) for (const s of sources) {
+        const dirs = (st.cwds || []).map((cwd) => realResolve(cwd, expandHome(s))).filter(isDirAt);
+        if (!dirs.length) continue;
+        const listing = dirs.map((x) => listTree(x)).find(Boolean);
+        if (!listing) { unlisted.push(dd, join(s)); continue; }
+        for (const e of listing) { placed.push(dd + "/" + e); if (asDir) placed.push(join(s) + "/" + e); }
+      }
     }
     return { sources, dest, placed, unlisted };
+  }
+  // A source of links that is a directory holding craftsman state, or may name one. holds() leaves out the project root itself and target() reads no glob, so neither judged `cp -al .`, `cp -al ..` or `cp -l .crafts*an/...`.
+  // A literal source holds state when it is, or lies above, the project root, the main checkout, the git common dir or a superproject. A source with a glob character is read by the names it can match, from the longest
+  // literal directory before it: it may name state when that directory lies inside a state area (the state directory or a .git), or when its segments match the names on the way down to one (`.crafts*an` matches
+  // `.craftsman`; a leading `*` matches no dot name, unless the command sets dotglob or GLOBIGNORE), however many segments follow. No file has to exist, since the shell expands the glob later. A brace group that spans a `/` or holds a glob character, an unclosed one and an extglob group are not read: they count.
+  function linkSourceHoldsState(source, cwd) {
+    const arg = expandHome(source);
+    const cut = arg.search(/[*?[{]/);
+    if (cut === -1) {
+      const abs = realResolve(cwd, arg);
+      return stateHolders().some((holder) => holder === abs || holder.startsWith(abs.endsWith(path.sep) ? abs : abs + path.sep));
+    }
+    if (/\{[^}]*(?:[\/*?[]|$)|[@+!?*]\(/.test(arg)) return true;
+    const lead = arg.slice(0, cut).replace(/[^/]*$/, "");
+    const dir = realResolve(cwd, lead === "" ? "." : lead);
+    const segs = arg.slice(lead.length).split("/").filter((seg) => seg !== "" && seg !== ".");
+    if (segs.includes("..")) return true;
+    const dotted = /dotglob|GLOBIGNORE/i.test(cmd);
+    const matches = (seg, name) => segmentRe(seg, "i").test(name) && (!name.startsWith(".") || dotted || /^[.[{\\]/.test(seg));
+    try {
+      return stateAreas().some((area) => {
+        if (area === dir || area.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)) {
+          const down = path.relative(dir, area).split(path.sep).filter(Boolean);
+          return down.slice(0, segs.length).every((name, n) => matches(segs[n], name));
+        }
+        return dir.startsWith(area + path.sep);
+      });
+    } catch { return true; } // a glob the parser cannot read is not shown to miss the state
   }
   // The sources of a link (`ln`, `link`, `cp -l`, `cp -s`): what each one names is a path a later write can reach under the link's name, so it is judged like a write to it.
   // A symlink holds the source as written and resolves it from the link's directory; a hard link takes the file `ln` or `cp` finds from the working directory. Both are judged.
@@ -902,13 +991,15 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
         target(aimed, { cwds: [cwd] }, label, env);
         if (!path.isAbsolute(source)) target(source, { cwds: [cwd] }, label, env);
+        // the project root, the main checkout, a directory above them, or a glob that may name the state directory: neither holds() nor target() reaches it
+        if ((linkSourceHoldsState(aimed, cwd) || (!path.isAbsolute(source) && linkSourceHoldsState(source, cwd))) && !hits.includes(LINKED_STATE_HIT)) hits.push(LINKED_STATE_HIT);
       }
     });
   }
   // A link whose name lands in the state directory would let a later Write reach the state under another name: every name that resolves into it, from each working directory, is a hit.
   // From a linked worktree the state is the main checkout's (ARCH-SAFETY-13), so a name under that one counts as well.
   function namesIntoState(names, st) {
-    const inState = (rel) => rel === ".craftsman" || rel.startsWith(".craftsman/");
+    const inState = (rel) => /^\.craftsman(?:\/|$)/i.test(rel); // case-folded, as selfKind compares: a case-insensitive filesystem reaches `.Craftsman` as it
     for (const a of names) for (const cwd of st.cwds || []) {
       const abs = realResolve(cwd, expandHome(a));
       const main = mainRelOf(abs);
@@ -918,8 +1009,8 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names. `linking` is a cp that links (-l, -s, linksNotCopies): each SOURCE is then a second
   // name for the file, judged as the source of `ln` is, and a directory SOURCE (cp -al) names every file under it again, so it is judged as one that holds protected state.
   // `linkDirs` are the directories an rsync is told to link its files to (--link-dest): each is a source of links, and a relative one is read from the destination directory as well as from the working directory.
-  function copyTargets(rest, st, env, recursive = false, linking = false, linkDirs = []) {
-    const { sources, dest, placed, unlisted } = placements(rest, st, recursive);
+  function copyTargets(rest, st, env, recursive = false, linking = false, linkDirs = [], verb = "cp") {
+    const { sources, dest, placed, unlisted } = placements(rest, st, recursive, verb);
     for (const p of placed) target(p, st, "write", env);
     for (const u of unlisted) target(u, st, "holds", env);
     if (linkDirs.length) {
@@ -939,11 +1030,11 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       if (a === "--") { others.push(...rest.slice(i)); break; }
       if (a === "--link-dest") { if (i + 1 < rest.length) linkDirs.push(rest[++i]); } else if (a.startsWith("--link-dest=")) linkDirs.push(a.slice(12)); else others.push(a);
     }
-    copyTargets(others, st, env, true, false, linkDirs.filter(Boolean));
+    copyTargets(others, st, env, true, false, linkDirs.filter(Boolean), "rsync");
   }
   // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
   function moveTargets(rest, st, env) {
-    const { sources, placed, unlisted } = placements(rest, st, true);
+    const { sources, placed, unlisted } = placements(rest, st, true, "mv");
     for (const source of sources) target(source, st, "mv", env);
     for (const p of placed) target(p, st, "write", env);
     for (const u of unlisted) target(u, st, "holds", env);
@@ -1031,11 +1122,12 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     let files = [];
     if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
     else if (verb === "ln" || verb === "link") { // coreutils `link SOURCE NAME` is a hard link, `ln` without -s: the same operands, judged the same way
-      const { sources, placed } = placements(rest, st);
+      const { sources, placed } = placements(rest, st, false, verb);
       files = placed;
       linkedSources(sources, placed, st, env); // what each link points at is a path a later write can reach under another name
       namesIntoState(args, st); // a link into the state directory would let a later Write reach it under another name
-    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env, false, verb === "cp" && linksNotCopies(rest));
+      namesIntoState(placed, st); // and where the link lands: the one-operand form names it in the working directory, -t names the directory
+    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env, false, verb === "cp" && linksNotCopies(rest), [], verb);
     else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
     else if (verb === "sed" || verb === "perl") {
       if (!rest.some((a) => /^-[A-Za-z]*i/.test(a) || /^--in-place(?:=|$)/.test(a))) return; // without -i or --in-place neither writes a named file
@@ -1813,6 +1905,11 @@ function denySelfDisable(what, advice) {
   process.exit(2);
 }
 if (tool === "Bash" && command) {
+  // A quoted-delimiter heredoc body fed to cat or tee, or to node or python with no NODE_E_LIVE-like word, is inert (blankInertHeredocs); the link check and the bypass scan below read what is left.
+  const NODE_E_LIVE = /require|import|process|spawn|exec|eval|Function|child|constructor|globalThis|Reflect|\bfs\b/;
+  const live = blankInertHeredocs(command, NODE_E_LIVE);
+  // A link into the state directory would let a later Write reach it under another name. This cheap text check runs first: the parser below can need seconds for a long command, and the hook has a timeout.
+  if (linksIntoState(live)) denySelfDisable("a command that links into .craftsman");
   // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
   const verb = WRITER_AT_COMMAND.test(command) || new RegExp(INPLACE_TEXT).test(command.includes("\\") ? command : blankProse(command)) || new RegExp(INPLACE_TEXT).test(emptyQuoted(command)) || SED_W_TEXT.test(command); // blankProse does not read escaped quotes: with a backslash, test the raw text (fail closed)
   const never = NEVER_TEXT.test(command);
@@ -1826,10 +1923,10 @@ if (tool === "Bash" && command) {
     denySelfDisable("a command the guard cannot read that writes and names craftsman state");
   }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
-  // A link into the state directory would let a later Write reach it under another name.
-  if (linksIntoState(command)) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
+    if (hit === LINKED_STATE_HIT) denySelfDisable("a command that links a directory or a glob that holds .craftsman state", "link the files you need by name: the project root, the main checkout, the git dir and a glob that can name .craftsman or .git each hold craftsman state, and a link is a second name for every file in it.");
+    if (hit === GITFILE_HIT) denySelfDisable("a command that writes, replaces or moves a .git file, which tells git where the repository is");
     if (hit.startsWith("remove:")) {
       // A removed or moved path takes everything under it along: a directory that holds craftsman state is as
       // protected as the state. Scoped files (hooks.json, the config, the settings) may go when a unit scope names them.
@@ -1859,11 +1956,9 @@ if (tool === "Bash" && command) {
   // A quoted grep/printf/echo argument (blankProse) or a plain `node -e '<code>'` literal that names `NAME=` assigns nothing; any text
   // that could run it (pipe, redirect, substitution, eval, a node body that can spawn or load) is read as it stands.
   const NODE_E_LITERAL = /(\bnode\s+(?:-e|-p|--eval|--print)\s+)'([^']*)'/g;
-  const NODE_E_LIVE = /require|import|process|spawn|exec|eval|Function|child|constructor|globalThis|Reflect|\bfs\b/;
   const inertNodeE = (text) => /[|>`<]|\$\(|\b(?:eval|source)\b/.test(text) ? text
     : text.replace(NODE_E_LITERAL, (all, head, body) => NODE_E_LIVE.test(body) ? all : head + "'x'");
-  // A quoted-delimiter heredoc body fed to cat or tee, or to node or python with no NODE_E_LIVE-like word, is inert (blankInertHeredocs); the bypass scan reads it.
-  const live = blankInertHeredocs(command, NODE_E_LIVE);
+  // The bypass scan reads the command with those inert heredoc bodies left out (live, above).
   const safetyText = live.includes("\\") ? unquotedOf(live) : inertNodeE(blankProse(live)).replace(/['"\\]/g, "");
   if (SETS_SAFETY_VAR.some((re) => re.test(unquoted) && re.test(safetyText))) {
     denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
@@ -1916,6 +2011,8 @@ if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
   const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
   const kinds = [selfKind(rel), selfKind(realTarget), mainStateRel(realResolve(activeRoot, file)) ? "never" : null];
   if (kinds.includes("never")) denySelfDisable(`writing ${rel}`);
+  // A regular file named .git (a gitfile) says where the repository is; judged by its real path, so a symlink to one is the same file (the Bash writers are judged by target()).
+  if (isGitFile(realResolve(activeRoot, file))) denySelfDisable(`writing ${rel}, a file that tells git where the repository is`);
   // The exemption is for a scope that names the file itself (by its real path); a name that only reaches it through a
   // symlink the session made does not count. hooks.json is judged by both spellings of its path.
   if (kinds.includes("scoped") && !scopeNames(realTarget)) {
