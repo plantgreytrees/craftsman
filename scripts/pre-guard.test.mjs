@@ -605,6 +605,68 @@ test("pre-guard: cp with -l, --link or -s judges its sources like ln: a link to 
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
+// submodule-git-surface (scrutinise-sandbox-auto-flow phase 2, round 3). `rsync --link-dest=DIR` makes a destination file a hard link to the same-named file under DIR (a relative DIR is read from the destination
+// directory), so DIR is a source of links like the source of `ln` or `cp -l`: refused when it is the state directory or holds a protected state file. A `cp` that links (-l, -s) is refused when the name of
+// the link lands in the state directory, as the name of an `ln` is. The state directory's name is spelled in some rows and reached through a symlinked directory in others, so the judgement is what refuses them.
+test("pre-guard: rsync --link-dest judges its directory as a linking source, and a cp that links into the state directory is refused like ln", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t), sessionDir = path.dirname(manifest), state = path.join(t.dir, ".craftsman");
+    const queue = path.join(t.dir, ".git", ".craftsman", "network", "queue.jsonl"), netDir = path.dirname(queue);
+    fs.mkdirSync(netDir, { recursive: true });
+    fs.writeFileSync(queue, '{"kind":"push","dst":"feat/x"}\n');
+    fs.symlinkSync(sessionDir, path.join(tmp, "sess"));
+    fs.symlinkSync(netDir, path.join(tmp, "net"));
+    fs.symlinkSync(state, path.join(tmp, "state"));
+    fs.mkdirSync(path.join(tmp, "plain-dir"));
+    fs.mkdirSync(path.join(tmp, "src"));
+    fs.writeFileSync(path.join(tmp, "src", "f.txt"), "f");
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2); // every row is judged, so a red run names them all
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const src = `${tmp}/src/`;
+    assert.deepEqual(notRefused([
+      `rsync -a --link-dest=${state} ${src} ${tmp}/out1/`, `rsync -a --link-dest ${state} ${src} ${tmp}/out2/`, // the state directory, both spellings of the option
+      `rsync -a --link-dest=${sessionDir} ${src} ${tmp}/out3/`, `rsync -a --link-dest ${netDir} ${src} ${tmp}/out4/`, // a directory that holds the scope manifest, the push queue
+    ]), [], "a link-dest that is the state directory or holds a protected state file");
+    const unspelled = [`rsync -a --link-dest=${tmp}/sess ${src} ${tmp}/out5/`, `rsync -a --link-dest ${tmp}/net ${src} ${tmp}/out6/`, `rsync -av --link-dest=${tmp}/state ${src} ${tmp}/out7/`];
+    for (const command of unspelled) assert.doesNotMatch(command, /\.craftsman/, "the fixture: the command text never spells the state directory");
+    assert.deepEqual(notRefused(unspelled), [], "a link-dest named through a symlinked directory");
+    assert.deepEqual(notRefused([
+      `rsync -a ${src} ${tmp}/out8/ --link-dest=${tmp}/sess`, `rsync -a --link-dest=${tmp}/plain-dir --link-dest=${tmp}/sess ${src} ${tmp}/out9/`, // the option after the operands; a second --link-dest
+      `rsync -a -H --delete --link-dest="${tmp}/sess" ${src} ${tmp}/out10/`, `rsync -a --link-dest='${tmp}/net' ${src} ${tmp}/out11/`,
+    ]), [], "the option anywhere on the line, repeated, and quoted");
+    assert.deepEqual(notRefused([
+      `rsync -a --link-dest=../sess ${src} ${tmp}/out12/`, // read from the destination directory: ${tmp}/out12/../sess is the symlink
+      `cd ${t.dir} && rsync -a --link-dest=.craftsman ${src} ${tmp}/out13/`, `cd ${sessionDir} && rsync -a --link-dest=. ${src} ${tmp}/out14/`, // read from the working directory
+    ]), [], "a relative link-dest is read from the destination directory and from the working directory");
+    // Controls: the same rsync without --link-dest, and with an ordinary directory, stays allowed; a copy that reads the state directory makes no second name.
+    assert.deepEqual(notAllowed([
+      `rsync -a ${src} ${tmp}/outa/`, `rsync -a --link-dest=${tmp}/plain-dir ${src} ${tmp}/outb/`, `rsync -a --link-dest ${tmp}/plain-dir ${src} ${tmp}/outc/`,
+      `rsync -a --link-dest=../plain-dir ${src} ${tmp}/outd/`, `cd ${tmp} && rsync -a --link-dest=plain-dir src/ oute/`, `rsync -a ${tmp}/sess/ ${tmp}/outf/`,
+    ]), [], "controls: no --link-dest, an ordinary directory, a plain copy of the state directory");
+
+    // A cp that links: the name of the link is judged like the name of `ln`.
+    assert.deepEqual(notRefused([
+      `cp -s ${tmp}/src.txt ${state}/x`, `cp -l ${tmp}/src.txt ${state}/x`, `cp -s ${tmp}/src.txt .craftsman/x`, `cp --symbolic-link ${tmp}/src.txt ${state}/x`, `cp --link ${tmp}/src.txt ${state}/x`,
+      `cp -sf ${tmp}/src.txt ${state}/x`, `cp -al ${tmp}/src.txt ${state}/x`, `cp -s ${tmp}/src.txt ${state}/`, `cp -s ${tmp}/src.txt ${tmp}/src.txt ${state}/`,
+    ]), [], "a linking cp whose link name is under the state directory");
+    assert.deepEqual(notRefused([
+      `cp -s -t ${state} ${tmp}/src.txt`, `cp --link --target-directory=${state} ${tmp}/src.txt`, `cd ${state} && cp -l ${tmp}/src.txt x`, `cd ${t.dir} && cp -s ${tmp}/src.txt .craftsman/x`,
+    ]), [], "the destination given by -t or --target-directory, and by the working directory");
+    const unspelledCp = [`cp -s ${tmp}/src.txt ${tmp}/state/x`, `cp -l ${tmp}/src.txt ${tmp}/state/`, `cp -s -t ${tmp}/state ${tmp}/src.txt`];
+    for (const command of unspelledCp) assert.doesNotMatch(command, /\.craftsman/, "the fixture: the command text never spells the state directory");
+    assert.deepEqual(notRefused(unspelledCp), [], "a link name given through a symlinked directory");
+    assert.deepEqual(notAllowed([
+      `cp ${tmp}/src.txt ${state}/x`, `cp -r ${tmp}/plain-dir ${state}/copied`, // a copy makes a new file, not a second name
+      `cp -s ${tmp}/src.txt ${tmp}/c-s2.txt`, `cp -l ${tmp}/src.txt ${t.dir}/b.txt`, `cp -al ${tmp}/plain-dir ${tmp}/plain-linked2`, `cd ${tmp} && cp -s src.txt c-cd2.txt`,
+      `ln -s ${tmp}/src.txt ${tmp}/c-ln2.txt`,
+    ]), [], "controls: a plain copy into the state directory, a linking cp or ln between ordinary paths");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
 test("pre-guard: ln and link read a relative source from the working directory as well as from the link's directory", () => {
   const t = scratchProject();
   try {

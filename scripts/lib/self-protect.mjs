@@ -25,8 +25,12 @@ export const SELF_NEVER = Object.freeze([
   "**/.git/.craftsman/network/**",
   // A submodule project's git dir is the superproject's .git/modules/<name> (nested ones add /modules/<inner>), so its queue is not under a bare .git/.craftsman.
   "**/.git/modules/**/.craftsman/network/**",
+  // A superproject's linked worktree keeps the git dir of a submodule checked out in it under .git/worktrees/<wt>/modules/<name>, and the queue with it.
+  "**/.git/worktrees/*/modules/**/.craftsman/network/**",
   // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
   "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
+  // A submodule's git dir holds the same config and hooks, and each of its linked worktrees (.git/modules/<name>/worktrees/<wt>) a config of its own.
+  "**/.git/modules/**/config", "**/.git/modules/**/config.worktree", "**/.git/modules/**/hooks/**", "**/.git/modules/**/worktrees/*/config*",
   // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git
   "**/.git/worktrees/*/config", "**/.git/worktrees/*/config.worktree",
 ]);

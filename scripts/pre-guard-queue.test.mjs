@@ -362,3 +362,95 @@ test("pre-guard: ordinary directories and files that merely look like git state 
     assert.deepEqual(verdicts(s.sub, inSub, "queue-guard-ordinary").filter(([, got]) => got.status === 2).map(([name]) => name), [], "an ordinary path was refused in the submodule");
   } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
 });
+
+// submodule-git-surface (scrutinise-sandbox-auto-flow phase 2, round 3). A submodule's git dir is the superproject's .git/modules/<name>. Its config, config.worktree and hooks decide which
+// hooks run (core.hooksPath, an alias, a hook that fires on the next git command), and so do the config files of one of its linked worktrees (.git/modules/<name>/worktrees/<wt>/config*).
+// A superproject's linked worktree keeps the git dir of a submodule checked out in it under .git/worktrees/<wt>/modules/<name>, and the push queue with it. A tool call may write none of them
+// from any root that reaches them (ARCH-SAFETY-13, ARCH-SAFETY-15): the superproject root, the submodule root, both linked worktrees of the submodule and the superproject's linked worktree.
+function repoWithSubmoduleSurface() {
+  const r = repoWithSubmodule();
+  const superWt = path.join(r.base, "super-wt");
+  assert.equal(gitIn(r.sup, "worktree", "add", "-q", "-b", "feat/super-wt", superWt).status, 0);
+  assert.equal(gitIn(superWt, "submodule", "update", "--init", "-q", "sub").status, 0);
+  const subInWt = path.join(superWt, "sub");
+  const wtGitDir = path.join(r.sup, ".git", "worktrees", "super-wt", "modules", "sub");
+  assert.ok(fs.existsSync(wtGitDir), "the submodule checked out in the superproject's linked worktree has its git dir under .git/worktrees/<wt>/modules");
+  enqueuePush(subInWt, { common_git_dir: wtGitDir }, { sha: gitIn(subInWt, "rev-parse", "HEAD").stdout.trim(), dst: "feat/in-super-wt", reason: "test" });
+  const wtQueue = path.join(wtGitDir, ".craftsman", "network", "queue.jsonl");
+  return { ...r, superWt, subInWt, wtGitDir, wtQueue, wtBefore: fs.readFileSync(wtQueue, "utf8") };
+}
+const surfaceRoots = (r) => [["the superproject root", r.sup], ["the submodule root", r.sub], ["the submodule's worktree inside it", r.inWt], ["the submodule's worktree beside it", r.besideWt], ["the superproject's linked worktree", r.superWt]];
+// The submodule's config, its worktree config, a hook and the config of one of its linked worktrees, as the superproject names them.
+const surfaceFiles = (r) => {
+  const store = r.info.common_git_dir;
+  return [path.join(store, "config"), path.join(store, "config.worktree"), path.join(store, "hooks", "pre-push"), path.join(store, "worktrees", "wt", "config"), path.join(store, "worktrees", "wt", "config.worktree")];
+};
+
+test("pre-guard: a tool call that writes a submodule's config, config.worktree, hooks or a linked worktree's config is refused from every root", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    for (const [where, dir] of surfaceRoots(r)) {
+      for (const file of surfaceFiles(r)) {
+        assert.deepEqual(notRefused(dir, toolCalls(file), "surface-write"), [], `allowed from ${where}, path ${file}`);
+        const relative = path.relative(dir, file);
+        assert.deepEqual(notRefused(dir, [["Write", { file_path: relative, content: "x" }], ["Bash", { command: `echo x >> ${relative}` }]], "surface-write"), [], `allowed from ${where}, path ${relative}`);
+      }
+    }
+    assert.match(run(r.sup, "Write", { file_path: surfaceFiles(r)[0], content: "x" }, "surface-write").stderr, /craftsman:/, "the refusal is named");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a Read of a submodule's config and hooks, and its other git files, still pass from every root", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const store = r.info.common_git_dir;
+    for (const [where, dir] of surfaceRoots(r)) {
+      for (const file of [...surfaceFiles(r), path.join(store, "HEAD"), path.join(store, "info", "exclude")]) {
+        const read = run(dir, "Read", { file_path: file }, "surface-read");
+        assert.equal(read.status, 0, `Read ${file} from ${where}: ${read.stderr}`);
+      }
+      for (const command of [`cat ${path.join(store, "config")}`, `grep -c url ${path.join(store, "config")}`, `ls ${path.join(store, "hooks")}`]) assert.equal(run(dir, "Bash", { command }, "surface-read").status, 0, `${command} from ${where}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the queue of a submodule checked out in a superproject's linked worktree is refused to Write, >> and rm -rf of its directories, and a Read is not", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const net = path.dirname(r.wtQueue);
+    const gone = (target) => [["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]];
+    const held = [net, path.dirname(net), r.wtGitDir, path.dirname(r.wtGitDir), r.wtQueue];
+    const roots = [["the superproject root", r.sup], ["the superproject's linked worktree", r.superWt], ["the submodule inside that worktree", r.subInWt]];
+    for (const [where, dir] of roots) {
+      for (const file of [r.wtQueue, path.relative(dir, r.wtQueue)]) assert.deepEqual(notRefused(dir, [...toolCalls(file), ...redirects(file)], "surface-wtqueue"), [], `allowed from ${where}, path ${file}`);
+      for (const target of held.flatMap((abs) => [abs, path.relative(dir, abs)])) assert.deepEqual(notRefused(dir, gone(target), "surface-wtqueue-gone"), [], `allowed from ${where}, ${target}`);
+      for (const file of [r.wtQueue, path.relative(dir, r.wtQueue)]) {
+        const read = run(dir, "Read", { file_path: file }, "surface-wtqueue-read");
+        assert.equal(read.status, 0, `Read ${file} from ${where}: ${read.stderr}`);
+      }
+      assert.equal(run(dir, "Bash", { command: `cat ${r.wtQueue}` }, "surface-wtqueue-read").status, 0, `cat from ${where}`);
+    }
+    assert.match(run(r.superWt, "Bash", { command: `echo x >> ${r.wtQueue}` }, "surface-wtqueue").stderr, /craftsman:.*network/, "the refusal names the queue");
+    assert.equal(fs.readFileSync(r.wtQueue, "utf8"), r.wtBefore, "nothing reached the queue");
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nor the queue of the submodule's own git dir");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: ordinary directories and the other files of the submodule's git dirs keep their verdict from every root", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const store = r.info.common_git_dir;
+    for (const [where, dir] of surfaceRoots(r)) {
+      for (const sub of ["build", "src", path.join("src", ".github"), "modules", "worktrees"]) fs.mkdirSync(path.join(dir, sub), { recursive: true });
+      const calls = [];
+      for (const target of ["build", "src", "modules", "worktrees"]) calls.push(["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]);
+      calls.push(["Write", { file_path: path.join(dir, "src", "a.txt"), content: "x" }], ["Write", { file_path: path.join(dir, "b.txt"), content: "x" }],
+        ["Bash", { command: "echo x >> src/a.txt" }], ["Bash", { command: "echo x > b.txt" }], ["Bash", { command: "cp b.txt src/e.txt" }],
+        ["Bash", { command: `echo x >> ${path.join(store, "info", "exclude")}` }], ["Write", { file_path: path.join(store, "description"), content: "x" }],
+        ["Write", { file_path: path.join(store, "worktrees", "wt", "HEAD"), content: "x" }], ["Write", { file_path: path.join(store, "hooks-notes.txt"), content: "x" }],
+        ["Write", { file_path: path.join(r.wtGitDir, "info", "exclude"), content: "x" }]);
+      const refused = calls.map(([tool, input]) => [label(tool, input), run(dir, tool, input, "surface-ordinary")]).filter(([, got]) => got.status === 2).map(([name, got]) => `${name}: ${got.stderr.trim()}`);
+      assert.deepEqual(refused, [], `an ordinary path was refused from ${where}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
