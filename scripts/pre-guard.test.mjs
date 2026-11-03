@@ -623,8 +623,8 @@ test("pre-guard: ln and link read a relative source from the working directory a
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
-// The text check that refuses a link into the state directory read `ln` or `link` after any blank, so a search for the word (`grep -n link …/acceptance.md`) was a link. It reads the verb where a
-// command word stands, as the other verb checks do; a link that the parser reads (after a wrapper, in a find -exec, through xargs) is still refused by the parser.
+// The text check that refuses a link into the state directory read `ln` or `link` after any blank, so a search for the word (`grep -n link …/acceptance.md`) was a link. A command that only
+// searches for or prints the word is exempt (every segment that holds it starts with a read-only head); a link behind any wrapper is refused (the next test).
 test("pre-guard: a search that only names ln or link under the state directory is not a link, and a real link there is refused wherever the verb stands", () => {
   const t = scratchProject();
   try {
@@ -645,6 +645,78 @@ test("pre-guard: a search that only names ln or link under the state directory i
       "sudo ln -s x .craftsman/x", "env ln -s x .craftsman/x", "nohup ln -s x .craftsman/x", "timeout 5 ln -s x .craftsman/x", "nice -n 5 ln -s x .craftsman/x", "command ln -s x .craftsman/x", "time ln -s x .craftsman/x",
       "sudo -u root ln -s x .craftsman/x", "env FOO=1 ln -s x .craftsman/x", "echo x | xargs ln -s .craftsman/x", "echo x | xargs -I{} ln -s {} .craftsman/x", "find . -name x -exec ln -s {} .craftsman/x +",
     ]), [], "a link into the state directory, whatever stands before the verb");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// ln-check-safe-exemption (scrutinise-sandbox-auto-flow phase 2, round 3). The text check reads `ln` or `link` as a whole word next to the state directory and refuses the command, whatever stands before
+// the word, so a wrapper no list names (`setsid`, `chrt 5`, `flock /x`, `taskset 1`, `strace -f`, `unshare -r`, `fakeroot`, `watch`) cannot hide a link. A command is exempt only when every segment (split on
+// `;`, `&`, `|` and newlines) that holds the word starts with a read-only head from a fixed list.
+test("pre-guard: an ln or link next to the state directory is refused behind any wrapper, and only a read-only search that merely names the word is exempt", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    fs.mkdirSync(path.join(t.dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(t.dir, ".craftsman", "acceptance.md"), "- [ ] link the unit\n");
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const wrappers = ["setsid", "chrt 5", "flock /x", "taskset 1", "strace -f", "unshare -r", "fakeroot", "watch"];
+    assert.deepEqual(notRefused(wrappers.flatMap((w) => [`${w} ln -s x .craftsman/x`, `${w} ln ${tmp}/src.txt .craftsman/x.json`, `${w} link .craftsman/acceptance.md ${tmp}/h.json`])), [],
+      "an unlisted wrapper in front of an ln whose link name or source is under the state directory");
+    assert.deepEqual(notRefused(["sudo ln -s x .craftsman/x", "env ln -s x .craftsman/x", "nohup ln -s x .craftsman/x", "timeout 5 ln -s x .craftsman/x", "nice -n 5 ln -s x .craftsman/x", "xargs -I{} ln -s {} .craftsman/x"]), [],
+      "the wrappers the text check named before stay refused");
+    assert.deepEqual(notAllowed([
+      "grep -n link .craftsman/acceptance.md", "rg -n link .craftsman/", "egrep -n link .craftsman/acceptance.md", "fgrep link .craftsman/acceptance.md", "echo ln .craftsman", "echo link .craftsman",
+      "printf ln .craftsman", "printf '%s\\n' link .craftsman", "cat link .craftsman/acceptance.md", "git log --oneline -- ln .craftsman", "git  log --oneline -- link .craftsman",
+      "grep -n link .craftsman/acceptance.md | head -3", "cat .craftsman/acceptance.md | grep -n link", "grep -n link .craftsman/acceptance.md && echo done", "ls .craftsman && grep -rn ln .craftsman",
+      "echo ln .craftsman; echo link .craftsman", "echo ln .craftsman\ngrep link .craftsman/acceptance.md", "grep -n link .craftsman/acceptance.md || echo none",
+    ]), [], "a read-only search or echo that only names the word: every segment that holds the word starts with a listed head");
+    assert.deepEqual(notRefused([
+      "grep -n link .craftsman/acceptance.md; ln -s x .craftsman/x", "grep -n link .craftsman/acceptance.md && setsid ln -s x .craftsman/x", "echo ln .craftsman | xargs ln -s x",
+      "echo ln .craftsman\nsetsid ln -s x .craftsman/x", "grep -n link .craftsman/acceptance.md || flock /x ln -s x .craftsman/x", "echo ln .craftsman & ln -s x .craftsman/x", "ln -s x .craftsman/x; grep -n link .craftsman/acceptance.md",
+      "git log --oneline -- ln .craftsman; chrt 5 link " + tmp + "/src.txt .craftsman/x.json", "echo link $(ln -s x .craftsman/x)", "echo link `ln -s x .craftsman/x`", "grep -n link .craftsman/acceptance.md | setsid ln -s x .craftsman/x",
+      "echo ln .craftsman && (ln -s x .craftsman/x)", "echo ln .craftsman && { setsid ln -s x .craftsman/x; }",
+    ]), [], "a mixed command whose other segment holds a real ln is refused");
+    // The fixed list is the whole exemption: a head outside it, or the word with no head, is refused.
+    assert.deepEqual(notRefused(["ls -l ln .craftsman", "sed -n ln .craftsman/acceptance.md", "echo hi ; ls link .craftsman"]), [], "the word and the state directory with a head outside the list");
+    // A listed head with an option that runs a program or writes a file is no longer a read-only search.
+    assert.deepEqual(notRefused(["rg --pre ln x .craftsman", "rg --pre=x ln .craftsman", "rg --hostname-bin ln x .craftsman", "git log --output=x -- ln .craftsman"]), [], "a listed head with an option that acts");
+    assert.equal(t.call("Bash", { command: "git log --pretty=oneline -- ln .craftsman" }).status, 0, "control: --pretty is no --pre");
+    assert.equal(t.call("Bash", { command: `ln ${tmp}/src.txt ${tmp}/c-ln.txt` }).status, 0, "control: two scratch files link");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// The text checks ran a backtracking regex over the whole command: `sudo` followed by 26 `1=1` tokens took 10 s, and the guard sits in front of every Bash call. Each adversarial input answers in
+// well under a second; the best of three runs is read, so a loaded machine's one slow start does not fail the row while a pattern that backtracks stays over the limit in all three.
+test("pre-guard: the Bash guard answers long adversarial commands in under 300 ms", () => {
+  const t = scratchProject();
+  try {
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const rows = {
+      "sudo and 40 `1=1` tokens": "sudo " + "1=1 ".repeat(40) + "x",
+      "sudo, 40 `1=1` tokens, then ln into the state directory": "sudo " + "1=1 ".repeat(40) + "ln -s x .craftsman/x",
+      "nice and 40 `1=1` tokens": "nice " + "1=1 ".repeat(40) + "ln",
+      "nice and 40 digits": "nice " + "1 ".repeat(40) + "x",
+      "nice and a run of 40 digits": "nice " + "1".repeat(40) + " ln",
+      "400 spaces": " ".repeat(400),
+      "400 spaces between ln and the state directory": "ln" + " ".repeat(400) + ".craftsman/x",
+      "sudo, 400 spaces, then ln": "sudo" + " ".repeat(400) + "ln -s x .craftsman/x",
+      "40 `;` segments that name the word": "grep -n link .craftsman/acceptance.md" + "; echo ln .craftsman".repeat(40),
+    };
+    const expect = { "sudo, 40 `1=1` tokens, then ln into the state directory": 2, "400 spaces between ln and the state directory": 2, "sudo, 400 spaces, then ln": 2 };
+    // A run that backtracks is cut off after 5 s, so a regression fails here instead of hanging the suite.
+    const timed = (command) => {
+      const started = Date.now();
+      const got = spawnSync(process.execPath, [GUARD], { cwd: t.dir, input: JSON.stringify({ session_id: "scratch", tool_name: "Bash", tool_input: { command } }), encoding: "utf8", timeout: 5000, env: { ...process.env, CLAUDE_PROJECT_DIR: t.dir, ...t.env } });
+      return { ms: Date.now() - started, status: got.status };
+    };
+    for (const [what, command] of Object.entries(rows)) {
+      let run = timed(command);
+      for (let again = 0; again < 2 && run.ms >= 300; again++) { const next = timed(command); if (next.ms < run.ms) run = next; }
+      assert.ok(run.ms < 300, `${what}: the guard took ${run.ms} ms at its best of three runs (limit 300 ms)`);
+      assert.equal(run.status, expect[what] ?? 0, `${what}: the verdict`);
+    }
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 

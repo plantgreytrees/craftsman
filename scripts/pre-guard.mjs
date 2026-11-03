@@ -599,10 +599,19 @@ const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filte
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
 // Where a command word stands: after a separator, a brace, a subshell or a case pattern, after then, do, else, if, time, `!`, and after assignment prefixes.
 const AT_COMMAND = String.raw`(?:^|[;&|(){\n\x60]|(?<![\w.-])(?:then|do|else|elif|if|while|until|time|command|builtin|!)(?=\s))[ \t]*(?:\w+=(?:[^\s;&|()\x60"']|"[^"\n]*"|'[^'\n]*')*[ \t]+)*`;
-// `ln` or `link` where a command word stands, so a search or an echo that only names the verb (`grep -n link …`) is not a link. A command word is also one that follows a
-// wrapper and its own options (`sudo -u root ln`, `env FOO=1 ln`, `timeout 5 ln`, `nice -n 5 ln`, `xargs -I{} ln`) or a find `-exec`, which the words alone do not give up.
-const WRAPPED = `(?:(?:${[...WRAPPERS, "xargs"].join("|")})(?=\\s)(?:[ \\t]+(?:-[^\\s;&|()]*(?:[ \\t]+[A-Za-z_][\\w-]*(?=[ \\t]+(?:ln|link)\\s))?|\\d[^\\s;&|()]*|\\w+=[^\\s;&|()]*))*[ \\t]+)*`;
-const LINK_AT_COMMAND = new RegExp(`(?:${AT_COMMAND}|(?<=\\s)-(?:exec|execdir|ok|okdir)[ \\t]+)${WRAPPED}(?:ln|link)(?=\\s)`);
+// A link into the state directory, read from the text: `ln` or `link` as a whole word, wherever it stands, in a command that names `.craftsman` is refused, so a wrapper no list names (`setsid`, `chrt`, `flock`, `taskset`,
+// `strace`, `unshare`, `fakeroot`, `watch`) hides nothing. A command that only searches for or prints the word is exempt: it is cut at `;`, `&`, `|`, a newline, a backtick and a parenthesis, and every piece that holds the word
+// must start with a read-only head. Plain string operations and one linear pattern, with no backtracking: this runs in front of every Bash call. The parser still judges a link it can read, whatever this check says.
+const LINK_WORD = /(?:^|[\s;&|(){\x60])(?:ln|link)(?=\s)/;
+const SEGMENT_BREAK = /[;&|\n\r()\x60]/;
+const READ_ONLY_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "git log"]);
+const ACTING_OPTIONS = ["--pre", "--hostname-bin", "--output"]; // rg runs a program, git log writes a file: the head is no longer read-only
+const readOnlySegment = (segment) => {
+  const words = segment.trim().split(/[ \t]+/);
+  return READ_ONLY_HEADS.has(words[0] === "git" ? `git ${words[1]}` : words[0]) && !words.some((w) => ACTING_OPTIONS.some((o) => w === o || w.startsWith(o + "=")));
+};
+const linksIntoState = (command) => command.includes(".craftsman") && LINK_WORD.test(command)
+  && !command.split(SEGMENT_BREAK).every((segment) => !LINK_WORD.test(segment + " ") || readOnlySegment(segment));
 // Does this `cp` make links instead of copies: -l / --link (hard links), -s / --symbolic-link (symlinks), alone, in a cluster of short options (-al, -sl) or as an
 // abbreviation getopt reads (--li, --sy)? Options end at `--`. A cluster that holds the letter over-reads (-t and -S take a value): the cost is a source judged that need not be.
 const linksNotCopies = (rest) => (rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest).some((a) => /^-[A-Za-z]*[ls][A-Za-z]*$/.test(a)
@@ -1795,7 +1804,7 @@ if (tool === "Bash" && command) {
   }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
   // A link into the state directory would let a later Write reach it under another name.
-  if (LINK_AT_COMMAND.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
+  if (linksIntoState(command)) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
     if (hit.startsWith("remove:")) {
