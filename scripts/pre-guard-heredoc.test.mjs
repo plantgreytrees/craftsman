@@ -293,6 +293,7 @@ test("heredoc: stated limits (ARCH-SAFETY-15), a stored body run by file name an
       `${store(project)}\npython3 f`,
       `python3 - <<'EOF'\nimport os\nos.putenv('CRAFTSMAN_SAFETY', 'off')\nEOF`,
       `node - <<'EOF'\nprocess.env['CRAFTSMAN_' + 'SAFETY'] = 'off';\nEOF`, // a name built at run time
+      `X=$(case a in\nesac)\ncat <<'EOF'\n${safety}\nEOF\n;; esac)`, // a first pattern spelled esac ends the list: a bash syntax error, nothing in it runs
     ];
     assert.deepEqual(allowedBut(bash, limits), []);
   });
@@ -311,6 +312,11 @@ test("heredoc: a case pattern's ) closes no $( ), so a body inside the substitut
       `X=$(case a in\na)\ncase b in\nb)\ncat <<'EOF'\n${safety}\nEOF\n;; esac\n;; esac)`,
       `X=$(for i in 1; do case $i in\n1)\ncat <<'EOF'\n${project}\nEOF\n;; esac; done)`,
       `echo "$(case a in\na)\ncat <<'EOF'\n${session}\nEOF\n;; esac)"`,
+      // a subshell or an array literal in an earlier arm closes with its own `)`, so a later arm's pattern still ends no substitution
+      `X=$(case a in\na) (cd d && ls);;\nb)\ncat <<'EOF'\n${safety}\nEOF\n;; esac)`,
+      `X=$(case a in\na) arr=(1 2);;\nb)\ncat <<'EOF'\n${project}\nEOF\n;; esac)`,
+      // a pattern spelled esac after `(` is a word: only an esac that opens a pattern ends the list (after `|` the pipe alone keeps the body read)
+      `X=$(case a in\n(esac)\ncat <<'EOF'\n${safety}\nEOF\n;; esac)`,
     ];
     assert.deepEqual(refusedWrong(bash, refused, SETTER), []);
     const allowed = [
@@ -320,6 +326,8 @@ test("heredoc: a case pattern's ) closes no $( ), so a body inside the substitut
       `X=$(echo case a in a)\ncat <<'EOF'\n${safety}\nEOF`,
       `case a in\na)\ncat <<'EOF'\n${project}\nEOF\n;; esac`, // a bare case is no substitution
       `(case a in\na) true;;\nesac)\ncat <<'EOF'\n${session}\nEOF`,
+      `X=$(case a in a) echo hi;;\n# done\nesac)\ncat <<'EOF'\n${safety}\nEOF`, // a comment before the closing esac keeps it the list end
+      `X=$(case a in a) (cd d);;\nb) arr=(1 2);;\nesac)\ncat <<'EOF'\n${project}\nEOF`,
     ];
     assert.deepEqual(allowedBut(bash, allowed), []);
   });

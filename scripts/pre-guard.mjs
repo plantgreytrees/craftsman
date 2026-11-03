@@ -2047,7 +2047,7 @@ function createdPath(target) {
 //   - the rest of the command, those bodies aside, has no pipe, no process substitution, no way to shadow a program name (a function, alias,
 //     hash, enable or a PATH change) and no command word that makes the shell read text it holds (source, a lone dot, eval, coproc), so neither
 //     a pipeline, a redefined `cat` nor `cat <<'EOF' > f` followed by `. f` can carry the body to a shell.
-// The tracking of quotes, comments, arithmetic and $(...) follows stripHeredocs; a `case` pattern's `)` ends the pattern, not a substitution.
+// The tracking of quotes, comments, arithmetic and $(...) follows stripHeredocs; a `case` pattern's `)` ends the pattern, not a substitution, and a first pattern spelled esac ends the list (a bash syntax error, so nothing in it runs).
 // Stated limits (ARCH-SAFETY-15), not read: a stored body run by file name (bash f, ./f, node f) or by a later command, a call that is not an
 // assignment (os.putenv, os.environ.update) and a name built at run time. Files an interpreter writes stay with the sandbox (ARCH-SAFETY-01).
 function blankInertHeredocs(text, nodeLive) {
@@ -2078,10 +2078,11 @@ function blankInertHeredocs(text, nodeLive) {
     if (c === "'") { sq = true; continue; }
     if (c === '"') { stack.push("dq"); continue; }
     const kase = cases[cases.length - 1], here = kase && kase.frame === stack.length;
+    const opens = here && kase.state === "pat" && kase.fresh; // nothing yet in this pattern: an esac here ends the list, after `(` or `|` it is a word
     if (here && kase.state === "pat") {
       if (c === "(") { if (kase.fresh) kase.fresh = false; else kase.paren++; continue; } // a leading `(`, else an extglob group
       if (c === ")") { if (kase.paren) kase.paren--; else kase.state = "body"; continue; }
-      if (!/\s/.test(c)) kase.fresh = false;
+      if (!/\s/.test(c) && !(c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1])))) kase.fresh = false; // a comment is no pattern
     }
     if (here && kase.state === "body" && c === ";" && (text[i + 1] === ";" || text[i + 1] === "&")) { // `;;`, `;&` or `;;&`: the next pattern
       i += text[i + 1] === ";" && text[i + 2] === "&" ? 2 : 1;
@@ -2094,7 +2095,7 @@ function blankInertHeredocs(text, nodeLive) {
       const found = word.exec(text)?.[0];
       if (found === "case" && !(here && kase.state === "pat") && atCommand(i)) cases.push({ frame: stack.length, state: "head", paren: 0, fresh: true });
       else if (found === "in" && here && kase.state === "head") { kase.state = "pat"; kase.fresh = true; kase.paren = 0; }
-      else if (found === "esac" && here && (kase.state === "pat" || (kase.state === "body" && atCommand(i)))) cases.pop(); // a pattern spelled esac ends the list too
+      else if (found === "esac" && here && (opens || (kase.state === "body" && atCommand(i)))) cases.pop();
       if (found) { i += found.length - 1; continue; }
     }
     if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
@@ -2103,7 +2104,7 @@ function blankInertHeredocs(text, nodeLive) {
     if (c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) { const j = text.indexOf("\n", i); i = (j === -1 ? text.length : j) - 1; continue; }
     if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; continue; }
     if (c === "`") { ticks = !ticks; continue; }
-    if (c === "(") { depth++; continue; }
+    if (c === "(") { stack.push("sub"); depth++; continue; } // a subshell, an array literal or an extglob group: its own `)` pops it
     if (c === ")") { if (stack.length > 1) { stack.pop(); unwind(); } if (depth) depth--; continue; }
     if (c === "<" && text.startsWith("<<<", i)) { i += 2; continue; }
     if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
