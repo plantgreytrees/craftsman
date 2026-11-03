@@ -967,7 +967,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     const args = targetsOf(rest);
     let files = [];
     if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
-    else if (verb === "ln") {
+    else if (verb === "ln" || verb === "link") { // coreutils `link SOURCE NAME` is a hard link, `ln` without -s: the same operands, judged the same way
       const { sources, placed } = placements(rest, st);
       files = placed;
       // What each link points at is a path a later write can reach under another name, so it is judged like a write to it.
@@ -1348,7 +1348,7 @@ if (tool === "Bash" && toolInput.dangerouslyDisableSandbox === true) logEvent({ 
 // in this file is safety and runs whatever enabled() says.
 const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(["Read", "Write", "Edit"].includes(tool) && insideScratchRoots(file, activeRoot, input))) { // ARCH-STATE-18: a scratch Read, Write or Edit passes the scope and the ambiguity refusal (NotebookEdit, Glob and Grep never); the checks below still judge a Write or Edit target
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(["Read", "Write", "Edit"].includes(tool) && insideScratchRoots(file, activeRoot, input, tool))) { // ARCH-STATE-18: a scratch Read, Write or Edit passes the scope and the ambiguity refusal, a Write that creates the file too (NotebookEdit, Glob and Grep never); the checks below still judge a Write or Edit target
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
@@ -1775,7 +1775,7 @@ if (tool === "Bash" && command) {
   }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
   // A link into the state directory would let a later Write reach it under another name.
-  if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
+  if (/(?:^|[\s;&|(])(?:ln|link)(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
     if (hit.startsWith("remove:")) {
@@ -1991,12 +1991,21 @@ function bracketClass(body, any = "[^/]", literal = "") {
 // Judged by the real path the OS resolves (a `..` after a symlink included), against EVERY active scope of the session, not the
 // one readScope happens to pick: a file whose real path lies inside any scope's root or the session checkout stays governed there, and a scratch
 // root that is, or encloses, any scope's root (a TMPDIR pointing at the home dir, at /, or holding a unit worktree) never
-// qualifies. A relative path, a file that does not exist and a root that cannot be resolved fail closed. The scopes are read only
-// for a target that really is under a scratch root, so an ordinary Read, Write or Edit costs what it did before.
-function insideScratchRoots(target, project, hookInput) {
+// qualifies. A relative path and a root that cannot be resolved fail closed, and so does a file that does not exist, except for a Write: it
+// creates the file, so it is judged by the real path of its nearest existing ancestor plus the missing rest (createdPath), by these same tests.
+// An existing Write or Edit target with more than one link is refused: the real path of a hard link does not show the other names of its inode,
+// so a hard link of the scope manifest, or of any protected file, would otherwise pass as a scratch file. The scopes are read only for a target
+// that really is under a scratch root, so an ordinary Read, Write or Edit costs what it did before (a Write that creates a file adds the stat calls that find its ancestor).
+function insideScratchRoots(target, project, hookInput, tool) {
   if (typeof target !== "string" || !path.isAbsolute(target)) return false;
   let real;
-  try { real = fs.realpathSync.native(target); } catch { return false; }
+  try { real = fs.realpathSync.native(target); } catch { real = tool === "Write" ? createdPath(target) : ""; }
+  if (!real) return false;
+  if (tool === "Write" || tool === "Edit") {
+    let st = null;
+    try { st = fs.statSync(real); } catch (error) { if (error?.code !== "ENOENT") return false; } // a path to be created has no inode yet
+    if (st && !st.isDirectory() && st.nlink > 1) return false; // a directory counts its subdirectories as links, so only a file is judged by its link count
+  }
   const within = (dir, entry) => entry.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
   const resolved = (root) => { try { return root ? fs.realpathSync.native(root) : ""; } catch { return ""; } };
   const scratch = [os.tmpdir(), process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, "tmp") : ""].map(resolved).filter((root) => root && within(root, real));
@@ -2004,6 +2013,23 @@ function insideScratchRoots(target, project, hookInput) {
   let governed;
   try { governed = [project, PROJECT_ROOT, ...activeScopes(hookInput).map((scope) => scope.worktree_path || scope.project_root)].map((dir) => fs.realpathSync.native(dir)); } catch { return false; }
   return scratch.some((root) => governed.every((dir) => dir !== root && !within(root, dir) && dir !== real && !within(dir, real)));
+}
+
+// The real path a Write would create: the real path of the nearest existing ancestor plus the missing rest, "" when it cannot be told.
+// A symlink counts as existing even when it dangles (lstat, not exists): it is judged by where it leads, and a dangling one fails closed
+// instead of being taken for a missing name. A rest holding `..` is refused: the OS does not walk a missing directory, so the text is no path.
+function createdPath(target) {
+  const rest = [];
+  let ancestor = target;
+  for (;;) {
+    try { fs.lstatSync(ancestor); break; } catch (error) { if (error?.code !== "ENOENT") return ""; }
+    rest.unshift(path.basename(ancestor));
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) return "";
+    ancestor = parent;
+  }
+  if (rest.includes("..")) return "";
+  try { return path.join(fs.realpathSync.native(ancestor), ...rest); } catch { return ""; }
 }
 
 // ARCH-SAFETY-13 / ARCH-SAFETY-15 / ARCH-STATE-16: the setter check that ends in denySelfDisable reads command text, and a quoted-delimiter
