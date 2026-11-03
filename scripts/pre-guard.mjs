@@ -597,6 +597,16 @@ const WRITE_ANY_TEXT = { test: (t) => VARIABLE_WORD.test(t) && new RegExp(`\\b(?
 const emptyQuoted = (text) => text.replace(/'[^']*'|"[^"]*"/g, '""'); // a quoted ; | & cannot end an in-place scan
 const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filter((verb) => verb !== "sed" && verb !== "perl").join("|")})\\b|${INPLACE_TEXT}`);
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
+// Where a command word stands: after a separator, a brace, a subshell or a case pattern, after then, do, else, if, time, `!`, and after assignment prefixes.
+const AT_COMMAND = String.raw`(?:^|[;&|(){\n\x60]|(?<![\w.-])(?:then|do|else|elif|if|while|until|time|command|builtin|!)(?=\s))[ \t]*(?:\w+=(?:[^\s;&|()\x60"']|"[^"\n]*"|'[^'\n]*')*[ \t]+)*`;
+// `ln` or `link` where a command word stands, so a search or an echo that only names the verb (`grep -n link …`) is not a link. A command word is also one that follows a
+// wrapper and its own options (`sudo -u root ln`, `env FOO=1 ln`, `timeout 5 ln`, `nice -n 5 ln`, `xargs -I{} ln`) or a find `-exec`, which the words alone do not give up.
+const WRAPPED = `(?:(?:${[...WRAPPERS, "xargs"].join("|")})(?=\\s)(?:[ \\t]+(?:-[^\\s;&|()]*(?:[ \\t]+[A-Za-z_][\\w-]*(?=[ \\t]+(?:ln|link)\\s))?|\\d[^\\s;&|()]*|\\w+=[^\\s;&|()]*))*[ \\t]+)*`;
+const LINK_AT_COMMAND = new RegExp(`(?:${AT_COMMAND}|(?<=\\s)-(?:exec|execdir|ok|okdir)[ \\t]+)${WRAPPED}(?:ln|link)(?=\\s)`);
+// Does this `cp` make links instead of copies: -l / --link (hard links), -s / --symbolic-link (symlinks), alone, in a cluster of short options (-al, -sl) or as an
+// abbreviation getopt reads (--li, --sy)? Options end at `--`. A cluster that holds the letter over-reads (-t and -S take a value): the cost is a source judged that need not be.
+const linksNotCopies = (rest) => (rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest).some((a) => /^-[A-Za-z]*[ls][A-Za-z]*$/.test(a)
+  || (a.startsWith("--") && a.length > 2 && ("link".startsWith(a.slice(2)) || (a.length > 3 && "symbolic-link".startsWith(a.slice(2))))));
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
 const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
@@ -873,11 +883,27 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     }
     return { sources, dest, placed, unlisted };
   }
-  // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names.
-  function copyTargets(rest, st, env, recursive = false) {
-    const { placed, unlisted } = placements(rest, st, recursive);
+  // The sources of a link (`ln`, `link`, `cp -l`, `cp -s`): what each one names is a path a later write can reach under the link's name, so it is judged like a write to it.
+  // A symlink holds the source as written and resolves it from the link's directory; a hard link takes the file `ln` or `cp` finds from the working directory. Both are judged.
+  function linkedSources(sources, placed, st, env) {
+    sources.forEach((source, i) => {
+      for (const cwd of st.cwds || []) {
+        const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
+        const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
+        target(aimed, { cwds: [cwd] }, "write", env);
+        if (!path.isAbsolute(source)) target(source, { cwds: [cwd] }, "write", env);
+      }
+    });
+  }
+  // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names. `linking` is a cp that links (-l, -s, linksNotCopies): each SOURCE is then a second
+  // name for the file, judged as the source of `ln` is, and a directory SOURCE (cp -al) names every file under it again, so it is judged as one that holds protected state.
+  function copyTargets(rest, st, env, recursive = false, linking = false) {
+    const { sources, placed, unlisted } = placements(rest, st, recursive);
     for (const p of placed) target(p, st, "write", env);
     for (const u of unlisted) target(u, st, "holds", env);
+    if (!linking) return;
+    linkedSources(sources, placed, st, env);
+    for (const source of sources) target(source, st, "holds", env);
   }
   // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
   function moveTargets(rest, st, env) {
@@ -971,20 +997,13 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     else if (verb === "ln" || verb === "link") { // coreutils `link SOURCE NAME` is a hard link, `ln` without -s: the same operands, judged the same way
       const { sources, placed } = placements(rest, st);
       files = placed;
-      // What each link points at is a path a later write can reach under another name, so it is judged like a write to it.
-      sources.forEach((source, i) => {
-        for (const cwd of st.cwds || []) {
-          const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
-          const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
-          target(aimed, { cwds: [cwd] }, "write", env);
-        }
-      });
+      linkedSources(sources, placed, st, env); // what each link points at is a path a later write can reach under another name
       // A link into the state directory would let a later Write reach it under another name.
       for (const a of args) for (const cwd of st.cwds || []) {
         const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
         if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
       }
-    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env);
+    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env, false, verb === "cp" && linksNotCopies(rest));
     else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
     else if (verb === "sed" || verb === "perl") {
       if (!rest.some((a) => /^-[A-Za-z]*i/.test(a) || /^--in-place(?:=|$)/.test(a))) return; // without -i or --in-place neither writes a named file
@@ -1776,7 +1795,7 @@ if (tool === "Bash" && command) {
   }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
   // A link into the state directory would let a later Write reach it under another name.
-  if (/(?:^|[\s;&|(])(?:ln|link)(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
+  if (LINK_AT_COMMAND.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
     if (hit.startsWith("remove:")) {
@@ -2057,8 +2076,6 @@ function blankInertHeredocs(text, nodeLive) {
   const RUNS_BODY = { node: nodeLive, python3: PY_LIVE, python: PY_LIVE };
   const WORD = String.raw`(?:[\w./:=@%+,~$-]|'[^'\n]*'|"(?:[^"\\\`$\n]|\$(?=[\w"]))*")+`;
   const HEAD = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+${WORD}[ \t]*&&[ \t]*)*([\w-]+)(?:[ \t]+(?:\d?>>?[ \t]*)?${WORD})*[ \t]*$`);
-  // Where a command word stands: after a separator, a brace, a subshell or a case pattern, after then, do, else, if, time, `!`, and after assignment prefixes.
-  const AT_COMMAND = String.raw`(?:^|[;&|(){\n\x60]|(?<![\w.-])(?:then|do|else|elif|if|while|until|time|command|builtin|!)(?=\s))[ \t]*(?:\w+=(?:[^\s;&|()\x60"']|"[^"\n]*"|'[^'\n]*')*[ \t]+)*`;
   const REACHES_SHELL = new RegExp(String.raw`\||[<>]\(|(?<![\w.-])(?:alias|unalias|function|hash|enable)(?=\s)|\bPATH\+?=|\w\s*\(\s*\)|${AT_COMMAND}(?:source|eval|coproc|\.)(?=[ \t\n]|$)`);
   const stack = ["cmd"], pending = [], bodies = [], cases = [];
   let sq = false, stmt = 0, depth = 0, ticks = false;
