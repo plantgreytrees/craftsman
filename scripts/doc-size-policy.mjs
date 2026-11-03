@@ -14,9 +14,10 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_ROOT = path.resolve(import.meta.dirname, "..");
 
-// Per-file byte caps (ARCH-SLIM-01/02): every loadable .md has its own cap, set
-// to its size when added and only ever lowered. A file with no entry is a
-// finding, not a skip. The ratchet test compares these with the merge-base copy.
+// Per-file byte caps (ARCH-SLIM-01/16): every loadable .md has its own cap, set
+// to its size when added and only ever lowered, except through a paid CAP_TRADES
+// entry. A file with no entry is a finding, not a skip. The ratchet test compares
+// these with the merge-base copy.
 export const FILE_CAPS = {
   "agents/api-reviewer.md": 2060,
   "agents/architect-analyst.md": 2808,
@@ -35,7 +36,7 @@ export const FILE_CAPS = {
   "agents/plan-reviewer.md": 2187,
   "agents/plan-strategist.md": 1753,
   "agents/review-router.md": 1187,
-  "agents/scrutineer.md": 3590,
+  "agents/scrutineer.md": 3700,
   "agents/security-auditor.md": 2184,
   "agents/standards-keeper.md": 2608,
   "agents/ui-ux-reviewer.md": 886,
@@ -66,7 +67,7 @@ export const FILE_CAPS = {
   "commands/merge.md": 6173,
   "commands/orchestrate.md": 9051,
   "commands/plan.md": 8988,
-  "commands/scrutinise.md": 8169,
+  "commands/scrutinise.md": 8030,
   "commands/stats.md": 348,
   "commands/sync-docs.md": 8604,
   "commands/toggle.md": 397,
@@ -198,6 +199,53 @@ export function checkDocSizes(root = DEFAULT_ROOT, caps = FILE_CAPS, invCaps = I
 // Ratchet helper: every cap present in both maps may only stay or fall.
 export function raisedCaps(base, current) {
   return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
+}
+
+// Recorded cap trades (ARCH-SLIM-16). A per-file cap may rise only when an entry names the file as `raise`, the
+// rise is at most `bytes`, and the `lower` file, one an invocation loads, had its cap fall by at least `bytes`
+// against the merge-base. Each entry cites the owner-approved rule and the date it was decided.
+export const CAP_TRADES = [
+  // guard-redesign: the ARCH-SAFETY-17 severity bullet, paid by trimming the /scrutinise command that dispatches the scrutineer.
+  { raise: "agents/scrutineer.md", lower: "commands/scrutinise.md", bytes: 110, rule: "ARCH-SLIM-16", decided: "2026-11-03" },
+];
+
+const loadedByInvocation = (rel) =>
+  /^commands\/[^/]+\.md$/.test(rel) || Object.values(INVOCATION_DOCS).some((docs) => docs.includes(rel));
+
+function tradeProblem(t) {
+  const named = (v) => typeof v === "string" && v.length > 0;
+  const wellFormed = t && named(t.raise) && named(t.lower) && t.raise !== t.lower &&
+    Number.isInteger(t.bytes) && t.bytes > 0 &&
+    /^ARCH-[A-Z]+-\d+$/.test(t.rule ?? "") && /^\d{4}-\d{2}-\d{2}$/.test(t.decided ?? "");
+  if (!wellFormed) return "malformed entry — needs raise, a different lower, whole bytes > 0, rule ARCH-…, decided YYYY-MM-DD";
+  if (!loadedByInvocation(t.lower)) return `lower ${t.lower} is not loaded by any invocation (commands/*.md or INVOCATION_DOCS)`;
+  return null;
+}
+
+// Ratchet with trades: every finding is a reason the cap change must not land. One fall cannot pay two trades.
+export function ratchetFindings(base, current, trades = CAP_TRADES) {
+  const findings = [];
+  const valid = [];
+  trades.forEach((t, i) => {
+    const problem = tradeProblem(t);
+    if (problem) findings.push(`CAP_TRADES[${i}]: ${problem}`);
+    else valid.push(t);
+  });
+  const owed = {};
+  for (const rel of Object.keys(base)) {
+    if (!(rel in current) || current[rel] <= base[rel]) continue;
+    const rise = current[rel] - base[rel];
+    const named = valid.filter((t) => t.raise === rel);
+    const covering = named.find((t) => rise <= t.bytes);
+    if (!named.length) findings.push(`${rel}: cap ${base[rel]} -> ${current[rel]} has no CAP_TRADES entry (ARCH-SLIM-16)`);
+    else if (!covering) findings.push(`${rel}: cap rose ${rise} bytes, more than its trade's ${Math.max(...named.map((t) => t.bytes))}`);
+    else owed[covering.lower] = (owed[covering.lower] || 0) + covering.bytes;
+  }
+  for (const [lower, need] of Object.entries(owed)) {
+    const fall = lower in base && lower in current ? Math.max(0, base[lower] - current[lower]) : 0;
+    if (fall < need) findings.push(`${lower}: cap fell ${fall} bytes, short of the ${need} its trades owe (unpaid)`);
+  }
+  return findings;
 }
 
 // Dependency-free on purpose: the ratchet test imports the merge-base copy of this file alone from a temp dir, so it must not import ./lib/core.mjs (isMain).

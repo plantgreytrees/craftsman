@@ -31,7 +31,8 @@ flowchart LR
 | id | decision | why | rejected alternatives |
 |---|---|---|---|
 | ARCH-SLIM-01 | Every loadable .md is capped | Unpoliced files (skill references) grow silently | Cap only some categories |
-| ARCH-SLIM-02 | Ratchet | Operationalises "as slim as possible" without a big-bang rewrite | Lower fixed caps now; review only |
+| ARCH-SLIM-02 | Superseded by ARCH-SLIM-16 | The ratchet test refused every rise, so the trade the rule allowed could never land | — |
+| ARCH-SLIM-16 (replaces 02) | Ratchet with recorded trades: a cap may rise only by a CAP_TRADES entry paid by another file in the same invocation | A needed sentence (ARCH-SAFETY-17 in agents/scrutineer.md) could not fit its cap without cutting guidance (owner decision 2026-11-03) | Net-zero per invocation: lets trades happen without a recorded decision; cutting guidance to fit |
 | ARCH-SLIM-03 | Per-invocation cap | Context cost is per invocation, not per file | Per-file only; token-based (needs a tokenizer) |
 | ARCH-SLIM-04 | Conditional reference docs | An existing pattern (`_shared-execution`, `_architecture`) | Inline everything |
 | ARCH-SLIM-05 | Delete what's enforced; dedupe only into already-loaded docs | Moving text into a newly loaded doc raises load | Move all to shared docs |
