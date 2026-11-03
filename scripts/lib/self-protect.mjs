@@ -27,12 +27,16 @@ export const SELF_NEVER = Object.freeze([
   "**/.git/modules/**/.craftsman/network/**",
   // A superproject's linked worktree keeps the git dir of a submodule checked out in it under .git/worktrees/<wt>/modules/<name>, and the queue with it.
   "**/.git/worktrees/*/modules/**/.craftsman/network/**",
-  // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
-  "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
-  // A submodule's git dir holds the same config and hooks, and each of its linked worktrees (.git/modules/<name>/worktrees/<wt>) a config of its own.
-  "**/.git/modules/**/config", "**/.git/modules/**/config.worktree", "**/.git/modules/**/hooks/**", "**/.git/modules/**/worktrees/*/config*",
-  // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git
-  "**/.git/worktrees/*/config", "**/.git/worktrees/*/config.worktree",
+  // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them. `{a,b}` is a choice between names inside one path segment, so one pattern covers
+  // several and NEVER_TEXT, which carries every pattern, does not grow with them.
+  "**/.git/{config,config.worktree}", "**/.git/hooks/**",
+  // A submodule's git dir holds the same config and hooks, and each of its linked worktrees (.git/modules/<name>/worktrees/<wt>) a config of its own and the commondir and gitdir files that say where
+  // git's common dir and the work tree are: a forged one moves the repository that the queue lookup and every other guard here find (ARCH-SAFETY-13).
+  "**/.git/modules/**/{config,config.worktree}", "**/.git/modules/**/hooks/**", "**/.git/modules/**/worktrees/*/{config*,commondir,gitdir}",
+  // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git, and so are its commondir and gitdir
+  "**/.git/worktrees/*/{config,config.worktree,commondir,gitdir}",
+  // The git dir of a submodule checked out in a superproject's linked worktree, .git/worktrees/<wt>/modules/<name>, holds all of the above again.
+  "**/.git/worktrees/*/modules/**/{config,config.worktree}", "**/.git/worktrees/*/modules/**/hooks/**", "**/.git/worktrees/*/modules/**/worktrees/*/{config*,commondir,gitdir}",
 ]);
 
 // A glob as a case-insensitive RegExp: the filesystems this runs on (default macOS, Windows) reach `.Claude` as `.claude`.
@@ -107,21 +111,27 @@ export function namesSelfScoped(writeEntries) {
 // The one list of commands that write or move a file. pre-guard builds its text gates and its dispatch from it.
 export const WRITER_VERBS = Object.freeze(["touch", "tee", "cp", "mv", "ln", "link", "install", "dd", "truncate", "mkdir", "sed", "perl"]);
 
-// A glob as free text: how a command line would spell it before any quote is removed. `**/` may be empty.
+// A glob as free text: how a command line would spell it before any quote is removed. `**/` may be empty. NEVER_TEXT is searched, not anchored, so a `**/` that leads a glob would only
+// make every alternative read the rest of the word from every position (quadratic: a 4 KB word of `.git/modules/` took seconds): it is dropped, and the name is found wherever it sits.
 function globToText(glob) {
-  let re = "";
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === "*" && glob[i + 1] === "*") {
+  const body = glob.startsWith("**/") ? glob.slice(3) : glob;
+  let re = "", choice = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "*" && body[i + 1] === "*") {
       i++;
-      if (glob[i + 1] === "/") { i++; re += "(?:\\S*/)?"; } else re += "\\S*";
+      if (body[i + 1] === "/") { i++; re += "(?:\\S*/)?"; } else re += "\\S*";
     } else if (c === "*") re += "[\\w.-]*";
+    else if (c === "{") { choice = true; re += "(?:"; } // `{a,b}`: one of the names, inside one path segment
+    else if (c === "}") { choice = false; re += ")"; }
+    else if (c === "," && choice) re += "|";
     else re += c.replace(/[.+?^${}()|[\]\\/]/g, "\\$&");
   }
-  return re + "(?![\\w.-])";
+  return re;
 }
-// The raw-text gate: does a command line name a never-written path? Derived from SELF_NEVER, so it cannot drift.
-export const NEVER_TEXT = new RegExp(SELF_NEVER.map(globToText).join("|"), "i");
+// The raw-text gate: does a command line name a never-written path? Derived from SELF_NEVER, so it cannot drift. The name must end where the path does (`.git/config.bak` is not `.git/config`): one lookahead
+// after the alternation, not one per pattern.
+export const NEVER_TEXT = new RegExp("(?:" + SELF_NEVER.map(globToText).join("|") + ")(?![\\w.-])", "i");
 
 // Words that, once the quotes are gone, name craftsman state or the files this layer protects. A bare `off` or
 // `doc-write` is not here on purpose (too common): those are caught as paths by NEVER_TEXT.
@@ -136,34 +146,43 @@ export function namesProtected(text) {
   return bare.split(/[\s;&|()<>={}]+/).some((word) => PROTECTED_WORDS.has(word.toLowerCase()) || PROTECTED_WORDS.has(word.split("/").pop().toLowerCase()) || word.toLowerCase().startsWith(".craftsman/") || word.toLowerCase().startsWith(".claude/settings"));
 }
 
-const lastSegment = (glob) => glob.split("/").pop().replace(/\*+/g, "x");
+// The last name of a glob as a sample name that it matches (`x` for `*`, the first of a `{a,b}`): the file a directory would hold.
+const lastSegment = (glob) => glob.split("/").pop().replace(/\{([^,}]*)[^}]*\}/g, "$1").replace(/\*+/g, "x");
 const literalBase = (glob) => {
   const parts = [];
   for (const part of glob.split("/")) { if (/[*?[{]/.test(part)) break; parts.push(part); }
   return parts.join("/");
 };
-// A pattern led by `**/` has no literal base of its own: it is anchored at whatever directory holds the rest, so the base of its
-// remainder (`.git/.craftsman/network` for `**/.git/.craftsman/network/**`) is the anchor, found at the end of any path.
-const anchoredBase = (pattern) => (pattern.startsWith("**/") ? literalBase(pattern.slice(3)).toLowerCase() : "");
+// A pattern led by `**/` has no literal base of its own: it sits under any directory, so its names are found at the end of a path. Its anchor is the names before its first `**`, read as a glob
+// (`.git/worktrees/*/modules` for `**/.git/worktrees/*/modules/**/config`; the `*` is any one worktree's name). The anchor and each directory above it (`.git`, `.git/worktrees`, `.git/worktrees/wt`) hold a
+// match, and a `**` swallows any directories, so everything beneath the anchor may lead to one. Nothing else does: `.git/worktrees/wt/index.lock` lies beside the anchor, not under it.
+const anchors = new Map();
+function anchorOf(pattern) {
+  if (!pattern.startsWith("**/")) return null;
+  let anchor = anchors.get(pattern);
+  if (anchor === undefined) {
+    const names = pattern.slice(3).split("/"), swallow = names.indexOf("**");
+    const lead = swallow < 0 ? names : names.slice(0, swallow);
+    const endsWith = (list) => new RegExp("(?:^|/)" + globToRe(list.join("/")).source.slice(1), "i"); // the glob at the end of a path, on a name boundary: `.git`, not `.github`
+    anchor = lead.length === 0 ? { dirs: [], beneath: null }
+      : { dirs: lead.map((_, n) => endsWith(lead.slice(0, n + 1))), beneath: swallow < 0 ? null : new RegExp(endsWith(lead).source.slice(0, -1) + "/", "i") };
+    anchors.set(pattern, anchor);
+  }
+  return anchor;
+}
 // Does removing or moving `rel` (relative to the project root) take `pattern`'s files with it: is it one, inside one,
 // or a directory that holds one? The project root itself is not counted (that is destroying the project, which the
-// sandbox and the ask rules own).
+// sandbox and the ask rules own). Removing or moving the anchor or a directory above it takes the protected files along
+// and lets a forged directory be put in its place. A name that only starts like one (`.github`, `src/.gitx`) is not one.
 function holds(rel, pattern) {
   const r = clean(rel);
   if (r === "" || r === "." || r.startsWith("..")) return false;
   const re = ci(pattern);
   if (re.test(r) || re.test(r + "/" + lastSegment(pattern))) return true;
+  const anchor = anchorOf(pattern);
+  if (anchor) return anchor.dirs.some((dir) => dir.test(r)) || (anchor.beneath !== null && anchor.beneath.test(r));
   const base = literalBase(pattern).toLowerCase(), rl = r.toLowerCase();
-  if (base !== "") return base === rl || base.startsWith(rl + "/");
-  // The anchor, or a directory above it (`.git`, `.git/.craftsman`) wherever it sits: removing or moving it takes the protected files along
-  // and lets a forged directory be put in its place. A name that only starts like one (`.github`, `src/.gitx`) is not one.
-  const anchor = anchoredBase(pattern).split("/").filter(Boolean);
-  for (let n = 1; n <= anchor.length; n++) {
-    const above = anchor.slice(0, n).join("/");
-    if (rl === above || rl.endsWith("/" + above)) return true;
-  }
-  // A `**` between names (`.git/modules/**/.craftsman/...`: a submodule's name path) swallows any directories, so anything under the anchor may sit above a match.
-  return anchor.length > 0 && /\/\*\*\//.test(pattern.slice(3)) && ("/" + rl + "/").includes("/" + anchor.join("/") + "/");
+  return base !== "" && (base === rl || base.startsWith(rl + "/"));
 }
 export const heldNever = (rel) => SELF_NEVER.some((pattern) => holds(rel, pattern));
 // Only the project-root names: a directory that merely might hold a nested copy of one is not what this guards.

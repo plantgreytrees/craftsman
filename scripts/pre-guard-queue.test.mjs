@@ -454,3 +454,105 @@ test("pre-guard: ordinary directories and the other files of the submodule's git
     }
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
+
+// worktree-surface-fixes (scrutinise-sandbox-auto-flow phase 2, round 4). The pattern for the queue of a submodule checked out in a superproject's linked worktree
+// (.git/worktrees/<wt>/modules/<name>) held everything under .git/worktrees, so a stale .git/worktrees/<wt>/index.lock could not be removed with rm -f. Only the queue's directories under it are held.
+// The files of that git dir that decide which hooks run (config, config.worktree, hooks, the config of its own linked worktrees) and the commondir and gitdir files that tell git where a
+// linked worktree's common dir and work tree are (a forged one redirects the queue lookup) are never written by a tool call, from any root that reaches them.
+test("pre-guard: an ordinary file of a linked worktree's admin dir (index.lock, logs, HEAD) can be removed with rm from the main checkout and from the linked worktrees", () => {
+  const r = repoWithQueue();
+  try {
+    const verdicts = [];
+    for (const name of ["wt", "wt-beside"]) {
+      const admin = path.join(r.main, ".git", "worktrees", name);
+      assert.ok(fs.existsSync(path.join(admin, "HEAD")), `git keeps the admin dir of ${name} under the main .git/worktrees`);
+      fs.writeFileSync(path.join(admin, "index.lock"), "");
+      fs.mkdirSync(path.join(admin, "logs"), { recursive: true });
+      const targets = [["rm -f", path.join(admin, "index.lock")], ["rm -rf", path.join(admin, "logs")], ["rm -f", path.join(admin, "logs", "HEAD")], ["rm -f", path.join(admin, "HEAD")], ["mv", path.join(admin, "index.lock")]];
+      for (const dir of [r.main, r.worktree, r.sibling]) {
+        for (const [verb, abs] of targets) {
+          for (const file of [abs, path.relative(dir, abs)]) {
+            const command = verb === "mv" ? `mv ${file} ${file}.old` : `${verb} ${file}`;
+            const got = run(dir, "Bash", { command }, "worktree-admin-free");
+            verdicts.push([`${command} (from ${path.relative(r.base, dir)})`, got.status, got.stderr.trim()]);
+          }
+        }
+      }
+    }
+    assert.deepEqual(verdicts.filter(([, status]) => status !== 0), [], "a removal of an ordinary file of the admin dir was refused");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: from every root, a lock in a superproject's linked worktree admin dir can go, while the admin dir, .git/worktrees and the modules directory under it stay held", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const admin = path.join(r.sup, ".git", "worktrees", "super-wt");
+    fs.writeFileSync(path.join(admin, "index.lock"), "");
+    const gone = (abs, dir) => [["Bash", { command: `rm -rf ${abs}` }], ["Bash", { command: `rm -rf ${path.relative(dir, abs)}` }], ["Bash", { command: `mv ${abs} elsewhere` }]];
+    // the queue of the submodule checked out in the linked worktree, each directory above it, and the git dir of a submodule nested in it (its name path may lead to a queue)
+    const held = [admin, path.dirname(admin), path.join(r.sup, ".git"), path.join(admin, "modules"), r.wtGitDir, path.join(r.wtGitDir, ".craftsman"), path.dirname(r.wtQueue), r.wtQueue, path.join(r.wtGitDir, "modules", "inner")];
+    for (const [where, dir] of surfaceRoots(r)) {
+      const lock = path.join(admin, "index.lock");
+      const free = [["Bash", { command: `rm -f ${lock}` }], ["Bash", { command: `rm -f ${path.relative(dir, lock)}` }], ["Bash", { command: `rm -f ${path.join(admin, "logs", "HEAD")}` }]];
+      const refused = free.map(([tool, input]) => [label(tool, input), run(dir, tool, input, "worktree-admin-free-surface")]).filter(([, got]) => got.status === 2).map(([name, got]) => `${name}: ${got.stderr.trim()}`);
+      assert.deepEqual(refused, [], `an ordinary file of the admin dir was refused from ${where}`);
+      for (const abs of held) assert.deepEqual(notRefused(dir, gone(abs, dir), "worktree-admin-held-surface"), [], `allowed from ${where}, ${abs}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+// The files a tool call may not write, as the superproject names them: the config, config.worktree, a hook and a linked worktree's config.worktree of the git dir of a submodule checked
+// out in the superproject's linked worktree, the commondir and gitdir of that linked worktree, and the same two files of a linked worktree of the submodule itself.
+function worktreeSurfaceFiles(r) {
+  const store = r.info.common_git_dir, admin = path.join(r.sup, ".git", "worktrees", "super-wt");
+  for (const file of ["commondir", "gitdir"]) assert.ok(fs.existsSync(path.join(admin, file)), `git writes ${file} into the admin dir of a linked worktree`);
+  return [
+    path.join(r.wtGitDir, "config"), path.join(r.wtGitDir, "config.worktree"), path.join(r.wtGitDir, "hooks", "pre-push"), path.join(r.wtGitDir, "worktrees", "subwt", "config.worktree"),
+    path.join(admin, "commondir"), path.join(admin, "gitdir"),
+    path.join(store, "worktrees", "subwt", "commondir"), path.join(store, "worktrees", "subwt", "gitdir"),
+    // the admin dirs git really made for the submodule's two linked worktrees, and a linked worktree of the submodule that lives in the superproject's linked worktree
+    path.join(store, "worktrees", "wt", "commondir"), path.join(store, "worktrees", "sub-wt", "gitdir"),
+    path.join(r.wtGitDir, "worktrees", "subwt", "commondir"), path.join(r.wtGitDir, "worktrees", "subwt", "gitdir"), path.join(r.wtGitDir, "worktrees", "subwt", "config"),
+  ];
+}
+
+test("pre-guard: a Write or an echo >> onto a worktree-modules git dir's config, config.worktree, hooks or worktree config, or onto a commondir or gitdir file, is refused from every root", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const files = worktreeSurfaceFiles(r);
+    for (const [where, dir] of surfaceRoots(r)) {
+      const calls = files.flatMap((file) => [["Write", { file_path: file, content: "x" }], ["Bash", { command: `echo x >> ${file}` }], ["Write", { file_path: path.relative(dir, file), content: "x" }]]);
+      assert.deepEqual(notRefused(dir, calls, "worktree-surface-write"), [], `allowed from ${where}`);
+    }
+    assert.match(run(r.sup, "Write", { file_path: files[4], content: "x" }, "worktree-surface-write").stderr, /craftsman:/, "the refusal is named");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a Read or a cat of a worktree-modules git dir's config, hooks, commondir and gitdir still passes from every root", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const files = worktreeSurfaceFiles(r);
+    for (const [where, dir] of surfaceRoots(r)) {
+      for (const file of files) {
+        const read = run(dir, "Read", { file_path: file }, "worktree-surface-read");
+        assert.equal(read.status, 0, `Read ${file} from ${where}: ${read.stderr}`);
+      }
+      for (const command of [`cat ${files[4]}`, `cat ${files[5]}`, `cat ${files[0]}`, `ls ${path.dirname(files[2])}`]) assert.equal(run(dir, "Bash", { command }, "worktree-surface-read").status, 0, `${command} from ${where}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the other files of the admin dirs (HEAD, logs, a lock to remove) keep their verdict from every root", () => {
+  const r = repoWithSubmoduleSurface();
+  try {
+    const store = r.info.common_git_dir, admin = path.join(r.sup, ".git", "worktrees", "super-wt");
+    for (const [where, dir] of surfaceRoots(r)) {
+      // (a Write of an index.lock is the protectedPaths rule for lock files, and everything under .git/modules stays held: neither is this unit's)
+      const calls = [["Write", { file_path: path.join(store, "worktrees", "wt", "HEAD"), content: "x" }], ["Write", { file_path: path.join(admin, "logs", "HEAD"), content: "x" }],
+        ["Write", { file_path: path.join(admin, "HEAD"), content: "x" }], ["Write", { file_path: path.join(admin, "locked"), content: "x" }], ["Bash", { command: `rm -f ${path.join(admin, "index.lock")}` }],
+        ["Bash", { command: `echo x >> ${path.join(admin, "HEAD")}` }]];
+      const refused = calls.map(([tool, input]) => [label(tool, input), run(dir, tool, input, "worktree-surface-ordinary")]).filter(([, got]) => got.status === 2).map(([name, got]) => `${name}: ${got.stderr.trim()}`);
+      assert.deepEqual(refused, [], `an ordinary file of an admin dir was refused from ${where}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
