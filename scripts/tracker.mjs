@@ -2,14 +2,15 @@
 // Structured tracker ledger. TRACKER.md remains the human-readable projection.
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import {
-  atomicWrite, logEvent, projectContext, readStdin, sidOf,
+  isMain, atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
-  mainCheckoutRoot,
+  mainCheckoutRoot, loadWorkspaceManifest,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
-import { droppedKeys } from "./lib/ledger-keys.mjs";
+import { BLOCK_BEGIN, BLOCK_END, BLOCK_RE, droppedKeys, generatedBlock } from "./lib/ledger-keys.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
 import { writeRollups } from "./lib/tracker-rollup.mjs";
 
@@ -133,14 +134,8 @@ export function trackerDocPath(context = projectContext(".")) {
 // TRACKER.md on every ledger write (and by the tracker-sync hook as a
 // backstop). Everything outside the fence stays hand-written; the fence
 // itself is never hand-edited — pre-guard refuses any edit that changes it.
-export const BLOCK_BEGIN = "<!-- craftsman:ledger:begin -->";
-export const BLOCK_END = "<!-- craftsman:ledger:end -->";
-const BLOCK_RE = new RegExp(`${BLOCK_BEGIN}[\\s\\S]*?${BLOCK_END}`);
-
-// The generated block inside `text`, or null when it has none.
-export function generatedBlock(text) {
-  return BLOCK_RE.exec(String(text))?.[0] ?? null;
-}
+// BLOCK_BEGIN/BLOCK_END/BLOCK_RE/generatedBlock live in lib/ledger-keys.mjs (which must not import this file); re-exported for callers.
+export { BLOCK_BEGIN, BLOCK_END, generatedBlock };
 
 function cell(value, max = 0) {
   let text = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -373,9 +368,9 @@ function writeTransition(input, context) {
 // acceptance.md is edited (quality-gate), when a unit lands on MERGED (above),
 // and at Stop (catches ticks made through Bash). For every `[unit:<id>]` whose
 // own criteria are all ticked:
-//   - MERGED, and no untagged whole-plan criterion is still open → COMPLETE
-//     (untagged lines are the whole-request checks /orchestrate Phase F and
-//     /scrutinise verify; "all rows MERGED" alone is not done);
+//   - MERGED, and no open `[plan:<slug>]` line of that plan remains → COMPLETE
+//     (open `[plan:<slug>]` lines hold that plan's MERGED rows; untagged lines
+//     hold none, ARCH-TRACKER-15; "all rows MERGED" alone is not done);
 //   - IN_PROGRESS → reported as ready to merge — the model's "you're done
 //     implementing" signal; a merge can't be inferred from ticks.
 // Untagged-only (legacy) files name no units, so nothing is transitioned.
@@ -387,15 +382,19 @@ export function reconcileAcceptance(context = projectContext("."), input = {}) {
   const criteria = acceptanceCriteria(text);
   if (!criteria.length) return null;
   const planWideOpen = criteria.some((c) => !c.unit && !c.done);
+  const rowsNow = currentState(context);
+  // ARCH-TRACKER-15: an open `[plan:<slug>]` line holds only that plan's rows. A legacy untagged
+  // line (D-legacy) holds no row; it is reported through plan_wide_open only.
+  const heldBy = (row) => criteria.some((c) => !c.unit && !c.done && c.plan && c.plan === planSlug(row.plan));
   const metUnits = [...new Set(criteria.filter((c) => c.unit).map((c) => c.unit))]
     .filter((unit) => criteria.every((c) => c.unit !== unit || c.done));
   const completed = [];
   const ready = [];
-  for (const row of currentState(context)) {
+  for (const row of rowsNow) {
     const id = [row.unit, row.scope_id].find((candidate) => candidate && metUnits.includes(candidate));
     if (!id) continue;
     if (row.status === "IN_PROGRESS") ready.push({ plan: row.plan, unit: row.unit });
-    if (row.status !== "MERGED" || planWideOpen) continue;
+    if (row.status !== "MERGED" || heldBy(row)) continue;
     const count = criteria.filter((c) => c.unit === id).length;
     try {
       // The key's own project segment, not row.project: keyOf() used the
@@ -437,15 +436,9 @@ export function renderState(context = projectContext(".")) {
   return currentState(context).sort((a, b) => a.key.localeCompare(b.key));
 }
 
-// The ledger is append-only and `currentState`/`transition` replay it IN FULL
-// on every single call — every claim, every status change, for the entire
-// life of the project. Only the LATEST event per key is ever actually needed
-// (validateTransition only ever looks at the immediately-preceding status);
-// every earlier event for a key that has since moved on is dead weight that
-// makes every future read/write slower, forever, with nothing to show for it.
-// Safe to compact unconditionally: collapsing to "one event per key, in
-// first-seen key order" cannot change any `currentState()`/`transition()`
-// result, since neither ever consults more than the latest event per key.
+// The ledger is append-only and every read replays it in full, but only the latest event per key is ever consulted
+// (validateTransition looks at the previous status only). Collapsing to one event per key, in first-seen order,
+// cannot change any currentState()/transition() result, so compaction is always safe.
 export function compactLedger(context = projectContext(".")) {
   const file = ledgerPath(context);
   return withLock(file, () => {
@@ -467,13 +460,13 @@ export function archivePath(context = projectContext(".")) {
 const headField = (value) => String(value ?? "").replace(/\s+/g, " ").trim().replaceAll(" · ", "; ").replaceAll(" — ", "; ");
 
 // One heading grammar for TRACKER-archive.md (ARCH-TRACKER-09):
-//   ## <plan> (<date>) [— <goal> · doc <sha> · landed <sha>]
+//   ## <plan> (<date>) [— <goal> · doc <sha> · landed <sha> [· archive <sha>]]
 //   ## idea <slug> (<date>) — <verdict> · <deciding fact> · doc <sha>
 export function formatArchiveHeading(f) {
   if (f.kind === "idea" || f.slug) {
     return `## idea ${f.slug} (${f.date}) — ${headField(f.verdict)} · ${headField(f.fact)} · doc ${f.doc}`;
   }
-  if (f.goal && f.doc && f.landed) return `## ${f.plan} (${f.date}) — ${headField(f.goal)} · doc ${f.doc} · landed ${f.landed}`;
+  if (f.goal && f.doc && f.landed) return `## ${f.plan} (${f.date}) — ${headField(f.goal)} · doc ${f.doc} · landed ${f.landed}${f.archive ? ` · archive ${f.archive}` : ""}`;
   return `## ${f.plan} (${f.date})`;
 }
 
@@ -484,8 +477,9 @@ export function parseArchiveHeading(line) {
     const [verdict, ...rest] = `${m[3]} · ${m[4]}`.split(" · ");
     return { kind: "idea", slug: m[1], date: m[2], verdict, fact: rest.join("; "), doc: m[5] };
   }
-  m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\) — (.*) · doc (\S+) · landed (\S+)$/.exec(line);
-  if (m) return { kind: "plan", plan: m[1], date: m[2], goal: m[3], doc: m[4], landed: m[5] };
+  m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\) — (.*) · doc (\S+) · landed (\S+?)(?: · archive (\S+))?$/.exec(line);
+  // `archive` is present only when the heading carries it, so older headings parse unchanged (ARCH-TRACKER-09).
+  if (m) return { kind: "plan", plan: m[1], date: m[2], goal: m[3], doc: m[4], landed: m[5], ...(m[6] ? { archive: m[6] } : {}) };
   m = /^## (\S+) \((\d{4}-\d{2}-\d{2})\)$/.exec(line);
   if (m) return { kind: "plan", plan: m[1], date: m[2], goal: null, doc: null, landed: null };
   return null;
@@ -504,7 +498,72 @@ export function lookupArchive(input, context = projectContext(".")) {
     const hit = rec.kind === "idea" ? rec.slug === key : rec.plan === key || path.posix.basename(rec.plan, ".md") === key;
     if (hit) found = rec;
   }
+  if (found?.kind === "plan") {
+    found = { ...found, archive: found.archive ?? null };
+    const restore = found.archive ? restoreCommandFor(found, context) : null;
+    if (restore) found.restoreCommand = restore;
+  }
   return found;
+}
+
+const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const KINDS = ["plans", "ideas"];
+
+// ARCH-ARCHIVE-01/02/06 helpers; they live here so tracker.mjs has no archive import.
+export function resolveArchive(context = null) {
+  const id = loadConfig(context).archive?.project || "archive";
+  let m;
+  try { m = loadWorkspaceManifest(); } catch (e) { return { off: `workspace manifest unusable: ${e.message}` }; }
+  if (!m) return { off: "no workspace manifest" };
+  if (!Object.hasOwn(m.projects, id)) return { off: `archive project "${id}" is not registered in the workspace manifest` };
+  if (m.projects[id].initialized === false) return { off: `archive project "${id}" is not checked out (uninitialised)` };
+  return { id, root: m.projects[id].root };
+}
+
+export function archivePathFor({ productId, kind, slug, file }) {
+  const bad = (msg) => { throw new Error(msg); };
+  if (!KINDS.includes(kind)) bad(`archive kind must be one of ${KINDS.join(", ")}: ${kind}`);
+  for (const [name, v] of [["productId", productId], ["slug", slug]]) if (typeof v !== "string" || !SEGMENT.test(v) || v.includes("..")) bad(`invalid archive ${name}: ${v}`);
+  if (typeof file !== "string" || !file.trim()) bad("archive file is required");
+  const raw = file.replaceAll("\\", "/");
+  if (raw.startsWith("/") || /^[A-Za-z]:/.test(raw)) bad(`archive file must be repo-relative: ${file}`);
+  if (raw.split("/").includes("..")) bad(`archive file must not traverse: ${file}`);
+  const clean = path.posix.normalize(raw).replace(/^(\.\/)+/, "");
+  if (!clean || clean === "." || clean.startsWith("../") || clean.split("/").includes(".git")) bad(`invalid archive file: ${file}`);
+  if (clean === "docs/architecture" || clean.startsWith("docs/architecture/")) bad(`architecture rules docs are never archived (ARCH-ARCHIVE-06): ${file}`);
+  return `${productId}/${kind}/${slug}/${clean}`;
+}
+
+export function productIdFor(context) {
+  const root = fs.realpathSync(mainCheckoutRoot(context.root));
+  try { return Object.entries(loadWorkspaceManifest()?.projects ?? {}).find(([, p]) => p.root === root)?.[0] ?? path.basename(root); }
+  catch { return path.basename(root); }
+}
+
+export function restoreCommand(archiveRoot, sha, file) {
+  const q = (s) => (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(s) ? s : `'${String(s).replaceAll("'", "'\\''")}'`);
+  return `git -C ${q(archiveRoot)} show ${q(`${sha}:${file}`)}`;
+}
+
+// ARCH-ARCHIVE-04: restore command for the archived doc; null without an archive or a sha.
+function restoreCommandFor(rec, context) {
+  try {
+    const archive = resolveArchive(context);
+    if (!archive.root || !/^[0-9a-f]{7,40}$/.test(rec.archive)) return null;
+    const productId = productIdFor(context);
+    const own = path.posix.basename(rec.plan, ".md");
+    // A sibling (scrutinise-/investigate-) is archived under its owning plan's folder (doc-retire).
+    const owner = own.replace(/^(?:scrutinise|investigate)-/, "");
+    const at = (slug) => archivePathFor({ productId, kind: "plans", slug, file: rec.plan });
+    let slug = owner;
+    if (owner !== own) {
+      try { // a plan that is itself named scrutinise-*: the archive tree says which folder holds it
+        const tree = execFileSync("git", ["-C", archive.root, "ls-tree", "-r", "--name-only", rec.archive], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n");
+        if (!tree.includes(at(owner)) && tree.includes(at(own))) slug = own;
+      } catch { /* sha not resolvable: keep the owner */ }
+    }
+    return restoreCommand(archive.root, rec.archive, at(slug));
+  } catch { return null; }
 }
 
 // Retire a finished plan: every row must be COMPLETE or CANCELLED. Its rows
@@ -529,7 +588,7 @@ export function archivePlan(input, context = projectContext(".")) {
     const doc = archivePath(context);
     let text = "";
     try { text = fs.readFileSync(doc, "utf8"); } catch { text = "# Tracker archive\n\nRows retired from the live ledger by `tracker.mjs archive`.\n"; }
-    atomicWrite(doc, `${text.trimEnd()}\n\n${formatArchiveHeading({ plan: input.plan, date: day, goal: input.goal, doc: input.doc, landed: input.landed })}\n\n${entries.join("\n")}\n`);
+    atomicWrite(doc, `${text.trimEnd()}\n\n${formatArchiveHeading({ plan: input.plan, date: day, goal: input.goal, doc: input.doc, landed: input.landed, archive: input.archive })}\n\n${entries.join("\n")}\n`);
     atomicWrite(file, kept.length ? kept.map((e) => JSON.stringify(e)).join("\n") + "\n" : "");
     return rows.map((row) => row.unit);
   });
@@ -538,7 +597,7 @@ export function archivePlan(input, context = projectContext(".")) {
   return { plan: input.plan, archived, archive: archivePath(context) };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");

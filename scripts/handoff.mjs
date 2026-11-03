@@ -5,7 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
-  atomicWrite, logEvent, projectContext, readStdin, sessionDir, sidOf,
+  atomicWrite, isMain, logEvent, projectContext, readStdin, sessionDir, sidOf,
 } from "./lib/core.mjs";
 import { recordMemory } from "./plan-memory.mjs";
 
@@ -21,6 +21,11 @@ export function normalizeHandoff(value, context = null) {
     if (typeof value[key] !== "string" || !value[key].trim()) {
       throw new Error(`handoff.${key} must be a non-empty string`);
     }
+  }
+  // SessionStart and adopt arm scope-required from remaining_units (ARCH-AUTO-11): a unit hand-off must say
+  // whether any units are left, and the last unit says [] rather than leaving the field out.
+  if (value.unit && !Array.isArray(value.remaining_units)) {
+    throw new Error("handoff.remaining_units must be an array of the unit ids still to run ([] on the last unit) when handoff.unit is set");
   }
   const state = {
     plan: value.plan,
@@ -46,7 +51,7 @@ export function normalizeHandoff(value, context = null) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");

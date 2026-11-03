@@ -3,14 +3,16 @@
 // doc-write grant, refuses while anything still references the doc, then removes
 // the plan + its closed scrutinise-/investigate- siblings, archives the ledger
 // rows and commits removal + archive together. There is no force option.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { grantValid, hasDocWriteGrant, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
-import { descendantSlugs, loadIndex, removeChild } from "./lib/plan-index.mjs";
+import { grantValid, hasDocWriteGrant, isMain, loadWorkspaceManifest, logEvent, projectContext, readStdin, safetyEnabled } from "./lib/core.mjs";
+import { classifyArchive, copyAndCommit, liveBlockers, productIdFor, resolveArchive } from "./lib/archive.mjs";
+import { parseNext } from "./lib/next-queue.mjs";
+import { descendantSlugs, docGoal, loadIndex, removeChild } from "./lib/plan-index.mjs";
 import { archivePath, archivePlan, currentState, ledgerPath, trackerDocPath, trackerRoot } from "./tracker.mjs";
 
-const CLOSED = ["COMPLETE", "CANCELLED"];
 function git(context, args) {
   return execFileSync("git", ["-C", context.root, ...args], {
     encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6,
@@ -22,12 +24,15 @@ const tryGit = (context, args) => { try { return git(context, args); } catch { r
 export { grantValid };
 const hasGrant = (sid, context) => hasDocWriteGrant({ sid }, context);
 
+// The landing capability (ARCH-DOCS-18), seam retire(input, context, capability): a module-private object that is never exported as a value and that no stdin field, argument
+// or CLI flag can supply. land-feature's automatic archive obtains it through landingCapability() and passes it as retire's third
+// argument; only a call carrying it skips the doc-write grant and is logged `auto`. It adds no file, nonce or environment key, and
+// ARCH-SAFETY-05 is unchanged: every other caller, `auto: true` on stdin included, still needs the grant.
+const LANDING = Object.freeze({ landing: true });
+export function landingCapability() { return LANDING; }
+
 // Default git runner for the referrer scan: throws on any non-zero status.
-function defaultGit(args, context) {
-  return execFileSync("git", ["-C", context.root, ...args], {
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64e6,
-  });
-}
+const defaultGit = (args, context) => git(context, args);
 
 // Union of HEAD, the index and the working-tree copies of tracked files.
 // Untracked files are NOT scanned. Status 1 with empty output means no hits;
@@ -47,6 +52,25 @@ function scanReferrers(context, plan, slug) {
   return [...hits];
 }
 
+const NEXT_DOC = "docs/plans/NEXT.md";
+const isBlockingKind = (file) => /^scripts\/[^/]*\.test\.mjs$/.test(file) || !file.includes("/") && file.endsWith(".md")
+  || /^docs\/architecture\/.*\.rules\.md$/.test(file);
+const isProseDoc = (file) => /^docs\/(plans|ideas)\/.*\.md$/.test(file);
+
+// Read-only referrer scan (ARCH-DOCS-13): writes nothing. NEXT.md is never a referrer. Blocking = rule cite:/source:,
+// a scripts/*.test.mjs, a top-level *.md (and anything unclassified); rewritable = prose docs under docs/plans or
+// docs/ideas, only when an archive project resolves, else every hit blocks. Null when the scan itself fails.
+export function findReferrers(context, plan, slug) {
+  const found = scanReferrers(context, plan, slug);
+  if (found === null) return null;
+  const hits = found.filter((f) => f !== NEXT_DOC).sort();
+  let archived = false;
+  try { archived = Boolean(resolveArchive(context).root); } catch { /* off */ }
+  const rewritable = archived ? hits.filter((f) => !isBlockingKind(f) && isProseDoc(f)) : [];
+  const blocking = hits.filter((f) => !rewritable.includes(f));
+  return { hits, blocking, rewritable };
+}
+
 // Read-only referrer check for all-closed plans (ARCH-DOCS-02): one {plan, referrers[], reason?}
 // per plan. Never throws and mutates nothing; a scan error yields no referrers plus a reason.
 export function retireCheck(plans, root) {
@@ -55,9 +79,10 @@ export function retireCheck(plans, root) {
     try {
       if (typeof plan !== "string" || !plan.trim()) return { plan, referrers: [], reason: "invalid plan path" };
       const slug = path.posix.basename(plan, ".md");
-      const hits = scanReferrers({ root: path.resolve(String(root)) }, plan, slug);
-      if (hits === null) return { plan, referrers: [], reason: "referrer scan failed" };
-      const referrers = hits.filter((f) => f !== plan && !/^docs\/plans\/TRACKER[^/]*\.md$/.test(f)).sort();
+      // The same verdict the dashboard uses (ARCH-VIEWS-15): the plan's own rollup and siblings are not referrers.
+      const verdict = classifyArchive({ root: path.resolve(String(root)) }, plan, { slug, archive: {} });
+      if (verdict.scanFailed) return { plan, referrers: [], reason: "referrer scan failed" };
+      const referrers = verdict.hits;
       return { plan, referrers };
     } catch (error) {
       return { plan, referrers: [], reason: `referrer scan failed: ${error?.message ?? error}` };
@@ -67,19 +92,15 @@ export function retireCheck(plans, root) {
 
 // Fallback goal for a goal-less plan: front-matter `goal:`, else the H1 (ARCH-DOCS-09).
 function planDocGoal(context, plan) {
-  let text = "";
-  try { text = fs.readFileSync(path.join(context.root, plan), "utf8"); } catch { return ""; }
-  const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  const fromFront = front && /^goal:[ \t]*(.+?)[ \t]*$/m.exec(front[1])?.[1].replace(/^(["'])(.*)\1$/, "$2").trim();
-  if (fromFront) return fromFront;
-  return /^#[ \t]+(.+?)[ \t]*$/m.exec(text.replace(/^---\r?\n[\s\S]*?\r?\n---/, ""))?.[1] ?? "";
+  try { return docGoal(fs.readFileSync(path.join(context.root, plan), "utf8")); } catch { return ""; }
 }
 
 function refuse(reason, referrers = []) {
   return { refused: true, reason, referrers };
 }
 
-export function retire(input, context = projectContext(".")) {
+export function retire(input, context = projectContext("."), capability = undefined, seams = {}) {
+  const resolve = seams.resolveArchive || resolveArchive;
   const plan = input?.plan;
   if (typeof plan !== "string" || !plan.trim() || plan.startsWith("/") || plan.split(/[\\/]/).includes("..")) {
     return refuse("retire needs a relative plan path");
@@ -87,53 +108,43 @@ export function retire(input, context = projectContext(".")) {
   if (fs.realpathSync(trackerRoot(context)) !== fs.realpathSync(context.root)) {
     return refuse("retire refused: run doc-retire from the main checkout");
   }
-  // The grant is always required. CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which
-  // any child process can set, so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
-  if (!hasGrant(input.sid, context)) {
+  // The grant is required unless the call carries the in-process landing capability (ARCH-DOCS-18); `input.auto` alone never skips it.
+  // CRAFTSMAN_SAFETY is read here only to word the refusal: it is in this script's own environment, which any child process can set,
+  // so nothing is skipped or granted on the strength of it (ARCH-SAFETY-05).
+  const landing = capability === LANDING;
+  if (!landing && !hasGrant(input.sid, context)) {
     return refuse(safetyEnabled()
       ? "retire refused: no doc-write grant (run doc-write.mjs first)"
       : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
   }
+  // ARCH-ARCHIVE-03: an automatic archive has nowhere to copy to without an archive project; refuse before anything is touched.
+  // The archive resolved here is the one copied into below: resolving again could answer differently and leave nothing to verify.
+  let landingArchive = null;
+  if (landing) { try { landingArchive = resolve(context); } catch { /* unresolved */ } }
+  if (landing && !landingArchive?.root) return refuse("retire refused: automatic archive needs an archive project");
   const dir = path.posix.dirname(plan);
   const slug = path.posix.basename(plan, ".md");
   const rowsOf = (p) => currentState(context).filter((row) => row.plan === p);
 
-  // Open rows of the plan itself are archive's refusal; open siblings keep the plan.
+  // Open siblings and live descendants keep the plan: the one check autoArchiveEligible shares (liveBlockers, ARCH-DOCS-09). A parent
+  // whose descendant plans still have an open row (or no row to prove them closed) is live; our own closed siblings and closed
+  // descendants retire with it.
   const candidates = [`scrutinise-${slug}.md`, `investigate-${slug}.md`].map((n) => path.posix.join(dir, n))
     .filter((p) => tryGit(context, ["ls-files", "--error-unmatch", "--", p]) !== null);
-  const siblings = [];
-  const openSiblings = [];
-  for (const sibling of candidates) {
-    const open = rowsOf(sibling).filter((row) => !CLOSED.includes(row.status));
-    if (open.length) openSiblings.push(`${sibling} (${open.map((r) => `${r.unit}=${r.status}`).join(", ")})`);
-    else siblings.push(sibling);
-  }
-  if (openSiblings.length) return refuse(`retire refused: open sibling plans keep ${plan}: ${openSiblings.join("; ")}`);
-
-  // A parent whose descendant plans still have an open row (or no row to prove them closed) is live
-  // (ARCH-DOCS-09); our own closed siblings and closed descendants retire with it.
-  const hierarchy = new Set();
-  const descendants = [];
+  let blockers;
   try {
-    const index = loadIndex(context.root);
-    const own = new Set(siblings.map((p) => path.posix.basename(p, ".md")));
-    const isParent = (n) => n && (n.level === "epic" || n.level === "story");
-    if (isParent(index.get(slug))) hierarchy.add(plan);
-    const found = index.get(slug) ? descendantSlugs(slug, { index }).filter((s) => !own.has(s)) : [];
-    const live = [];
-    for (const child of found) {
-      const node = index.get(child);
-      const childPlan = node.path;
-      const rows = rowsOf(childPlan);
-      const open = rows.filter((row) => !CLOSED.includes(row.status));
-      if (open.length || (!rows.length && !isParent(node) && !node.derived)) { live.push(child); continue; }
-      if (!rows.length) hierarchy.add(childPlan);
-      descendants.push({ slug: child, plan: childPlan, goal: rows.find((row) => row.goal)?.goal || planDocGoal(context, childPlan) || child });
-    }
-    if (live.length) return refuse(`retire refused: ${plan} has live descendants: ${live.join(", ")}`);
+    blockers = liveBlockers({ plan, rowsOf, trackedSiblings: candidates, loadIndex: () => loadIndex(context.root) });
   } catch (error) {
     return refuse(`retire refused: cannot read the plan hierarchy: ${error.message}`);
   }
+  if (blockers.reason) return refuse(`retire refused: ${blockers.reason}`);
+  const { siblings } = blockers;
+  const hierarchy = new Set();
+  if (blockers.isParent) hierarchy.add(plan);
+  const descendants = blockers.descendants.map(({ slug: child, node, rows }) => {
+    if (!rows.length) hierarchy.add(node.path);
+    return { slug: child, plan: node.path, goal: rows.find((row) => row.goal)?.goal || planDocGoal(context, node.path) || child };
+  });
 
   // Every sibling takes its own goal (rows, else doc); read before the docs leave the tree.
   const siblingGoal = new Map(siblings.map((p) => [p, rowsOf(p).find((row) => row.goal)?.goal || planDocGoal(context, p) || path.posix.basename(p, ".md")]));
@@ -150,23 +161,14 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: uncommitted changes in ${removing.join(", ")}`);
   }
 
-  // The parent's generated rollup and the child list of its doc only describe the hierarchy; they are not referrers.
   const parentSlug = (() => { try { return loadIndex(context.root).get(slug)?.parent ?? null; } catch { return null; } })();
   const parentDoc = parentSlug ? path.posix.join(dir, `${parentSlug}.md`) : null;
-  const parentRollup = parentSlug ? rollupOf(parentSlug) : null;
   // Every ancestor's rollup is regenerated by the archive; each lands in the same commit.
   const ancestorRollups = [];
   try {
     const index = loadIndex(context.root);
     for (let p = parentSlug; p; p = index.get(p)?.parent) ancestorRollups.push(rollupOf(p));
   } catch { /* the index check below decides */ }
-  // plan-index decides whether the parent still names the child; anything else mentioning it is a referrer.
-  const onlyChildrenList = (file, targets) => {
-    let text = "";
-    try { text = fs.readFileSync(path.join(context.root, file), "utf8"); } catch { return false; }
-    const next = removeChild(text, slug);
-    return next !== null && !targets.some((t) => next.includes(t));
-  };
   // The parent's child list drops this plan in the same commit so the index still loads (ARCH-TRACKER-10).
   let parentEdit = null;
   if (parentDoc && tryGit(context, ["ls-files", "--error-unmatch", "--", parentDoc]) !== null) {
@@ -179,29 +181,96 @@ export function retire(input, context = projectContext(".")) {
       if (next !== null) parentEdit = { file: parentDoc, next };
     } catch { /* unreadable parent: the post-edit index check decides */ }
   }
+  // The shared classifier (ARCH-VIEWS-15) decides what is a referrer: exempt are the removing set, the parent rollup, a parent
+  // doc that only lists the child, and NEXT.md. A rewritable prose hit is rewritten; anything else refuses.
   const found = new Set();
+  const rewriteFiles = new Set();
   for (const doc of [{ plan, slug }, ...descendants]) {
-    const hits = scanReferrers(context, doc.plan ?? plan, doc.slug ?? slug);
-    if (hits === null) return refuse("retire refused: referrer scan failed");
-    const targets = [doc.plan ?? plan, doc.slug ?? slug];
-    for (const file of hits) {
-      if (removing.includes(file) || /^docs\/plans\/TRACKER[^/]*\.md$/.test(file)) continue;
-      if (doc.plan === undefined || doc.plan === plan) {
-        if (file === parentRollup) continue;
-        if (file === parentDoc && onlyChildrenList(file, targets)) continue;
-      }
-      found.add(file);
-    }
+    const verdict = classifyArchive(context, doc.plan ?? plan, { slug: doc.slug ?? slug, removing, primary: doc.plan === undefined || doc.plan === plan });
+    if (verdict.scanFailed) return refuse("retire refused: referrer scan failed");
+    for (const file of verdict.blocking) found.add(file);
+    for (const file of verdict.rewritable) rewriteFiles.add(file);
   }
+  // Rewritable prose files must be clean so the rewrite lands alone in the retire commit.
+  for (const file of rewriteFiles) {
+    if (git(context, ["status", "--porcelain", "--", file]).trim()) return refuse(`retire refused: uncommitted changes in ${file}`, [file]);
+  }
+  // ARCH-DOCS-13: prose mentions become archive pointers (sha pending in the dry run).
+  const productId = productIdFor(context);
+  const rewriteDocs = [{ plan, slug }, ...descendants.map((d) => ({ plan: d.plan, slug: d.slug }))];
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // One pass over every doc's plan path and slug: a pointer written for one doc is never rewritten for another (ARCH-DOCS-13).
+  const tokenDoc = new Map();
+  for (const d of rewriteDocs) { for (const t of [d.plan, d.slug]) if (!tokenDoc.has(t)) tokenDoc.set(t, d); }
+  const tokenRe = new RegExp(`(?<![\\w/.-])(?:${[...tokenDoc.keys()].sort((a, b) => b.length - a.length).map(esc).join("|")})(?![\\w-])`, "g");
+  const rewriteLine = (line, shaOf) => line.replace(tokenRe, (m) => {
+    const d = tokenDoc.get(m);
+    return `archive:${productId}/plans/${d.slug}@${shaOf(d.plan)}`;
+  });
+  const rewriteBase = (file) => (parentEdit?.file === file ? parentEdit.next : fs.readFileSync(path.join(context.root, file), "utf8"));
+  const rewriteText = (file, shaOf) => rewriteBase(file).split("\n").map((l) => rewriteLine(l, shaOf)).join("\n");
+  const rewrites = [];
+  for (const file of [...rewriteFiles].sort()) {
+    const before = rewriteBase(file).split("\n");
+    const after = rewriteText(file, () => "pending").split("\n");
+    before.forEach((line, i) => { if (line !== after[i]) rewrites.push({ file, line: i + 1, before: line, after: after[i] }); });
+    if (!rewrites.some((r) => r.file === file)) found.add(file); // a hit with nothing to rewrite stays a referrer
+  }
+  const digest = crypto.createHash("sha256").update(JSON.stringify(rewrites)).digest("hex");
   const referrers = [...found].sort();
   if (referrers.length) {
     logEvent({ ev: "doc_prune_refused", path: plan, cited_by: referrers }, context);
     return refuse(`retire refused: ${plan} is referenced by ${referrers.join(", ")}`, referrers);
   }
 
+  if (input.dry_run) return { dry_run: true, rewrites, digest };
+  if (rewrites.length && input.confirm_rewrites !== digest) {
+    const files = [...new Set(rewrites.map((r) => r.file))];
+    return refuse(input.confirm_rewrites
+      ? `retire refused: confirm_rewrites is stale; re-run the dry run (referenced by ${files.join(", ")})`
+      : `retire refused: ${plan} is referenced by ${files.join(", ")}; run a dry run and confirm its digest as confirm_rewrites`, files);
+  }
+
+  // The retired plans' lines leave NEXT.md in the same commit (ARCH-DOCS-13).
+  let nextEdit = null;
+  if (tryGit(context, ["ls-files", "--error-unmatch", "--", NEXT_DOC]) !== null) {
+    try {
+      const old = fs.readFileSync(path.join(context.root, NEXT_DOC), "utf8");
+      const gone = new Set([plan, ...siblings, ...descendants.map((d) => d.plan)].map((p) => path.posix.basename(p, ".md")));
+      const canonical = new Set(parseNext(old).filter((e) => gone.has(e.slug)).map((e) => e.slug));
+      const lines = old.split("\n");
+      const kept = lines.filter((line) => { const m = parseNext(line)[0]; return !(m && canonical.has(m.slug)); });
+      if (kept.length !== lines.length) {
+        if (git(context, ["status", "--porcelain", "--", NEXT_DOC]).trim()) return refuse(`retire refused: uncommitted changes in ${NEXT_DOC}`);
+        nextEdit = kept.join("\n");
+      }
+    } catch { /* unreadable NEXT.md: left alone */ }
+  }
+
   const doc_sha = git(context, ["rev-parse", "HEAD"]).trim();
   const goal = input.goal || rowsOf(plan).find((row) => row.goal)?.goal || planDocGoal(context, plan) || slug;
   const landed_sha = input.landed_sha || doc_sha;
+
+  // ARCH-ARCHIVE-03: copy into the archive repo first; any failure refuses with nothing touched here.
+  let archiveShas = null;
+  let archiveSha;
+  try {
+    const archive = landing ? landingArchive : resolve(context);
+    if (landing && !archive?.root) return refuse("retire refused: automatic archive needs an archive project");
+    if (archive.root) {
+        const seams = { context };
+      archiveShas = new Map();
+      const copied = copyAndCommit({ archive, productId, kind: "plans", slug, files: [plan, ...siblings], sourceRoot: context.root, plan }, seams);
+      archiveSha = copied.sha;
+      for (const p of [plan, ...siblings]) archiveShas.set(p, copied.sha);
+      for (const d of descendants) {
+        archiveShas.set(d.plan, copyAndCommit({ archive, productId, kind: "plans", slug: d.slug, files: [d.plan], sourceRoot: context.root, plan: d.plan }, seams).sha);
+      }
+    }
+  } catch (error) {
+    return refuse(`retire refused: archive copy failed: ${error.message}`);
+  }
+  const archiveOf = (p) => archiveShas?.get(p);
 
   // Archiving re-renders every rollup; only the ancestors' are ours, so the rest are put back as found.
   const ancestorSet = new Set(ancestorRollups);
@@ -233,9 +302,24 @@ export function retire(input, context = projectContext(".")) {
     if (parentSlug) {
       try { loadIndex(context.root); } catch (error) { throw new Error(`the plan index would not load after retiring: ${error.message}`); }
     }
-    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(plan) }, context);
-    for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, hierarchy: hierarchy.has(d.plan) }, context);
-    for (const sibling of siblings) archivePlan({ plan: sibling, goal: siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, hierarchy: !rowsOf(sibling).length }, context);
+    if (nextEdit !== null) {
+      removing.push(NEXT_DOC);
+      fs.writeFileSync(path.join(context.root, NEXT_DOC), nextEdit);
+      git(context, ["add", "--", NEXT_DOC]);
+    }
+    if (rewrites.length) {
+      const shaOf = (p) => { const v = archiveOf(p); if (!v) throw new Error(`no archive sha for ${p}`); return v; };
+      for (const file of rewriteFiles) {
+        if (!rewrites.some((r) => r.file === file)) continue;
+        const next = rewriteText(file, shaOf);
+        if (!removing.includes(file)) removing.push(file); // on the rollback set before it is written
+        fs.writeFileSync(path.join(context.root, file), next);
+        git(context, ["add", "--", file]);
+      }
+    }
+    archivePlan({ plan, goal, doc: doc_sha, landed: landed_sha, archive: archiveOf(plan), hierarchy: hierarchy.has(plan) }, context);
+    for (const d of descendants) archivePlan({ plan: d.plan, goal: d.goal, doc: doc_sha, landed: landed_sha, archive: archiveOf(d.plan), hierarchy: hierarchy.has(d.plan) }, context);
+    for (const sibling of siblings) archivePlan({ plan: sibling, goal: siblingGoal.get(sibling), doc: doc_sha, landed: landed_sha, archive: archiveOf(sibling), hierarchy: !rowsOf(sibling).length }, context);
     restoreUnrelated();
     const extra = [archivePath(context), trackerDocPath(context), ...ancestorRollups.map((r) => path.join(context.root, r))]
       .filter((file) => fs.existsSync(file)).map((file) => path.relative(fs.realpathSync(trackerRoot(context)), file));
@@ -258,11 +342,12 @@ export function retire(input, context = projectContext(".")) {
     return refuse(`retire refused: ${error.message}${restoreFailure}`);
   }
   const sha = git(context, ["rev-parse", "HEAD"]).trim();
-  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan) }, context);
+  for (const file of new Set(rewrites.map((r) => r.file))) logEvent({ ev: "archive_rewrite", file, plan }, context);
+  logEvent({ ev: "doc_retired", plan, sha, siblings, descendants: descendants.map((d) => d.plan), archive: archiveSha, ...(landing ? { auto: true } : {}) }, context);
   return { retired: plan, siblings, rollup: removing.includes(rollup) ? rollup : null, sha, doc_sha };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const at = process.argv.indexOf("--sid");

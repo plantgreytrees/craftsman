@@ -189,7 +189,10 @@ denying credential directories such as `~/.config/gh`. So `repo-exec` splits the
 network from the work: the root session runs `{"action":"network","step":"fetch"}`
 before a run and `{"action":"network","step":"drain"}` after it (outside the
 sandbox, with your approval for that call), and runners only do local git,
-queueing each push for the drain. Pushes stay plain; nothing is forced. If a
+queueing each push for the drain. Pushes stay plain; nothing is forced. The drain checks every queued entry first: pushes go to `feat/` and
+`feature/` branches (the base branch only when `planning.featureBranches` is off), deletes
+remove only `feat/` branches, and anything else is logged `drain_refused` and parks. The
+queue under the git common dir is protected from tool calls. If a
 runner needs the network for something else (`"pr"` mode, a fetch older than
 `repoExec.offlineMaxFetchAgeMinutes`, default 120) the run stops with
 `needs_network` and root runs the named action and relaunches. Nothing to
@@ -242,6 +245,10 @@ change:
   that many wave units of one feature run at once, each in its own short-lived
   worktree.
 - `execution.maxSessions` — `1`; reserved, nothing reads it yet.
+- `execution.builtinAgents` — `["Explore"]`. Add the optional, read-only Artist
+  critic with `{ "execution": { "builtinAgents": ["Explore", "artist:design-critic"] } }`;
+  the guard code is unchanged. Without it the ui gate runs the critic brief
+  in-session, labelled NOT ISOLATED. Artist is optional and never required.
 
 ## 2. Add a stack-specific skill pack (project `.claude/skills/`)
 

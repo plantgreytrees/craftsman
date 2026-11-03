@@ -3,7 +3,7 @@
 > and `/architect --update state` should be run.
 
 # State architecture
-_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Craftsman's guards keep their state under `.craftsman/sessions/<session-id>/`.
@@ -72,15 +72,28 @@ ARCH-STATE-12 narrows the 18 Oct fail-closed choice, with the owner's approval. 
 
 - **ARCH-STATE-14** replaces 12: the guard's removal-word refusal stays fail-closed as PR #1 built it. Only two things change: heredoc prose is not a hook-bypass flag unless the heredoc feeds a shell or interpreter, and a lease push to the run's own branches is allowed. `guard_unparsed` is not emitted.
 - **ARCH-STATE-15** replaces 13: outside-worktree deletes and credential reads are the Claude Code sandbox's job (ARCH-SAFETY-01), not pre-guard's. Craftsman keeps `protectedPaths` for env files and the stop-gate secrets scan, and publication still waits for approval. Nothing PARKs on a secret hit today; the guard exits 2 with the fix.
+- **ARCH-STATE-16** replaces 14 (after review round 8): the heredoc-prose allowance is dropped. The hook-bypass check reads the whole command as PR #1 built it, so prose that mentions the flag inside a heredoc is refused; only the own-branch `--force-with-lease` allowance remains.
 
-## Service-scoped gates (2026-10-23)
-Source: [service-scoped-gates](../ideas/service-scoped-gates.md). Rules ARCH-STATE-16 to 19, plus ARCH-LAND-30 in [landing](./landing.md). A multi-service workspace such as Gleam (61 submodules, one repo per service) used to get one config, one tool cwd and one whole-repo test command. These four rules let each service use the workspace's settings, run tools in the right folder and test only what a session touched.
+## Amendments (2026-11-01, owner-approved)
+
+- **ARCH-STATE-17** replaces 10: the same state-resolution rule, plus one allowance. Under an active unit scope the `Read` tool (never Glob, Grep or a write) may read a file whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. It passes the scope check and the ambiguous-scope refusal, but `protectedPaths` still apply, and a symlink or `..` is judged by where it leads. Why: models read evidence (screenshots, logs) there while verifying a unit, and the project-boundary check refused every such Read: 32 of them in the 2026-11-01 sweep with the misleading "more than one active project scope". Rejected: keeping it fail-closed (the manifest cannot list a path outside the project as a relative entry), and allowing any Read outside every git repo (credential reads would then rest entirely on the sandbox and deny rules, ARCH-SAFETY-01). Not covered, on purpose: a Read when no scope is active ("requires an active unit scope"), directories such as `~/scratch`, and Claude Code's own tool-result spill files.
+
+## Phase 2 amendments (2026-11-01, owner-approved)
+_Verified at `a0cb8a2`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The full table and diagram are in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+
+**Status: implemented (2026-11-03).** ARCH-STATE-18 covers Write and Edit as well as Read. A scoped Write may create a scratch file (judged by its nearest existing ancestor, a `..` in the missing part refused), and a Write or Edit target with more than one hard link is refused.
+
+- **ARCH-STATE-18** replaces 17: Write and Edit join Read for files whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. NotebookEdit, Glob and Grep stay refused, an enclosing root still rules a directory out, and `protectedPaths` still apply. A new file is judged by its nearest existing ancestor, and an existing target with more than one hard link is refused, because a link can carry a write to protected state. Why: under a scope, this `/architect` run couldn't write a probe script to the job dir and had to put one in the repo root, while ARCH-SAFETY-01 already leaves outside-root writes to the sandbox. Rejected: keeping Read only, which means scratch scripts end up in the repo.
+- Two other decisions from this pass touch state but live elsewhere. The scope-required marker's lifetime is **ARCH-AUTO-11** ([auto.md](./auto.md)), and the command-record lifetime is part of **ARCH-SAFETY-13** ([safety.md](./safety.md)). They moved there so unit contexts that load `state.rules.md` stay inside the ARCH-ENGINE-08 budget.
+
+## Service-scoped gates (2026-11-03)
+Source: [service-scoped-gates](../ideas/service-scoped-gates.md). Rules ARCH-STATE-19 to 22, plus ARCH-LAND-37 in [landing](./landing.md). A multi-service workspace such as Gleam (61 submodules, one repo per service) used to get one config, one tool cwd and one whole-repo test command. These four rules let each service use the workspace's settings, run tools in the right folder and test only what a session touched.
 
 ```mermaid
 flowchart LR
   edit[Edit hook: quality-gate] -->|appends path| changed[(sessions/sid/changed)]
   edit -->|lang cwd nearest marker| tool[format and check tools]
-  cfgroot[workspace root config] -->|ARCH-STATE-16| load[loadConfig]
+  cfgroot[workspace root config] -->|ARCH-STATE-19| load[loadConfig]
   cfgproj[project or worktree config] --> load
   load --> edit
   changed --> stop[Stop: stop-gate]
@@ -91,12 +104,12 @@ flowchart LR
 
 | id | decision | why | rejected alternatives |
 |---|---|---|---|
-| ARCH-STATE-16 | A sub-project or unit worktree inherits the workspace root's config, with `{workspaceRoot}` for root-relative commands | Units were getting plugin defaults (csharp `dotnet format`, no `extraChecks`) because their root has no config; Gleam edits 3 lines | Opt-in `workspace.inheritConfig` (leaves the gap open); inherit non-command keys only (a root `stopGate` edit would not apply in units) |
-| ARCH-STATE-17 | `languages.<lang>.cwd = "nearest:<marker,...>"`, resolved downward from the file, never above root | One block serves all 61 services; deletes Gleam's ESLint wrapper | Static path per service (a per-repo list again); tool flags only (does not put `eslint` on PATH) |
-| ARCH-STATE-18 | `{changed}` / `{changedDirs}` whole-token placeholders from the session change list; never snapshotted; failure blocks as scoped | A snapshot cannot know the touched set at session start; `git status` would test other sessions' dirt | `git status` source; advisory-only failure |
-| ARCH-STATE-19 | Events carry `project` and a fixed skip-reason set | The idea's own kill test needed a count of dirty stops that ran nothing | One event per skipped command |
+| ARCH-STATE-19 | A sub-project or unit worktree inherits the workspace root's config, with `{workspaceRoot}` for root-relative commands | Units were getting plugin defaults (csharp `dotnet format`, no `extraChecks`) because their root has no config; Gleam edits 3 lines | Opt-in `workspace.inheritConfig` (leaves the gap open); inherit non-command keys only (a root `stopGate` edit would not apply in units) |
+| ARCH-STATE-20 | `languages.<lang>.cwd = "nearest:<marker,...>"`, resolved downward from the file, never above root | One block serves all 61 services; deletes Gleam's ESLint wrapper | Static path per service (a per-repo list again); tool flags only (does not put `eslint` on PATH) |
+| ARCH-STATE-21 | `{changed}` / `{changedDirs}` whole-token placeholders from the session change list; never snapshotted; failure blocks as scoped | A snapshot cannot know the touched set at session start; `git status` would test other sessions' dirt | `git status` source; advisory-only failure |
+| ARCH-STATE-22 | Events carry `project` and a fixed skip-reason set | The idea's own kill test needed a count of dirty stops that ran nothing | One event per skipped command |
 
-**Correction to the idea.** An empty `stopGate.commands: {}` does not disable the defaults: `deepMerge` keeps every default key (`scripts/lib/core.mjs:588-596`), so Gleam's whole-solution `dotnet test` runs at every session start and is red, which is why Stop never runs a test. Only a `null` value drops a marker (`scripts/lib/gate-command.mjs:30`). Gleam's own stop events show about 65 dirty stops in 3 days with no test run.
+**Correction to the idea.** An empty `stopGate.commands: {}` does not disable the defaults: `deepMerge` keeps every default key (`scripts/lib/core.mjs:590`), so Gleam's whole-solution `dotnet test` runs at every session start and is red, which is why Stop never runs a test. Only a `null` value drops a marker (`scripts/lib/gate-command.mjs:30`). Gleam's own stop events show about 65 dirty stops in 3 days with no test run.
 
 **Trade-offs.** Inheriting by default is the only behaviour change; it is called out under "Changed" in the CHANGELOG and shipped last, after Gleam's three root-relative commands use `{workspaceRoot}`. The session change list is blind to edits made only through Bash, as the `dirty` marker already is. A scoped failure in a service that was already red blocks until it is fixed or the marker is set to `null`. Deferred: resolving every file to its owning service and running an affected-set engine (idea recommendation 5).
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   acceptanceNotice, archivePath, archivePlan, compactLedger, currentState, formatArchiveHeading, lookupArchive, parseArchiveHeading, generatedBlock, ledgerPath, reconcileAcceptance, renderBlock,
   initLedger, syncTrackerDoc, trackerDocPath, trackerRoot, transition,
@@ -52,7 +52,7 @@ test("tracker: MERGED is refused while the unit's own tagged acceptance criteria
   const selected = context();
   const acPath = path.join(selected.stateDir, "acceptance.md");
   fs.mkdirSync(selected.stateDir, { recursive: true });
-  fs.writeFileSync(acPath, "- [ ] [unit:unit-1] the endpoint rejects bad input\n- [ ] [unit:unit-2] not this unit\n- [ ] whole-plan criterion\n");
+  fs.writeFileSync(acPath, "- [ ] [unit:unit-1] the endpoint rejects bad input\n- [ ] [unit:unit-2] not this unit\n- [ ] [plan:example] whole-plan criterion\n");
   transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "PENDING" }, selected);
   transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "IN_PROGRESS", evidence: "claimed" }, selected);
   assert.throws(
@@ -102,13 +102,13 @@ test("tracker: reconcile moves a MERGED unit to COMPLETE once its criteria and t
   const selected = context();
   const acPath = path.join(selected.stateDir, "acceptance.md");
   fs.mkdirSync(selected.stateDir, { recursive: true });
-  fs.writeFileSync(acPath, "- [x] [unit:unit-1] a\n- [x] [unit:unit-1] b\n- [ ] whole-plan check\n");
+  fs.writeFileSync(acPath, "- [x] [unit:unit-1] a\n- [x] [unit:unit-1] b\n- [ ] [plan:example] whole-plan check\n");
   startUnit(selected, "unit-1");
   const merged = transition({ plan: "docs/plans/example.md", unit: "unit-1", status: "MERGED", evidence: "abc123", session_id: "s1" }, selected);
   assert.equal(merged.acceptance.plan_wide_open, true);
   assert.equal(status(selected, "unit-1"), "MERGED", "an open whole-plan criterion means the request is not verified yet");
 
-  fs.writeFileSync(acPath, fs.readFileSync(acPath, "utf8").replace("- [ ] whole-plan", "- [x] whole-plan"));
+  fs.writeFileSync(acPath, fs.readFileSync(acPath, "utf8").replace("- [ ] [plan:example] whole-plan", "- [x] [plan:example] whole-plan"));
   fs.rmSync(path.join(selected.stateDir, "sessions"), { recursive: true, force: true });
   const result = reconcileAcceptance(selected, { session_id: "s1" });
   assert.deepEqual(result.completed, [{ plan: "docs/plans/example.md", unit: "unit-1" }]);
@@ -494,4 +494,91 @@ test("tracker: init --from-block rehydrates one row per block row and is idempot
   assert.equal(state[3].status, "COMPLETE");
   assert.equal(initLedger({ from_block: true }, selected).added, 0);
   assert.equal(currentState(selected).length, 50);
+});
+
+test("tracker: archive sha is appended only when given; headings without it are unchanged", () => {
+  const f = { plan: "docs/plans/p.md", date: "2026-10-18", goal: "g", doc: "aaa", landed: "bbb" };
+  const base = formatArchiveHeading(f);
+  assert.equal(base, "## docs/plans/p.md (2026-10-18) — g · doc aaa · landed bbb");
+  const withArchive = formatArchiveHeading({ ...f, archive: "ccc" });
+  assert.equal(withArchive, `${base} · archive ccc`);
+  assert.deepEqual(parseArchiveHeading(withArchive), { kind: "plan", plan: f.plan, date: f.date, goal: "g", doc: "aaa", landed: "bbb", archive: "ccc" });
+  assert.deepEqual(parseArchiveHeading(base), { kind: "plan", plan: f.plan, date: f.date, goal: "g", doc: "aaa", landed: "bbb" });
+});
+
+test("tracker: lookup returns archive and restoreCommand with the sha, archive null without it", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-ws-"));
+  fixtures.add(ws);
+  const real = fs.realpathSync(ws);
+  for (const id of ["prod", "archive"]) {
+    fs.mkdirSync(path.join(real, id));
+    spawnSync("git", ["init", "-q"], { cwd: path.join(real, id) });
+  }
+  const manifest = path.join(real, "craftsman.workspace.json");
+  fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { prod: { root: "prod" }, archive: { root: "archive" } } }));
+  const root = path.join(real, "prod");
+  const selected = { id: "prod", root, stateDir: path.join(root, ".craftsman") };
+  fs.mkdirSync(path.dirname(archivePath(selected)), { recursive: true });
+  fs.writeFileSync(archivePath(selected), [
+    "# Tracker archive", "",
+    formatArchiveHeading({ plan: "docs/plans/a.md", date: "2026-10-18", goal: "g", doc: "d1", landed: "l1", archive: "abc1234" }), "",
+    formatArchiveHeading({ plan: "docs/plans/b.md", date: "2026-10-18", goal: "g", doc: "d2", landed: "l2" }), "",
+  ].join("\n"));
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+  try {
+    const hit = lookupArchive({ plan: "a" }, selected);
+    assert.equal(hit.archive, "abc1234");
+    assert.equal(hit.restoreCommand, `git -C ${path.join(real, "archive")} show abc1234:prod/plans/a/docs/plans/a.md`);
+    const miss = lookupArchive({ plan: "b" }, selected);
+    assert.equal(miss.archive, null);
+    assert.equal("restoreCommand" in miss, false);
+  } finally {
+    if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
+  }
+});
+
+test("tracker: an option-shaped archive value yields no restore command (ARCH-TRACKER-02)", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-ws-"));
+  fixtures.add(ws);
+  const real = fs.realpathSync(ws);
+  for (const id of ["prod", "archive"]) {
+    fs.mkdirSync(path.join(real, id));
+    spawnSync("git", ["init", "-q"], { cwd: path.join(real, id) });
+  }
+  const manifest = path.join(real, "craftsman.workspace.json");
+  fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { prod: { root: "prod" }, archive: { root: "archive" } } }));
+  const root = path.join(real, "prod");
+  const selected = { id: "prod", root, stateDir: path.join(root, ".craftsman") };
+  fs.mkdirSync(path.dirname(archivePath(selected)), { recursive: true });
+  fs.writeFileSync(archivePath(selected), [
+    "# Tracker archive", "",
+    formatArchiveHeading({ plan: "docs/plans/a.md", date: "2026-10-18", goal: "g", doc: "d1", landed: "l1", archive: "--output=x" }), "",
+    formatArchiveHeading({ plan: "docs/plans/b.md", date: "2026-10-18", goal: "g", doc: "d2", landed: "l2" }), "",
+    // A closed sibling archived with the plan carries its own heading; an option-shaped value there is refused the same way.
+    formatArchiveHeading({ plan: "docs/plans/scrutinise-a.md", date: "2026-10-18", goal: "g", doc: "d3", landed: "l3", archive: "--output=y" }), "",
+  ].join("\n"));
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+  try {
+    const hit = lookupArchive({ plan: "a" }, selected);
+    assert.equal("restoreCommand" in hit, false);
+    assert.equal(fs.existsSync(path.join(real, "archive", "x")), false);
+    for (const key of ["scrutinise-a", "docs/plans/scrutinise-a.md"]) {
+      const sibling = lookupArchive({ plan: key }, selected);
+      assert.equal(sibling.archive, "--output=y", key);
+      assert.equal("restoreCommand" in sibling, false, key);
+    }
+    assert.equal(fs.existsSync(path.join(real, "archive", "y")), false);
+  } finally {
+    if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev;
+  }
+});
+
+test("tracker: archivePlan writes the archive sha into TRACKER-archive.md", () => {
+  const selected = context();
+  transition({ plan: "docs/plans/p.md", unit: "u", status: "COMPLETE", evidence: "abc" }, selected);
+  archivePlan({ plan: "docs/plans/p.md", goal: "g", doc: "d1", landed: "l1", archive: "a1" }, selected);
+  assert.match(fs.readFileSync(archivePath(selected), "utf8"), /^## docs\/plans\/p\.md \(\d{4}-\d{2}-\d{2}\) — g · doc d1 · landed l1 · archive a1$/m);
+  assert.equal(lookupArchive({ plan: "docs/plans/p.md" }, selected).archive, "a1");
 });

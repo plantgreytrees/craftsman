@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyInitPlan, buildInitPlan, buildUpdatePlan, claudeIgnorePatterns, pluginVersion, renderInitDiff } from "./init.mjs";
 import * as initMod from "./init.mjs";
+import * as sm from "./lib/settings-merge.mjs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -233,6 +234,7 @@ test("init --settings-diff shows the merge and writes nothing; declining leaves 
   const r = initCli(root, "--settings-diff");
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /\+ sandbox\.enabled: true/);
+  assert.doesNotMatch(r.stdout, /rm -r/);
   assert.match(r.stdout, /\+ permissions\.ask: Bash\(git push --force \*\)/);
   assert.equal(fs.readFileSync(settingsPath(root), "utf8"), original, "a preview never writes");
   assert.equal(fs.existsSync(path.join(root, ".craftsman", "init-backups")), false);
@@ -281,6 +283,265 @@ test("init: the settings merge and the other modes are mutually exclusive", () =
   assert.equal(r.status, 2);
   assert.match(r.stderr, /choose only one/);
   assert.equal(typeof initMod.previewSandboxSettings, "function");
+});
+
+// ARCH-SAFETY-16: the project block carries the origin host of each registered project. Hosts show in --settings-diff and nowhere else.
+const git = (cwd, ...args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+function repoWithOrigin(url) {
+  const root = fixture();
+  git(root, "init", "-q");
+  if (url) git(root, "remote", "add", "origin", url);
+  return root;
+}
+// a clean environment: no inherited workspace manifest, and a user config dir that is never the real one
+function initEnv(root, extra = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-home-"));
+  return { ...process.env, CLAUDE_PROJECT_DIR: root, CRAFTSMAN_WORKSPACE_MANIFEST: "", HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, ".claude"), ...extra };
+}
+const run = (root, flags, extra) => spawnSync(process.execPath, [INIT, ...[].concat(flags)], { cwd: root, encoding: "utf8", env: initEnv(root, extra) });
+
+test("init --settings-diff lists the origin host as an allowedDomains entry and no excludedCommands, and writes nothing", () => {
+  const root = repoWithOrigin("git@github.com:o/r.git");
+  const r = run(root, "--settings-diff");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\+ sandbox\.network\.allowedDomains: github\.com/);
+  assert.match(r.stdout, /\+ sandbox\.enabled: true/);
+  assert.doesNotMatch(r.stdout, /excludedCommands|autoMode|docker/);
+  assert.equal(fs.existsSync(settingsPath(root)), false, "a preview never writes");
+});
+
+test("init --settings-diff: no origin, or a host the file already allows, adds no allowedDomains entry", () => {
+  const bare = repoWithOrigin(null);
+  assert.doesNotMatch(run(bare, "--settings-diff").stdout, /allowedDomains/);
+  const withAllowed = (url) => {
+    const root = repoWithOrigin(url);
+    fs.mkdirSync(path.join(root, ".claude"));
+    fs.writeFileSync(settingsPath(root), JSON.stringify({ sandbox: { network: { allowedDomains: ["*.github.com"] } } }));
+    return run(root, "--settings-diff");
+  };
+  const covered = withAllowed("https://github.com/o/r.git");
+  assert.equal(covered.status, 0, covered.stderr);
+  assert.doesNotMatch(covered.stdout, /allowedDomains: github\.com/);
+  const other = withAllowed("https://gitlab.com/o/r.git");
+  assert.match(other.stdout, /\+ sandbox\.network\.allowedDomains: gitlab\.com/, "a host the file does not cover is still added");
+  assert.equal(run(fixture(), "--settings-diff").status, 0, "not a git repository: fail open, no host");
+});
+
+test("init --settings-write puts the host in .claude/settings.json once; the other modes put it nowhere", () => {
+  const root = repoWithOrigin("https://github.com/o/r.git");
+  for (const flag of ["--check", "--diff", "--write", "--user-settings-diff"]) {
+    const r = run(root, flag);
+    assert.doesNotMatch(r.stdout + r.stderr, /allowedDomains|github\.com\/o/, flag);
+  }
+  assert.equal(fs.existsSync(settingsPath(root)), false, "--write does not touch the sandbox settings");
+  assert.equal(run(root, "--settings-write").status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(root), "utf8")).sandbox.network, { allowedDomains: ["github.com"] });
+  assert.match(run(root, "--settings-write").stdout, /nothing to add/);
+});
+
+test("originHostsOf: the current project without a manifest; every registered project, de-duplicated, with one; a failing project is skipped", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-ws-"));
+  const mk = (name, url) => { const dir = path.join(ws, name); fs.mkdirSync(dir); git(dir, "init", "-q"); if (url) git(dir, "remote", "add", "origin", url); return dir; };
+  const top = mk("top", "https://github.com/o/top.git");
+  mk("a", "git@github.com:o/a.git");
+  mk("b", "ssh://git@git.example.com:2222/o/b.git");
+  mk("c", "git.example.com:/srv/c.git");
+  mk("noremote", null);
+  mk("local", "/srv/git/l.git");
+  const manifest = path.join(ws, "craftsman.workspace.json");
+  fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: Object.fromEntries(["a", "b", "c", "noremote", "local"].map((id) => [id, { root: id }])) }));
+  const saved = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  try {
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = path.join(ws, "missing.json");
+    assert.deepEqual(initMod.originHostsOf(top), ["github.com"], "no manifest: the current project");
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+    assert.deepEqual([...initMod.originHostsOf(top)].sort(), ["git.example.com", "github.com"], "every registered project once, hosts only");
+    fs.writeFileSync(manifest, "{ not json");
+    assert.deepEqual(initMod.originHostsOf(top), ["github.com"], "an unusable manifest fails open to the current project");
+    assert.deepEqual(initMod.originHostsOf(path.join(ws, "gone")), [], "a root with no repository gives no host");
+  } finally {
+    if (saved === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = saved;
+  }
+});
+
+test("init --settings-diff reads the hosts of every project in the workspace manifest", () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-ws-"));
+  git(ws, "init", "-q");
+  for (const [id, url] of [["a", "git@github.com:o/a.git"], ["b", "https://git.example.com/o/b.git"]]) {
+    fs.mkdirSync(path.join(ws, id)); git(path.join(ws, id), "init", "-q"); git(path.join(ws, id), "remote", "add", "origin", url);
+  }
+  fs.writeFileSync(path.join(ws, "craftsman.workspace.json"), JSON.stringify({ version: 1, projects: { a: { root: "a" }, b: { root: "b" } } }));
+  const r = run(ws, "--settings-diff");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\+ sandbox\.network\.allowedDomains: github\.com/);
+  assert.match(r.stdout, /\+ sandbox\.network\.allowedDomains: git\.example\.com/);
+});
+
+test("originHostsOf: a git that hangs is cut off after about two seconds and gives no host", () => {
+  const root = repoWithOrigin("https://github.com/o/r.git");
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-bin-"));
+  fs.writeFileSync(path.join(bin, "git"), "#!/bin/sh\nexec sleep 5\n", { mode: 0o755 });
+  const savedPath = process.env.PATH;
+  const savedManifest = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  try {
+    process.env.PATH = `${bin}${path.delimiter}${savedPath}`;
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = path.join(bin, "missing.json");
+    const started = Date.now();
+    assert.deepEqual(initMod.originHostsOf(root), []);
+    assert.ok(Date.now() - started < 4000, "returned well before the 5 s the stub sleeps");
+  } finally {
+    process.env.PATH = savedPath;
+    if (savedManifest === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = savedManifest;
+  }
+});
+
+// ARCH-SAFETY-16: the user-scope offer is separate: its own flags, its own file, diff first, written only by --user-settings-write.
+const userFile = (env) => path.join(env.CLAUDE_CONFIG_DIR, "settings.json");
+const ENTRY = sm.NETWORK_STEP_ALLOW;
+
+test("init --user-settings-diff shows the one autoMode.allow entry, names the file, and writes nothing", () => {
+  const root = fixture();
+  const env = initEnv(root);
+  const r = spawnSync(process.execPath, [INIT, "--user-settings-diff"], { cwd: root, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(userFile(env)), "the diff names the user settings file");
+  assert.ok(r.stdout.includes("+ autoMode.allow: $defaults"));
+  assert.ok(r.stdout.includes(`+ autoMode.allow: ${ENTRY}`));
+  assert.match(r.stdout, /direct-land mode \(planning\.featureBranches off\)/);
+  assert.deepEqual(r.stdout.split("\n").filter((line) => line.startsWith("+ ")).map((line) => line.split(":")[0]), ["+ autoMode.allow", "+ autoMode.allow"], "two list items under autoMode.allow, no other key");
+  assert.doesNotMatch(r.stdout, /tlsTerminate|sandbox\.credentials|permissions\./);
+  assert.equal(fs.existsSync(env.CLAUDE_CONFIG_DIR), false, "a preview never writes, not even the directory");
+  assert.equal(fs.existsSync(path.join(root, ".craftsman", "init-backups")), false);
+  assert.equal(fs.existsSync(settingsPath(root)), false);
+});
+
+test("init --user-settings-write creates the user file with $defaults first, once, and leaves the project file alone", () => {
+  const root = repoWithOrigin("https://github.com/o/r.git");
+  const env = initEnv(root);
+  const first = spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env });
+  assert.equal(first.status, 0, first.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(userFile(env), "utf8")), { autoMode: { allow: ["$defaults", ENTRY] } });
+  assert.equal(fs.existsSync(settingsPath(root)), false, "the user offer never writes the project file");
+  assert.equal(fs.existsSync(path.join(root, ".craftsman", "init-backups")), false, "a new file has nothing to back up");
+  const second = spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /nothing to add/);
+  assert.equal(JSON.parse(fs.readFileSync(userFile(env), "utf8")).autoMode.allow.length, 2);
+});
+
+test("init --user-settings-write appends to an existing list without $defaults, keeps every key, and backs the old file up under user/", () => {
+  const root = fixture();
+  const env = initEnv(root);
+  fs.mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+  const original = JSON.stringify({ model: "opus", permissions: { allow: ["Bash(npm test)"] }, autoMode: { allow: ["mine"] } }, null, 2);
+  fs.writeFileSync(userFile(env), original);
+  const r = spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  const next = JSON.parse(fs.readFileSync(userFile(env), "utf8"));
+  assert.deepEqual(next.autoMode.allow, ["mine", ENTRY]);
+  assert.equal(next.model, "opus");
+  assert.deepEqual(next.permissions, { allow: ["Bash(npm test)"] });
+  const stamps = fs.readdirSync(path.join(root, ".craftsman", "init-backups"));
+  assert.equal(stamps.length, 1);
+  assert.equal(fs.readFileSync(path.join(root, ".craftsman", "init-backups", stamps[0], "user", "settings.json"), "utf8"), original);
+  assert.ok(r.stdout.includes(path.join(fs.realpathSync(root), ".craftsman", "init-backups", stamps[0], "user", "settings.json")), "the output names the backup");
+});
+
+test("init --user-settings-write keeps the user file's mode, makes a new one private, and writes through a symlink", { skip: process.platform === "win32" && "POSIX modes" }, () => {
+  const root = fixture();
+  const env = initEnv(root);
+  fs.mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(userFile(env), JSON.stringify({ env: { TOKEN: "x" } }), { mode: 0o600 });
+  fs.chmodSync(userFile(env), 0o600);
+  assert.equal(spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env }).status, 0);
+  assert.equal(fs.statSync(userFile(env)).mode & 0o777, 0o600, "an existing private file stays private");
+  const fresh = initEnv(root);
+  assert.equal(spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env: fresh }).status, 0);
+  assert.equal(fs.statSync(userFile(fresh)).mode & 0o777, 0o600, "a new user file is private");
+  // a dotfiles-managed settings.json is a link: the link stays and the file it points at changes
+  const linked = initEnv(root);
+  const real = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-dotfiles-")), "settings.json");
+  fs.writeFileSync(real, JSON.stringify({ model: "opus" }));
+  fs.mkdirSync(linked.CLAUDE_CONFIG_DIR, { recursive: true });
+  fs.symlinkSync(real, userFile(linked));
+  assert.equal(spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env: linked }).status, 0);
+  assert.equal(fs.lstatSync(userFile(linked)).isSymbolicLink(), true, "the symlink survives");
+  assert.deepEqual(JSON.parse(fs.readFileSync(real, "utf8")).autoMode.allow, ["$defaults", ENTRY]);
+  assert.equal(JSON.parse(fs.readFileSync(real, "utf8")).model, "opus");
+});
+
+test("init: the project and the user offers are separate; neither flag writes the other's file", () => {
+  const root = repoWithOrigin("https://github.com/o/r.git");
+  const env = initEnv(root);
+  const write = (flag) => spawnSync(process.execPath, [INIT, flag], { cwd: root, encoding: "utf8", env });
+  assert.equal(write("--settings-write").status, 0);
+  assert.equal(fs.existsSync(env.CLAUDE_CONFIG_DIR), false, "--settings-write never touches the user directory");
+  assert.doesNotMatch(fs.readFileSync(settingsPath(root), "utf8"), /autoMode/);
+  assert.doesNotMatch(write("--settings-diff").stdout, /autoMode/);
+  fs.rmSync(settingsPath(root));
+  assert.equal(write("--user-settings-write").status, 0);
+  assert.equal(fs.existsSync(settingsPath(root)), false, "--user-settings-write never touches the project file");
+  const written = fs.readFileSync(userFile(env), "utf8");
+  assert.deepEqual(Object.keys(JSON.parse(written)), ["autoMode"], "the user file holds the entry and nothing of the project block");
+  assert.doesNotMatch(written, /allowedDomains|github\.com/);
+  const both = spawnSync(process.execPath, [INIT, "--user-settings-write", "--settings-write"], { cwd: root, encoding: "utf8", env });
+  assert.equal(both.status, 2);
+  assert.match(both.stderr, /choose only one/);
+  const modes = spawnSync(process.execPath, [INIT, "--user-settings-diff", "--write"], { cwd: root, encoding: "utf8", env });
+  assert.equal(modes.status, 2);
+});
+
+test("init --user-settings-*: CLAUDE_CONFIG_DIR unset means ~/.claude/settings.json", () => {
+  const root = fixture();
+  const env = initEnv(root);
+  delete env.CLAUDE_CONFIG_DIR;
+  const r = spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stdout.includes(path.join(env.HOME, ".claude", "settings.json")));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(env.HOME, ".claude", "settings.json"), "utf8")).autoMode.allow, ["$defaults", ENTRY]);
+});
+
+test("init --user-settings-write: a user file that is not valid JSON aborts and is left untouched", () => {
+  const root = fixture();
+  const env = initEnv(root);
+  fs.mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(userFile(env), "{ not json");
+  for (const flag of ["--user-settings-diff", "--user-settings-write"]) {
+    const r = spawnSync(process.execPath, [INIT, flag], { cwd: root, encoding: "utf8", env });
+    assert.equal(r.status, 2, flag);
+    assert.ok(r.stderr.includes(userFile(env)), "the error names the user file");
+  }
+  assert.equal(fs.readFileSync(userFile(env), "utf8"), "{ not json");
+});
+
+// A write that fails (a read-only directory, a sandbox that denies it) prints the path and the diff and exits non-zero; it does not throw.
+test("init --user-settings-write: a user directory that cannot be created prints the path and the diff and exits non-zero", () => {
+  const root = fixture();
+  const blocker = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-init-blocker-")), "not-a-dir");
+  fs.writeFileSync(blocker, "a file where the config directory should be");
+  const env = initEnv(root, { CLAUDE_CONFIG_DIR: path.join(blocker, ".claude") });
+  const r = spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env });
+  assert.notEqual(r.status, 0);
+  assert.ok(r.stderr.includes(path.join(blocker, ".claude", "settings.json")), "the path is printed");
+  assert.ok(r.stderr.includes(`+ autoMode.allow: ${ENTRY}`), "the diff is printed");
+  assert.doesNotMatch(r.stderr, /\n\s+at .*:\d+:\d+/, "a message, not a stack trace");
+});
+
+test("init --user-settings-write: a read-only user directory leaves the file as it was, prints the path and the diff, and exits non-zero", { skip: typeof process.getuid === "function" && process.getuid() === 0 ? "root ignores directory modes" : false }, () => {
+  const root = fixture();
+  const env = initEnv(root);
+  fs.mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+  const original = JSON.stringify({ model: "opus" }, null, 2) + "\n";
+  fs.writeFileSync(userFile(env), original);
+  fs.chmodSync(env.CLAUDE_CONFIG_DIR, 0o555);
+  try {
+    const r = spawnSync(process.execPath, [INIT, "--user-settings-write"], { cwd: root, encoding: "utf8", env });
+    assert.notEqual(r.status, 0);
+    assert.ok(r.stderr.includes(userFile(env)), "the path is printed");
+    assert.ok(r.stderr.includes(`+ autoMode.allow: ${ENTRY}`), "the diff is printed");
+    assert.equal(fs.readFileSync(userFile(env), "utf8"), original);
+    assert.deepEqual(fs.readdirSync(env.CLAUDE_CONFIG_DIR), ["settings.json"], "no temp file left behind");
+  } finally { fs.chmodSync(env.CLAUDE_CONFIG_DIR, 0o755); }
 });
 
 // Round 5 (38.2): the architecture dir comes from the merged project config, so craftsman.project.json applies.

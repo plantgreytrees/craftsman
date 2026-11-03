@@ -58,3 +58,5 @@ flowchart LR
 - **Archive repo:** the dedicated Git repository holding finished docs for every project in the workspace.
 - **Pointer:** `archive:<product-id>/<kind>/<slug>@<sha>`, what a mention becomes after archiving.
 - **Candidate:** a closed plan not yet archived, with the reason it is waiting.
+
+Owner decision (external-project-board, D2): ARCH-ARCHIVE-05 -> 09 (the archive push is owner-run only; a scripted push that PARKs a rejection is a future amendment) and ARCH-ARCHIVE-07 -> 10 (its check now names the prune-command tests in `views-wiring.test.mjs`). Rejected: building the scripted push now.

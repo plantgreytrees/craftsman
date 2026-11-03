@@ -4,7 +4,7 @@
 // tokens. This is the empirical answer to "which tools pay for themselves?".
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { loadConfig, readEvents, topRules } from "./lib/core.mjs";
+import { isMain, loadConfig, readEvents, topRules } from "./lib/core.mjs";
 
 // Event type -> hook script whose hooks.json timeout bounds it (ARCH-SLIM-07).
 const EV_SCRIPT = { gate: "quality-gate.mjs", preguard: "pre-guard.mjs", stop: "stop-gate.mjs" };
@@ -34,7 +34,7 @@ export function hookTimeouts(file = fileURLToPath(new URL("../hooks/hooks.json",
 export function latencySection(events, timeouts = hookTimeouts()) {
   const byEv = new Map();
   for (const e of events) {
-    if (typeof e.ms !== "number") continue;
+    if (typeof e.ms !== "number" || e.ev === "dashboard_render") continue;
     if (!byEv.has(e.ev)) byEv.set(e.ev, []);
     byEv.get(e.ev).push(e.ms);
   }
@@ -48,6 +48,16 @@ export function latencySection(events, timeouts = hookTimeouts()) {
     lines.push(`  ${String(ev).padEnd(12)} n=${arr.length} · p50 ${pct(arr, 50)}ms · p95 ${p95}ms${small}${flag}`);
   }
   return lines.join("\n");
+}
+
+// dashboard_render p50/p95, beside the hook latency section (ARCH-VIEWS-10); skipped renders are counted apart.
+export function renderSection(events) {
+  const all = events.filter((e) => e.ev === "dashboard_render" && typeof e.ms === "number");
+  const done = all.filter((e) => !e.skipped).map((e) => e.ms);
+  const skipped = all.length - done.length;
+  if (!all.length) return "Dashboard render: no samples yet";
+  const stat = done.length ? ` · p50 ${pct(done, 50)}ms · p95 ${pct(done, 95)}ms` : "";
+  return `Dashboard render: ${done.length} rendered${stat} · ${skipped} skipped`;
 }
 
 // Protected-path blocks: only preguard events whose result is "blocked";
@@ -132,6 +142,21 @@ export function approvalSection(events) {
   return `  approvals: ${secs.length} decided · p50 ${pct(secs, 50)}s · p95 ${pct(secs, 95)}s`;
 }
 
+// Sandbox bypasses (dangerouslyDisableSandbox retries): auto mode refuses them, so each one is a likely stall.
+// pre-guard counts them from the flag alone; an event holds a session id and the first command word, never command text.
+export function sandboxBypassSection(events) {
+  const hits = events.filter((e) => e.ev === "sandbox_bypass");
+  if (!hits.length) return "Sandbox bypasses: none recorded";
+  const count = (key) => hits.reduce((map, e) => map.set(key(e), (map.get(key(e)) || 0) + 1), new Map());
+  const bySession = [...count((e) => e.sid ?? "unknown")].sort((a, b) => b[1] - a[1]);
+  const byHead = [...count((e) => e.head || "?")].sort((a, b) => b[1] - a[1]);
+  const lines = [`Sandbox bypasses: ${hits.length} calls in ${bySession.length} sessions`];
+  for (const [sid, n] of bySession.slice(0, 10)) lines.push(`  ${String(sid).padEnd(38)} ${n} calls`);
+  if (bySession.length > 10) lines.push(`  … and ${bySession.length - 10} more sessions`);
+  lines.push(`  top commands: ${byHead.slice(0, 5).map(([head, n]) => `${head} ${n}`).join(" · ")}`);
+  return lines.join("\n");
+}
+
 function main() {
   const cfg = loadConfig();
   const events = readEvents();
@@ -159,13 +184,14 @@ function main() {
   const cacheRate = gate.length ? Math.round((100 * (gr.cached || 0)) / gate.length) : 0;
   console.log(`  cache hit rate: ${cacheRate}%\n`);
 
-  console.log(`${latencySection(events)}\n`);
+  console.log(`${latencySection(events)}\n${renderSection(events)}\n`);
 
   console.log(`PreToolUse protected-path blocks: ${pre.length}`);
   console.log(guardReasonsSection(events));
   console.log(`Stop gate: ${stop.length} runs · blocked ${stop.filter((e) => e.result === "block").length}`);
   console.log(approvalSection(events));
   console.log(`SessionStart injections: ${ss.length}`);
+  console.log(sandboxBypassSection(events));
 
   const router = events.filter((e) => e.ev === "router");
   console.log(`\nReview router: ${router.length} decisions`);
@@ -221,4 +247,4 @@ function main() {
   console.log(`\nRead: a layer with ~0% block rate but non-trivial latency is a candidate to cut.`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (isMain(import.meta.url)) main();

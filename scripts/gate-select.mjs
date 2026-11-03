@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic backstop for `_shared-execution.md` step 5's mandatory
-// specialist gates. Before this script, "does this diff need ui-ux-reviewer /
+// specialist gates. Before this script, "does this diff need the ui-gate (Artist or ui-ux-reviewer a11y) /
 // migration-reviewer / api-reviewer / dependency-auditor / performance-reviewer
 // / observability-reviewer" was pure prose the orchestrating model had to
 // remember and apply correctly, unit after unit, with nothing to catch a

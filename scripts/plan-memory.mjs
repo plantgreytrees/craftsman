@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { atomicWrite, logEvent, projectContext, readStdin } from "./lib/core.mjs";
+import { atomicWrite, isMain, logEvent, projectContext, readStdin } from "./lib/core.mjs";
 
 const MAX_SUMMARY = 220; // one terse fact, not a paragraph — see normalizeRecord's comment
 const MAX_SOURCE_FILES = 8;
@@ -323,7 +323,7 @@ function readAllRecords(file) {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const output = input.action === "record" ? recordMemory(input)

@@ -9,6 +9,7 @@
     "maxSessions": 1
   },
   "archive": { "project": "archive" },
+  "export": { "enabled": true, "atStop": true },
   "timeoutMs": 20000,
   "maxFeedbackLines": 40,
   "noisePatterns": [

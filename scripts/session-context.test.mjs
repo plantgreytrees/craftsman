@@ -96,6 +96,40 @@ test("session-context: the HAND-OFF line carries the plan's level and adds no li
   });
 });
 
+// ARCH-AUTO-11: SessionStart re-arms scope-required on resume only for a hand-off that still lists
+// units to run; a closing hand-off (nothing left) used to lock a later /architect out of every Read.
+function resumeMarker(dir, sid, handoff) {
+  const session = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(session, { recursive: true });
+  if (handoff) fs.writeFileSync(path.join(session, "handoff.json"), JSON.stringify(handoff));
+  const result = run(SESSION_CONTEXT, dir, { session_id: sid });
+  assert.equal(result.status, 0, result.stderr);
+  return fs.existsSync(path.join(session, "scope-required"));
+}
+
+test("session-context: a hand-off listing remaining units re-arms scope-required (ARCH-AUTO-11)", () => {
+  withProject((dir) => {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    const handoff = { plan: "p", unit: "u1", next_action: "go", completed_units: [], remaining_units: ["u2"] };
+    assert.equal(resumeMarker(dir, "resume-open", handoff), true);
+  });
+});
+
+const closing = { plan: "p", unit: "u1", next_action: "done", completed_units: ["u1"] };
+for (const [name, handoff] of [
+  ["a closing hand-off (remaining_units is empty)", { ...closing, remaining_units: [] }],
+  ["a hand-off without the remaining_units field", closing],
+  ["a hand-off whose remaining_units is not an array", { ...closing, remaining_units: "u2" }],
+  ["no hand-off at all", null],
+]) {
+  test(`session-context: ${name} arms nothing (ARCH-AUTO-11)`, () => {
+    withProject((dir) => {
+      spawnSync("git", ["init", "-q"], { cwd: dir });
+      assert.equal(resumeMarker(dir, "resume-none", handoff), false);
+    });
+  });
+}
+
 // 7.2: SessionStart says whether the guards are on, and if not, why (ARCH-SAFETY-04).
 function startState(dir, { env = {}, setup } = {}) {
   spawnSync("git", ["init", "-q"], { cwd: dir });
@@ -201,6 +235,42 @@ test("session-context: no sandbox line when project settings, user settings or a
   assert.equal(sandboxNotice(({ managed }) => enable(path.join(managed, "managed-settings.json"))), "");
 });
 
+// A sandbox that is on but half-configured pushes git, docker and registry calls into unsandboxed
+// retries that auto mode refuses: SessionStart names what is missing, in one line.
+function enableSandbox(dir, extra = {}) {
+  fs.mkdirSync(path.join(dir, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".claude", "settings.json"), JSON.stringify({ sandbox: { enabled: true, ...extra } }));
+}
+
+test("session-context: sandbox on with a git host that is not allowed gets one gap line naming the host", () => {
+  const notice = sandboxNotice(({ dir }) => {
+    enableSandbox(dir);
+    spawnSync("git", ["remote", "add", "origin", "https://github.com/o/r.git"], { cwd: dir });
+  });
+  assert.match(notice, /^craftsman: the Claude Code sandbox is on, but github\.com is not in sandbox\.network\.allowedDomains/);
+  assert.match(notice, /dangerouslyDisableSandbox/);
+  assert.equal(notice.split("\n").length, 1);
+});
+
+test("session-context: sandbox on with compose files and no docker exclusion, and a malformed exclusion, are named too", () => {
+  const notice = sandboxNotice(({ dir }) => {
+    enableSandbox(dir, { excludedCommands: ["build/, docs/plans/, src/**"] });
+    fs.writeFileSync(path.join(dir, "docker-compose.yml"), "services: {}\n");
+  });
+  assert.match(notice, /docker/);
+  assert.match(notice, /build\/, docs\/plans\//);
+  assert.equal(notice.split("\n").length, 1);
+});
+
+test("session-context: no gap line when the sandbox is on and the host, docker and exclusions are in order", () => {
+  assert.equal(sandboxNotice(({ dir }) => {
+    enableSandbox(dir, { network: { allowedDomains: ["github.com"] }, excludedCommands: ["docker compose *"] });
+    spawnSync("git", ["remote", "add", "origin", "git@github.com:o/r.git"], { cwd: dir });
+    fs.writeFileSync(path.join(dir, "compose.yaml"), "services: {}\n");
+  }), "");
+  assert.equal(sandboxNotice(({ dir }) => enableSandbox(dir)), "", "no remote and no compose file: nothing to report");
+});
+
 // 13.3a: SessionStart records the hash of every guarded doc.
 test("session-context: SessionStart snapshots the hash of every guarded doc", () => {
   withProject((dir) => {
@@ -245,4 +315,31 @@ test("ARCH-APPROVAL-05: SessionStart names approved-but-unlanded runs in one lin
     assert.match(lines[0], /p-a/);
     assert.doesNotMatch(lines[0], /p-b|p-c/);
   });
+});
+
+// One predicate (handoffArmsScope, lib/core.mjs) decides arming for SessionStart and for account-switch adopt;
+// two inline copies are how adopt came to arm a closing hand-off that SessionStart left alone.
+test("handoffArmsScope: true only for a hand-off whose remaining_units is a non-empty array (ARCH-AUTO-11)", async () => {
+  const { handoffArmsScope } = await import("./lib/core.mjs");
+  for (const [handoff, armed] of [
+    [{ remaining_units: ["u2"] }, true],
+    [{ remaining_units: [] }, false],
+    [{}, false],
+    [{ remaining_units: "u2" }, false],
+    [{ remaining_units: null }, false],
+    [{ remaining_units: { length: 1 } }, false],
+    [null, false],
+    [undefined, false],
+  ]) {
+    assert.equal(handoffArmsScope(handoff), armed, JSON.stringify(handoff));
+  }
+});
+
+test("session-context and account-switch both arm through handoffArmsScope, with no inline copy (ARCH-AUTO-11)", () => {
+  for (const file of ["session-context.mjs", "account-switch.mjs"]) {
+    const source = fs.readFileSync(path.join(ROOT, file), "utf8");
+    assert.match(source, /import\s*\{[^}]*\bhandoffArmsScope\b[^}]*\}\s*from "\.\/lib\/core\.mjs"/, `${file} imports it`);
+    assert.match(source, /\bhandoffArmsScope\(/, `${file} calls it`);
+    assert.doesNotMatch(source, /remaining_units\??\.length/, `${file} keeps no inline copy of the rule`);
+  }
 });

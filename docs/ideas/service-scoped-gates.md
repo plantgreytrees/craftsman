@@ -87,7 +87,7 @@ None. Checked against code: stop-gate emits no event for a dirty stop with no co
 - **"Do nothing" is weaker than stated:** units read the submodule's root, which has no config, so they get plugin defaults (`dotnet format`, no `extraChecks`); config layering fixes that.
 - **Recommendation 1 is about 10 lines, not one,** across `stop-gate.mjs` and `quality-gate.mjs`; the skip taxonomy also needs `red-at-start` and `snapshot-pending`.
 - **Hidden cost found:** `loadWorkspaceManifest` already runs 17 `git rev-parse` per hook in Gleam (`core.mjs:152,157`); a cached manifest is a separate fix.
-- **Decisions taken with the owner:** inherit workspace config by default with `{workspaceRoot}`; `nearest:<marker>` downward cwd; session change list as the Stop source; scoped failures block; `extraChecks` get the placeholders; a budget kill is said once. Rules: ARCH-STATE-16 to 19, ARCH-LAND-30.
+- **Decisions taken with the owner:** inherit workspace config by default with `{workspaceRoot}`; `nearest:<marker>` downward cwd; session change list as the Stop source; scoped failures block; `extraChecks` get the placeholders; a budget kill is said once. Rules: ARCH-STATE-19 to 22, ARCH-LAND-37.
 
 ## Next step
 `/architect service-scoped-gates` (add `--deep`: it touches STATE/LAND/ENGINE rules if the owner lookup is revived). Start with recommendation 1 — a one-line telemetry change needs no architecture pass.

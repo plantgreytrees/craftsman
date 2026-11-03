@@ -3,7 +3,7 @@
 > and `/architect --update auto` should be run.
 
 # Auto architecture
-_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 `/craftsman:auto <request>` is the one command that takes work from an idea
@@ -46,6 +46,7 @@ sequenceDiagram
 | ARCH-AUTO-06 | The guard treats `/auto` like `/orchestrate` | Scope and acceptance enforcement apply | — |
 | ARCH-AUTO-07 | Paste fallback | `-p`, VS Code, and installs without mods | — |
 | ARCH-AUTO-08 | `FEATURE_MERGED` counts as open | Otherwise `/auto` stops granting runners before the feature lands | Count it as landed |
+| ARCH-AUTO-10 | `/auto` no longer sets scope-required; the `/orchestrate` its goal starts with does (supersedes AUTO-06) | Setting it at invocation locked Phase A's `/architect` and `/plan` out of their own docs (2026-10-27) | Exempt doc writes under a doc-write grant (widens a pre-guard bypass); keep it and tell users to run `/architect`/`/plan` first |
 
 ## Trade-offs & known limits
 Phase A can be long: by design it asks everything. Unknown decisions that
@@ -56,3 +57,14 @@ only surface mid-run still park, which costs a Phase C round.
 
 ## Plan-hierarchy additions (2026-10-18)
 ARCH-AUTO-09 supersedes ARCH-AUTO-01: the stop rule covers every descendant row of the slug. See [plan](./plan.md) for the reasoning and rejected alternatives.
+
+## Phase 2 amendment (2026-11-01, owner-approved)
+_Verified at `a0cb8a2`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The rest of the pass is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+
+**Status: implemented (2026-11-03).** SessionStart and the account-switch `adopt` re-arm the marker only for a hand-off that lists remaining units (one predicate, `handoffArmsScope`), a typed craftsman command ends the run's marker and session scope, and `handoff.mjs` refuses a unit hand-off without a `remaining_units` array.
+
+- **ARCH-AUTO-11**: the scope-required marker belongs to the `/orchestrate` run that armed it.
+  - **Re-arming:** SessionStart re-arms it only when the hand-off still lists remaining units.
+  - **Ending:** a craftsman command the user types (never a model Skill call) clears the session marker and the session scope. Unit scopes keyed to a worktree are left alone, and an active `/auto` run keeps everything (ARCH-AUTO-10).
+  - **Why:** SessionStart re-armed the marker after compaction from a closing hand-off with nothing left to run, so a later `/architect` couldn't Read anything until it activated a scope. The sweep counted 126 blocks of this kind, mostly `/plan` and `/investigate` edits of `docs/plans/**` after an `/orchestrate`.
+  - **Rejected:** limiting the marker to writes, which would let Reads in a unit skip the boundary analysis; leaving it as is.

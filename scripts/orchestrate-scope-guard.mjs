@@ -21,7 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig, orchestrationEnabled, RECORDED_COMMANDS, recordCommand, STATE_DIR, projectContext, readStdin, sidOf, acceptancePath, recordAcceptanceOwnership, grantAgent, grantRunnerDispatches, runnerDispatchCount, planSlugOf, writeAutoMarker, readAutoMarker, autoActive } from "./lib/core.mjs";
-import { requiredFile } from "./scope.mjs";
+import { requiredFile, scopeFile } from "./scope.mjs";
 import { loadIndex, resolve } from "./lib/plan-index.mjs";
 
 // Units in the invoked plan (the `- id:` steps of its front matter only, not
@@ -101,6 +101,8 @@ const command = typeof toolInput.command === "string" ? toolInput.command
 // text and hard-locked sessions that had merely talked about the script.
 const invocation = /^\/(?:craftsman:)?(orchestrate|auto|scrutinise|idea|architect)(?=\s|$)(.*)/s.exec(command.trim());
 const invoked = invocation?.[1];
+// Typed into the prompt, not a model's tool call: the only route that may end an /orchestrate run (ARCH-AUTO-11).
+const typedPrompt = typeof toolInput.command !== "string" && typeof toolInput.skill !== "string" && typeof input?.prompt === "string";
 // The commands pre-guard looks for before it lets doc-write.mjs or toggle.mjs run (ARCH-SAFETY-05).
 const recorded = new RegExp(`^/(?:craftsman:)?(${RECORDED_COMMANDS.join("|")})(?=\\s|$)`).exec(command.trim())?.[1];
 if (!invoked && !recorded) process.exit(0);
@@ -111,10 +113,23 @@ const cfg = loadConfig(context);
 if (!orchestrationEnabled()) process.exit(0);
 // Root session dir, as every grant (ARCH-STATE-06): pre-guard reads it from the same place.
 if (recorded) recordCommand(sidOf(input), recorded, typeof input?.prompt === "string" ? "prompt" : "skill", { stateDir: STATE_DIR });
+
+// The scope-required marker belongs to the /orchestrate run that armed it (ARCH-AUTO-11): any other craftsman
+// command the user types ends that run, so the session-level marker and session scope go. Never a Skill call,
+// an active /auto run (ARCH-AUTO-10), or a unit's files keyed by its worktree (ARCH-STATE-03): only the two
+// session-level names are unlinked, and a file that will not go only leaves the guard on.
+const sid = sidOf(input);
+const ended = invoked || recorded;
+if (typedPrompt && ended && ended !== "orchestrate" && ended !== "auto" && !autoActive(sid, context)) {
+  for (const file of [requiredFile({ session_id: input.session_id }), scopeFile({ session_id: input.session_id })]) {
+    try { fs.unlinkSync(file); } catch { /* absent, or best-effort */ }
+  }
+}
 if (!invoked) process.exit(0);
 
-// /auto executes a plan exactly as /orchestrate does (ARCH-AUTO-06).
-if (invoked === "orchestrate" || invoked === "auto") {
+// Only /orchestrate arms scope-required (ARCH-AUTO-10): /auto's Phase A writes docs,
+// and the /orchestrate its goal starts with arms it before any source edit.
+if (invoked === "orchestrate") {
   // Use scope.mjs's own path function directly — this must land at EXACTLY
   // the path pre-guard.mjs's requiredFile(input) reads, and duplicating that
   // path computation by hand would risk drifting apart from it silently.
@@ -134,7 +149,6 @@ const flags = levelFlags(args);
 const invokedSlug = planSlugOf(flags.rest);
 const resolved = featurePlan(invokedSlug, context, flags);
 const slug = resolved.slug;
-const sid = sidOf(input);
 let autoRun = invoked === "auto";
 if (autoRun) writeAutoMarker(sid, slug);
 else if (invoked === "orchestrate" && autoActive(sid, context)) {
@@ -142,7 +156,7 @@ else if (invoked === "orchestrate" && autoActive(sid, context)) {
   if (slug) writeAutoMarker(sid, slug, readAutoMarker(sid).at);
 }
 
-// /auto grants its per-unit runner dispatches (ARCH-AUTO-06): on /auto
+// /auto grants its per-unit runner dispatches (ARCH-AUTO-10): on /auto
 // itself, and on the /orchestrate its unattended /goal starts with. Sized
 // from the resolved feature plan's units, not the parent doc's; a fresh invocation re-arms, never accumulates.
 if (autoRun) grantRunnerDispatches(runnerDispatchCount(resolved.units || planUnitCount(slug, context), resolved.features || 0), sid, context);

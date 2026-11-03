@@ -65,8 +65,10 @@ test("safety.rules.md holds ARCH-SAFETY-01 through 11, each decided with a check
   const human = read("docs/architecture/safety.md");
   for (let n = 1; n <= 11; n++) {
     const id = `ARCH-SAFETY-${String(n).padStart(2, "0")}`;
-    const line = rules.split("\n").find((l) => l.includes(`**${id}**`));
+    let line = rules.split("\n").find((l) => l.includes(`**${id}**`));
     assert.ok(line, `${id} in safety.rules.md`);
+    const successor = /\[superseded by (ARCH-SAFETY-\d+)\]/.exec(line)?.[1];
+    if (successor) line = rules.split("\n").find((l) => l.includes(`**${successor}**`)) || "";
     assert.match(line, /\[decided\]/, id);
     assert.match(line, /— check: .+ — cite: \S+:\d+/, `${id} has a check and a cite`);
     assert.ok(human.includes(`| ${id} |`), `${id} in safety.md`);
@@ -77,8 +79,9 @@ test("docs/architecture/README.md lists the safety area", () => {
   assert.match(read("docs/architecture/README.md"), /\[safety\]\(\.\/safety\.md\)/);
 });
 
-test("CHANGELOG [Unreleased] has one entry per feature area, including the steps 24-26 reconciliation", () => {
-  const unreleased = read("CHANGELOG.md").match(/^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## \[)/m)[1];
+// The fixes-and-safety entries shipped in 2.3.0.
+test("CHANGELOG 2.3.0 has one entry per feature area, including the steps 24-26 reconciliation", () => {
+  const unreleased = read("CHANGELOG.md").match(/^## \[2\.3\.0\][^\n]*\n([\s\S]*?)(?=^## \[)/m)[1];
   assert.match(unreleased, /### Fixed/);
   assert.match(unreleased, /### Added/);
   assert.match(unreleased, /guard-failclosed|steps? 24/i);

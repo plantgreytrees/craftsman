@@ -56,3 +56,38 @@ test("digest: FEATURE_MERGED rows count with the open work, not as complete", ()
   assert.equal(digest.done.length, 0);
   assert.equal(digest.plans[0].percent, 0);
 });
+
+test("digest --html: writes dashboard and notes under the export root and prints the path", async () => {
+  const { htmlOutput } = await import("./digest.mjs");
+  const { exportRoot } = await import("./lib/export-notes.mjs");
+  const selected = context();
+  transition({ plan: "docs/plans/a.md", unit: "unit-1", status: "PENDING" }, selected);
+  const out = htmlOutput(selected);
+  assert.equal(out.length, 1);
+  assert.equal(out[0], path.join(exportRoot(selected), "dashboard.html"));
+  assert.ok(fs.existsSync(out[0]));
+  assert.ok(fs.existsSync(path.join(exportRoot(selected), "notes")));
+});
+
+test("digest --html --publish: adds a final publish line", async () => {
+  const { htmlOutput } = await import("./digest.mjs");
+  const selected = context();
+  const out = htmlOutput(selected, { publish: true });
+  assert.equal(out.length, 2);
+  assert.equal(out[1], `publish: ${out[0]}`);
+});
+
+test("digest --html: export.enabled false prints a one-line notice and writes nothing", async () => {
+  const { htmlOutput } = await import("./digest.mjs");
+  const { exportRoot } = await import("./lib/export-notes.mjs");
+  const selected = context();
+  fs.writeFileSync(path.join(selected.root, "craftsman.config.json"), JSON.stringify({ export: { enabled: false } }));
+  const out = htmlOutput(selected, { publish: true });
+  assert.equal(out.length, 1);
+  assert.ok(!fs.existsSync(exportRoot(selected)));
+});
+
+test("digest.mjs has no network or Artifact call", () => {
+  const src = fs.readFileSync(new URL("./digest.mjs", import.meta.url), "utf8");
+  assert.ok(!/\bfetch\s*\(|node:(https?|net|tls|dgram)|child_process|\bhttps?:\/\/|Artifact/.test(src));
+});

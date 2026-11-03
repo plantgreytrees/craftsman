@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import {
   PROJECT_ROOT, PLUGIN_ROOT, mainCheckoutRoot, atomicWrite, orchestrationEnabled, isGitRoot, loadConfig, logEvent, readStdin,
   projectContext, resolveSelectedProject, clearWorktreeBinding, writeWorktreeBinding,
-  sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR } from "./lib/core.mjs";
+  isMain, sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR } from "./lib/core.mjs";
 import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
 import { namesSelfScoped, realEntries } from "./lib/self-protect.mjs";
 
@@ -93,16 +93,21 @@ export function scopeRequired(input) {
   });
 }
 
+// Every live scope manifest of the session, in file-name order (ARCH-STATE-18).
+export function activeScopes(input) {
+  let scopes = [];
+  try {
+    scopes = fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).sort().map((n) => {
+      try { return JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), n), "utf8")); } catch { return null; }
+    }).filter((scope) => scope && (!scope.worktree_path || fs.existsSync(scope.worktree_path)));
+  } catch { return []; }
+  return input?.project ? scopes.filter((scope) => (scope.project || ".") === input.project) : scopes;
+}
+
 // A unit scope whose worktree is gone is stale: it must never be enforced on
 // root or make the remaining scopes ambiguous.
 export function readScope(input) {
-  let scopes = [];
-  try {
-    scopes = fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).map((n) => {
-      try { return JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), n), "utf8")); } catch { return null; }
-    }).filter((scope) => scope && (!scope.worktree_path || fs.existsSync(scope.worktree_path)));
-  } catch { return null; }
-  if (input?.project) scopes = scopes.filter((scope) => (scope.project || ".") === input.project);
+  const scopes = activeScopes(input);
   if (!scopes.length) return null;
   const absolute = targetOf(input);
   const matching = scopes.filter((scope) => inside(path.resolve(scope.worktree_path || scope.project_root), absolute));
@@ -123,7 +128,7 @@ function sameRepository(first, second) {
   } catch { return false; }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const selectedContext = projectContext(input.project || ".");
@@ -140,7 +145,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       let binding;
       try { binding = JSON.parse(fs.readFileSync(worktreeBindingPath(input, { ...selectedContext, worktreePath: input.worktree_path }), "utf8")); } catch {}
       if (binding && binding.session_id !== sidOf(input)) throw new Error("worktree is owned by another session");
-      clearWorktreeBinding(input, selectedContext);
+      refuseDirtyWorktree(input); clearWorktreeBinding(input, selectedContext);
       // The unit's scope and scope-required files go with its binding; the
       // session's own scope (no worktree) is never released here.
       if (input.worktree_path) {
@@ -211,4 +216,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.stderr.write(`craftsman: scope activation failed: ${error.message}\n`);
     process.exitCode = 2;
   }
+}
+
+function refuseDirtyWorktree(input) {
+  const w = input.worktree_path;
+  if (!w || !fs.existsSync(w)) return;
+  let dirty;
+  try { dirty = execFileSync("git", ["-C", w, "status", "--porcelain"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
+  if (dirty === "") return;
+  logEvent({ ev: "scope_release_refused", sid: sidOf(input), worktree: w });
+  process.stderr.write(dirty === undefined
+    ? `craftsman: scope release refused: ${w} is not a readable git worktree — remove it, run \`git worktree prune\`, and release again.\n`
+    : `craftsman: scope release refused: ${w} has uncommitted changes — commit them (wip: when parking or blocking), then release again.\n`);
+  process.exit(2);
 }

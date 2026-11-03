@@ -347,11 +347,13 @@ export const AUTO_MARKER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const OPEN_STATUSES = new Set(["PENDING", "IN_PROGRESS", "FEATURE_MERGED"]);
 const LANDED_STATUSES = new Set(["MERGED", "COMPLETE"]);
 export const autoMarkerFile = (sid) => path.join(sessionDir(sid), "auto-active");
-// The plan slug a command's arguments name: its first non-flag word, with an
-// optional docs/plans/ prefix and .md suffix. null when it isn't slug-shaped.
+// The plan slug a command's arguments name: its first non-flag word; a path
+// ending in `<slug>.md` maps to its basename. null when it isn't slug-shaped.
 export function planSlugOf(args) {
-  const slug = (String(args || "").trim().split(/\s+/).find((a) => !a.startsWith("-")) || "")
-    .replace(/^docs\/plans\//, "").replace(/\.md$/, "");
+  const word = String(args || "").trim().split(/\s+/).find((a) => !a.startsWith("-")) || "";
+  const inPlans = /(^|\/)docs\/plans\/[^/]+$/.test(word);
+  if (word.includes("/") && !inPlans) return null;
+  const slug = (inPlans ? word.slice(word.lastIndexOf("/") + 1) : word).replace(/\.md$/, "");
   return /^[A-Za-z0-9._-]+$/.test(slug) ? slug : null;
 }
 export function writeAutoMarker(sid, plan, at = new Date().toISOString()) {
@@ -499,23 +501,23 @@ export function ownsAcceptance(sid, text, context = null) {
     return ref.identity ? ref.identity === acceptanceIdentity(text) : ref.hash === sha1(String(text).trim());
   } catch { return false; }
 }
-// Every criterion as { line, unit, feature, done }. `- [ ] [unit:<id>] …`
-// scopes a criterion to one plan unit (its tracker unit or scope_id);
-// `[feature:<id>]` scopes it to one feature's land-feature (ARCH-TRACKER-08).
-// Lines with neither tag are untagged.
+// Every criterion as { line, unit, feature, plan, done }. Leading tags, any
+// order: `[unit:<id>]` one plan unit, `[feature:<id>]` one feature's
+// land-feature (ARCH-TRACKER-08), `[plan:<slug>]` one whole plan (ARCH-TRACKER-15).
 export function acceptanceCriteria(text) {
-  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.test(l)).map((line) => ({
-    line: line.trim(),
-    unit: /^\s*[-*]\s*\[[ xX]\]\s*(?:\[feature:[^\]\s]+\]\s*)?\[unit:([^\]\s]+)\]/.exec(line)?.[1] || null,
-    feature: /^\s*[-*]\s*\[[ xX]\]\s*(?:\[unit:[^\]\s]+\]\s*)?\[feature:([^\]\s]+)\]/.exec(line)?.[1] || null,
-    done: ACCEPTANCE_LINE.exec(line)[2] !== " ",
-  }));
+  return String(text).split("\n").filter((l) => ACCEPTANCE_LINE.test(l)).map((line) => {
+    const tags = {};
+    for (let rest = line.replace(ACCEPTANCE_LINE, ""), m; (m = /^\s*\[(unit|feature|plan):([^\]\s]+)\]/.exec(rest)); rest = rest.slice(m[0].length)) tags[m[1]] ??= m[2];
+    return { line: line.trim(), unit: tags.unit || null, feature: tags.feature || null,
+      plan: tags.plan ? planSlugOf(tags.plan) : null, done: ACCEPTANCE_LINE.exec(line)[2] !== " " };
+  });
 }
-// The criteria gating one feature's land-feature: its `[feature:<id>]` lines,
-// plus the untagged ones only when it is the plan's last feature.
-export function featureCriteria(text, featureId, isLast = false) {
-  return acceptanceCriteria(text).filter((c) =>
-    c.feature != null ? c.feature === String(featureId) : isLast && !c.unit);
+// A feature's land-feature criteria: its `[feature:<id>]` lines, plus untagged
+// ones when it is the last feature; with `plan`, another plan's line never matches.
+export function featureCriteria(text, featureId, isLast = false, plan = null) {
+  const mine = plan == null ? null : planSlugOf(plan);
+  return acceptanceCriteria(text).filter((c) => !(mine != null && c.plan != null && c.plan !== mine) &&
+    (c.feature != null ? c.feature === String(featureId) : isLast && !c.unit));
 }
 export function uncheckedAcceptance(text) {
   return acceptanceCriteria(text).filter((c) => !c.done);
@@ -636,24 +638,28 @@ export function orchestrationEnabled(env = process.env) {
 export const DOC_WRITER_COMMANDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check"];
 // `instruction` writes nothing under docs/, so it is not a doc writer; it is recorded because goal-token.mjs mints only after it (or /auto).
 export const RECORDED_COMMANDS = [...DOC_WRITER_COMMANDS, "toggle", "instruction"];
-const COMMAND_TTL_MS = 3600000;
+// How long a record is honoured is a function of the command. A record lasts the session, because a model Skill call can create a
+// doc writer's anyway, so expiring it protects nothing; /toggle's is the exception: only the user's typed command creates it, and
+// it expires after one hour (ARCH-SAFETY-13). An unparsable `at` is never honoured.
+const TOGGLE_TTL_MS = 3600000;
+const commandTtlMs = (command) => (command === "toggle" ? TOGGLE_TTL_MS : Infinity);
 const commandsFile = (sid, context) => path.join(sessionDir(sidOf({ session_id: sid }), context), "commands.json");
 export function recordCommand(sid, command, via, context = null) {
   const file = commandsFile(sid, context);
   let known = {};
   try { known = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
-  // The user's typed command outranks a model's Skill call for the same command while it is fresh.
+  // The user's typed command outranks a model's Skill call for the same command for as long as that record is honoured.
   const held = known[command];
-  if (via !== "prompt" && held?.via === "prompt" && Date.now() - Date.parse(held.at) < COMMAND_TTL_MS) return;
+  if (via !== "prompt" && held?.via === "prompt" && Date.now() - Date.parse(held.at) < commandTtlMs(command)) return;
   known[command] = { via, at: new Date().toISOString() };
   atomicWrite(file, JSON.stringify(known) + "\n");
 }
-export function commandInvoked(sid, names, { context = null, via = null, ttlMs = COMMAND_TTL_MS, now = Date.now() } = {}) {
+export function commandInvoked(sid, names, { context = null, via = null, ttlMs = null, now = Date.now() } = {}) {
   let known;
   try { known = JSON.parse(fs.readFileSync(commandsFile(sid, context), "utf8")); } catch { return false; }
   return names.some((name) => {
     const entry = known?.[name];
-    return entry && (!via || entry.via === via) && now - Date.parse(entry.at) < ttlMs;
+    return entry && (!via || entry.via === via) && now - Date.parse(entry.at) < (ttlMs ?? commandTtlMs(name));
   });
 }
 
@@ -1172,3 +1178,33 @@ export function readStdin() {
 }
 
 export function warn(msg) { process.stderr.write(`[craftsman] ${msg}\n`); }
+
+// True when the module at `metaUrl` is the process entry script. Compares
+// realpaths of both sides so a space, a `%` or a symlinked script is handled,
+// unlike the `file://${argv[1]}` template-literal idiom.
+export function isMain(metaUrl, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  try {
+    return fs.realpathSync(fileURLToPath(metaUrl)) === fs.realpathSync(path.resolve(argv1));
+  } catch {
+    return false;
+  }
+}
+// Split criteria into those a session binds to and legacy untagged ones.
+// `[unit:]` decides alone; `[plan:]` binds iff touched; untagged binds only
+// when the session touched no plan, else it is listed in `legacy`.
+export function bindingAcceptance(text, { units = [], plans = [] } = {}) {
+  const u = new Set(units), p = new Set(plans.map((x) => planSlugOf(x)));
+  const binding = [], legacy = [];
+  for (const c of acceptanceCriteria(text)) {
+    if (c.unit) { if (u.has(c.unit)) binding.push(c); }
+    else if (c.plan) { if (p.has(c.plan)) binding.push(c); }
+    else (p.size === 0 ? binding : legacy).push(c);
+  }
+  return { binding, legacy };
+}
+
+// ARCH-AUTO-11: a restored hand-off re-arms scope-required only while it still lists units to run. SessionStart and
+// account-switch adopt both ask this one question; a closing hand-off (remaining_units []), one without the field and
+// one whose field is not an array have nothing left to scope, and arming them locked a later /architect out of every Read.
+export const handoffArmsScope = (handoff) => Array.isArray(handoff?.remaining_units) && handoff.remaining_units.length > 0;

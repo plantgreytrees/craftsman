@@ -644,15 +644,29 @@ test("config: hierarchy key defaults, and project config overrides them", () => 
   assert.equal(m.tracker.nudgeLines, 300);
 });
 
-test("config: execution.maxSessions is reserved, read by nothing yet", () => {
-  const root = path.dirname(CFG), hits = [];
+// ARCH-PLAN-08: only the queue readers may mention maxSessions.
+const MAXSESSIONS_READERS = ["scripts/lib/next-queue.mjs", "scripts/lib/dashboard.mjs"];
+function maxSessionsHits(root) {
+  const hits = [];
   const walk = (d) => fs.existsSync(d) && fs.readdirSync(d, { withFileTypes: true }).forEach((e) => {
     const f = path.join(d, e.name);
     if (e.isDirectory()) { if (e.name !== "node_modules") walk(f); }
-    else if (!/\.test\.m?[jt]s$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")) hits.push(f);
+    else if (!/\.test\.m?[jt]s$/.test(e.name) && fs.readFileSync(f, "utf8").includes("maxSessions")
+      && !MAXSESSIONS_READERS.includes(path.relative(root, f).split(path.sep).join("/"))) hits.push(f);
   });
   for (const d of ["scripts", "hooks", "workflows", "commands", "agents", "skills"]) walk(path.join(root, d));
-  assert.deepEqual(hits, []);
+  return hits;
+}
+test("config: execution.maxSessions is read only by the queue readers", () => {
+  assert.deepEqual(maxSessionsHits(path.dirname(CFG)), []);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-maxsess-"));
+  fs.mkdirSync(path.join(tmp, "scripts/lib"), { recursive: true });
+  for (const r of MAXSESSIONS_READERS) fs.writeFileSync(path.join(tmp, r), "maxSessions");
+  assert.deepEqual(maxSessionsHits(tmp), []);
+  const bad = path.join(tmp, "scripts/lib/other.mjs");
+  fs.writeFileSync(bad, "maxSessions");
+  assert.deepEqual(maxSessionsHits(tmp), [bad]);
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 // ARCH-TRACKER-08: feature-tagged, untagged and mixed criteria.
@@ -817,6 +831,89 @@ test("recordCommand / commandInvoked: per session, by command, by route, and not
   }
 });
 
+// A command record's lifetime is a function of the command: the doc writers and `instruction` keep theirs for the session (a
+// model Skill call can create one anyway, so expiring it protects nothing), while /toggle's, which only the user's typed command
+// creates, lasts one hour (ARCH-SAFETY-13).
+const HOUR_MS = 3600000;
+const SESSION_RECORDS = ["plan", "orchestrate", "auto", "sync-docs", "idea", "architect", "builtin-check", "instruction"];
+// Rewrites the age of every record held for a session, as if each had been made `ageMs` ago.
+function ageRecords(dir, sid, ageMs) {
+  const file = path.join(dir, "sessions", sid, "commands.json");
+  const held = JSON.parse(fs.readFileSync(file, "utf8"));
+  for (const entry of Object.values(held)) entry.at = new Date(Date.now() - ageMs).toISOString();
+  fs.writeFileSync(file, JSON.stringify(held));
+}
+
+test("commandInvoked: every record but toggle's is still honoured 25 hours after it was made", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-life-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    assert.deepEqual(coreNs.RECORDED_COMMANDS.filter((name) => name !== "toggle").sort(), [...SESSION_RECORDS].sort(), "a new recorded command needs a lifetime decision here");
+    for (const name of SESSION_RECORDS) {
+      for (const via of ["skill", "prompt"]) {
+        const sid = `life-${name}-${via}`;
+        coreNs.recordCommand(sid, name, via, ctx);
+        ageRecords(dir, sid, 25 * HOUR_MS);
+        assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx }), true, `${name} (${via}) is honoured at 25 hours`);
+        assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx, via }), true, `${name} is honoured at 25 hours by its own route (${via})`);
+        assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx, now: Date.now() + 25 * HOUR_MS }), true, `${name} (${via}) is honoured 50 hours on`);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("commandInvoked: toggle's record expires after one hour and still needs the typed command", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-toggle-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    coreNs.recordCommand("t1", "toggle", "prompt", ctx);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt" }), true, "fresh");
+    ageRecords(dir, "t1", HOUR_MS - 60000);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt" }), true, "just inside the hour");
+    ageRecords(dir, "t1", HOUR_MS + 60000);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt" }), false, "just past the hour");
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx }), false, "just past the hour, whatever the route");
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt", ttlMs: 3 * HOUR_MS }), true, "an explicit ttlMs still wins, longer");
+    ageRecords(dir, "t1", 30 * 60000);
+    assert.equal(coreNs.commandInvoked("t1", ["toggle"], { context: ctx, via: "prompt", ttlMs: 10 * 60000 }), false, "an explicit ttlMs still wins, shorter");
+    coreNs.recordCommand("t2", "toggle", "skill", ctx);
+    assert.equal(coreNs.commandInvoked("t2", ["toggle"], { context: ctx, via: "prompt" }), false, "a Skill call is not the typed command");
+    coreNs.recordCommand("t3", "plan", "prompt", ctx);
+    ageRecords(dir, "t3", 2 * HOUR_MS);
+    assert.equal(coreNs.commandInvoked("t3", ["plan"], { context: ctx, ttlMs: HOUR_MS }), false, "an explicit ttlMs still wins over a record that would not expire");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("recordCommand: a typed record outranks a later skill record at any age, except toggle's once its hour is over", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-record-outrank-"));
+  try {
+    const ctx = { root: dir, stateDir: dir };
+    const via = (sid, name) => JSON.parse(fs.readFileSync(path.join(dir, "sessions", sid, "commands.json"), "utf8"))[name].via;
+    for (const name of SESSION_RECORDS) {
+      const sid = `outrank-${name}`;
+      coreNs.recordCommand(sid, name, "prompt", ctx);
+      ageRecords(dir, sid, 25 * HOUR_MS);
+      coreNs.recordCommand(sid, name, "skill", ctx);
+      assert.equal(via(sid, name), "prompt", `${name}: the typed record survives a skill call 25 hours on`);
+      assert.equal(coreNs.commandInvoked(sid, [name], { context: ctx, via: "prompt" }), true, `${name}: and is still honoured as typed`);
+    }
+    coreNs.recordCommand("o1", "toggle", "prompt", ctx);
+    ageRecords(dir, "o1", HOUR_MS - 60000);
+    coreNs.recordCommand("o1", "toggle", "skill", ctx);
+    assert.equal(via("o1", "toggle"), "prompt", "toggle: kept inside its hour");
+    ageRecords(dir, "o1", HOUR_MS + 60000);
+    coreNs.recordCommand("o1", "toggle", "skill", ctx);
+    assert.equal(via("o1", "toggle"), "skill", "toggle: an expired typed record is replaced");
+    assert.equal(coreNs.commandInvoked("o1", ["toggle"], { context: ctx, via: "prompt" }), false, "and the Skill call is not the typed command");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // 11.1: not being in a git repo turns the quality machinery off and leaves safety on.
 test("safetyEnabled vs enabled: a non-git project root leaves safety on and the quality side off, and logEvent writes nothing", () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-core-nongit-")));
@@ -975,7 +1072,8 @@ test("this repo's craftsman.project.json lists the markdown its own tests read, 
   const shipped = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "craftsman.config.json"), "utf8"));
   assert.deepEqual(shipped.stopGate.markdownTests, [], "the default other projects get");
   for (const pattern of ["README.md", "CHANGELOG.md", "commands/*.md", "agents/*.md", "docs/architecture/*.md"]) assert.ok(project.stopGate.markdownTests.includes(pattern), pattern);
-  assert.deepEqual(Object.keys(project), ["stopGate"], "only project-only values live here");
+  assert.deepEqual(Object.keys(project).sort(), ["docs", "stopGate"], "only project-only values live here");
+  assert.deepEqual(project.docs, { budgets: { claudeMdLines: 200, openPlans: 30 } }, "this repo sets the two optional budgets (ARCH-DOCS-16); the plugin default stays at three keys");
 });
 
 // Round 6 (42.1): the nonce is required whatever files exist; no marker can stand in for it.
@@ -992,4 +1090,28 @@ test("consumeNonce: a leftover safety-off file does not stand in for the nonce, 
     assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), true);
     assert.equal(coreNs.consumeNonce("s1", "doc-write", { context }), false, "and one-shot");
   } finally { fs.rmSync(stateDir, { recursive: true, force: true }); }
+});
+
+// ---- isMain (ARCH-STATE-06 unit ismain-helper) ----
+test("isMain: matches a plain path, a path with a space, a %, and a symlink; false when argv[1] is missing", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ismain-"));
+  try {
+    for (const name of ["plain.mjs", "has space.mjs", "pct%41.mjs"]) {
+      const f = path.join(dir, name);
+      fs.writeFileSync(f, "");
+      assert.equal(coreNs.isMain(pathToFileURL(f).href, f), true, name);
+      assert.equal(coreNs.isMain(pathToFileURL(f).href, path.join(dir, "other.mjs")), false, name);
+    }
+    const real = path.join(dir, "plain.mjs");
+    const link = path.join(dir, "link.mjs");
+    fs.symlinkSync(real, link);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, link), true);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, null), false);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, ""), false);
+    // "" resolves to the cwd: with metaUrl at the cwd only the `!argv1` early return yields false.
+    assert.equal(coreNs.isMain(pathToFileURL(process.cwd()).href, ""), false);
+    assert.equal(coreNs.isMain(pathToFileURL(real).href, path.join(dir, "missing.mjs")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

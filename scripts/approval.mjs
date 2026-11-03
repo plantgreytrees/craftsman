@@ -54,16 +54,13 @@ export function defaultRunners(root) {
     secrets: (dir = root) => {
       const cfg = loadConfig({ root });
       const out = [];
-      let ran = 0;
       for (const cmd of cfg.security?.check || []) {
         const [bin, ...args] = splitCmd(cmd);
         if (!bin || !onPath(bin, process.env, dir)) continue;
-        ran++;
         const r = spawnSync(bin, args, { cwd: dir, encoding: "utf8", timeout: cfg.stopGate?.testTimeoutMs });
         if (r.status !== 0) out.push({ file: "(security.check)", line: 0, rule: `${path.basename(bin)} exit ${r.status ?? "timeout"}` });
       }
-      if (!ran) return scanTree(dir).map((f) => ({ file: f.file, line: f.line, rule: f.rule }));
-      return out;
+      return [...scanTree(dir).map((f) => ({ file: f.file, line: f.line, rule: f.rule })), ...out];
     },
     docChecks: (dir = root) => {
       const cfg = loadConfig({ root });
@@ -160,7 +157,14 @@ export function check(input, { root = "." } = {}) {
   try { return withLock(root, input.run, () => checkLocked(input, { root })); } catch (e) { return refuse(e.message); }
 }
 
-function checkLocked({ run, row, writer_is_owner }, { root }) {
+// The terminal answer is a QUESTION.options label; it is stamped decided now (ARCH-APPROVAL-07).
+const fromFallback = (row) => {
+  const i = QUESTION.options.indexOf(row?.choice);
+  return i < 0 ? row : { ...row, choice: CHOICES[i], decided_at: new Date().toISOString() };
+};
+
+function checkLocked({ run, row: given, writer_is_owner, source }, { root }) {
+  const row = source === "fallback" ? fromFallback(given) : given;
   const rec = load(root, run);
   if (!rec) return refuse("no approval record");
   if (rec.status !== "requested") return refuse(`record status is ${rec.status}, not requested`);

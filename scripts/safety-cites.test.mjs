@@ -17,9 +17,9 @@ const HOLDS = {
     "scripts/pre-guard.mjs": ["failClosed"], "scripts/agent-mode-guard.mjs": ["failClosed"], "scripts/orchestrate-scope-guard.mjs": ["failClosed"],
   },
   "ARCH-SAFETY-04": { "scripts/lib/core.mjs": ["advisorySkipped", "guardState"], "scripts/session-context.mjs": ["guardState"] },
-  "ARCH-SAFETY-05": {
+  "ARCH-SAFETY-13": {
     "scripts/lib/core.mjs": ["safetyEnabled"],
-    "scripts/pre-guard.mjs": ["selfKind", "denySelfDisable", "heldNever", "safetyKeysChanged", "hooks/hooks.json", "CLAUDE_CODE_SESSION_ID", "No list-only skip"],
+    "scripts/pre-guard.mjs": ["selfKind", "denySelfDisable", "heldNever", "safetyKeysChanged", "hooks/hooks.json", "CLAUDE_CODE_SESSION_ID", "No list-only skip", "stateHolders", "targetDirOptions", "linkSourceHoldsState"],
     "scripts/scope.mjs": ["namesSelfScoped"],
   },
   "ARCH-SAFETY-06": {
@@ -36,6 +36,9 @@ const HOLDS = {
     "scripts/lib/settings-merge.mjs": ["mergeSettings", "export function"],
   },
   "ARCH-SAFETY-11": { "hooks/run.sh": ["guard_cannot_act", "ARCH-SAFETY-11"] },
+  "ARCH-SAFETY-12": { "scripts/lib/settings-merge.mjs": ["SANDBOX_BLOCK", "function merge"] },
+  "ARCH-SAFETY-16": { "scripts/lib/settings-merge.mjs": ["SANDBOX_BLOCK"] },
+  "ARCH-SAFETY-17": { "scripts/pre-guard.mjs": ["gitTargets", "Git mutation blocked"] },
 };
 
 function citesOf(ruleId) {
@@ -46,7 +49,7 @@ function citesOf(ruleId) {
 }
 
 test("every ARCH-SAFETY rule is covered by this test, so a new rule cannot skip it", () => {
-  const ids = [...RULES.matchAll(/\*\*(ARCH-SAFETY-\d+)\*\*/g)].map((m) => m[1]);
+  const ids = [...RULES.matchAll(/\*\*(ARCH-SAFETY-\d+)\*\* \[(?!superseded)/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(ids)].sort(), Object.keys(HOLDS).sort());
 });
 

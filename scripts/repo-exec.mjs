@@ -3,12 +3,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { acceptanceCriteria, atomicWrite, featureCriteria, forgetSessionWorktree, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
+import { acceptanceCriteria, atomicWrite, featureCriteria, forgetSessionWorktree, isMain, loadConfig, logEvent, mainCheckoutRoot, projectContext, readStdin, recordSessionWorktree, sidOf, splitCmd } from "./lib/core.mjs";
 import { loadIndex, resolve as resolvePlan } from "./lib/plan-index.mjs";
 import { mergedInto } from "./worktree-sweep.mjs";
 import { detectHost, openPullRequest, preflightHost } from "./lib/land.mjs";
 import { currentState, transition } from "./tracker.mjs";
-import { afterLand, afterUnitLand, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
+import { autoArchive } from "./lib/archive.mjs";
+import { afterLand, afterUnitLand, assertMergeAllowed, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
@@ -44,12 +45,12 @@ function fetchBase(context, root, input, info, branch = info.base_branch) {
 
 // `args` is the plain `git push` argument list; `ref` the local ref it sends
 // to refs/heads/<dst>. Returns true when pushed, false when queued for root.
-function pushOrDefer(context, input, info, { cwd, args, ref, dst, upstream = false }) {
+function pushOrDefer(context, input, info, { cwd, args, ref, dst }) {
   if (online(cwd, input)) {
     try { remote(cwd, ["push", ...args]); return true; }
     catch (error) { throw isUnreachable(error) ? networkError(error) : error; }
   }
-  const entry = enqueuePush(cwd, info, { sha: run(cwd, ["rev-parse", ref]), dst, upstream, reason: input.unit || input.slug || "" });
+  const entry = enqueuePush(cwd, info, { sha: run(cwd, ["rev-parse", ref]), dst, reason: input.unit || input.slug || "" });
   logEvent({ ev: "network_deferred", kind: "push", project: info.project, dst, id: entry.id }, context);
   return false;
 }
@@ -202,6 +203,14 @@ function heartbeat(lock) {
 // Plan files the feature must find on origin/<base> before its worktree exists:
 // the plan doc and each parent ancestor (from the plan index). Generated rollups
 // (docs/plans/<slug>/TRACKER.md) are excluded: transitions rewrite them locally.
+// ARCH-TRACKER-08/15: the open criteria gating a feature landing; another plan's `[plan:]` line never counts.
+export function featureGate(text, planSlug, feature, lastCheck) {
+  const openCriteria = featureCriteria(text, feature, lastCheck.last === true, planSlug).filter((c) => !c.done);
+  // Fail closed: an unresolvable index cannot clear an open untagged (legacy or own-plan) line.
+  const unresolvedOpen = acceptanceCriteria(text).filter((c) => c.feature == null && !c.unit && !c.done && (c.plan == null || c.plan === planSlug));
+  return { openCriteria, unresolvedOpen };
+}
+
 function planGateFiles(root, planSlug) {
   let index;
   try { index = loadIndex(root); } catch (error) { throw new Error(`plan gate: plan index failed: ${error.message}`); }
@@ -269,8 +278,8 @@ function prepareFeature(context, input, info) {
     fs.mkdirSync(path.dirname(worktree), { recursive: true });
     const existing = run(main, ["show-ref", "--verify", `refs/heads/${branch}`], { allowFailure: true });
     if (existing) run(main, ["worktree", "add", worktree, branch]);
-    else run(main, ["worktree", "add", "-b", branch, worktree, baseRef]);
-    if (info.has_remote) pushed = pushOrDefer(context, input, info, { cwd: worktree, args: ["-u", "origin", branch], ref: branch, dst: branch, upstream: true });
+    else run(main, ["worktree", "add", "--no-track", "-b", branch, worktree, baseRef]);
+    if (info.has_remote) pushed = pushOrDefer(context, input, info, { cwd: worktree, args: ["origin", branch], ref: branch, dst: branch });
   }
   recordSessionWorktree(input, worktree, anchored);
   logEvent({ ev: "feature_worktree", plan: planSlug, feature: input.feature, branch, worktree, reattached }, anchored);
@@ -296,7 +305,7 @@ function prepare(context, input, info) {
   fs.mkdirSync(path.dirname(worktree), { recursive: true });
   const existing = run(context.root, ["show-ref", "--verify", `refs/heads/${branch}`], { allowFailure: true });
   if (existing) run(context.root, ["worktree", "add", worktree, branch]);
-  else run(context.root, ["worktree", "add", "-b", branch, worktree, baseRef]);
+  else run(context.root, ["worktree", "add", "--no-track", "-b", branch, worktree, baseRef]);
   recordSessionWorktree(input, worktree, context);
   return { ...info, worktree_path: worktree, branch, base_ref: baseRef, reattached: false };
 }
@@ -349,18 +358,19 @@ function mergeOnly(context, input, info, deps = {}) {
   const cfg = loadConfig(context);
   const land = landMode(cfg);
   noteUnenforced(cfg, context);
+  const pin = assertMergeAllowed(cfg, input, { info, land, worktree });
   if (land === "direct" && run(context.root, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) {
     throw new Error("selected repository already has an in-progress merge");
   }
-  const checkedOutBranch = run(worktree, ["branch", "--show-current"]);
-  if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
-  const branch = checkedOutBranch;
+  const branch = run(worktree, ["branch", "--show-current"]);
+  if (input.branch && input.branch !== branch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
   verifyGateBeforeMerge(context, worktree);
-  // ARCH-LAND-12: a unit PR targets its feature branch when one is given.
-  if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner });
+  pin();
+  // ARCH-LAND-12: a unit PR targets its feature branch.
+  if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner, pin });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
-  if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch });
+  if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch, pin });
   // Else merge where base is checked out (this root or another worktree), never dirty.
   const at = holder || context.root;
   if (holder && (run(holder, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })
@@ -373,6 +383,7 @@ function mergeOnly(context, input, info, deps = {}) {
   let pushed = true;
   let step = null; // the landing step that PARKs instead of throwing (ARCH-LAND-06)
   try {
+    pin();
     heartbeat(lock);
     if (!holder) run(at, ["checkout", info.base_branch]);
     if (info.has_remote && input.pull !== false) {
@@ -435,7 +446,7 @@ function baseHeldElsewhere(root, base) {
 
 // Base held elsewhere, pushing: merge in a temporary detached worktree at
 // origin's base (removed on every path), push HEAD:<base>.
-function landDetached(context, input, info, { worktree, branch }) {
+function landDetached(context, input, info, { worktree, branch, pin }) {
   const result = { ...info, branch, land: "direct", merged: false, merged_locally: false, worktree_path: worktree };
   const lock = acquireLock(info, input);
   const temp = path.join(info.common_git_dir, ".craftsman", "land", `${branch.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
@@ -443,6 +454,7 @@ function landDetached(context, input, info, { worktree, branch }) {
   let step = null;
   let pushed = true;
   try {
+    pin();
     heartbeat(lock);
     if (input.pull !== false) fetchBase(context, context.root, { ...input, fetch: undefined }, info);
     fs.mkdirSync(path.dirname(temp), { recursive: true });
@@ -512,7 +524,7 @@ function landUnit(context, input, info) {
     const hasRemoteFeature = info.has_remote && input.push !== false;
     let pushedFeature = true;
     if (hasRemoteFeature) {
-      try { pushedFeature = pushOrDefer(context, input, info, { cwd: worktree, args: ["-u", "origin", feature], ref: feature, dst: feature, upstream: true }); }
+      try { pushedFeature = pushOrDefer(context, input, info, { cwd: worktree, args: ["origin", feature], ref: feature, dst: feature }); }
       catch (error) {
         if (error?.needsNetwork) throw error;
         logEvent({ ev: "land_unit", unit: input.unit, branch: unitBranch, feature, ok: false, reason: "rejected-push" }, context);
@@ -570,11 +582,9 @@ function landFeature(context, input, info, deps = {}) {
   if (fs.existsSync(acceptanceFile)) {
     const text = fs.readFileSync(acceptanceFile, "utf8");
     const lastCheck = isLastFeature(planSlug, input.feature, main);
-    const openCriteria = featureCriteria(text, input.feature, lastCheck.last === true).filter((c) => !c.done);
+    const { openCriteria, unresolvedOpen } = featureGate(text, planSlug, input.feature, lastCheck);
     if (lastCheck.error !== undefined) {
-      // Fail closed: an unresolvable index cannot clear an open untagged line.
-      const untagged = acceptanceCriteria(text).filter((c) => c.feature == null && !c.unit && !c.done);
-      if (untagged.length) throw new Error(`land-feature refused: cannot resolve plan index to tell if ${input.feature} is last: ${lastCheck.error}`);
+      if (unresolvedOpen.length) throw new Error(`land-feature refused: cannot resolve plan index to tell if ${input.feature} is last: ${lastCheck.error}`);
     }
     if (openCriteria.length) throw new Error(`land-feature refused: open acceptance criteria for feature ${input.feature}: ${openCriteria.map((c) => c.line.trim()).join(" | ")}`);
   }
@@ -661,6 +671,7 @@ function landFeature(context, input, info, deps = {}) {
   }
   logEvent({ ev: "land_feature", plan: planSlug, feature: input.feature, ok: true, sha: result.merge_sha }, context);
   afterLand({ gate, sha: result.merge_sha, rows, context, retire: deps.retireCheck });
+  autoArchive(context, input, info, { rows, sha: result.merge_sha, deps }); // ARCH-LAND-33: never changes the result
   return { ...result, merged: true, merged_locally: true, pushed: true, promoted, promote_errors, cleaned, remote_branch_deleted: remoteDeleted };
 }
 
@@ -675,7 +686,7 @@ function landFeaturePullRequest(context, input, info, { feature, head, config, r
   };
   preflightHost(options, runner);
   const result = { ...info, branch: feature, feature_branch: feature, land: "pr", merged: false, merged_locally: false, park_unit: lastUnit, units };
-  try { remote(context.root, ["push", "-u", "origin", `${head}:refs/heads/${feature}`]); }
+  try { remote(context.root, ["push", "origin", `${head}:refs/heads/${feature}`]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
     return landingPark("rejected-push", { ...result, pushed: false }, error);
@@ -689,6 +700,9 @@ function landFeaturePullRequest(context, input, info, { feature, head, config, r
   if (auto_merge_error) return landingPark("auto-merge", { ...result, pushed: true, pr: request, auto_merge, auto_merge_error }, new Error(auto_merge_error));
   return { ...result, pushed: true, pr: request, auto_merge };
 }
+
+// A queued ref name is untrusted text (ARCH-LAND-36): bound it and drop control characters before it reaches a question.
+const shownRef = (name) => scrub(String(name)).replace(/[^\x20-\x7e]/g, "?").slice(0, 80);
 
 // Landing failures that PARK (ARCH-LAND-06): {parked:true, decision}, branch kept.
 const PARK_DECISIONS = {
@@ -709,6 +723,11 @@ const PARK_DECISIONS = {
     options: ["Fix the remote's refusal (permissions, hooks, protection) and push again", "Land through a pull request instead (repoExec.land: \"pr\")", "Leave it unpushed for the user"],
     recommended: "Land through a pull request instead (repoExec.land: \"pr\")",
   }),
+  "drain-refused": (r) => ({
+    question: `The network drain refused the queued ${shownRef(r.kind)} of ${shownRef(r.branch)} (${r.refused}); nothing was sent to origin and the entry left the queue. How should it be handled?`,
+    options: [`Check where the entry came from, then push or delete ${shownRef(r.branch)} yourself if it was meant`, "Land the change through the run's own mode (a feature branch merge or a pull request) instead", "Drop it"],
+    recommended: "Land the change through the run's own mode (a feature branch merge or a pull request) instead",
+  }),
   gate: gatePark,
   "auto-merge": (r) => ({
     question: `${r.pr?.url || "The pull request"} for ${r.branch} is open, but the host refused auto-merge. How should it be merged?`,
@@ -725,7 +744,7 @@ function landingPark(reason, result, error) {
 
 // "pr" mode: no lock, base untouched; push the unit branch, open or reuse its
 // PR and ask for auto-merge. Every refusal is checked before the push.
-function landPullRequest(context, input, info, { worktree, branch, cfg, runner }) {
+function landPullRequest(context, input, info, { worktree, branch, cfg, runner, pin }) {
   if (!info.has_remote) throw new Error(`repoExec.land is "pr" but ${info.project} has no origin remote`);
   requireOnline(worktree, input, info, 'repoExec.land "pr"');
   const host = detectHost(info.origin, cfg.repoExec?.host);
@@ -739,7 +758,8 @@ function landPullRequest(context, input, info, { worktree, branch, cfg, runner }
   fetchBase(context, context.root, input, info);
   const subjects = run(worktree, ["log", "--reverse", "--format=%s", `origin/${info.base_branch}..${branch}`]);
   if (!subjects) throw new Error(`${branch} has no commits beyond origin/${info.base_branch}`);
-  try { remote(worktree, ["push", "-u", "origin", branch]); }
+  pin();
+  try { remote(worktree, ["push", "origin", branch]); }
   catch (error) {
     if (isUnreachable(error)) throw networkError(error, retryAs(input));
     return landingPark("rejected-push", { ...info, branch, land: "pr", merged: false, pushed: false, worktree_path: worktree }, error);
@@ -775,9 +795,8 @@ function cleanupAfterLanding(context, input, info, result) {
 function cleanup(context, input, info) {
   const worktree = safeWorktree(context, input.worktree_path, input.slug || input.unit);
   if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
-  const checkedOutBranch = run(worktree, ["branch", "--show-current"]);
-  if (input.branch && input.branch !== checkedOutBranch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
-  const branch = checkedOutBranch;
+  const branch = run(worktree, ["branch", "--show-current"]);
+  if (input.branch && input.branch !== branch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   run(context.root, ["worktree", "remove", worktree]);
   forgetSessionWorktree(input, worktree, context);
   run(context.root, ["worktree", "prune"]);
@@ -813,16 +832,30 @@ function networkAction(context, input, info) {
     }
     return { ...info, step, fetched: [info.base_branch, ...(input.branches || [])] };
   }
-  const { pushed, rejected } = drainQueue(context.root, info);
+  let drained;
+  try { drained = drainQueue(context.root, info, { directLand: loadConfig(context).planning?.featureBranches !== true }); }
+  catch (error) {
+    // A drain that loses the network stops with the earlier refusals no longer queued: they PARK on this error's payload (exit 3).
+    if (error?.rejected?.length) error.parked = parkRejected(info, error.rejected);
+    throw error;
+  }
+  const { pushed, rejected } = drained;
   logEvent({ ev: "network_drain", project: info.project, pushed: pushed.length, rejected: rejected.length }, context);
   return {
     ...info, step,
     pushed: pushed.map(({ dst, sha }) => ({ branch: dst, sha })),
-    parked: rejected.map(({ entry, error }) => landingPark("rejected-push", { ...info, branch: entry.dst, base_branch: entry.dst, land: "direct", merged: false, merged_locally: true }, error)),
+    parked: parkRejected(info, rejected),
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Every drained entry that did not reach origin becomes the landing PARK for its reason (ARCH-LAND-06, ARCH-LAND-36).
+function parkRejected(info, rejected) {
+  return rejected.map(({ entry, error, refused }) => refused
+    ? landingPark("drain-refused", { ...info, branch: shownRef(entry.dst), kind: shownRef(entry.kind), refused, merged: false }, error)
+    : landingPark("rejected-push", { ...info, branch: entry.dst, base_branch: entry.dst, land: "direct", merged: false, merged_locally: true }, error));
+}
+
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");
@@ -841,7 +874,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } catch (error) {
     if (error?.needsNetwork) {
       // One clear message naming the fix, plus the action root should run (ARCH-LAND-19).
-      process.stdout.write(JSON.stringify({ needs_network: true, message: scrub(error.message), action: error.action || null }) + "\n");
+      const parked = error.parked?.length ? { parked: error.parked } : {};
+      process.stdout.write(JSON.stringify({ needs_network: true, message: scrub(error.message), action: error.action || null, ...parked }) + "\n");
       process.stderr.write(`craftsman: needs network: ${scrub(error.message)}\n`);
       process.exitCode = 3;
     } else {

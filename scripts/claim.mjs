@@ -2,12 +2,18 @@
 // Atomically claim one plan unit so concurrent orchestrators cannot execute it twice.
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { atomicWrite, liveClaudeSession, logEvent, projectContext, readStdin, sidOf } from "./lib/core.mjs";
+import { atomicWrite, isMain, liveClaudeSession, logEvent, mainCheckoutRoot, projectContext, readStdin, sidOf } from "./lib/core.mjs";
+
+// Anchored at the main checkout so root and linked-worktree sessions share one lock directory.
+export function claimsDir(context = null, project = ".") {
+  const root = context?.root || (context?.stateDir ? null : projectContext(project).root);
+  const state = root ? path.join(mainCheckoutRoot(root), ".craftsman") : context.stateDir;
+  return path.join(state, "claims");
+}
 
 export function claimPath(plan, unit, project = ".", context = null) {
   const key = `${project}--${plan}--${unit}`.replace(/[^A-Za-z0-9_.-]/g, "_");
-  return path.join(context?.stateDir || projectContext(project).stateDir, "claims", `${key}.lock`);
+  return path.join(claimsDir(context, project), `${key}.lock`);
 }
 
 // Hand a claim to the session that replaced its owner (e.g. after an account
@@ -27,7 +33,7 @@ export function transferClaim(lock, fromSid, toSid, context = null) {
   return next;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     if (!input.plan || !input.unit) throw new Error("claim requires plan and unit");

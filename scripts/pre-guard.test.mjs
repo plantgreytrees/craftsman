@@ -47,6 +47,1025 @@ function homePinned(base = os.tmpdir()) {
   return { home, dir, env };
 }
 
+// The sandbox-bypass retry (dangerouslyDisableSandbox) is what auto mode refuses: count it, never judge it.
+function bypassEvents(dir) {
+  const file = path.join(dir, ".craftsman", "events.jsonl");
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.ev === "sandbox_bypass");
+}
+
+test("pre-guard: a sandbox-bypass Bash call logs one sandbox_bypass with only the first command word, and the verdict is unchanged", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    const command = "cd /srv/some/where && SECRET_TOKEN=hunter2 docker ps -a";
+    const plain = run(GUARD, dir, { session_id: "bypass-a", tool_name: "Bash", tool_input: { command } });
+    assert.deepEqual(bypassEvents(dir), [], "no flag, no event");
+    const flagged = run(GUARD, dir, { session_id: "bypass-b", tool_name: "Bash", tool_input: { command, dangerouslyDisableSandbox: true } });
+    assert.equal(flagged.status, plain.status, "logging does not change the decision");
+    const events = bypassEvents(dir);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].sid, "bypass-b");
+    assert.equal(events[0].head, "docker");
+    const raw = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8");
+    assert.doesNotMatch(raw, /hunter2|SECRET_TOKEN|\/srv\/some\/where/, "no command text, no assignment value, no path");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// W1 (scrutinise-sandbox-auto-flow round 2): a bare NAME=value is not followed by whitespace, so the prefix strip skipped it and the path split
+// logged the tail of the value. No part of an assignment's value may reach the log.
+test("pre-guard: a sandbox-bypass call that is only an assignment logs head \"?\", never a fragment of the value", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    const secrets = [
+      "API_KEY=abc/Sk_live-123",
+      "TOKEN=a/b+c",
+      "AWS_SECRET_ACCESS_KEY=fake/abc+def",
+      "cd /x && API_KEY=abc/Sk_live-123",
+    ];
+    secrets.forEach((command, n) => run(GUARD, dir, { session_id: `bypass-assign-${n}`, tool_name: "Bash", tool_input: { command, dangerouslyDisableSandbox: true } }));
+    const events = bypassEvents(dir);
+    assert.equal(events.length, secrets.length, "one event per call");
+    assert.deepEqual(events.map((e) => e.head), secrets.map(() => "?"), "every bare assignment logs the unknown head");
+    const raw = fs.readFileSync(path.join(dir, ".craftsman", "events.jsonl"), "utf8");
+    assert.doesNotMatch(raw, /Sk_live|b\+c|abc\+def/, "no fragment of any value reaches the log");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a refused sandbox-bypass call is still counted, and a false or non-boolean flag is not", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bypass-"));
+  try {
+    const refused = run(GUARD, dir, { session_id: "bypass-c", tool_name: "Bash", tool_input: { command: "git commit --no-verify -m x", dangerouslyDisableSandbox: true } });
+    assert.equal(refused.status, 2);
+    for (const flag of [false, "true", 1, null]) run(GUARD, dir, { session_id: "bypass-d", tool_name: "Bash", tool_input: { command: "git status", dangerouslyDisableSandbox: flag } });
+    run(GUARD, dir, { session_id: "bypass-e", tool_name: "Read", tool_input: { file_path: path.join(dir, "x.txt"), dangerouslyDisableSandbox: true } });
+    assert.deepEqual(bypassEvents(dir).map((e) => [e.sid, e.head]), [["bypass-c", "git"]]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// A reversed bracket range (`[a-1]`, `[z-a]`) is a legal shell glob that matches nothing: the guard must read it as
+// a one-character wildcard (the safe over-approximation), never crash into "could not decide".
+test("pre-guard: a reversed bracket range in a removal or write target is read like a one-character wildcard", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-segre-"));
+  try {
+    fs.mkdirSync(path.join(dir, "docs", "plans"), { recursive: true });
+    const verdict = (command) => run(GUARD, dir, { session_id: "segre", tool_name: "Bash", tool_input: { command } });
+    for (const [command, twin] of [
+      ["rm L[a-1].txt", "rm L?.txt"],
+      ["rm out.txt L[a-1]", "rm out.txt L?"],
+      ["mv E[a-1].strip /tmp/x", "mv E?.strip /tmp/x"],
+      ["git rm L[a-1]", "git rm L?"],
+      ["rm docs/plans/L[a-1]*.md", "rm docs/plans/L?*.md"],
+      ["rm -rf docs/[z-a]", "rm -rf docs/?"],
+      ["sed -i s/a/b/ docs/plans/L[a-1].md", "sed -i s/a/b/ docs/plans/L?.md"],
+      ["echo hi > docs/plans/L[a-1].md", "echo hi > docs/plans/L?.md"],
+      ["rm docs/plans/[!a-1]x.md", "rm docs/plans/?x.md"],
+      ["rm docs/plans/[^z-a]x.md", "rm docs/plans/?x.md"],
+    ]) {
+      const got = verdict(command);
+      assert.doesNotMatch(got.stderr, /could not decide|Invalid regular expression/, command);
+      assert.equal(got.status, verdict(twin).status, `${command} reads like ${twin}`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: bracket text that is quoted or in a heredoc stays inert next to a removal word", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-segre-"));
+  try {
+    for (const command of [
+      "python3 -c 'print(L[a-1].strip())'; rm -f out.txt",
+      "grep -n 'E[a-1].strip' f.py; rm out.txt",
+      "python3 - <<'PY'\nprint(L[a-1].strip()[:110] if a<=len(L) else '')\nPY\nrm -f out.txt",
+    ]) {
+      const got = run(GUARD, dir, { session_id: "segre", tool_name: "Bash", tool_input: { command } });
+      assert.equal(got.status, 0, `${JSON.stringify(command)}: ${got.stderr}`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// S3 (scrutinise-sandbox-auto-flow): in a shell a glob that matches nothing is passed on literally, so `rm docs/plans/L[a-1].md` deletes
+// a file that really is named that. Reading the reversed class only as one wildcard character cannot match such a name; both readings count.
+test("pre-guard: a reversed bracket range is also read as the literal file name, so a bracketed guarded doc stays guarded (no ** in docPaths)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-segre-"));
+  try {
+    fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["docs/plans/*.md"] } }));
+    for (const sub of ["plans", "other"]) fs.mkdirSync(path.join(dir, "docs", sub), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "plans", "L[a-1].md"), "x");
+    fs.writeFileSync(path.join(dir, "docs", "other", "L[a-1].md"), "x");
+    const verdict = (command) => run(GUARD, dir, { session_id: "segre-literal", tool_name: "Bash", tool_input: { command } });
+    for (const command of ["rm docs/plans/L[a-1].md", "rm 'docs/plans/L[a-1].md'", 'rm "docs/plans/L[a-1].md"', "git rm docs/plans/L[a-1].md"]) {
+      const got = verdict(command);
+      assert.equal(got.status, 2, `${command} removes a guarded doc: ${got.stderr}`);
+      assert.doesNotMatch(got.stderr, /could not decide|Invalid regular expression/, command);
+    }
+    // the wildcard reading still holds, and a file outside the guarded path is not caught by either reading
+    assert.equal(verdict("rm docs/plans/L[a-1]*.md").status, 2, "the wildcard twin of the guarded name");
+    assert.equal(verdict("rm docs/other/L[a-1].md").status, 0, "the same name outside docs/plans/*.md is not guarded");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ARCH-STATE-18: under an active unit scope the Read, Write and Edit tools (never Glob, Grep or NotebookEdit) may reach a file under the OS
+// temp dir or $CLAUDE_JOB_DIR/tmp, judged by real path; everything else keeps the scope's closed allow-list.
+function scratchProject() {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scratch-")));
+  const dir = path.join(base, "proj");
+  for (const d of ["proj", "tmp", path.join("job", "tmp"), "other"]) fs.mkdirSync(path.join(base, d), { recursive: true });
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  spawnSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir });
+  const env = { TMPDIR: path.join(base, "tmp"), CLAUDE_JOB_DIR: path.join(base, "job") };
+  const scope = (unit, worktree) => {
+    const added = spawnSync("git", ["worktree", "add", "-q", "-b", `feat/${unit}`, worktree], { cwd: dir, encoding: "utf8" });
+    assert.equal(added.status, 0, added.stderr);
+    const manifest = { session_id: "scratch", plan: "docs/plans/x.md", unit, project: ".", worktree_path: worktree, scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    const activated = run(SCOPE, dir, manifest, env);
+    assert.equal(activated.status, 0, activated.stderr);
+  };
+  const call = (tool, input, extra = {}) => run(GUARD, dir, { session_id: "scratch", tool_name: tool, tool_input: input }, { ...env, ...extra });
+  return { base, dir, env, scope, call, read: (file, extra) => call("Read", { file_path: file }, extra) };
+}
+
+test("pre-guard: a scoped Read of scratch evidence under the temp dir or the job dir passes, with one scope or several", () => {
+  const t = scratchProject();
+  try {
+    fs.writeFileSync(path.join(t.base, "tmp", "shot.png"), "png");
+    fs.writeFileSync(path.join(t.base, "job", "tmp", "run.log"), "log");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const one = t.read(path.join(t.base, "tmp", "shot.png"));
+    assert.equal(one.status, 0, `one scope: ${one.stderr}`);
+    assert.equal(t.read(path.join(t.base, "job", "tmp", "run.log")).status, 0, "the job scratch dir");
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    const two = t.read(path.join(t.base, "tmp", "shot.png"));
+    assert.equal(two.status, 0, `two scopes, past the ambiguous-scope refusal too: ${two.stderr}`);
+    const inside = t.read(path.join(t.dir, "src", "a.ts"));
+    assert.equal(inside.status, 2, "a file inside the project is still governed by the scopes");
+    assert.match(inside.stderr, /more than one active project scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: scratch Reads stay narrow: NotebookEdit, Glob, Grep, other dirs, symlink escapes, env files and an enclosing temp root are refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.writeFileSync(path.join(tmp, ".env"), "K=v");
+    fs.mkdirSync(path.join(t.base, "other", "sub"));
+    fs.writeFileSync(path.join(t.base, "other", "secret.txt"), "s");
+    fs.writeFileSync(path.join(t.base, "other", "private.txt"), "p");
+    fs.writeFileSync(path.join(tmp, "private.txt"), "decoy");
+    fs.symlinkSync(path.join(t.base, "other", "sub"), path.join(tmp, "link"));
+    fs.symlinkSync(path.join(t.base, "other", "secret.txt"), path.join(tmp, "secret-link.txt"));
+    fs.writeFileSync(path.join(t.base, "job", "notes.txt"), "n");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    const refused = (what, got) => assert.equal(got.status, 2, `${what} should be refused: ${got.stderr}`);
+    refused("NotebookEdit", t.call("NotebookEdit", { notebook_path: path.join(tmp, "n.ipynb"), new_source: "x" }));
+    refused("Glob", t.call("Glob", { pattern: "*", path: tmp }));
+    refused("Grep", t.call("Grep", { pattern: "x", path: tmp }));
+    refused("another directory", t.read(path.join(t.base, "other", "secret.txt")));
+    refused("the job dir outside its tmp", t.read(path.join(t.base, "job", "notes.txt")));
+    refused("a symlinked file", t.read(path.join(tmp, "secret-link.txt")));
+    // The OS resolves link/.. to the symlink target's parent (other/), not to tmp/: written as text, never normalised.
+    refused("a symlink followed by ..", t.read(`${tmp}/link/../private.txt`));
+    const envFile = t.read(path.join(tmp, ".env"));
+    refused("an env file", envFile);
+    assert.match(envFile.stderr, /is a protected path/, "the allowance passes an env file on to protectedPaths, which names it; a refusal by the ambiguous-scope check would not");
+    refused("a temp root that encloses the project", t.read(path.join(tmp, "shot.png"), { TMPDIR: t.base }));
+    refused("a file that does not exist", t.read(path.join(tmp, "missing.png")));
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// W2 (scrutinise-sandbox-auto-flow): the allowance is judged against every active scope, not the one readScope happens to list first.
+test("pre-guard: a scratch Read never reaches a file inside another active scope's root, whichever scope is listed first", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    const bWorktree = path.join(tmp, "b-wt");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", bWorktree);
+    fs.mkdirSync(path.join(bWorktree, "src"), { recursive: true });
+    fs.writeFileSync(path.join(bWorktree, "src", "a.ts"), "listed");
+    fs.writeFileSync(path.join(bWorktree, "src", "secret.ts"), "not on the read list");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.symlinkSync(path.join(bWorktree, "src", "secret.ts"), path.join(tmp, "alias.ts"));
+    // Swap the two manifests' contents between their two file names: the directory order of the names never changes, so
+    // each scope is listed first in exactly one of the two rounds, on any filesystem.
+    const sessionDir = path.join(t.dir, ".craftsman", "sessions", "scratch");
+    const files = fs.readdirSync(sessionDir).filter((n) => /^scope-[0-9a-f]{16}\.json$/.test(n)).sort().map((n) => path.join(sessionDir, n));
+    assert.equal(files.length, 2, "two session scopes");
+    const [first, second] = files.map((f) => fs.readFileSync(f, "utf8"));
+    for (const [round, [one, two]] of [["as activated", [first, second]], ["swapped", [second, first]]]) {
+      fs.writeFileSync(files[0], one);
+      fs.writeFileSync(files[1], two);
+      const alias = t.read(path.join(tmp, "alias.ts"));
+      assert.equal(alias.status, 2, `${round}: a symlink under the temp dir into scope B's tree, off B's read list, is refused: ${alias.stderr}`);
+      assert.equal(t.read(path.join(bWorktree, "src", "secret.ts")).status, 2, `${round}: the direct path is refused by B's read list`);
+      assert.equal(t.read(path.join(bWorktree, "src", "a.ts")).status, 0, `${round}: a file on B's read list still reads, B governs it`);
+      assert.equal(t.read(path.join(tmp, "shot.png")).status, 2, `${round}: with a scope root under the temp dir the scratch allowance is off, the ambiguous-scope refusal stands`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// W2 (scrutinise-sandbox-auto-flow round 2): a scratch dir that sits inside a root the session governs gives no allowance; the file stays under that
+// root's own scope check. Each row proves one clause of insideScratchRoots: the first two the "inside a governed root" clause, the third the session checkout.
+function offListFile(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "off.txt"), "on no read list");
+  return path.join(dir, "off.txt");
+}
+
+test("pre-guard: a scratch dir inside a session scope's project root gives no allowance", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.dir, ".tmp");
+    const session = { session_id: "scratch", plan: "docs/plans/x.md", unit: "u-session", project: ".", scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    const activated = run(SCOPE, t.dir, session, t.env);
+    assert.equal(activated.status, 0, activated.stderr);
+    const got = t.read(offListFile(tmp), { TMPDIR: tmp });
+    assert.equal(got.status, 2, `a file under the project is the scope's, scratch dir or not: ${got.stderr}`);
+    assert.match(got.stderr, /outside active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a scratch dir inside a unit worktree gives no allowance", () => {
+  const t = scratchProject();
+  try {
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    const tmp = path.join(worktree, ".tmp");
+    const got = t.read(offListFile(tmp), { TMPDIR: tmp });
+    assert.equal(got.status, 2, `a file under the unit's worktree is the unit's scope, scratch dir or not: ${got.stderr}`);
+    assert.match(got.stderr, /outside active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: with only unit-worktree scopes, a scratch dir inside the session checkout gives no allowance either", () => {
+  const t = scratchProject();
+  try {
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const tmp = path.join(t.dir, ".tmp");
+    const got = t.read(offListFile(tmp), { TMPDIR: tmp });
+    assert.equal(got.status, 2, `the session checkout is outside every unit worktree, scratch dir or not: ${got.stderr}`);
+    assert.match(got.stderr, /outside active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: with no scope active, the required-scope refusal still covers scratch Reads", () => {
+  const t = scratchProject();
+  try {
+    fs.writeFileSync(path.join(t.base, "tmp", "shot.png"), "png");
+    assert.equal(run(SCOPE, t.dir, { action: "require", session_id: "scratch" }, t.env).status, 0);
+    const got = t.read(path.join(t.base, "tmp", "shot.png"));
+    assert.equal(got.status, 2);
+    assert.match(got.stderr, /requires an active unit scope/);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// ARCH-STATE-18 (guard-paths): Write and Edit join Read, so one insideScratchRoots judges all three and the clauses the Read rows above prove
+// (the real path, every active scope, the session checkout, a root that cannot be resolved) hold for the two writers as well. A file that
+// does not exist has no real path: an Edit or a Read of one is refused, while a Write that would create one is judged by the real path of its
+// nearest existing ancestor plus the missing rest, by the same tests (scratch-write-hardening, the rows after "the checks after the scope").
+const WRITERS = [
+  ["Write", (file) => ({ file_path: file, content: "x" })],
+  ["Edit", (file) => ({ file_path: file, old_string: "a", new_string: "b" })],
+];
+// Both writers' verdicts on one file, so a red run names each writer that disagrees, with the reason the guard gave.
+function expectWriters(t, file, status, what, extra) {
+  const got = {}, why = [];
+  for (const [tool, make] of WRITERS) {
+    const result = t.call(tool, make(file), extra);
+    got[tool] = result.status;
+    if (result.status !== 0) why.push(`${tool}: ${result.stderr.trim().split("\n")[0]}`);
+  }
+  assert.deepEqual(got, typeof status === "number" ? { Write: status, Edit: status } : status, `${what}${why.length ? ` (${why.join(" | ")})` : ""}`); // status: one number for both writers, or { Write, Edit }
+}
+
+test("pre-guard: a scoped Write and Edit of a scratch file under the temp dir or the job dir pass, with one scope or several", () => {
+  const t = scratchProject();
+  try {
+    const shot = path.join(t.base, "tmp", "shot.png"), log = path.join(t.base, "job", "tmp", "run.log");
+    fs.writeFileSync(shot, "png");
+    fs.writeFileSync(log, "log");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    expectWriters(t, shot, 0, "one scope, the temp dir");
+    expectWriters(t, log, 0, "the job dir's tmp");
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    expectWriters(t, shot, 0, "two scopes, past the ambiguous-scope refusal too");
+    for (const [tool, make] of WRITERS) {
+      const inside = t.call(tool, make(path.join(t.dir, "src", "a.ts")));
+      assert.equal(inside.status, 2, `${tool}: a file inside the project is still governed by the scopes`);
+      assert.match(inside.stderr, /more than one active project scope/);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: NotebookEdit, Glob and Grep stay outside the scratch allowance while Write and Edit pass it", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.writeFileSync(path.join(tmp, "n.ipynb"), "{}");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    expectWriters(t, path.join(tmp, "shot.png"), 0, "control: the writers pass under the same scope");
+    for (const [what, got] of [["NotebookEdit", t.call("NotebookEdit", { notebook_path: path.join(tmp, "n.ipynb"), new_source: "x" })],
+      ["Glob", t.call("Glob", { pattern: "*", path: tmp })], ["Grep", t.call("Grep", { pattern: "x", path: tmp })]]) {
+      assert.equal(got.status, 2, `${what} of an existing scratch path should be refused: ${got.stderr}`);
+      assert.match(got.stderr, /outside active unit scope/, `${what} is refused by the scope itself`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: scratch Writes and Edits stay narrow: other dirs, symlink escapes, an Edit of a missing file, a relative path, env files and an enclosing temp root are refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.writeFileSync(path.join(tmp, ".env"), "K=v");
+    fs.mkdirSync(path.join(t.base, "other", "sub"));
+    fs.writeFileSync(path.join(t.base, "other", "secret.txt"), "s");
+    fs.writeFileSync(path.join(t.base, "other", "private.txt"), "p");
+    fs.writeFileSync(path.join(tmp, "private.txt"), "decoy");
+    fs.symlinkSync(path.join(t.base, "other", "sub"), path.join(tmp, "link"));
+    fs.symlinkSync(path.join(t.base, "other", "secret.txt"), path.join(tmp, "secret-link.txt"));
+    fs.writeFileSync(path.join(t.base, "job", "notes.txt"), "n");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    expectWriters(t, path.join(tmp, "shot.png"), 0, "control: the scratch file itself passes with two scopes");
+    expectWriters(t, path.join(t.base, "other", "secret.txt"), 2, "another directory");
+    expectWriters(t, path.join(t.base, "job", "notes.txt"), 2, "the job dir outside its tmp");
+    expectWriters(t, path.join(tmp, "secret-link.txt"), 2, "a symlinked file");
+    // The OS resolves link/.. to the symlink target's parent (other/), not to tmp/: written as text, never normalised.
+    expectWriters(t, `${tmp}/link/../private.txt`, 2, "a symlink followed by ..");
+    expectWriters(t, path.join(tmp, "shot.png"), 2, "a temp root that encloses the project", { TMPDIR: t.base });
+    expectWriters(t, path.join(tmp, "new.txt"), { Write: 0, Edit: 2 }, "a file that does not exist: a Write creates it under the scratch root, an Edit has nothing to edit");
+    expectWriters(t, path.relative(t.dir, path.join(tmp, "shot.png")), 2, "a relative path, though it names the scratch file from the working directory");
+    for (const [tool, make] of WRITERS) {
+      const none = t.call(tool, { ...make("x"), file_path: undefined });
+      assert.equal(none.status, 2, `${tool} with no path: ${none.stderr}`);
+    }
+    for (const [tool, make] of WRITERS) {
+      const envFile = t.call(tool, make(path.join(tmp, ".env")));
+      assert.equal(envFile.status, 2, `${tool} of an env file should be refused: ${envFile.stderr}`);
+      assert.match(envFile.stderr, /is a protected path/, `${tool}: the allowance passes an env file on to protectedPaths, which names it; a refusal by the ambiguous-scope check would not`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// Each row proves one clause of insideScratchRoots for the writers: a scope root under the temp dir, the active root, a unit worktree, the session checkout.
+test("pre-guard: a scratch Write or Edit never reaches a file inside a governed root, whichever root it is", () => {
+  let t = scratchProject();
+  try { // another active scope's worktree sits under the temp dir
+    const tmp = path.join(t.base, "tmp");
+    const bWorktree = path.join(tmp, "b-wt");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", bWorktree);
+    fs.mkdirSync(path.join(bWorktree, "src"), { recursive: true });
+    fs.writeFileSync(path.join(bWorktree, "src", "a.ts"), "listed");
+    fs.writeFileSync(path.join(bWorktree, "src", "secret.ts"), "not on the write list");
+    fs.writeFileSync(path.join(tmp, "shot.png"), "png");
+    fs.symlinkSync(path.join(bWorktree, "src", "secret.ts"), path.join(tmp, "alias.ts"));
+    expectWriters(t, path.join(tmp, "alias.ts"), 2, "a symlink under the temp dir into scope B's tree, off B's write list");
+    expectWriters(t, path.join(bWorktree, "src", "secret.ts"), 2, "the direct path is refused by B's write list");
+    expectWriters(t, path.join(bWorktree, "src", "a.ts"), 0, "a file on B's write list still writes, B governs it");
+    expectWriters(t, path.join(tmp, "shot.png"), 2, "with a scope root under the temp dir the scratch allowance is off, the ambiguous-scope refusal stands");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // the active root: a scratch dir inside the session scope's project root
+    const session = { session_id: "scratch", plan: "docs/plans/x.md", unit: "u-session", project: ".", scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    assert.equal(run(SCOPE, t.dir, session, t.env).status, 0);
+    const tmp = path.join(t.dir, ".tmp");
+    expectWriters(t, offListFile(tmp), 2, "a file under the project is the scope's, scratch dir or not", { TMPDIR: tmp });
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // a unit worktree
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    const tmp = path.join(worktree, ".tmp");
+    expectWriters(t, offListFile(tmp), 2, "a file under the unit's worktree is the unit's scope, scratch dir or not", { TMPDIR: tmp });
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // the session checkout, with only unit-worktree scopes
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const tmp = path.join(t.dir, ".tmp");
+    expectWriters(t, offListFile(tmp), 2, "the session checkout is outside every unit worktree, scratch dir or not", { TMPDIR: tmp });
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the checks after the scope still judge a scratch Write or Edit: protectedPaths, the doc-write guard and hooks.json", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    fs.writeFileSync(path.join(tmp, "note.txt"), "n");
+    fs.writeFileSync(path.join(tmp, "note.md"), "# n");
+    fs.writeFileSync(path.join(tmp, ".env"), "K=v");
+    fs.mkdirSync(path.join(tmp, "hooks"));
+    fs.writeFileSync(path.join(tmp, "hooks", "hooks.json"), "{}");
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    // the unit's own root is the active root, so its config is the one the guard reads
+    fs.writeFileSync(path.join(worktree, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["**/*.md"] } }));
+    expectWriters(t, path.join(tmp, "note.txt"), 0, "control: a scratch file no later check names");
+    const later = [[path.join(tmp, ".env"), /is a protected path/], [path.join(tmp, "note.md"), /docWriteGuard\.docPaths/], [path.join(tmp, "hooks", "hooks.json"), /editing .*hooks\.json/]];
+    for (const [file, message] of later) {
+      for (const [tool, make] of WRITERS) {
+        const got = t.call(tool, make(file));
+        assert.equal(got.status, 2, `${tool} ${path.basename(file)}: ${got.stderr}`);
+        assert.match(got.stderr, message, `${tool} ${path.basename(file)}`);
+      }
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// scratch-write-hardening (scrutinise-sandbox-auto-flow phase 2). ARCH-STATE-18 judges a scratch Write or Edit by the real path, so a second name
+// for protected state would pass: a hard link of the scope manifest under a scratch root is that name. insideScratchRoots therefore refuses an
+// existing Write or Edit target with more than one link, the Bash guard judges the coreutils `link` verb as it judges `ln`, and a Write that would
+// create a file is judged by the real path of its nearest existing ancestor plus the missing rest, by the same containment tests.
+function manifestOf(t) { // the one active unit's scope manifest: state no tool call may write
+  const sessionDir = path.join(t.dir, ".craftsman", "sessions", "scratch");
+  const names = fs.readdirSync(sessionDir).filter((n) => /^scope-[0-9a-f]{16}\.json$/.test(n));
+  assert.equal(names.length, 1, `one unit scope manifest in ${sessionDir}`);
+  return path.join(sessionDir, names[0]);
+}
+
+test("pre-guard: a scoped Write or Edit of a hard link of the scope manifest under a scratch root is refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp"), job = path.join(t.base, "job", "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t);
+    fs.writeFileSync(path.join(tmp, "plain.json"), "{}");
+    expectWriters(t, path.join(tmp, "plain.json"), 0, "control: a scratch file with one link passes");
+    for (const [where, dir] of [["the temp dir", tmp], ["the job dir's tmp", job]]) {
+      const hard = path.join(dir, "h.json");
+      fs.linkSync(manifest, hard);
+      assert.equal(fs.statSync(hard).ino, fs.statSync(manifest).ino, "the fixture: one inode under two names");
+      for (const [tool, make] of WRITERS) {
+        const got = t.call(tool, make(hard));
+        assert.equal(got.status, 2, `${tool} of a hard link of the manifest in ${where}: ${got.stderr}`);
+        assert.match(got.stderr, /outside active unit scope/, `${tool}: the scratch allowance is off, so the scope itself refuses`);
+      }
+    }
+    // The rule is the link count, not the name: two scratch files that share an inode are both refused, a symlink to either is judged by the real path,
+    // and a Read of them is untouched (the rule is for the two tools that change a file).
+    fs.writeFileSync(path.join(tmp, "a.txt"), "a");
+    fs.linkSync(path.join(tmp, "a.txt"), path.join(tmp, "b.txt"));
+    fs.symlinkSync(path.join(tmp, "a.txt"), path.join(tmp, "via-link.txt"));
+    expectWriters(t, path.join(tmp, "a.txt"), 2, "the original name of a file that now has two links");
+    expectWriters(t, path.join(tmp, "b.txt"), 2, "the second name");
+    expectWriters(t, path.join(tmp, "via-link.txt"), 2, "a symlink to a file with two links");
+    assert.equal(t.read(path.join(tmp, "b.txt")).status, 0, "a Read of a file with two links still passes");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the coreutils link verb is judged like ln: a hard link of the scope manifest into a scratch root is refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t);
+    const bash = (command) => t.call("Bash", { command });
+    for (const [command, name] of [[`ln ${manifest} ${tmp}/h-ln.json`, "h-ln.json"], [`link ${manifest} ${tmp}/h-link.json`, "h-link.json"],
+      [`cd ${tmp} && link ${manifest} h-cd.json`, "h-cd.json"], [`true; link ${manifest} ${tmp}/h-seq.json`, "h-seq.json"]]) {
+      const got = bash(command);
+      assert.equal(got.status, 2, `blocked: ${command} (${got.stderr})`);
+      assert.match(got.stderr, /is blocked/, `${command}: the self-protection scan names it`);
+      assert.equal(fs.readdirSync(tmp).includes(name), false, "the guard ran instead of the command");
+    }
+    // The blanket text check on the state directory's name cannot help when the command never spells it: reach the manifest through a symlinked
+    // directory, so only the judgement of the source (its real path, a write to it under another name) can refuse.
+    fs.symlinkSync(path.dirname(manifest), path.join(tmp, "sess"));
+    for (const verb of ["ln", "link"]) {
+      const spelled = `${verb} ${tmp}/sess/${path.basename(manifest)} ${tmp}/h-sym-${verb}.json`;
+      assert.doesNotMatch(spelled, /\.craftsman/, "the fixture: the command text never spells the state directory");
+      const got = bash(spelled);
+      assert.equal(got.status, 2, `blocked: ${spelled} (${got.stderr})`);
+      assert.equal(fs.existsSync(path.join(tmp, `h-sym-${verb}.json`)), false, "the guard ran instead of the command");
+    }
+    // The state directory is no destination either: a later Write through the link would reach it under another name.
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    for (const command of [`link ${tmp}/src.txt ${t.dir}/.craftsman/x.json`, `ln ${tmp}/src.txt ${t.dir}/.craftsman/x.json`]) assert.equal(bash(command).status, 2, `blocked: ${command}`);
+    // Controls: the verb is not refused wholesale; two scratch files link.
+    assert.equal(bash(`ln ${tmp}/src.txt ${tmp}/c-ln.txt`).status, 0, "control: the verb `ln` between scratch files");
+    assert.equal(bash(`link ${tmp}/src.txt ${tmp}/c-link.txt`).status, 0, "control: the verb `link` between scratch files");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// cp-link-sources (scrutinise-sandbox-auto-flow phase 2, round 2). `cp -l` / `--link` makes a hard link and `cp -s` / `--symbolic-link` a symlink, as `ln` does, so each source of
+// such a copy gets a second name that a later write can reach protected state under. The Bash guard judges it as a write to that source, as it judges the source of `ln` and `link`.
+// A command that spells a protected name is also refused by the text check on that name, so the rows that must fail on the old guard reach the source without spelling it:
+// through a symlinked directory, by a relative name after `cd`, or as a directory (`cp -al DIR`) that holds it.
+test("pre-guard: cp with -l, --link or -s judges its sources like ln: a link to the scope manifest or the push queue is refused, a copy is not", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t), sessionDir = path.dirname(manifest), name = path.basename(manifest);
+    const queue = path.join(t.dir, ".git", ".craftsman", "network", "queue.jsonl"), netDir = path.dirname(queue);
+    fs.mkdirSync(netDir, { recursive: true });
+    fs.writeFileSync(queue, '{"kind":"push","dst":"feat/x"}\n');
+    fs.symlinkSync(sessionDir, path.join(tmp, "sess"));
+    fs.symlinkSync(netDir, path.join(tmp, "net"));
+    fs.mkdirSync(path.join(tmp, "plain-dir"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    fs.writeFileSync(path.join(tmp, "plain-dir", "f.txt"), "f");
+    fs.mkdirSync(path.join(t.dir, "src"));
+    fs.writeFileSync(path.join(t.dir, "src", "a.txt"), "a");
+    assert.equal(fs.statSync(path.join(tmp, "sess", name)).ino, fs.statSync(manifest).ino, "the fixture: the symlinked directory reaches the manifest");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2); // every row is judged, so a red run names them all
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    // Every spelling of the option that links, with the protected source named only through a symlinked directory.
+    const linking = ["-l", "--link", "--li", "-al", "-sl", "-ls", "-fl", "-s", "--symbolic-link", "--sy"];
+    const unspelled = linking.flatMap((opt) => [`cp ${opt} ${tmp}/sess/${name} ${tmp}/h.json`, `cp ${opt} ${tmp}/net/queue.jsonl ${tmp}/q.jsonl`]);
+    for (const command of unspelled) assert.doesNotMatch(command, /\.craftsman/, "the fixture: the command text never spells the state directory");
+    assert.deepEqual(notRefused(unspelled), [], "a linking cp whose source is the manifest or the queue, named through a symlinked directory");
+    assert.deepEqual(notRefused([
+      `cp -l -t ${tmp} ${tmp}/sess/${name}`, `cp --link --target-directory=${tmp} ${tmp}/net/queue.jsonl`, // the destination directory named by an option
+      `cp -l ${tmp}/src.txt ${tmp}/sess/${name} ${tmp}/plain-dir`, `cp -l ${tmp}/sess/${name} ${tmp}/src.txt ${tmp}/plain-dir`, // the protected source is any of several
+    ]), [], "the destination given by -t or --target-directory, and a protected source among several");
+    assert.deepEqual(notRefused([
+      `cd ${sessionDir} && cp -l ${name} ${tmp}/h.json`, `cd ${tmp}/sess && cp --link ${name} ../h.json`, `cd ${netDir} && cp -s queue.jsonl ${tmp}/q.jsonl`,
+      `cd ${tmp}/sess && cp -l ${name} ${tmp}/h.json`, `cd ${t.dir} && cp -l .git/.craftsman/network/queue.jsonl ${tmp}/q.jsonl`,
+    ]), [], "a relative source is read from the working directory the command ran in");
+    assert.deepEqual(notRefused([
+      `cp -al ${tmp}/sess/ ${tmp}/sessions-copy`, `cp -al ${tmp}/net/ ${tmp}/net-copy`, `cp --link -r ${sessionDir} ${tmp}/sessions-copy`, `cp -al ${t.dir}/.craftsman ${tmp}/state-copy`,
+    ]), [], "a directory source that holds protected state: cp -al makes a second name for every file under it");
+    // The spelled form was already refused by the text check on the protected name; it stays refused.
+    assert.deepEqual(notRefused([`cp -l ${manifest} ${tmp}/h.json`, `cp --link ${queue} ${tmp}/q.jsonl`, `cp -s ${manifest} ${tmp}/s.json`, `cp -al ${queue} ${tmp}/q.jsonl`]), [], "the spelled sources");
+    // Controls: only a copy that links is judged by its source. A copy makes a new file, not a second name; an option that merely resembles -l or -s is not one.
+    assert.deepEqual(notAllowed([
+      `cp ${tmp}/src.txt ${tmp}/x`, `cp -r ${tmp}/plain-dir ${tmp}/plain-copy`, `cp -rv ${tmp}/plain-dir ${tmp}/plain-copy2`,
+      `cp ${tmp}/sess/${name} ${tmp}/plain.json`, `cp -r ${tmp}/sess/ ${tmp}/plain-sessions`, `cp -L ${tmp}/sess/${name} ${tmp}/deref.json`,
+      `cp -t ${tmp}/plain-dir ${tmp}/sess/${name}`, `cp --sparse=always ${tmp}/sess/${name} ${tmp}/sparse.json`, `cp --strip-trailing-slashes ${tmp}/sess/${name} ${tmp}/strip.json`,
+      `cp -- ${tmp}/sess/${name} ${tmp}/dashes.json`,
+    ]), [], "controls: an ordinary copy of the protected source");
+    assert.deepEqual(notAllowed([
+      `cp -l ${tmp}/src.txt ${tmp}/c-l.txt`, `cp --link ${tmp}/src.txt ${tmp}/c-link.txt`, `cp -s ${tmp}/src.txt ${tmp}/c-s.txt`, `cp -sl ${tmp}/src.txt ${tmp}/c-sl.txt`,
+      `cp -al ${tmp}/plain-dir ${tmp}/plain-linked`, `cp -l -t ${tmp}/plain-dir ${tmp}/src.txt`, `cd ${tmp} && cp -l src.txt c-cd.txt`, `cd ${t.dir} && cp -al src ${tmp}/src-linked`,
+    ]), [], "controls: a linking cp whose sources are ordinary files and directories");
+    // rsync -l copies symlinks as links and rsync -s protects arguments: neither makes a link of the source, so the options mean nothing there.
+    assert.deepEqual(notAllowed([`rsync -l ${tmp}/sess/${name} ${tmp}/rs.json`, `rsync -s ${tmp}/sess/${name} ${tmp}/rs.json`]), [], "controls: the same letters on rsync");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// submodule-git-surface (scrutinise-sandbox-auto-flow phase 2, round 3). `rsync --link-dest=DIR` makes a destination file a hard link to the same-named file under DIR (a relative DIR is read from the destination
+// directory), so DIR is a source of links like the source of `ln` or `cp -l`: refused when it is the state directory or holds a protected state file. A `cp` that links (-l, -s) is refused when the name of
+// the link lands in the state directory, as the name of an `ln` is. The state directory's name is spelled in some rows and reached through a symlinked directory in others, so the judgement is what refuses them.
+test("pre-guard: rsync --link-dest judges its directory as a linking source, and a cp that links into the state directory is refused like ln", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t), sessionDir = path.dirname(manifest), state = path.join(t.dir, ".craftsman");
+    const queue = path.join(t.dir, ".git", ".craftsman", "network", "queue.jsonl"), netDir = path.dirname(queue);
+    fs.mkdirSync(netDir, { recursive: true });
+    fs.writeFileSync(queue, '{"kind":"push","dst":"feat/x"}\n');
+    fs.symlinkSync(sessionDir, path.join(tmp, "sess"));
+    fs.symlinkSync(netDir, path.join(tmp, "net"));
+    fs.symlinkSync(state, path.join(tmp, "state"));
+    fs.mkdirSync(path.join(tmp, "plain-dir"));
+    fs.mkdirSync(path.join(tmp, "src"));
+    fs.writeFileSync(path.join(tmp, "src", "f.txt"), "f");
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2); // every row is judged, so a red run names them all
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const src = `${tmp}/src/`;
+    assert.deepEqual(notRefused([
+      `rsync -a --link-dest=${state} ${src} ${tmp}/out1/`, `rsync -a --link-dest ${state} ${src} ${tmp}/out2/`, // the state directory, both spellings of the option
+      `rsync -a --link-dest=${sessionDir} ${src} ${tmp}/out3/`, `rsync -a --link-dest ${netDir} ${src} ${tmp}/out4/`, // a directory that holds the scope manifest, the push queue
+    ]), [], "a link-dest that is the state directory or holds a protected state file");
+    const unspelled = [`rsync -a --link-dest=${tmp}/sess ${src} ${tmp}/out5/`, `rsync -a --link-dest ${tmp}/net ${src} ${tmp}/out6/`, `rsync -av --link-dest=${tmp}/state ${src} ${tmp}/out7/`];
+    for (const command of unspelled) assert.doesNotMatch(command, /\.craftsman/, "the fixture: the command text never spells the state directory");
+    assert.deepEqual(notRefused(unspelled), [], "a link-dest named through a symlinked directory");
+    assert.deepEqual(notRefused([
+      `rsync -a ${src} ${tmp}/out8/ --link-dest=${tmp}/sess`, `rsync -a --link-dest=${tmp}/plain-dir --link-dest=${tmp}/sess ${src} ${tmp}/out9/`, // the option after the operands; a second --link-dest
+      `rsync -a -H --delete --link-dest="${tmp}/sess" ${src} ${tmp}/out10/`, `rsync -a --link-dest='${tmp}/net' ${src} ${tmp}/out11/`,
+    ]), [], "the option anywhere on the line, repeated, and quoted");
+    assert.deepEqual(notRefused([
+      `rsync -a --link-dest=../sess ${src} ${tmp}/out12/`, // read from the destination directory: ${tmp}/out12/../sess is the symlink
+      `cd ${t.dir} && rsync -a --link-dest=.craftsman ${src} ${tmp}/out13/`, `cd ${sessionDir} && rsync -a --link-dest=. ${src} ${tmp}/out14/`, // read from the working directory
+    ]), [], "a relative link-dest is read from the destination directory and from the working directory");
+    // Controls: the same rsync without --link-dest, and with an ordinary directory, stays allowed; a copy that reads the state directory makes no second name.
+    assert.deepEqual(notAllowed([
+      `rsync -a ${src} ${tmp}/outa/`, `rsync -a --link-dest=${tmp}/plain-dir ${src} ${tmp}/outb/`, `rsync -a --link-dest ${tmp}/plain-dir ${src} ${tmp}/outc/`,
+      `rsync -a --link-dest=../plain-dir ${src} ${tmp}/outd/`, `cd ${tmp} && rsync -a --link-dest=plain-dir src/ oute/`, `rsync -a ${tmp}/sess/ ${tmp}/outf/`,
+    ]), [], "controls: no --link-dest, an ordinary directory, a plain copy of the state directory");
+
+    // A cp that links: the name of the link is judged like the name of `ln`.
+    assert.deepEqual(notRefused([
+      `cp -s ${tmp}/src.txt ${state}/x`, `cp -l ${tmp}/src.txt ${state}/x`, `cp -s ${tmp}/src.txt .craftsman/x`, `cp --symbolic-link ${tmp}/src.txt ${state}/x`, `cp --link ${tmp}/src.txt ${state}/x`,
+      `cp -sf ${tmp}/src.txt ${state}/x`, `cp -al ${tmp}/src.txt ${state}/x`, `cp -s ${tmp}/src.txt ${state}/`, `cp -s ${tmp}/src.txt ${tmp}/src.txt ${state}/`,
+    ]), [], "a linking cp whose link name is under the state directory");
+    assert.deepEqual(notRefused([
+      `cp -s -t ${state} ${tmp}/src.txt`, `cp --link --target-directory=${state} ${tmp}/src.txt`, `cd ${state} && cp -l ${tmp}/src.txt x`, `cd ${t.dir} && cp -s ${tmp}/src.txt .craftsman/x`,
+    ]), [], "the destination given by -t or --target-directory, and by the working directory");
+    const unspelledCp = [`cp -s ${tmp}/src.txt ${tmp}/state/x`, `cp -l ${tmp}/src.txt ${tmp}/state/`, `cp -s -t ${tmp}/state ${tmp}/src.txt`];
+    for (const command of unspelledCp) assert.doesNotMatch(command, /\.craftsman/, "the fixture: the command text never spells the state directory");
+    assert.deepEqual(notRefused(unspelledCp), [], "a link name given through a symlinked directory");
+    assert.deepEqual(notAllowed([
+      `cp ${tmp}/src.txt ${state}/x`, `cp -r ${tmp}/plain-dir ${state}/copied`, // a copy makes a new file, not a second name
+      `cp -s ${tmp}/src.txt ${tmp}/c-s2.txt`, `cp -l ${tmp}/src.txt ${t.dir}/b.txt`, `cp -al ${tmp}/plain-dir ${tmp}/plain-linked2`, `cd ${tmp} && cp -s src.txt c-cd2.txt`,
+      `ln -s ${tmp}/src.txt ${tmp}/c-ln2.txt`,
+    ]), [], "controls: a plain copy into the state directory, a linking cp or ln between ordinary paths");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: ln and link read a relative source from the working directory as well as from the link's directory", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t), name = path.basename(manifest);
+    fs.symlinkSync(path.dirname(manifest), path.join(tmp, "sess"));
+    fs.mkdirSync(path.join(tmp, "plain-dir"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    assert.deepEqual(notRefused([
+      `cd ${tmp}/sess && ln ${name} ${tmp}/h-ln.json`, `cd ${tmp}/sess && link ${name} ${tmp}/h-link.json`, `cd ${tmp}/sess && ln -s ${name} ${tmp}/h-sym.json`, `cd ${tmp}/sess && ln ${name} ${tmp}/plain-dir`,
+    ]), [], "a relative source after cd into a symlinked directory, the link made in another directory");
+    assert.equal(t.call("Bash", { command: `cd ${tmp} && ln src.txt c-ln.txt` }).status, 0, "control: two scratch files link");
+    assert.equal(t.call("Bash", { command: `cd ${tmp} && ln -s plain-dir c-dir` }).status, 0, "control: a symlink to a scratch directory");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// The text check that refuses a link into the state directory read `ln` or `link` after any blank, so a search for the word (`grep -n link …/acceptance.md`) was a link. A command that only
+// searches for or prints the word is exempt (every segment that holds it starts with a read-only head); a link behind any wrapper is refused (the next test).
+test("pre-guard: a search that only names ln or link under the state directory is not a link, and a real link there is refused wherever the verb stands", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    fs.mkdirSync(path.join(t.dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(t.dir, ".craftsman", "acceptance.md"), "- [ ] link the unit\n");
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    assert.deepEqual(notAllowed([
+      "grep -n link .craftsman/acceptance.md", "rg -n link .craftsman/", "grep -rn ln .craftsman", "grep -c link .craftsman/acceptance.md", "echo link .craftsman", "cat .craftsman/acceptance.md | grep -n link",
+      "git log --grep=link -- .craftsman", "grep -n 'ln -s' .craftsman/acceptance.md", "true && grep link .craftsman/acceptance.md",
+    ]), [], "a search or an echo that names the verb next to the state directory");
+    assert.deepEqual(notRefused([
+      "ln -s x .craftsman/x", "link " + tmp + "/src.txt .craftsman/x.json", "ln " + tmp + "/src.txt .craftsman/x.json", "true; ln -s x .craftsman/x", "true&&ln -s x .craftsman/x", "cd " + t.dir + " && ln -s x .craftsman/x",
+      "echo hi\nln -s x .craftsman/x", "FOO=1 ln -s x .craftsman/x", "if true; then ln -s x .craftsman/x; fi", "(ln -s x .craftsman/x)", "{ ln -s x .craftsman/x; }", "x=$(ln -s y .craftsman/z)", "ls | while read f; do ln -s $f .craftsman/x; done",
+      "sudo ln -s x .craftsman/x", "env ln -s x .craftsman/x", "nohup ln -s x .craftsman/x", "timeout 5 ln -s x .craftsman/x", "nice -n 5 ln -s x .craftsman/x", "command ln -s x .craftsman/x", "time ln -s x .craftsman/x",
+      "sudo -u root ln -s x .craftsman/x", "env FOO=1 ln -s x .craftsman/x", "echo x | xargs ln -s .craftsman/x", "echo x | xargs -I{} ln -s {} .craftsman/x", "find . -name x -exec ln -s {} .craftsman/x +",
+    ]), [], "a link into the state directory, whatever stands before the verb");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// ln-check-safe-exemption (scrutinise-sandbox-auto-flow phase 2, round 3). The text check reads `ln` or `link` as a whole word next to the state directory and refuses the command, whatever stands before
+// the word, so a wrapper no list names (`setsid`, `chrt 5`, `flock /x`, `taskset 1`, `strace -f`, `unshare -r`, `fakeroot`, `watch`) cannot hide a link. A command is exempt only when every segment (split on
+// `;`, `&`, `|` and newlines) that holds the word starts with a read-only head from a fixed list.
+test("pre-guard: an ln or link next to the state directory is refused behind any wrapper, and only a read-only search that merely names the word is exempt", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    fs.mkdirSync(path.join(t.dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(t.dir, ".craftsman", "acceptance.md"), "- [ ] link the unit\n");
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const wrappers = ["setsid", "chrt 5", "flock /x", "taskset 1", "strace -f", "unshare -r", "fakeroot", "watch"];
+    assert.deepEqual(notRefused(wrappers.flatMap((w) => [`${w} ln -s x .craftsman/x`, `${w} ln ${tmp}/src.txt .craftsman/x.json`, `${w} link .craftsman/acceptance.md ${tmp}/h.json`])), [],
+      "an unlisted wrapper in front of an ln whose link name or source is under the state directory");
+    assert.deepEqual(notRefused(["sudo ln -s x .craftsman/x", "env ln -s x .craftsman/x", "nohup ln -s x .craftsman/x", "timeout 5 ln -s x .craftsman/x", "nice -n 5 ln -s x .craftsman/x", "xargs -I{} ln -s {} .craftsman/x"]), [],
+      "the wrappers the text check named before stay refused");
+    assert.deepEqual(notAllowed([
+      "grep -n link .craftsman/acceptance.md", "rg -n link .craftsman/", "egrep -n link .craftsman/acceptance.md", "fgrep link .craftsman/acceptance.md", "echo ln .craftsman", "echo link .craftsman",
+      "printf ln .craftsman", "printf '%s\\n' link .craftsman", "cat link .craftsman/acceptance.md", "git log --oneline -- ln .craftsman", "git  log --oneline -- link .craftsman",
+      "grep -n link .craftsman/acceptance.md | head -3", "cat .craftsman/acceptance.md | grep -n link", "grep -n link .craftsman/acceptance.md && echo done", "ls .craftsman && grep -rn ln .craftsman",
+      "echo ln .craftsman; echo link .craftsman", "echo ln .craftsman\ngrep link .craftsman/acceptance.md", "grep -n link .craftsman/acceptance.md || echo none",
+    ]), [], "a read-only search or echo that only names the word: every segment that holds the word starts with a listed head");
+    assert.deepEqual(notRefused([
+      "grep -n link .craftsman/acceptance.md; ln -s x .craftsman/x", "grep -n link .craftsman/acceptance.md && setsid ln -s x .craftsman/x", "echo ln .craftsman | xargs ln -s x",
+      "echo ln .craftsman\nsetsid ln -s x .craftsman/x", "grep -n link .craftsman/acceptance.md || flock /x ln -s x .craftsman/x", "echo ln .craftsman & ln -s x .craftsman/x", "ln -s x .craftsman/x; grep -n link .craftsman/acceptance.md",
+      "git log --oneline -- ln .craftsman; chrt 5 link " + tmp + "/src.txt .craftsman/x.json", "echo link $(ln -s x .craftsman/x)", "echo link `ln -s x .craftsman/x`", "grep -n link .craftsman/acceptance.md | setsid ln -s x .craftsman/x",
+      "echo ln .craftsman && (ln -s x .craftsman/x)", "echo ln .craftsman && { setsid ln -s x .craftsman/x; }",
+    ]), [], "a mixed command whose other segment holds a real ln is refused");
+    // The fixed list is the whole exemption: a head outside it, or the word with no head, is refused.
+    assert.deepEqual(notRefused(["ls -l ln .craftsman", "sed -n ln .craftsman/acceptance.md", "echo hi ; ls link .craftsman"]), [], "the word and the state directory with a head outside the list");
+    // A listed head with an option that runs a program or writes a file is no longer a read-only search.
+    assert.deepEqual(notRefused(["rg --pre ln x .craftsman", "rg --pre=x ln .craftsman", "rg --hostname-bin ln x .craftsman", "git log --output=x -- ln .craftsman"]), [], "a listed head with an option that acts");
+    assert.equal(t.call("Bash", { command: "git log --pretty=oneline -- ln .craftsman" }).status, 0, "control: --pretty is no --pre");
+    assert.equal(t.call("Bash", { command: `ln ${tmp}/src.txt ${tmp}/c-ln.txt` }).status, 0, "control: two scratch files link");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// The text checks ran a backtracking regex over the whole command: `sudo` followed by 26 `1=1` tokens took 10 s, and the guard sits in front of every Bash call. Each adversarial input answers in
+// well under a second; the best of three runs is read, so a loaded machine's one slow start does not fail the row while a pattern that backtracks stays over the limit in all three.
+test("pre-guard: the Bash guard answers long adversarial commands in under 300 ms", () => {
+  const t = scratchProject();
+  try {
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const rows = {
+      "sudo and 40 `1=1` tokens": "sudo " + "1=1 ".repeat(40) + "x",
+      "sudo, 40 `1=1` tokens, then ln into the state directory": "sudo " + "1=1 ".repeat(40) + "ln -s x .craftsman/x",
+      "nice and 40 `1=1` tokens": "nice " + "1=1 ".repeat(40) + "ln",
+      "nice and 40 digits": "nice " + "1 ".repeat(40) + "x",
+      "nice and a run of 40 digits": "nice " + "1".repeat(40) + " ln",
+      "400 spaces": " ".repeat(400),
+      "400 spaces between ln and the state directory": "ln" + " ".repeat(400) + ".craftsman/x",
+      "sudo, 400 spaces, then ln": "sudo" + " ".repeat(400) + "ln -s x .craftsman/x",
+      "40 `;` segments that name the word": "grep -n link .craftsman/acceptance.md" + "; echo ln .craftsman".repeat(40),
+    };
+    const expect = { "sudo, 40 `1=1` tokens, then ln into the state directory": 2, "400 spaces between ln and the state directory": 2, "sudo, 400 spaces, then ln": 2 };
+    // A run that backtracks is cut off after 5 s, so a regression fails here instead of hanging the suite.
+    const timed = (command) => {
+      const started = Date.now();
+      const got = spawnSync(process.execPath, [GUARD], { cwd: t.dir, input: JSON.stringify({ session_id: "scratch", tool_name: "Bash", tool_input: { command } }), encoding: "utf8", timeout: 5000, env: { ...process.env, CLAUDE_PROJECT_DIR: t.dir, ...t.env } });
+      return { ms: Date.now() - started, status: got.status };
+    };
+    for (const [what, command] of Object.entries(rows)) {
+      let run = timed(command);
+      for (let again = 0; again < 2 && run.ms >= 300; again++) { const next = timed(command); if (next.ms < run.ms) run = next; }
+      assert.ok(run.ms < 300, `${what}: the guard took ${run.ms} ms at its best of three runs (limit 300 ms)`);
+      assert.equal(run.status, expect[what] ?? 0, `${what}: the verdict`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// bash-writer-gaps (scrutinise-sandbox-auto-flow phase 2, round 4). GNU cp, mv, install and ln read the option `-t` the way getopt does: `-t DIR`, an attached `-tDIR`, a cluster that ends in t (`-ft DIR`) or
+// carries the directory (`-ft.git/x`), and `--target-directory` or an abbreviation of it; a letter that takes a value before the t (`-S`) swallows the rest of its cluster. The guard read only the word `-t`, so
+// `cp ../tmp/queue.jsonl -t.git/.craftsman/network` was a copy to a file named for the source. rsync's `-t` keeps times and takes no directory, so it is no target.
+test("pre-guard: an attached -tDIR and a short-option cluster that holds t name the target directory of cp, mv, install and ln", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const net = path.join(t.dir, ".git", ".craftsman", "network");
+    fs.mkdirSync(net, { recursive: true });
+    fs.mkdirSync(path.join(tmp, "d"));
+    for (const name of ["queue.jsonl", "off"]) fs.writeFileSync(path.join(tmp, name), "x");
+    fs.symlinkSync(net, path.join(tmp, "net"));
+    fs.symlinkSync(path.join(t.dir, ".craftsman"), path.join(tmp, "state"));
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    // No trailing slash on the spelled directories: the text check on the queue path needs one, so the parser's reading of the option decides these rows. The symlinked ones do not spell the state at all.
+    const spellings = (file, dir) => [
+      `cp ${file} -t${dir}`, `cp -ft${dir} ${file}`, `cp -vt${dir} ${file}`, `cp ${file} -ft${dir}`, `cp -rt${dir} ${file}`, `cp -ft ${dir} ${file}`, `cp -S .bak -t${dir} ${file}`, `cp --backup -t${dir} ${file}`,
+      `mv ${file} -t${dir}`, `mv -ft${dir} ${file}`, `mv -vt${dir} ${file}`, `mv -ft ${dir} ${file}`,
+      `install ${file} -t${dir}`, `install -Dt${dir} ${file}`, `install -m 644 -t${dir} ${file}`, `install -Dm644 -t${dir} ${file}`, `install -Dt ${dir} ${file}`,
+      `ln -sft${dir} ${file}`, `ln -s -t${dir} ${file}`, `ln -sf -t${dir} ${file}`, `ln -st ${dir} ${file}`,
+    ];
+    const queueRows = [".git/.craftsman/network", "../tmp/net"].flatMap((dir) => spellings("../tmp/queue.jsonl", dir));
+    const stateRows = [".craftsman", "../tmp/state"].flatMap((dir) => spellings("../tmp/off", dir));
+    for (const command of [...spellings("../tmp/queue.jsonl", "../tmp/net"), ...spellings("../tmp/off", "../tmp/state")]) assert.doesNotMatch(command, /.craftsman/, "the fixture: these rows never spell the state directory");
+    assert.deepEqual(notRefused([...queueRows, ...stateRows]), [], "an attached -tDIR, a cluster ending in t and a cluster carrying the directory, for the queue directory and for the state directory");
+    // The spellings that were read before stay refused, and so do the abbreviations of the long option.
+    assert.deepEqual(notRefused([
+      "cp ../tmp/off -t .craftsman", "cp ../tmp/off --target-directory=.craftsman", "cp ../tmp/off --target-directory .craftsman", "cp ../tmp/off --target-dir=.craftsman", "cp ../tmp/off --target=.craftsman", "cp ../tmp/off --t=.craftsman",
+      "mv ../tmp/off --target-directory=.craftsman", "install ../tmp/off --target-directory=.craftsman", "cp ../tmp/off -t ../tmp/d -t.craftsman", "cp ../tmp/off -t.craftsman -t ../tmp/d", // a second -t: both are judged
+    ]), [], "the separate and the long spellings of the option");
+    // rsync's -t is --times: the destination is the last word, whatever -t is followed by.
+    assert.deepEqual(notRefused(["rsync -t ../tmp/queue.jsonl .git/.craftsman/network/", "rsync -at ../tmp/off .craftsman/", "rsync -t ../tmp/off ../tmp/state/"]), [], "rsync -t names no directory");
+    // Controls: the same spellings into an ordinary directory, and a cluster in which a letter that takes a value comes first (the rest of the cluster is that letter's value).
+    assert.deepEqual(notAllowed([
+      "cp ../tmp/off -t../tmp/d", "cp -ft../tmp/d ../tmp/off", "cp -t ../tmp/d ../tmp/off", "cp -vt ../tmp/d ../tmp/off", "mv ../tmp/off -t../tmp/d", "mv -ft../tmp/d ../tmp/off",
+      "install -Dt../tmp/d ../tmp/off", "install -m644 -o root -t../tmp/d ../tmp/off", "ln -sft../tmp/d ../tmp/off", "ln -s -t../tmp/d ../tmp/off",
+      "cp -S .bak ../tmp/off ../tmp/d", "cp -S.craftsman ../tmp/off ../tmp/d", "cp -St.craftsman ../tmp/off ../tmp/d", "cp -S .bak -t../tmp/d ../tmp/off",
+      "rsync -at ../tmp/off ../tmp/d/", "rsync -t ../tmp/off ../tmp/d/",
+    ]), [], "controls: an ordinary target directory, a suffix that happens to hold a t, rsync -t");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// bash-writer-gaps (round 4). A link makes a second name for the file it is given, and a directory source of `cp -al` or `rsync --link-dest` a second name for every file under it. Holds() does not count the
+// project root (removing it is the sandbox's business), so `cp -al .` linked every file of the state directory and the queue, and a write through the new name passed. The project root, the main checkout, the git
+// common dir and any directory above one of them hold the state; so does a source with a glob character that could name it (`.crafts*an` expands to the state directory, and the guard runs no shell to see which
+// names exist). The rows here never rely on a file the glob would match: a glob is judged by the names it can match.
+test("pre-guard: a link whose source is the project root, holds it or is a glob that could name the state directory is refused, and an ordinary directory or glob is not", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp"), worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    fs.mkdirSync(path.join(t.dir, "docs"));
+    fs.mkdirSync(path.join(t.dir, "src"));
+    fs.writeFileSync(path.join(t.dir, "docs", "a.md"), "a");
+    fs.mkdirSync(path.join(tmp, "plain"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const fromWorktree = (command) => run(GUARD, worktree, { session_id: "scratch", tool_name: "Bash", tool_input: { command } }, t.env).status;
+    assert.deepEqual(notRefused([
+      "cp -al . ../tmp/o1", "cp -lr . ../tmp/o2", "cp -al ../proj ../other/o3", "cp -al .. ../other/o4", `cp -al ${t.dir} ${tmp}/o5`, `cp -al ${t.base} ${tmp}/o6`, `cp -al / ${tmp}/o7`,
+      "cp --link -r . ../tmp/o8", "cp -lR ./ ../tmp/o9", "cp -al ./. ../tmp/o10", "cp -al -t ../tmp/d .", "cp -al . -t../tmp/d", "cp -a --link . ../tmp/o11", "cd docs && cp -al .. ../../tmp/o12",
+      "cp -alt../tmp/d .", "cp -sft../tmp/d .", "cp -s . ../tmp/o13", "ln -s . ../tmp/o14", "ln -s .. ../tmp/o15", `ln -s ${t.dir} ${tmp}/o16`, `link ${t.dir} ${tmp}/o17`,
+    ]), [], "a linking cp or ln whose source is the project root or a directory above it");
+    assert.deepEqual(notRefused([
+      "rsync -a --link-dest=.. src/ ../tmp/out1/", "rsync -a --link-dest=. docs/ ../tmp/out2/", "rsync -a --link-dest ../proj docs/ ../tmp/out3/", "rsync -a docs/ ../tmp/out4/ --link-dest=.",
+    ]), [], "rsync --link-dest naming the project root or a directory above it");
+    // A glob: judged by the names it can match, so none of them has to exist (there is no sessions/x here).
+    assert.deepEqual(notRefused([
+      "cp -l .craftsman/sessions/x/scope-* ../tmp/g0", "cp -l .crafts*an/sessions/x/scope-* ../tmp/g1", "cp -al .craftsma?/sessions ../tmp/g2", "cp -l .craft[s]man/sessions/x/f ../tmp/g3", "cp -l .{craftsman,x}/sessions/f ../tmp/g4",
+      "cp -al .c* ../tmp/g5", "cp -al .* ../tmp/g6", "cp -al .g* ../tmp/g7", "cp -l .git/hooks/* ../tmp/g8", "cp -l .git/*/x ../tmp/g9", "cp -al ../pro* ../tmp/g10", "cp -al ../*/ ../tmp/g11",
+      "cp -al /* ../tmp/g12", "cp -al ./.crafts*an ../tmp/g13", "cp --link .crafts*an/sessions/*/scope-* -t ../tmp", `cp -l ${t.dir}/.crafts*an/sessions/*/scope-* ${tmp}/g14`, "cd docs && cp -l ../.crafts*an/x ../../tmp/g15",
+      "ln .crafts*an/sessions/x/scope-* ../tmp/g16", "ln -s .crafts*an/sessions/x/scope-* ../tmp/g17", "link .crafts*an/sessions/x/scope-1.json ../tmp/g18", "ln .crafts*an/sessions/x/scope-* -t ../tmp",
+      "/bin/ln .crafts*an/sessions/x/scope-* ../tmp/g19", "rsync -a --link-dest=.crafts*an docs/ ../tmp/out5/", "rsync -a --link-dest=.git/* docs/ ../tmp/out6/",
+    ]), [], "a linking cp, ln, link or rsync whose source is a glob that could name the state directory or lies inside it");
+    // The same from the linked worktree: the main checkout, the directory that holds the worktree and the main checkout's state directory hold the state too.
+    assert.deepEqual([
+      `cp -al ${t.dir} ${tmp}/m1`, `cp -al ${t.dir}/.worktrees ${tmp}/m2`, `cp -al ${t.dir}/.craftsman ${tmp}/m3`, `cp -al ${t.dir}/.cra* ${tmp}/m4`, `cp -al ${t.dir}/.git ${tmp}/m5`, `cp -al . ${tmp}/m6`, `ln -s ${t.dir} ${tmp}/m7`,
+    ].filter((command) => fromWorktree(command) !== 2), [], "from a linked worktree: the main checkout and its state");
+    assert.deepEqual(["cp -al src ../../../tmp/w1", "cp -l docs/* ../../../tmp/w2"].filter((command) => fromWorktree(command) !== 0), [], "controls from the linked worktree: its own ordinary directories");
+    // Controls: an ordinary directory, a glob inside one, a glob at the root that does not reach a dot name, and copies that make no second name.
+    assert.deepEqual(notAllowed([
+      "cp -al docs ../tmp/d1", "cp -al docs/ ../tmp/d2", "cp -l docs/a.md ../tmp/d3", "cp -al src ../tmp/d4", "cp -al ../tmp/plain ../tmp/d5", "cp -l docs/* ../tmp/d6", "cp -l docs/*.md ../tmp/d7", "cp -al * ../tmp/d8",
+      "cp -al ../tmp/* ../other/", "cd docs && cp -al a.md ../../tmp/d9", "cd docs && ln -s a.md ../../tmp/d10", "ln docs/a.md ../tmp/d11", "ln -s docs/* ../tmp/plain", "ln -s ../tmp/plain ../tmp/d12",
+      "cp -a . ../tmp/c1", "cp -r . ../tmp/c2", "cp -Sl . ../tmp/c4", "cp -rSs . ../tmp/c5", "cp -a .crafts*an ../tmp/c3", "rsync -a docs/ ../tmp/out7/", "rsync -a --link-dest=../tmp/plain docs/ ../tmp/out8/", "rsync -a --link-dest=docs src/ ../tmp/out9/",
+    ]), [], "controls: ordinary sources, and copies that do not link");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// bash-writer-gaps (round 4). The text check for a link into the state directory (a) reads a quoted-delimiter heredoc body fed to cat or tee as the inert text it is (prose that names the verb and the
+// state directory is not a link, a real link before or after it is), (b) runs before the slow removal check, so a 48 KB command of link operands is answered in well under a second and not after the
+// seconds the parser needs (the hook has a timeout), (c) folds the case of the state directory's name, as selfKind does, and (d) is backed by a parser that judges where an `ln` lands: the one-operand form
+// makes a link named for its operand in the working directory, `-t` names a directory, and a path-qualified or quoted verb is the verb.
+test("pre-guard: the link check ignores quoted heredoc prose, answers a long command in under a second, folds case and judges where an ln lands", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    fs.mkdirSync(path.join(t.dir, ".craftsman", "approvals"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "plain"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    fs.symlinkSync(path.join(t.dir, ".craftsman"), path.join(tmp, "state"));
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    // (a) A heredoc body is prose to cat and tee. A body that is run (bash, a pipe to a shell, node with live words) or expanded (an unquoted tag) is read as it stands.
+    const prose = "note: ln -s x .craftsman/y is refused, and so is link .craftsman/z";
+    const heredoc = (head, body, tag = "'EOF'") => `${head} <<${tag}\n${body}\nEOF`;
+    assert.deepEqual(notAllowed([
+      heredoc(`cat > ${tmp}/n.txt`, prose), heredoc(`cat > ${tmp}/n.txt`, prose, '"EOF"'), heredoc(`tee ${tmp}/n.txt`, prose), heredoc(`cat >> ${tmp}/n.txt`, prose),
+      `${heredoc(`cat > ${tmp}/n.txt`, prose)}\necho done`, `cd ${tmp} && ${heredoc("cat > n.txt", prose)}`, heredoc(`cat > ${tmp}/n.txt`, `${prose}\nln\nlink .craftsman`),
+    ]), [], "a quoted-delimiter heredoc body fed to cat or tee that names the verb word and the state directory is prose");
+    assert.deepEqual(notRefused([
+      `${heredoc(`cat > ${tmp}/n.txt`, prose)}\nln -s x .craftsman/y`, `ln -s x .craftsman/y\n${heredoc(`cat > ${tmp}/n.txt`, prose)}`, `${heredoc(`cat > ${tmp}/n.txt`, prose)}\ncd .craftsman && ln -s ../tmp/src.txt z`,
+      `${heredoc(`cat > ${tmp}/n.txt`, prose)}; ln -s x .craftsman/y`, `ln -s x .craftsman/y; ${heredoc(`cat > ${tmp}/n.txt`, prose)}`,
+      heredoc(`cat > ${tmp}/n.txt`, prose, "EOF"), heredoc("bash", "ln -s x .craftsman/y"), `cat <<'EOF' | sh\n${prose}\nEOF`, heredoc("sh", prose),
+    ]), [], "a real link next to the heredoc, an unquoted tag, and a body that is run");
+    // (b) 48 KB of link operands into the state directory. A run that backtracks or scans for seconds is cut off after 5 s, so a regression fails here instead of hanging the suite; the best of three runs is read.
+    const timed = (command) => {
+      const started = Date.now();
+      const got = spawnSync(process.execPath, [GUARD], { cwd: t.dir, input: JSON.stringify({ session_id: "scratch", tool_name: "Bash", tool_input: { command } }), encoding: "utf8", timeout: 5000, env: { ...process.env, CLAUDE_PROJECT_DIR: t.dir, ...t.env } });
+      return { ms: Date.now() - started, status: got.status };
+    };
+    const long = { "repeated ln operands into the state directory": "ln -s x .craftsman/y ".repeat(2400), "ln commands joined by ;": "ln -s x .craftsman/y; ".repeat(2300), "link operands, one per line": "link x .craftsman/y\n".repeat(2500) };
+    for (const [what, command] of Object.entries(long)) {
+      assert.ok(command.length >= 48 * 1024, `${what}: the fixture is 48 KB`);
+      let got = timed(command);
+      for (let again = 0; again < 2 && got.ms >= 1000; again++) { const next = timed(command); if (next.ms < got.ms) got = next; }
+      assert.ok(got.ms < 1000, `${what}: the guard took ${got.ms} ms at its best of three runs (limit 1000 ms)`);
+      assert.equal(got.status, 2, `${what}: the verdict`);
+    }
+    // (c) The state directory's name is compared case-folded: a case-insensitive filesystem reaches .Craftsman as .craftsman.
+    assert.deepEqual(notRefused([
+      "ln -s ../tmp/plain .Craftsman/approvals", "ln -s ../tmp/src.txt .Craftsman/x", "ln -s ../tmp/src.txt .CRAFTSMAN/x", "ln ../tmp/src.txt .Craftsman/x", "link ../tmp/src.txt .Craftsman/x", "cp -l ../tmp/src.txt .Craftsman/x", "cp -s ../tmp/src.txt .CRAFTSMAN/x",
+      "cd .Craftsman && ln -s ../../tmp/src.txt x", "/bin/ln -s ../tmp/src.txt .Craftsman/x", "ln -s -t .Craftsman ../tmp/src.txt", "ln -sft.Craftsman ../tmp/src.txt",
+      "setsid ln -s ../tmp/src.txt .Craftsman/x", "flock /x ln -s ../tmp/src.txt .CRAFTSMAN/x", "chrt 5 link ../tmp/src.txt .Craftsman/x", "echo hi; setsid ln -s x .CRAFTSMAN/x", // behind a wrapper no list names: only the text check reads these
+    ]), [], "a link into the state directory spelled in another case");
+    // (d) Where an ln lands.
+    const here = (dir, command) => `cd ${dir} && ${command}`;
+    assert.deepEqual(notRefused([
+      here(path.join(tmp, "state"), "/bin/ln -s ../../tmp/approvals"), here(path.join(tmp, "state"), "ln -s ../../tmp/approvals"), here(path.join(tmp, "state"), "ln ../tmp/src.txt"), here(path.join(tmp, "state"), '"ln" -s ../tmp/plain'),
+      here(path.join(tmp, "state"), "'ln' -s ../tmp/plain"), here(path.join(tmp, "state"), "/usr/bin/ln -sf ../tmp/src.txt"), here(".craftsman", "/bin/ln -s ../../tmp/approvals"), here(".craftsman/approvals", "/usr/bin/ln -s ../../tmp/src.txt"),
+      `"ln" -sft.craftsman ../tmp/src.txt`, `'ln' -sft.craftsman ../tmp/src.txt`, `/bin/ln -sft.craftsman ../tmp/src.txt`, `ln -s -t.craftsman ../tmp/src.txt`, `ln -st .craftsman ../tmp/src.txt`, `l""n -sft.craftsman ../tmp/src.txt`,
+      `"ln" -sft../tmp/state ../tmp/src.txt`, `/bin/ln -sft../tmp/state ../tmp/src.txt`, `/usr/bin/link ../tmp/src.txt .craftsman/x`, `"link" ../tmp/src.txt .craftsman/x`, `ln -s ../tmp/src.txt ../tmp/state/x`, "ln -s ../tmp/src.txt ../tmp/state",
+    ]), [], "a link that lands in the state directory by its one operand, by -t, or through a quoted or path-qualified verb");
+    assert.deepEqual(notAllowed([
+      here(tmp, "/bin/ln -s plain"), here(tmp, "ln -s ../proj/docs"), here(path.join(tmp, "plain"), "/usr/bin/ln -s ../src.txt"), "ln -s ../tmp/plain", "/bin/ln -s ../tmp/src.txt", '"ln" -sft../tmp/plain ../tmp/src.txt',
+      "ln -sft ../tmp/plain ../tmp/src.txt", "/usr/bin/link ../tmp/src.txt ../tmp/plain/x", "ln -s ../tmp/src.txt ../tmp/plain",
+    ]), [], "controls: a link that lands in an ordinary directory, whatever its spelling");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a scoped Write of a new file whose nearest existing ancestor is a scratch root passes; an Edit, a Read, NotebookEdit, Glob and Grep of it do not", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp"), job = path.join(t.base, "job", "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const write = (file, extra) => t.call("Write", { file_path: file, content: "x" }, extra);
+    for (const file of [path.join(tmp, "new.txt"), path.join(tmp, "deep", "er", "new.txt"), path.join(job, "new.log"), `${tmp}/./dot.txt`]) {
+      const got = write(file);
+      assert.equal(got.status, 0, `a Write of the new file ${file}: ${got.stderr}`);
+    }
+    const refused = (what, got) => {
+      assert.equal(got.status, 2, `${what} should be refused: ${got.stderr}`);
+      assert.match(got.stderr, /outside active unit scope/, `${what} is refused by the scope itself`);
+    };
+    refused("an Edit of a missing file", t.call("Edit", { file_path: path.join(tmp, "new.txt"), old_string: "a", new_string: "b" }));
+    refused("a Read of a missing file", t.read(path.join(tmp, "new.txt")));
+    refused("a NotebookEdit of a new notebook", t.call("NotebookEdit", { notebook_path: path.join(tmp, "new.ipynb"), new_source: "x" }));
+    refused("a Glob of a missing path", t.call("Glob", { pattern: "*", path: path.join(tmp, "missing") }));
+    refused("a Grep of a missing path", t.call("Grep", { pattern: "x", path: path.join(tmp, "missing") }));
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    const two = write(path.join(tmp, "two.txt"));
+    assert.equal(two.status, 0, `two scopes, past the ambiguous-scope refusal too: ${two.stderr}`);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a scoped Write of a new file stays narrow: a symlinked directory out, a dangling link, .., another dir, a relative path and an enclosing temp root are refused", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp"), outside = path.join(t.base, "other");
+    fs.mkdirSync(path.join(outside, "sub"));
+    fs.symlinkSync(path.join(outside, "sub"), path.join(tmp, "link"));
+    fs.symlinkSync(path.join(outside, "nothere.txt"), path.join(tmp, "dangling.txt"));
+    fs.symlinkSync(path.join(outside, "nodir"), path.join(tmp, "dangling-dir"));
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", path.join(t.dir, ".worktrees", "b"));
+    const write = (file, extra) => t.call("Write", { file_path: file, content: "x" }, extra);
+    assert.equal(write(path.join(tmp, "new.txt")).status, 0, "control: a new file in the scratch root passes with two scopes");
+    for (const [file, what, extra] of [
+      [`${tmp}/link/new.txt`, "a new file below a symlinked directory that leads out"],
+      [`${tmp}/link/deeper/new.txt`, "several missing levels below that symlinked directory"],
+      [`${tmp}/dangling.txt`, "a new file reached through a dangling symlink that points out"],
+      [`${tmp}/dangling-dir/new.txt`, "a new file below a dangling directory symlink that points out"],
+      [`${tmp}/../other/new.txt`, "a new file with .. out of the scratch root, past an existing directory"],
+      [`${tmp}/missing/../../other/new.txt`, "a new file with .. out of the scratch root, past a missing directory"],
+      [`${tmp}/missing/../new.txt`, "a .. after a missing directory, though the text stays inside the scratch root"],
+      [path.join(outside, "new.txt"), "a new file in another directory"],
+      [path.join(t.base, "job", "new.txt"), "a new file in the job dir outside its tmp"],
+      [path.relative(t.dir, path.join(tmp, "new.txt")), "a relative path, though it names the scratch root from the working directory"],
+      [path.join(tmp, "new2.txt"), "a temp root that encloses the project", { TMPDIR: t.base }],
+    ]) {
+      const got = write(file, extra);
+      assert.equal(got.status, 2, `${what}: ${got.stderr}`);
+    }
+    const none = t.call("Write", { content: "x" });
+    assert.equal(none.status, 2, `a Write with no path: ${none.stderr}`);
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a scoped Write of a new file never lands inside a governed root, whichever root it is", () => {
+  const write = (t, file, extra) => t.call("Write", { file_path: file, content: "x" }, extra);
+  let t = scratchProject();
+  try { // another active scope's worktree sits under the temp dir
+    const tmp = path.join(t.base, "tmp");
+    const bWorktree = path.join(tmp, "b-wt");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    t.scope("u-b", bWorktree);
+    fs.mkdirSync(path.join(bWorktree, "src"), { recursive: true });
+    assert.equal(write(t, path.join(bWorktree, "src", "new.ts")).status, 2, "a new file in scope B's tree, off B's write list");
+    assert.equal(write(t, path.join(bWorktree, "fresh", "new.ts")).status, 2, "a new file in a new directory of scope B's tree");
+    assert.equal(write(t, path.join(tmp, "new.png")).status, 2, "with a scope root under the temp dir the scratch allowance is off, the ambiguous-scope refusal stands");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // the active root: a scratch dir inside the session scope's project root
+    const session = { session_id: "scratch", plan: "docs/plans/x.md", unit: "u-session", project: ".", scope: { read: ["src/a.ts"], docs: [], write: ["src/a.ts"] } };
+    assert.equal(run(SCOPE, t.dir, session, t.env).status, 0);
+    const tmp = path.join(t.dir, ".tmp");
+    fs.mkdirSync(tmp, { recursive: true });
+    assert.equal(write(t, path.join(tmp, "new.txt"), { TMPDIR: tmp }).status, 2, "a new file under the project is the scope's, scratch dir or not");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // a unit worktree
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    const tmp = path.join(worktree, ".tmp");
+    fs.mkdirSync(tmp, { recursive: true });
+    assert.equal(write(t, path.join(tmp, "new.txt"), { TMPDIR: tmp }).status, 2, "a new file under the unit's worktree is the unit's scope, scratch dir or not");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+  t = scratchProject();
+  try { // the session checkout, with only unit-worktree scopes
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const tmp = path.join(t.dir, ".tmp");
+    fs.mkdirSync(tmp, { recursive: true });
+    assert.equal(write(t, path.join(tmp, "new.txt"), { TMPDIR: tmp }).status, 2, "the session checkout is outside every unit worktree, scratch dir or not");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the checks after the scope still judge a Write that creates a scratch file: protectedPaths, the doc-write guard and hooks.json", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    const worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    fs.writeFileSync(path.join(worktree, "craftsman.config.json"), JSON.stringify({ docWriteGuard: { docPaths: ["**/*.md"] } }));
+    const write = (file) => t.call("Write", { file_path: file, content: "x" });
+    const control = write(path.join(tmp, "note.txt"));
+    assert.equal(control.status, 0, `control: a new scratch file no later check names: ${control.stderr}`);
+    const later = [[path.join(tmp, ".env"), /is a protected path/], [path.join(tmp, ".env.local"), /is a protected path/],
+      [path.join(tmp, "package-lock.json"), /is a protected path/], [path.join(tmp, "yarn.lock"), /is a protected path/],
+      [path.join(tmp, "dist", "out.js"), /is a protected path/], [path.join(tmp, "note.md"), /docWriteGuard\.docPaths/],
+      [path.join(tmp, "fresh", "hooks", "hooks.json"), /editing .*hooks\.json/]];
+    for (const [file, message] of later) {
+      const got = write(file);
+      assert.equal(got.status, 2, `a new ${path.relative(tmp, file)}: ${got.stderr}`);
+      assert.match(got.stderr, message, `a new ${path.relative(tmp, file)}`);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: with no scope active, the required-scope refusal still covers scratch Writes and Edits", () => {
+  const t = scratchProject();
+  try {
+    fs.writeFileSync(path.join(t.base, "tmp", "shot.png"), "png");
+    assert.equal(run(SCOPE, t.dir, { action: "require", session_id: "scratch" }, t.env).status, 0);
+    for (const [tool, make] of WRITERS) {
+      const got = t.call(tool, make(path.join(t.base, "tmp", "shot.png")));
+      assert.equal(got.status, 2, tool);
+      assert.match(got.stderr, /requires an active unit scope/, tool);
+    }
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
 test("pre-guard: active scope allows declared reads and blocks undeclared reads", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scope-"));
   try {
@@ -1797,6 +2816,36 @@ test("pre-guard: hooks.json and the scope exemption are judged by real path thro
   }
 });
 
+test("pre-guard: the approval gate keys cannot be flipped by a tool call", () => {
+  const dir = selfDisableProject();
+  try {
+    const base = { maxFeedbackLines: 40, stopGate: { enabled: true }, repoExec: { approval: { required: true, prLines: 400 } }, planning: { featureBranches: true } };
+    const cfg = path.join(dir, "craftsman.config.json");
+    fs.writeFileSync(cfg, JSON.stringify(base, null, 2) + "\n");
+    const write = (mutate) => {
+      const next = JSON.parse(JSON.stringify(base)); mutate(next);
+      return run(GUARD, dir, { session_id: "ak-1", tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify(next) } });
+    };
+    assert.equal(write((c) => { c.repoExec.approval.required = false; }).status, 2, "approval.required off");
+    assert.equal(write((c) => { c.planning.featureBranches = false; }).status, 2, "featureBranches off");
+    assert.equal(write((c) => { c.repoExec.approval.prLines = 10; }).status, 0, "unrelated key passes");
+    const projectCfg = path.join(dir, "craftsman.project.json");
+    fs.writeFileSync(projectCfg, JSON.stringify(base, null, 2) + "\n");
+    const writeProject = (mutate) => {
+      const next = JSON.parse(JSON.stringify(base)); mutate(next);
+      return run(GUARD, dir, { session_id: "ak-3", tool_name: "Write", tool_input: { file_path: projectCfg, content: JSON.stringify(next) } });
+    };
+    assert.equal(writeProject((c) => { c.repoExec.approval.required = false; }).status, 2, "craftsman.project.json: approval.required off");
+    assert.equal(writeProject((c) => { c.planning.featureBranches = false; }).status, 2, "craftsman.project.json: featureBranches off");
+    assert.equal(writeProject((c) => { c.repoExec.approval.prLines = 10; }).status, 0, "craftsman.project.json: unrelated key passes");
+    assert.equal(typed(dir, "ak-2", "/craftsman:orchestrate docs/plans/p.md").status, 0);
+    assert.equal(run(SCOPE, dir, { session_id: "ak-2", plan: "docs/plans/p.md", unit: "u", project: ".", scope: { read: ["craftsman.config.json"], docs: [], write: ["craftsman.config.json"] } }).status, 0);
+    assert.equal(run(GUARD, dir, { session_id: "ak-2", tool_name: "Write", tool_input: { file_path: cfg, content: JSON.stringify({ ...base, planning: { featureBranches: false } }) } }).status, 0, "a scope naming the file may flip it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // Round 3 (21.x): the worktree sweep controls decide what the sweep may remove, so they are safety keys.
 test("pre-guard: the worktree sweep config keys cannot be loosened by a tool call (21.1)", () => {
   const dir = selfDisableProject();
@@ -2088,4 +3137,70 @@ test("pre-guard: a dangling symlink cannot be written through, and ln refuses a 
     }
     for (const command of ["ln -s src/a.txt src/b", "ln -s /tmp/craftsman-nowhere out.link", "ln -s a.txt b.txt"]) assert.equal(bash(command), 0, `allowed: ${command}`);
   } finally { fs.rmSync(p.dir, { recursive: true, force: true }); fs.rmSync(p.home, { recursive: true, force: true }); }
+});
+
+// The approval record gateFeature and runLanded trust is written only by approval.mjs / repo-exec.mjs (ARCH-APPROVAL-04, ARCH-SAFETY-05).
+test("pre-guard: a Write, Edit or shell redirect onto .craftsman/approvals/x.json is denied; the owning scripts are not", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-approvals-"));
+  try {
+    const file = path.join(dir, ".craftsman", "approvals", "x.json");
+    for (const [tool_name, tool_input] of [["Write", { file_path: file, content: "{}" }], ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+      ["Bash", { command: "echo '{}' > .craftsman/approvals/x.json" }], ["Bash", { command: "echo '{}' | tee .craftsman/approvals/x.json" }]]) {
+      const r = run(GUARD, dir, { session_id: "appr", tool_name, tool_input });
+      assert.equal(r.status, 2, `${tool_name} ${JSON.stringify(tool_input)}: ${r.stderr}`);
+    }
+    for (const command of ["node scripts/approval.mjs", "node scripts/repo-exec.mjs"]) {
+      const r = run(GUARD, dir, { session_id: "appr", tool_name: "Bash", tool_input: { command } });
+      assert.notEqual(r.status, 2, `${command}: ${r.stderr}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Round 17: the documented helpers (A, R, S) once set the project-dir variable, which this guard refuses (ARCH-SAFETY-05), so every
+// documented approval, remote-step and unit-runner script call was blocked. They now run from the project root with `project` in the JSON.
+const PLUGIN_ROOT_DIR = path.dirname(ROOT);
+function documentedHelper(doc, name) {
+  const text = fs.readFileSync(path.join(PLUGIN_ROOT_DIR, doc), "utf8");
+  const m = text.match(new RegExp(`\`${name} <[^\`]*>\` = \`([^\`]*)\``));
+  assert.ok(m, `${doc} documents ${name}`);
+  return m[1];
+}
+function fillHelper(template, literalRoot) {
+  let cmd = template.replaceAll("<json>", '{"project":"."}').replaceAll("<plugin_root>", PLUGIN_ROOT_DIR).replaceAll("<name>", "tracker").replaceAll("<action>", "prepare");
+  if (!literalRoot) cmd = cmd.replaceAll("${CLAUDE_PLUGIN_ROOT}", PLUGIN_ROOT_DIR);
+  return cmd.includes("printf") ? cmd : `printf '%s' '{"project":"."}' | ${cmd}`;
+}
+const helperBash = (sid, command) => ({ session_id: sid, tool_name: "Bash", tool_input: { command } });
+
+test("pre-guard: each documented helper (A, R, S) is allowed, filled with sample JSON (18.1)", () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-helper-")));
+  try {
+    for (const [doc, name] of [["commands/_approval.md", "A"], ["commands/_network.md", "R"], ["agents/unit-runner.md", "S"]]) {
+      const template = documentedHelper(doc, name);
+      assert.ok(!/PROJECT_DIR/.test(template), `${doc} ${name}: no project-dir assignment`);
+      for (const literalRoot of [false, true]) {
+        const command = fillHelper(template, literalRoot);
+        const r = run(GUARD, dir, helperBash("helper", command), { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT_DIR });
+        assert.equal(r.status, 0, `${doc} ${name}: ${command}: ${r.stderr}`);
+      }
+    }
+    // the refusal itself still holds
+    assert.equal(run(GUARD, dir, helperBash("helper", `printf '%s' '{}' | ${"CLAUDE_PROJECT" + "_DIR"}="${dir}" node ${PLUGIN_ROOT_DIR}/scripts/approval.mjs prepare`)).status, 2);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("pre-guard: approval.mjs and repo-exec.mjs are allowed from a linked worktree, a Write to the main approvals dir is not (18.1)", () => {
+  const { main, worktree } = gitRepoWithWorktree();
+  try {
+    for (const name of ["approval", "repo-exec"]) {
+      const r = run(GUARD, worktree, helperBash("wt-helper", `printf '%s' '{"project":"."}' | node ${PLUGIN_ROOT_DIR}/scripts/${name}.mjs prepare`));
+      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      const rel = run(GUARD, worktree, helperBash("wt-helper", `printf '%s' '{"project":"."}' | node scripts/${name}.mjs prepare`));
+      assert.equal(rel.status, 0, `scripts/${name}: ${rel.stderr}`);
+    }
+    const w = run(GUARD, worktree, { session_id: "wt-helper", tool_name: "Write", tool_input: { file_path: path.join(main, ".craftsman", "approvals", "x.json"), content: "{}" } });
+    assert.equal(w.status, 2, w.stderr);
+  } finally { fs.rmSync(main, { recursive: true, force: true }); }
 });

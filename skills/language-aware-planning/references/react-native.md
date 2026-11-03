@@ -24,8 +24,8 @@ platform boundary (iOS/Android/web) instead of Node/browser.
   reused or in a render-heavy component — inline styles recreate a new
   object every render and defeat `PureComponent`/`React.memo`.
 - Accessibility: `accessible`/`accessibilityLabel`/`accessibilityRole` on
-  interactive elements — RN has no semantic HTML, so this is the equivalent
-  of `design-review`'s semantic-markup bullet. Touch targets meet the
+  interactive elements — RN has no semantic HTML, so this is the
+  equivalent of semantic markup. Touch targets meet the
   platform minimum (44x44pt iOS / 48x48dp Android).
 - Bundle/startup cost: a new dependency that pulls in a large native SDK or
   polyfill is a deliberate choice, not an accident — check it's actually

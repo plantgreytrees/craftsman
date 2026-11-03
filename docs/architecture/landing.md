@@ -3,7 +3,7 @@
 > and `/architect --update landing` should be run.
 
 # Landing architecture
-_Last verified: 2026-10-18 at `ac57d0e` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
+_Last verified: 2026-11-03 at `a0cb8a2` · Source idea: [autonomous-e2e-loop](../ideas/autonomous-e2e-loop.md)_
 
 ## In plain English
 Running `/auto` gives it full authority to commit, branch, merge, push, land
@@ -64,12 +64,35 @@ Unit runners run in Claude Code's sandbox, which denies the credential files git
 ARCH-LAND-08 is superseded by ARCH-LAND-18 (units land by `land-unit` inside the feature worktree). See [plan](./plan.md).
 
 ## Approval amendments (2026-10-23)
-ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and external posts wait for the approval page; Phase A answers authorise the docs-only plan push. ARCH-LAND-05 → 23: `--force-with-lease` only, only on branches the run created. ARCH-LAND-17 → 24: tracker publish to base happens inside an approved land. ARCH-LAND-18 → 25: cite corrected to `repo-exec.mjs:568-670`. New: ARCH-LAND-26 (retire check logs candidates, never deletes) and ARCH-LAND-27 (moved base re-merges, re-gates, lands if green). See [approval](./approval.md) for the reasoning and rejected alternatives.
+ARCH-LAND-01 → 22: /auto pushes its own branches freely, but base, PRs and external posts wait for the approval page; Phase A answers authorise the docs-only plan push. ARCH-LAND-05 → 23: `--force-with-lease` only, only on branches the run created. ARCH-LAND-17 → 24: tracker publish to base happens inside an approved land. ARCH-LAND-18 → 25: cite corrected to `repo-exec.mjs:568-670`. New: ARCH-LAND-26 (retire check logs candidates, never deletes; superseded by ARCH-LAND-30, which keeps the log and lets land-feature alone archive a plan with no referrer, commit-local and never pushed, so the external-project-board auto-archive can exist; rejected: dropping the automatic archive, as the owner chose to keep it) and ARCH-LAND-27 (moved base re-merges, re-gates, lands if green). See [approval](./approval.md) for the reasoning and rejected alternatives.
 
 ## Amendments (2026-10-23, owner-approved)
 
 - **ARCH-LAND-28** replaces 22: adds that with `planning.featureBranches` off, units merge to base without a verification point.
 - **ARCH-LAND-29** replaces 24: `tracker.publish` is `off|on-approve` (default on-approve). The legacy `push` value acts as on-approve when approval is required. An approved publish names a landed, unpublished approval record, is spent once and is re-checked under the base lock; `manual:true` is logged.
+- **ARCH-LAND-31** replaces 23 (after review rounds 9 to 12): the lease exception is unchanged in intent but must be written `src:refs/heads/<own>`. The force block is described honestly as a best-effort text scan: round 12 reproduced older ways around it (quoted flags, `read`-set `GIT_CONFIG_*`, `git send-pack`, `$()` arguments, delete-then-recreate). Base protection is the remote's branch protection plus the approval gate; the structural fix is the follow-up row `force-block-wordlevel`.
+- **ARCH-LAND-32** replaces 30 (2026-10-25, owner decision D1 of external-project-board): `land-feature` reaches the automatic archive only through the in-process capability of ARCH-DOCS-17, and `autoArchiveEligible` refuses without it before the main checkout moves.
+- **ARCH-LAND-33** replaces 32 (2026-10-25, scrutinise round 4): same wording fix as ARCH-DOCS-18; cites ARCH-DOCS-18 and keeps everything else of ARCH-LAND-32.
 
-## Scoped pre-merge gate (2026-10-23)
-ARCH-LAND-30 lets the pre-merge gate use the same `{changed}` and `{changedDirs}` placeholders as Stop (ARCH-STATE-18), filled from `git diff --name-only <base>...HEAD` in the worktree being landed. An empty diff skips the gate and logs it; a diff that cannot be computed fails the gate as before. Rejected: running the whole-superproject gate on every land, which Gleam had to turn off. See [state](./state.md#service-scoped-gates-2026-10-23) and [service-scoped-gates](../ideas/service-scoped-gates.md).
+## Phase 2 amendment (2026-11-01, owner-approved)
+_Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was skipped. The diagram is in [safety.md](./safety.md#phase-2-amendments-2026-11-01-owner-approved)._
+
+**Status: implemented (2026-11-03).** ARCH-LAND-36: `drainVerdict` judges every queue entry before it touches origin; a refusal is logged `drain_refused` and parks, also when a later push in the same drain loses the network (the exit-3 payload carries `parked[]`, `commands/_network.md`). ARCH-LAND-35: `/init` offers the `autoMode.allow` entry (ARCH-SAFETY-16) and a classifier refusal stops the run like `needs_network`.
+
+- **ARCH-LAND-36** replaces 34 (2026-11-02, owner decision): root's drain checks every queue entry before it touches origin.
+  - **What passes:** a push goes to a `feat/` or `feature/` branch, or to base only in direct-land mode (`planning.featureBranches` off). A delete only removes a `feat/` unit branch. A push is never forced.
+  - **Anything else** (base in feature mode, any other branch, a delete of base) is logged as `drain_refused` and PARKs like a rejected push.
+  - **Why:** `drainQueue` (`scripts/lib/network.mjs:145-171`) pushed or deleted whatever `dst` an entry named, and a tool call could write the queue (probe, 2026-11-01). The first wording refused base outright, but the runner runs `repo-exec merge` (`agents/unit-runner.md:28`), whose push to base (`scripts/repo-exec.mjs:411`) an offline sandboxed runner queues; in direct-land mode that merge is allowed on standing approval (ARCH-LAND-28, ARCH-APPROVAL-08), so refusing it would stall every unattended run.
+  - **Rejected:** refusing base always (direct-land under a sandbox could never finish); relying only on the queue's protection (ARCH-SAFETY-13), since runner processes still write the queue and the guard doesn't read them.
+- **ARCH-LAND-35**: root's network step (fetch, drain, status) stays outside the sandbox.
+  - **Why outside:** a sandboxed git can't read the `gh` credential store; Gleam logged 99 `could not read Username`. Masking the token would give every sandboxed command, runners included, a working credential, against ARCH-LAND-19.
+  - **Unattended:** the call passes auto mode through the one user-scope `autoMode.allow` entry that `/init` offers (ARCH-SAFETY-16). Without that entry, the user approves it. A classifier refusal stops the run like `needs_network`, naming the one command, with nothing parked.
+  - **Still human steps:** every other `needs_network` action (pr-mode host API, `land-feature`, any base push), under ARCH-LAND-28.
+  - **Rejected:**
+    - a `permissions.allow` rule: the path changes on every upgrade, and it approves with no review;
+    - an `excludedCommands` entry: it loosens the sandbox for a whole command text;
+    - keeping today's behaviour: unattended runs stall.
+  - **Placement:** it sits here rather than in `engine.rules.md`, beside ARCH-LAND-19, so the engine units' context budget (ARCH-ENGINE-08) holds.
+
+## Scoped pre-merge gate (2026-11-03)
+ARCH-LAND-37 lets the pre-merge gate use the same `{changed}` and `{changedDirs}` placeholders as Stop (ARCH-STATE-21), filled from `git diff --name-only <base>...HEAD` in the worktree being landed. An empty diff skips the gate and logs it; a diff that cannot be computed fails the gate as before. Rejected: running the whole-superproject gate on every land, which Gleam had to turn off. See [state](./state.md#service-scoped-gates-2026-11-03) and [service-scoped-gates](../ideas/service-scoped-gates.md).

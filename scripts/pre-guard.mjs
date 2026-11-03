@@ -11,13 +11,12 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, mintNonce, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
-import { forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
+import { blankProse, forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
-import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
-import { insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
+import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection, gitCommonDir, commonRel } from "./lib/self-protect.mjs";
+import { activeScopes, insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
-import { proseOnly } from "./lib/heredoc-allow.mjs";
 
 const T0 = Date.now();
 // Authority scripts this command invokes; their nonces are left only when the whole command is allowed (ARCH-SAFETY-05).
@@ -49,28 +48,8 @@ function mutatesGit(value) {
   return /(?:^|[;&|]\s*)\s*git\s+(?:(?:-[A-Za-z]+\s+[^\s]+)\s+)*(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|(?:^|[;&|]\s*)\s*git\s+branch\s+-[dD]\b|(?:^|[;&|]\s*)\s*git\s+worktree\s+(?:remove|move|prune)\b/.test(command);
 }
 
-function commandDirectoryTargets(command, worktree) {
-  const targets = [];
-  for (const match of command.matchAll(/\bgit\s+-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/g)) {
-    targets.push(match[1] || match[2] || match[3]);
-  }
-  for (const match of command.matchAll(/(?:^|&&|;|\|\|)\s*(?:cd|pushd)\s+(?:"([^"]+)"|'([^']+)'|(\S+))/g)) {
-    targets.push(match[1] || match[2] || match[3]);
-  }
-  return targets.some((target) => {
-    const absolute = path.resolve(process.cwd(), target);
-    let ancestor = absolute;
-    while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
-    let resolved;
-    try { resolved = path.resolve(fs.realpathSync(ancestor), path.relative(ancestor, absolute)); }
-    catch { return true; }
-    const realWorktree = fs.realpathSync(worktree);
-    return resolved !== realWorktree && !resolved.startsWith(realWorktree + path.sep);
-  });
-}
-
 function usesAlternateGitRoot(command) {
-  return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_DIR\s*=|\bGIT_WORK_TREE\s*=/.test(command);
+  return /\bgit\b[^;&|]*(?:--git-dir|--work-tree|--separate-git-dir)(?:[=\s])|\bGIT_(?:DIR|WORK_TREE|COMMON_DIR|OBJECT_DIRECTORY|INDEX_FILE)\s*=/.test(command);
 }
 
 // An unquoted-tag heredoc body is expanded by sh: keep only its $(...) and
@@ -87,7 +66,7 @@ function heredocSubstitutions(body) {
       let j = i + 2, depth = 1;
       while (j < body.length && depth) { if (body[j] === "(") depth++; else if (body[j] === ")") depth--; j++; }
       res += "$(" + body.slice(i + 2, j) + (depth ? ")" : "") + "\n"; i = j - 1;
-    }
+    } else if (body[i] === "$" && body[i + 1] === "{" && /[\s|]/.test(body[i + 2] ?? "")) res += "${ }\n"; // a current-shell substitution (bash 5.3): the tokenizer refuses it
   }
   return res;
 }
@@ -96,7 +75,7 @@ function heredocSubstitutions(body) {
 // parsed as shell. Quote-aware: a `<<` inside single quotes is not a heredoc,
 // while one inside `"$( ... )"` is. Unterminated bodies run to the end, as in sh.
 function arithmeticEnd(text, i) { // index of the `)` / `]` closing arithmetic opened at i, else text.length
-  if (text[i + 1] === "{") return braceEnd(text, i);  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
+  if (text[i + 1] === "[") { const j = text.indexOf("]", i + 2); return j === -1 ? text.length : j; }
   let j = i + 1, depth = 0;
   for (; j < text.length; j++) { if (text[j] === "(") depth++; else if (text[j] === ")" && --depth === 0) break; }
   return j;
@@ -131,7 +110,7 @@ function stripHeredocs(text) {
     if (sq) { out += c; if (c === "'") sq = false; continue; }
     if (c === "\\" && i + 1 < text.length) { out += c + text[++i]; continue; }
     if (top === "dq") {
-      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[" || text[i + 1] === "{")) { // arithmetic: a shift, never a heredoc
+      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { // arithmetic: a shift, never a heredoc
         const j = arithmeticEnd(text, i); out += text.slice(i, j + 1); i = j; continue;
       }
       if (c === '"') stack.pop();
@@ -141,7 +120,7 @@ function stripHeredocs(text) {
     if (c === "'") { sq = true; out += c; continue; }
     if (c === '"') { stack.push("dq"); out += c; continue; }
     // Arithmetic `$(( ))` / `(( ))`: its `<<` is a shift, never a heredoc.
-    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[" || text[i + 1] === "{")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
       const j = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1);
       out += text.slice(i, j + 1); i = j; continue;
     }
@@ -187,7 +166,7 @@ function realDir(dir) { try { return fs.realpathSync(dir); } catch { return path
 function realRoot() { return realDir(activeRoot); }
 // A linked worktree keeps its session's state (scope manifests, command records, grants) in the MAIN checkout's .craftsman, shared
 // through the git common dir (scope.mjs). Paths there are not under this session's root, so every root-relative check misses them:
-// name such a path relative to the main checkout, and only when it is craftsman state a tool call must never write (ARCH-SAFETY-05).
+// name such a path relative to the main checkout, and only when it is craftsman state a tool call must never write (ARCH-SAFETY-05, and the network queue in the main .git, ARCH-SAFETY-13).
 function mainRelOf(abs) {
   let main;
   try { main = fs.realpathSync(mainCheckoutRoot(activeRoot)); } catch { return null; }
@@ -195,7 +174,61 @@ function mainRelOf(abs) {
   const rel = path.relative(main, abs).split(path.sep).join("/");
   return rel && !rel.startsWith("..") ? rel : null;
 }
-const mainStateRel = (abs) => { const rel = mainRelOf(abs); return rel && selfKind(rel) === "never" ? rel : null; };
+// A submodule session keeps its git dir, and so its push queue, in the superproject: .git/modules/<name>. `git worktree list` names that git dir as the
+// session's main checkout, so a name relative to it has lost the `.git/modules/<name>` the queue pattern holds. The same path named from the
+// superproject's work tree keeps it (ARCH-SAFETY-13). The superprojects, nearest first (a submodule inside a submodule has two), are looked up once.
+let superRootsMemo;
+function superprojectRoots() {
+  if (superRootsMemo) return superRootsMemo;
+  superRootsMemo = [];
+  for (let dir = activeRoot, depth = 0; depth < 8; depth++) {
+    let up = ""; // empty outside a submodule, and realpathSync("") is the cwd, so an empty answer ends the walk before it
+    try { up = execFileSync("git", ["-C", dir, "rev-parse", "--show-superproject-working-tree"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { break; }
+    if (!up) break;
+    try { dir = fs.realpathSync(up); } catch { break; }
+    superRootsMemo.push(dir);
+  }
+  return superRootsMemo;
+}
+// The first name `abs` has, from a root that keeps this session's state outside its own work tree, for which `test` holds: relative to the main checkout
+// (a linked worktree), to a superproject (a submodule) or to the git common dir (a linked worktree of a submodule); the last two only for a path outside this session's root.
+function outerRelWhere(abs, test) {
+  const up = (rel) => rel === ".." || rel.startsWith("../");
+  const main = mainRelOf(abs);
+  if (main && test(main)) return main;
+  if (!up(path.relative(realRoot(), abs).split(path.sep).join("/"))) return null;
+  for (const sup of superprojectRoots()) {
+    const rel = path.relative(sup, abs).split(path.sep).join("/");
+    if (rel && !up(rel) && test(rel)) return rel;
+  }
+  const common = commonRel(gitCommonDir(activeRoot), abs); // a linked worktree of a submodule has no superproject, and its main checkout is the git dir: the queue is judged where git says it is
+  return common && test(common) ? common : null;
+}
+const mainStateRel = (abs) => outerRelWhere(abs, (rel) => selfKind(rel) === "never");
+// The directories that hold craftsman state for this session: its own root, the main checkout it shares session state with, the git common dir (the push queue) and the superprojects of a submodule. A link whose
+// source is, or lies above, one of them makes a second name for every file of its state; holds() does not count the project root itself, so they are asked for directly. Asked once: a guard process judges one command.
+let stateHoldersMemo;
+function stateHolders() {
+  if (stateHoldersMemo) return stateHoldersMemo;
+  const out = new Set([realRoot()]);
+  try { out.add(fs.realpathSync(mainCheckoutRoot(activeRoot))); } catch { /* no main checkout to name */ }
+  const common = gitCommonDir(activeRoot);
+  if (common) out.add(common);
+  for (const sup of superprojectRoots()) out.add(sup);
+  return (stateHoldersMemo = [...out]);
+}
+// The directories whose contents are state: the state directory and the .git of each holder, and the git common dir itself (a git dir under no `.git`).
+let stateAreasMemo;
+const stateAreas = () => (stateAreasMemo ??= [...new Set([...stateHolders().flatMap((holder) => [path.join(holder, ".craftsman"), path.join(holder, ".git")]), ...[gitCommonDir(activeRoot)].filter(Boolean)])]);
+// A regular file named .git is a gitfile, `gitdir: <path>`: it tells git where the repository is, so a rewritten one hands every git command, and the guard's own lookup of the queue, a forged directory's config, hooks and
+// queue (ARCH-SAFETY-13). Judged by real path, so a symlink to one is the same file; the directory `.git` is the repository itself, and a name that does not exist yet is no file to rewrite.
+const GITFILE_HIT = ".git (a file that names the repository)";
+function isGitFile(abs) {
+  if (path.basename(abs).toLowerCase() !== ".git") return false;
+  try { return fs.statSync(abs).isFile(); } catch { return false; }
+}
+// The hit a link source gets when it holds state (linkSourceHoldsState); the loop over the hits in the Bash check names it.
+const LINKED_STATE_HIT = ".craftsman (linked source)";
 
 // `p` resolved from `cwd`, each component through realpath while it exists, so a
 // symlink (`d -> docs`) is followed; the rest of a missing tail stays lexical.
@@ -242,7 +275,7 @@ function segmentRe(seg, flags = "") {
     const c = seg[i];
     if (c === "*") re += "[^/]*";
     else if (c === "?") re += "[^/]";
-    else if (c === "[" && seg.indexOf("]", i + 2) !== -1) { const e = seg.indexOf("]", i + 2); re += "[" + seg.slice(i + 1, e).replace(/^!/, "^").replace(/\\/g, "\\\\") + "]"; i = e; }
+    else if (c === "[" && seg.indexOf("]", i + 2) !== -1) { const e = seg.indexOf("]", i + 2); re += bracketClass(seg.slice(i + 1, e).replace(/^!/, "^").replace(/\\/g, "\\\\"), "[^/]", "\\[" + seg.slice(i + 1, e).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\]"); i = e; }
     else if (c === "{" && seg.indexOf("}", i) !== -1) { const e = seg.indexOf("}", i); re += "(?:" + seg.slice(i + 1, e).split(",").map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")"; i = e; }
     else re += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -284,7 +317,7 @@ function pathspecHit(arg, cwd, docPaths) {
   let re = "";
   for (const c of (pre ? pre + "/" : "") + arg.replace(/^\.\//, "")) re += c === "*" ? ".*" : c === "?" ? "." : c === "[" || c === "]" ? c : c.replace(/[.+^${}()|\\]/g, "\\$&");
   let rx;
-  try { rx = new RegExp("^" + re + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
+  try { rx = new RegExp("^" + re.replace(/\[([^\]]*)\]/g, (whole, body) => bracketClass(body, ".", "\\[" + body + "\\]")) + "$"); } catch { return "(git pathspec the parser cannot read: " + arg + ")"; }
   let budget = 20000, found = null;
   const visit = (rel) => {
     if (found || --budget < 0) return;
@@ -361,6 +394,216 @@ function findNamesMiss(names, start, cwd, docPaths) {
 // (cwd, `git -C`, `cd X &&`) outside the guarded bases and their ancestors.
 // Anything else with a removal word present is reported as a hit.
 const REMOVAL_WORD = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval|clean)\b/;
+// `clean` alone is prose (`echo clean`); as a removal word it counts only after a `git` in the same simple command.
+const REMOVAL_GATE_NOCLEAN = /\b(?:rm|unlink|rmdir|mv|shred|truncate|rsync|find|xargs|eval)\b/;
+const gitThenClean = (t) => t.split(/[;&|\n]/).some((seg) => { const g = seg.search(/\bgit\b/); return g >= 0 && /\bclean\b/.test(seg.slice(g)); }); // linear: no nested scan
+// `clean` counts after a `git` only when the whole command tokenizes and no word is dynamic (`$G clean`, `git $x`): else any `clean` does.
+// A glob character in ANY word may spell the program, its subcommand or a wrapper's target: not plain either.
+const plainWords = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.every((c) => c.words.every((w) => !/[$`*?[{]/.test(w))); };
+// The git autocorrect setting (by option or environment) lets git run a misspelt subcommand: it fails closed like a removal word.
+// Structural, not a guess at what a glob matches: a simple command holding a git command word (basename `git`, or a glob word that may spell it) and any glob word opens the gate; git() then refuses a globbed subcommand.
+const GLOB_CHAR = /[*?[{]/;
+const globbedGit = (t) => { const cmds = tokenize(stripHeredocs(t), () => {}); return !!cmds && cmds.some((c) => c.words.some((w, n) => path.basename(w) === "git" || (GLOB_CHAR.test(path.basename(w)) && (n === 0 || globMayBeGit(w)))) && c.words.some((w) => GLOB_CHAR.test(w))); };
+const globMayBeGit = (w) => { if (/\[.+\]/.test(w)) return true; try { return new RegExp("^" + path.basename(w).replace(/[.+^$()|\\]/g, "\\$&").replace(/\{[^}]*\}/g, ".*").replace(/\*/g, ".*").replace(/\?/g, ".").replace(/\[!/g, "[^") + "$").test("git"); } catch { return true; } };
+// Config indirection (an include, GIT_CONFIG_*, --config-env, a HOME or XDG_CONFIG_HOME assignment, another repository's config through GIT_DIR,
+// GIT_COMMON_DIR or --git-dir) can alias a misspelt subcommand to clean.
+// Only a subcommand that is not a git builtin can run an alias (a builtin is never shadowed), so a known builtin leaves the gate shut.
+const CONFIG_INDIRECT = /include\.path|includeif|GIT_CONFIG|--config-env|--git-dir|\b(?:HOME|XDG_CONFIG_HOME|GIT_(?:COMMON_)?DIR)\b/i;
+const PRINTF_V = /\s-v\s*["']?[^\s;&|'"]*[$`]/g, DECL_NAME = /\s["']?[^\s=;&|'"(]*[$`]/g, DECL_NREF = /\s-[A-Za-z]*n\b/g, DECL_INT = /\s-[A-Za-z]*i/g;
+const firstFrom = (re, s, k) => { re.lastIndex = k; const m = re.exec(s); return m ? m.index : -1; };
+// Bash evaluates arithmetic in `((…))`, `$((…))`, `$[…]`, `let`, an array subscript `a[…]` set or expanded, a `${x:…}` substring offset or length, the
+// operands of `[[ … -eq … ]]` and an assignment to an integer (`declare -i`), and an arithmetic `NAME = …` sets any variable. A `$` or backtick inside one
+// may build HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`${n}ME = 1`); arithmetic also evaluates the value of each name it reads, which a `$` in a value set
+// elsewhere may have built (`v=${n}ME=1; (( v ))`). Either counts as a built name, for the whole text: the value can be set in one simple command and read
+// in another. Only a context that reads a name (a letter inside it) can do the latter. One linear pass over the raw text (a stack of the open
+// brackets, each closed by its match; one left open counts), then one per simple command.
+const SETTER = String.raw`(?:^|\s)([A-Za-z_]\w*)(?:\[[^\][]*\])?\+?=|\$\{([A-Za-z_]\w*)(?:\[[^\]]*\])?:?=`; // an assignment or a default assignment (an array element too); readArith's SETS shares it
+const SETS_VALUE = new RegExp(String.raw`\b(?:read|mapfile|readarray|getopts|for|select|declare|typeset|local|export|readonly)\b|` + SETTER);
+const LET_CMD = /(?:^|[\s;&|({!`])let\s/; // a `let` word anywhere (behind if, while, elif, !, time, builtin, command …), read with quotes and backslashes removed
+// A value arithmetic reads can also be set with no `$` at all: a `NAME+=` string append outside arithmetic, `printf -v`, or read, mapfile, readarray,
+// getopts, for and select, which set a name from input or a word list, or the uppercase attribute (`declare -u v=home=1`; typeset, local)
+// (`v=HO; v+=ME=1; let v`, `read v <<< HOME=1; (( v ))`).
+const V_OPT = /\s-v/g, DECL_UPPER = /\s-[A-Za-z]*u/g;
+const upperAttr = (s) => { const d = s.search(/\b(?:declare|typeset|local)\b/); return d >= 0 && firstFrom(DECL_UPPER, s, d) >= 0; };
+const builtBy = (x) => { const p = x.search(/\bprintf\b/); return /\b(?:read|mapfile|readarray|getopts)\b|\b(?:for|select)\s+[A-Za-z_]/.test(x) || (p >= 0 && firstFrom(V_OPT, x, p) >= 0) || x.split(/[;&|\n]/).some(upperAttr); };
+const intAttr = (s) => { const d = s.search(/\b(?:declare|typeset|local)\b/); return d >= 0 && firstFrom(DECL_INT, s, d) >= 0; };
+const arithDyn = (t) => {
+  const open = [];
+  let arith = 0, seen = LET_CMD.test(t.replace(/['"\\]/g, "")) || t.split(/[;&|\n]/).some(intAttr), cond = null, inLet = false, append = false; // cond: inside `[[ … ]]`, an arithmetic comparison (cmp), a `$` or backtick (dyn)
+  const closeCond = () => { const dyn = !!cond?.cmp && cond.dyn; if (cond?.cmp) seen = true; cond = null; return dyn; };
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i], top = open[open.length - 1];
+    if (top?.param && !/[\w#!@*[]/.test(c) && !(i === top.at && /[-$?]/.test(c))) { top.param = false; if (c === ":" && !/[-=+?]/.test(t[i + 1] ?? "")) { top.arith = true; arith++; } } // `${name:`, `${a[i]:` or `${-:` (a special parameter): a substring
+    if (arith > 0 && top && /[A-Za-z_]/.test(c)) top.name = true;
+    if (arith === 0) { // outside arithmetic: a `let` makes the rest of its simple command arithmetic; a `NAME+=` elsewhere appends a string (append)
+      if (/[;&|\n]/.test(c)) inLet = false;
+      else if (c === "l" && t.startsWith("let", i) && /^[\s;&|({!`]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 3] ?? "")) inLet = true;
+      else if (c === "+" && t[i + 1] === "=" && !inLet && /[\w\]]/.test(t[i - 1] ?? "")) append = true;
+    }
+    if (c === "$" || c === "`") { if (arith > 0) return true; if (cond) cond.dyn = true; }
+    else if (c === "[" && t[i + 1] === "[" && /^[\s;&|(!]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 2] ?? "")) cond = { cmp: false, dyn: false };
+    else if (c === "]" && t[i + 1] === "]" && cond) { if (closeCond()) return true; }
+    else if (c === "-" && cond && /^-(?:eq|ne|lt|le|gt|ge)(?!\S)/.test(t.slice(i, i + 4))) cond.cmp = true;
+    if (c === "(" || c === "[" || c === "{") {
+      const a = c === "(" ? t[i + 1] === "(" : c === "[" && /[\w$]/.test(t[i - 1] ?? "");
+      open.push({ arith: a, param: c === "{" && t[i - 1] === "$", at: i + 1, sub: c === "[" && a && t[i - 1] !== "$", name: false });
+      if (a) arith++;
+    } else if ((c === ")" || c === "]" || c === "}") && open.length) {
+      const e = open.pop(), up = open[open.length - 1];
+      if (e.arith) arith--;
+      if (e.name && up) up.name = true;
+      if (e.arith && e.name && (!e.sub || t[i + 1] === "=" || t.startsWith("+=", i + 1) || up?.param)) seen = true; // it reads a name (a subscript: when set or expanded)
+    }
+  }
+  return closeCond() || ((seen || arith > 0) && (append || builtBy(t) || builtBy(t.replace(/['"\\]/g, "")) || t.split(/[;&|\n]/).some((s) => /[$`]/.test(s) && (SETS_VALUE.test(s) || intAttr(s)))));
+};
+// The raw-text hint for dynamicName: a built name in arithmetic (arithDyn, which needs no `$`); else, with a `$` or backtick in the text, `${!`, a current-shell
+// substitution (`${ cmd; }`, `${| cmd; }`: the tokenizer refuses it), `for`/`select` or `getopts` setting a `$` name, or, within one simple command (split at ; & | and newlines), a `$` or backtick after `read`, `mapfile`, `readarray` or `let`,
+// in the `printf -v` name, in a word after export/declare/typeset/local/readonly before its `=` (`${x}ME` and `HO${x}` alike; a `NAME=$value` value does not
+// count) or after their nameref option. Each part scans once from its first keyword, so the hint is linear in the text.
+const SETTER_HINT = /\$\{!|\$\{[\s|]|\b(?:for|select)\s+["']?[$`]|\bgetopts\s+\S+\s+["']?[^\s;&|'"]*[$`]/;
+const dynNameHint = (t) => arithDyn(t) || (/[$`]/.test(t) && (SETTER_HINT.test(t) || t.split(/[;&|\n]/).some((s) => {
+  const last = Math.max(s.lastIndexOf("$"), s.lastIndexOf("`"));
+  const reader = s.search(/\b(?:read|mapfile|readarray|let)\b/), printf = s.search(/\bprintf\b/), decl = s.search(/\b(?:export|declare|typeset|local|readonly)\b/);
+  if (reader >= 0 && reader < last) return true;
+  if (printf >= 0 && firstFrom(PRINTF_V, s, printf) >= 0) return true;
+  if (decl < 0) return false;
+  const nref = firstFrom(DECL_NREF, s, decl);
+  return firstFrom(DECL_NAME, s, decl) >= 0 || (nref >= 0 && nref < last);
+})));
+// Judged per simple command: an environment assignment of HOME, XDG_CONFIG_HOME or GIT_CONFIG* (`=` or `+=`) in a prefix or after export/declare/env/a wrapper, a HOME, XDG_CONFIG_HOME or GIT_CONFIG* word that is not a plain read, a name built from a variable (dynamicName),
+// or an include, --config-env or GIT_CONFIG word in a command that holds a git word (anywhere in it: wrappers, keywords and their options are read through,
+// a `$` or backtick word among the leading wrappers may be git, and a substitution body is judged on its own). `echo HOME=/x` is prose.
+const ENV_CONFIG = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*|GIT_(?:COMMON_)?DIR)\+?=/i;
+const ENV_CONFIG_NAME = /^(?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*|GIT_(?:COMMON_)?DIR)(?![\w}]|\+?=)|[^\w$](?:HOME|XDG_CONFIG_HOME|GIT_CONFIG\w*|GIT_(?:COMMON_)?DIR)(?![\w}])/; // the name, not a plain `$NAME`/`${NAME}` read nor a leading `NAME=` (ENV_CONFIG judges that): `for NAME in`, `read NAME`, `printf -v NAME`, a nameref `-n R=NAME`, `${NAME:=x}`
+const ASSIGN_WORD = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const cmdIndex = (words) => { let k = 0; while (k < words.length && (ASSIGN_WORD.test(words[k]) || KEYWORDS.has(words[k]))) k++; return k; };
+const ENV_SETTER = /^(?:export|declare|typeset|readonly|local|env|let)$/;
+// A name built from a `$` or backtick word where a setter takes a variable name (`printf -v ${x}ME`, `read $n`, `mapfile`, `export ${n}ME=`,
+// `declare -n R=${n}ME`, `getopts s $n`, `for $n in`, `${!n:=x}`) cannot be read: it may be HOME, XDG_CONFIG_HOME or GIT_CONFIG*, so it counts (fail closed).
+const DYN = /[$`]/;
+const NAME_SETTERS = new Set(["printf", "read", "mapfile", "readarray", "export", "declare", "typeset", "local", "readonly", "getopts", "let"]);
+const dynamicName = (words) => {
+  const k = cmdIndex(words);
+  if (words.some((w) => /\$\{![^}]*=/.test(w)) || (k > 0 && /^(?:for|select)$/.test(words[k - 1]) && DYN.test(words[k] ?? ""))) return true;
+  const s = words.findIndex((w, i) => i >= k && NAME_SETTERS.has(path.basename(w)));
+  if (s < 0) return false;
+  const name = path.basename(words[s]), rest = words.slice(s + 1);
+  if (name === "printf") return rest.some((w, i) => (w === "-v" && DYN.test(rest[i + 1] ?? "")) || (/^-v./.test(w) && DYN.test(w)));
+  if (name === "getopts") return DYN.test(rest[1] ?? "");
+  if (name !== "export" && !/^(?:declare|typeset|local|readonly)$/.test(name)) return rest.some((w) => DYN.test(w)); // read, mapfile, readarray, let
+  const nameref = name !== "export" && rest.some((w) => /^-[A-Za-z]*n/.test(w));
+  return rest.some((w) => !w.startsWith("-") && DYN.test(nameref ? w : w.split("=")[0]));
+};
+const envConfigIn = (c) => { const k = cmdIndex(c.words); return dynamicName(c.words) || c.words.some((w) => ENV_CONFIG_NAME.test(w)) || c.words.slice(0, k).some((w) => ENV_CONFIG.test(w)) || c.words.some((w, j) => j > k && ENV_CONFIG.test(w) && c.words.slice(k, j).some((x) => ENV_SETTER.test(path.basename(x)) || WRAPPERS.has(path.basename(x)))); };
+const ownConfig = (c) => c.words.some((w) => /include\.path|includeif|GIT_CONFIG|--config-env|--git-dir/i.test(w));
+const NUMERIC_ARG = /^\d+(?:\.\d+)?[smhd]?$/;
+const gitWordsIn = (words) => { const at = words.flatMap((w, i) => (path.basename(w) === "git" ? [i] : [])); for (let i = cmdIndex(words); i < words.length; i++) { const w = words[i], b = path.basename(w); if (/[$`]/.test(w)) at.push(i); else if (!(WRAPPERS.has(b) || b === "xargs" || w.startsWith("-") || ASSIGN_WORD.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) break; } return at; };
+// env runs its -S string as a command line; GNU env takes any unambiguous prefix of --split-string (`--s` on), the value after `=` or as the next word.
+const ENV_SPLIT = /^-[A-Za-z]*S|^--s(?:p(?:l(?:i(?:t(?:-(?:s(?:t(?:r(?:i(?:ng?)?)?)?)?)?)?)?)?)?)?(?:=|$)/;
+const envSplitString = (words) => words.some((w, i) => path.basename(w) === "env" && words.slice(i + 1).find((a) => !(a.startsWith("-") && !ENV_SPLIT.test(a)) && !ASSIGN_WORD.test(a))?.match(ENV_SPLIT)); const configIndirectIn = (cmds, inherited = false, depth = 0) => { const env = inherited || cmds.some(envConfigIn); return cmds.some((c) => envSplitString(c.words) || ((env || ownConfig(c)) && gitWordsIn(c.words).some((i) => { const sub = gitSub(c.words.slice(i + 1)); return sub !== undefined && !GIT_BUILTINS.has(sub); })) || c.substs.some((s) => { const inner = depth < 5 && tokenize(stripHeredocs(s), () => {}); return inner ? configIndirectIn(inner, env, depth + 1) : mayReachGit("$(" + s + ")"); })); };
+// An alias is tried only after the builtins and the dashed externals, so these names always run as themselves. Checked against git 2.56 (`git --list-cmds=builtins`, and
+// `git -c alias.NAME='!echo X' NAME` for every name below): an alias DOES override scalar, daemon and the deprecated builtins whatchanged and pack-redundant, so they are not listed.
+const GIT_BUILTINS = new Set("add am annotate apply archive bisect blame branch bundle cat-file check-attr check-ignore checkout cherry cherry-pick clean clone commit config describe diff difftool fetch for-each-ref format-patch fsck gc grep hash-object help init log ls-files ls-remote ls-tree maintenance merge merge-base mergetool mv name-rev notes pull push range-diff rebase reflog remote repack replace reset restore rev-list rev-parse revert rm shortlog show show-ref sparse-checkout stash status submodule switch symbolic-ref tag update-index update-ref version worktree write-tree bugreport checkout-index column commit-graph commit-tree count-objects credential diff-files diff-index diff-tree fast-export fast-import fetch-pack filter-branch for-each-repo get-tar-commit-id index-pack interpret-trailers mailinfo mailsplit merge-file merge-index mktag mktree multi-pack-index pack-objects pack-refs patch-id prune prune-packed read-tree receive-pack request-pull rerere send-pack show-branch stripspace unpack-file unpack-objects update-server-info upload-pack var verify-commit verify-pack verify-tag".split(" "));
+// The global git options whose next word is skipped (`--opt=value` is one word), shared by gitSub and the doc guard's git(). All but bare `--exec-path`
+// take it as their value; bare `--exec-path` prints the exec path and ends git before any subcommand runs, so skipping its next word is harmless.
+const GIT_VALUED_OPTS = /^(?:-[Cc]|--(?:git-dir|work-tree|namespace|super-prefix|config-env|attr-source|shallow-file|exec-path))$/;
+const gitSub = (rest) => { let i = 0; while (i < rest.length && rest[i].startsWith("-")) i += GIT_VALUED_OPTS.test(rest[i]) ? 2 : 1; return rest[i]; };
+// Text the tokenizer rejects (a `(`, `((`, a function, a case or a `${ cmd; }`) can still reach git only through a `git` word, a backtick, a shell or `source` that runs
+// a string, an `env -S` string (a command line), or a `$` or glob word where a command starts: after ; & | ( ) a newline or a lone { or }, behind keywords, assignments, wrappers, their options
+// and redirections (a quoted or escaped word keeps the scan going). Arithmetic itself runs no command (a value it reads may expand a substitution, `x='a[$(cmd)]'; (( x ))`,
+// but that text is scanned where the value is set), so a `((…))` or `$((…))` holding no substitution (`$(`, a backtick, a current-shell `${ `), quote or escape reads as `:` or `0` first. Text that cannot reach git leaves the gate shut (`for (( i=0; i<$n; i++ ))`); text that can fails closed.
+const blankArith = (t) => {
+  let out = "", p = 0;
+  for (let n = 0, i = t.indexOf("(("); i >= 0 && n < 256; i = t.indexOf("((", p), n++) {
+    const j = matchParen(t, i);
+    if (j < 0) break;
+    const dollar = t[i - 1] === "$", arith = matchParen(t, i + 1) === j - 1 && !/\$\(|\$\{[\s|]|[`'"\\]/.test(t.slice(i + 2, j - 1));
+    out += arith ? t.slice(p, dollar ? i - 1 : i) + (dollar ? "0" : ":") : t.slice(p, j + 1);
+    p = j + 1;
+  }
+  return out + t.slice(p);
+};
+const leadDyn = (seg) => {
+  const words = seg.replace(/[<>]+[&|]?\s*[^\s<>;&|()]*/g, " ").split(/\s+/).filter(Boolean);
+  let env = false; // an `env` among the leading words: its -S option runs its string as a command line
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i], b = path.basename(w), bare = w.replace(/['"\\]/g, "");
+    if (w === "[" || w === "[[") return false;
+    if (/[$*?[{]/.test(w) || (env && ENV_SPLIT.test(bare))) return true;
+    if (path.basename(bare) === "env") env = true;
+    if (!(KEYWORDS.has(w) || WRAPPERS.has(b) || b === "xargs" || /^-|['"\\=]/.test(w) || NUMERIC_ARG.test(w) || (i > 0 && words[i - 1].startsWith("-")))) return false;
+  }
+  return false;
+};
+const mayReachGit = (t, gitWord = true) => (gitWord && /\bgit\b/.test(t)) || /`|\b(?:sh|bash|zsh|dash|ksh|source)\b|(?:^|[\s;&|(])\.\s/.test(t) || blankArith(t).split(/[;&|\n()]|(?<![^\s;&|()])[{}](?![^\s;&|()])/).some(leadDyn);
+// The text bash evaluates as arithmetic: `((…))`, `$((…))`, `$[…]`, a subscript `a[…]`, a `${x:…}` offset or length, the rest of a `let` command, a `[[ … ]]`
+// test holding -eq, -ne, -lt, -le, -gt or -ge, and the whole text once an integer attribute is set (declare -i). One linear pass with arithDyn's bracket stack.
+const arithText = (t) => {
+  if (t.split(/[;&|\n]/).some(intAttr)) return t;
+  const open = [];
+  let out = "", arith = 0, inLet = false, cond = -1;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i], top = open[open.length - 1];
+    if (top?.param && !/[\w#!@*[]/.test(c) && !(i === top.at && /[-$?]/.test(c))) { top.param = false; if (c === ":" && !/[-=+?]/.test(t[i + 1] ?? "")) { top.arith = true; arith++; } }
+    if (arith > 0 || inLet) out += c;
+    if (arith === 0) {
+      if (/[;&|\n]/.test(c)) inLet = false;
+      else if (c === "l" && t.startsWith("let", i) && /^[\s;&|({!`]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 3] ?? "")) inLet = true;
+    }
+    if (c === "[" && t[i + 1] === "[" && cond < 0 && /^[\s;&|(!]?$/.test(t[i - 1] ?? "") && /\s/.test(t[i + 2] ?? "")) { cond = i + 2; i++; continue; }
+    if (c === "]" && t[i + 1] === "]" && cond >= 0) { const body = t.slice(cond, i); if (/\s-(?:eq|ne|lt|le|gt|ge)\b/.test(body)) out += " " + body; cond = -1; i++; continue; }
+    if (c === "(" || c === "[" || c === "{") {
+      const a = c === "(" ? t[i + 1] === "(" : c === "[" && /[\w$]/.test(t[i - 1] ?? "");
+      open.push({ arith: a, param: c === "{" && t[i - 1] === "$", at: i + 1 });
+      if (a) arith++;
+    } else if ((c === ")" || c === "]" || c === "}") && open.length && open.pop().arith) arith--;
+  }
+  return out;
+};
+// Names whose value comes from outside the text: read, mapfile and readarray (every name-like word after them, REPLY, MAPFILE), getopts (and OPTARG), and
+// for or select over a list holding a `$`, backtick or glob, or over the positional parameters; a name assigned from one of them inherits it. Arithmetic
+// evaluates a value it reads, and a `$(…)` in an array subscript there runs (`a[$(cmd)]`), so arithmetic that reads such a name may run a command the
+// text never shows. A name set beside a command substitution (`declare w="$(cat f)"`, `printf -v v %s "$(cat f)"`) holds such a value too, and arithmetic
+// re-evaluates a bare name (`y=l; (( y ))`) and follows a nameref (`declare -n z=l`), so every name-like word of a command that sets a name flows into it.
+// A `for` list and a default assignment (`${z=l}`) set a name the same way, and `set` hands a read value to the positional parameters (`$1`, `$@`).
+// `${#name}` is a length: bash never evaluates the value. Linear: one pass per simple command, then a bounded fixpoint over the assignments.
+const SETS = new RegExp(SETTER + String.raw`|\s-v\s*([A-Za-z_]\w*)|\b(?:for|select)\s+([A-Za-z_]\w*)\s+in\b`, "g"), setsOf = (s) => [...s.matchAll(SETS)].map((x) => x[1] ?? x[2] ?? x[3] ?? x[4]);
+const setsIn = (s) => (/(?:^|\s)set\s/.test(s) ? [...setsOf(s), "@"] : setsOf(s)); // `@` stands for the positional parameters
+const lengthless = (s) => s.replace(/\$\{#[A-Za-z_]\w*/g, "");
+const readArith = (t) => {
+  const segs = t.split(/[;&|\n]/), names = new Set();
+  for (const s of segs) {
+    const m = /\b(read|mapfile|readarray|getopts)\b/.exec(s);
+    if (m) { for (const w of s.slice(m.index + m[0].length).match(/[A-Za-z_]\w*/g) ?? []) names.add(w); names.add({ read: "REPLY", getopts: "OPTARG" }[m[1]] ?? "MAPFILE"); }
+    const f = /\b(?:for|select)\s+([A-Za-z_]\w*)(?:\s+in\b(.*))?/.exec(s);
+    if (f && (f[2] === undefined || /[$`*?[]/.test(f[2]))) names.add(f[1]);
+    if (/\$\((?!\()|`/.test(s)) for (const n of setsIn(s)) names.add(n);
+  }
+  if (!names.size) return false;
+  const flows = segs.map((s) => ({ refs: lengthless(s).match(/[A-Za-z_]\w*/g) ?? [], sets: setsIn(s) })).filter((x) => x.refs.length && x.sets.length);
+  let grew = true;
+  for (let k = 0; grew && k < 16; k++) { grew = false; for (const x of flows) if (x.refs.some((r) => names.has(r))) for (const n of x.sets) if (!names.has(n)) { names.add(n); grew = true; } }
+  if (grew) return true; // a longer chain than the bound: fail closed
+  const a = lengthless(arithText(t));
+  return (a.match(/[A-Za-z_]\w*/g) ?? []).some((n) => names.has(n)) || (names.has("@") && /\$\{?[1-9@*]/.test(a));
+};
+// Bash joins a backslash-newline before it reads a word, so every hint reads that joined text as well as the raw one. A current-shell substitution, or
+// arithmetic reading a value from outside the text (readArith), fails closed whenever the text can reach git. Text that only arithmetic makes unreadable
+// (`(( n++ ))`) is read again with each plain `((…))` as `:` (blankArith): its git words are judged as if a config name were set (the blanked arithmetic
+// may have held `(( HOME = 1 ))`), so only a built-in subcommand passes, and every other way to reach git (mayReachGit without its plain `git` word) still
+// fails closed. Other unreadable text fails closed when it can reach git.
+const configIndirectGit = (t) => {
+  // Bash joins first and decodes `$'…'` after, so a word split by both (`help.$'auto'c\<newline>orrect`) is whole only in the decoded joined text.
+  const j = t.includes("\\\n") ? t.replace(/\\\n/g, "") : t, views = j === t ? [t] : [t, j, decodeAnsiC(j), decodeAnsiC(j, false)], both = (f) => views.some(f);
+  if (!both((x) => CONFIG_INDIRECT.test(x)) && !both(dynNameHint)) return false;
+  if (both((x) => /\$\{[\s|]/.test(x)) || both(readArith)) return both((x) => mayReachGit(x));
+  const s = stripHeredocs(t), cmds = tokenize(s, () => {});
+  if (cmds) return configIndirectIn(cmds, both(arithDyn));
+  const blanked = tokenize(blankArith(s), () => {});
+  return blanked ? configIndirectIn(blanked, true) || both((x) => mayReachGit(x, false)) : both((x) => mayReachGit(x));
+};
+const removalGate = (t) => REMOVAL_GATE_NOCLEAN.test(t) || globbedGit(t) || configIndirectGit(t) || /help\.autocorrect/i.test(t) || (plainWords(t) ? gitThenClean(t) : REMOVAL_WORD.test(t));
 const SHELL_C = /\b(?:sh|bash|zsh|dash|ksh)\b[\s\S]*\s-\w*c\b/; // `sh|bash|zsh -c`, wherever the flag sits
 const CANDIDATES = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync", "find", "xargs", "eval", "git", "sh", "bash", "zsh", "dash", "ksh"]);
 const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rsync"]);
@@ -369,8 +612,66 @@ const RM_LIKE = new Set(["rm", "unlink", "rmdir", "mv", "shred", "truncate", "rs
 const WRITE_VERBS = new Set(WRITER_VERBS.filter((verb) => !RM_LIKE.has(verb)));
 // Writers whose target is not a plain operand: they edit in place, patch or unpack. Read only by the self-protection scan.
 const OTHER_WRITERS = new Set(["awk", "gawk", "ed", "patch", "tar", "unzip"]);
-const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`);
+// sed and perl count only in their in-place form (-i, -…i, --in-place), as the word-based verb check below does.
+const INPLACE_TEXT = String.raw`\b(?:sed|perl)\b[^;&|\n]*?\s(?:-[A-Za-z0-9]*i|--i(?:n(?:-(?:p(?:l(?:a(?:c(?:e)?)?)?)?)?)?)?(?=[\s=]|$))`;
+// A sed `w` command or `w` flag writes the file it names; read from the raw text (fail closed), it only counts when a guarded name is mentioned.
+const SED_W_TEXT = /\bsed\b[^&|\n]*?[wW]\s*[^\s'";}]/;
+const VARIABLE_WORD = /(?:^|[;&|(]\s*)\$\{?\w+\}?(?=\s)/; // a command word that is a variable
+const WRITE_ANY_TEXT = { test: (t) => VARIABLE_WORD.test(t) && new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].join("|")})\\b`).test(t) }; // plain sed and perl too: a variable command word may be either
+const emptyQuoted = (text) => text.replace(/'[^']*'|"[^"]*"/g, '""'); // a quoted ; | & cannot end an in-place scan
+const WRITE_TEXT = new RegExp(`\\b(?:${[...WRITER_VERBS, ...OTHER_WRITERS].filter((verb) => verb !== "sed" && verb !== "perl").join("|")})\\b|${INPLACE_TEXT}`);
 const WRITER_AT_COMMAND = new RegExp(`(?:^|[\\s;&|(])(?:${WRITER_VERBS.filter((verb) => verb !== "sed" && verb !== "perl").join("|")})(?=\\s)`);
+// Where a command word stands: after a separator, a brace, a subshell or a case pattern, after then, do, else, if, time, `!`, and after assignment prefixes.
+const AT_COMMAND = String.raw`(?:^|[;&|(){\n\x60]|(?<![\w.-])(?:then|do|else|elif|if|while|until|time|command|builtin|!)(?=\s))[ \t]*(?:\w+=(?:[^\s;&|()\x60"']|"[^"\n]*"|'[^'\n]*')*[ \t]+)*`;
+// A link into the state directory, read from the text: `ln` or `link` as a whole word, wherever it stands, in a command that names `.craftsman` is refused, so a wrapper no list names (`setsid`, `chrt`, `flock`, `taskset`,
+// `strace`, `unshare`, `fakeroot`, `watch`) hides nothing. A command that only searches for or prints the word is exempt: it is cut at `;`, `&`, `|`, a newline, a backtick and a parenthesis, and every piece that holds the word
+// must start with a read-only head. Plain string operations and one linear pattern, with no backtracking: this runs in front of every Bash call. The parser still judges a link it can read, whatever this check says. The name of the state directory is compared case-folded, as selfKind compares (a case-insensitive filesystem reaches `.Craftsman` as it), and the caller
+// passes the command with the bodies of inert heredocs left out (blankInertHeredocs): prose in a quoted heredoc that names the word and the directory is not a link, a real link beside it is.
+const LINK_WORD = /(?:^|[\s;&|(){\x60])(?:ln|link)(?=\s)/;
+const SEGMENT_BREAK = /[;&|\n\r()\x60]/;
+const READ_ONLY_HEADS = new Set(["grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "git log"]);
+const ACTING_OPTIONS = ["--pre", "--hostname-bin", "--output"]; // rg runs a program, git log writes a file: the head is no longer read-only
+const readOnlySegment = (segment) => {
+  const words = segment.trim().split(/[ \t]+/);
+  return READ_ONLY_HEADS.has(words[0] === "git" ? `git ${words[1]}` : words[0]) && !words.some((w) => ACTING_OPTIONS.some((o) => w === o || w.startsWith(o + "=")));
+};
+const linksIntoState = (command) => /\.craftsman/i.test(command) && LINK_WORD.test(command)
+  && !command.split(SEGMENT_BREAK).every((segment) => !LINK_WORD.test(segment + " ") || readOnlySegment(segment));
+// Does this `cp` make links instead of copies: -l / --link (hard links), -s / --symbolic-link (symlinks), alone, in a cluster of short options (-al, -sl, -alt../d) or as an abbreviation getopt
+// reads (--li, --sy)? Options end at `--`. A letter that takes a value (-t, -S) ends the letters of its cluster, the rest of it being that value: `-St` holds no `l` or `s`, and `-alt../d` holds both.
+const linksNotCopies = (rest) => (rest.includes("--") ? rest.slice(0, rest.indexOf("--")) : rest).some((a) => (/^-[^-]/.test(a) && /[ls]/.test(a.slice(1).split(/[tS]/)[0]))
+  || (a.startsWith("--") && a.length > 2 && ("link".startsWith(a.slice(2)) || (a.length > 3 && "symbolic-link".startsWith(a.slice(2))))));
+// The short options of cp, mv, ln and install that take a value, as GNU getopt reads them: `-S SUFFIX`, `-t DIR`, and for install `-m MODE`, `-o OWNER`, `-g GROUP`. rsync is not here: its `-t` keeps times and takes no value.
+const VALUED_SHORT = { cp: "tS", mv: "tS", ln: "tS", install: "tSmog" };
+// The target-directory option of `cp`, `mv`, `ln` and `install`, read the way getopt reads it: `-t DIR`, an attached `-tDIR`, a cluster that ends in t (`-ft DIR`) or carries the directory (`-ft.git/x`), and
+// `--target-directory=DIR`, `--target-directory DIR` or an abbreviation of it (`--target`, `--t`). A letter that takes a value swallows the rest of its cluster, or the next word when it ends one, so `-St` is a suffix
+// and `-m 644 src dst` has no operand 644. Options end at `--`. Every -t is returned (the last wins in cp, but a reading that differs from getopt's in an odd spelling must not hide one). `used` holds the indexes of
+// the words that these options took (a `--target-directory=DIR` word, a value given as the next word), which are no operands.
+function targetDirOptions(rest, valued) {
+  const dirs = [], used = new Set();
+  if (!valued) return { dirs, used };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === "--") break;
+    if (a.startsWith("--")) {
+      const name = a.slice(2).split("=")[0];
+      if (name === "" || !"target-directory".startsWith(name)) continue;
+      used.add(i);
+      if (a.includes("=")) dirs.push(a.slice(a.indexOf("=") + 1));
+      else if (i + 1 < rest.length) { used.add(i + 1); dirs.push(rest[++i]); }
+      continue;
+    }
+    if (!/^-[^-]/.test(a)) continue;
+    for (let k = 1; k < a.length; k++) {
+      if (!valued.includes(a[k])) continue;
+      let value = a.slice(k + 1);
+      if (value === "" && i + 1 < rest.length) { used.add(i + 1); value = rest[++i]; }
+      if (a[k] === "t" && value !== "") dirs.push(value);
+      break;
+    }
+  }
+  return { dirs, used };
+}
 // The commands whose target is gone afterwards (so an ancestor of a protected path is as bad as the path).
 const REMOVER_LABELS = /^(?:rm|unlink|rmdir|shred|truncate|rsync|mv|git rm|git mv|git clean|holds)$/;
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
@@ -405,6 +706,21 @@ function matchParen(t, i) {
 // Strict tokenizer for the safe subset: [{ words, sep, redirOut, redirIn, substs }]
 // or null (after fail(why)) for anything outside it: `(` `)` a lone `&` `;;`,
 // process substitution, an unclosed quote or substitution.
+// Bash `$'...'` (ANSI-C quoting): the text between the quotes with its escapes decoded; j is the closing quote, or -1.
+function ansiCEnd(text, i) { for (let j = i + 2; j < text.length; j++) { if (text[j] === "\\") j++; else if (text[j] === "'") return j; } return -1; }
+function ansiCDecode(body, cut = true) {
+  const simple = { n: "\n", t: "\t", r: "\r", a: "\x07", b: "\b", f: "\f", v: "\v", e: "\x1b", E: "\x1b", "\\": "\\", "'": "'", '"': '"', "?": "?" };
+  const out = body.replace(/\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c(.)|([\s\S]))/g, (m, x, u, U, o, ctl, ch) => {
+    if (x !== undefined) return String.fromCharCode(parseInt(x, 16));
+    if (u !== undefined || U !== undefined) { try { return String.fromCodePoint(parseInt(u ?? U, 16)); } catch { return ""; } }
+    if (o !== undefined) return String.fromCharCode(parseInt(o, 8) & 255);
+    if (ctl !== undefined) return String.fromCharCode(ctl.charCodeAt(0) & 31);
+    return simple[ch] ?? m;
+  });
+  const nul = out.indexOf("\0"); // bash ends a $'...' string at a NUL: a decoded \0, \x00, \u0000, \U00000000 or \c@ drops the rest of the body
+  return nul < 0 || !cut ? out : out.slice(0, nul);
+}
+const decodeAnsiC = (text, cut = true) => { let out = "", i = 0; while (i < text.length) { if (text[i] === "$" && text[i + 1] === '"') { i++; continue; } const j = text[i] === "$" && text[i + 1] === "'" ? ansiCEnd(text, i) : -1; if (j === -1) out += text[i++]; else { out += ansiCDecode(text.slice(i + 2, j), cut); i = j + 1; } } return out; };
 function tokenize(text, fail) {
   const cmds = [], n = text.length;
   const fresh = (sep) => ({ words: [], sep, redirOut: [], redirIn: false, substs: [] });
@@ -442,6 +758,7 @@ function tokenize(text, fail) {
           const j = matchParen(text, i + 1);
           if (j === -1) { fail("an unclosed substitution"); return null; }
           cur.substs.push(text.slice(i + 2, j)); word += text.slice(i, j + 1); i = j;
+        } else if (d === "$" && text[i + 1] === "{" && /[\s|]/.test(text[i + 2] ?? "")) { fail("a current-shell substitution"); return null;
         } else if (d === "`") {
           let j = i + 1; while (j < n && text[j] !== "`") j += text[j] === "\\" ? 2 : 1;
           if (j >= n) { fail("an unclosed substitution"); return null; }
@@ -449,10 +766,17 @@ function tokenize(text, fail) {
         } else word += d;
       }
       if (i >= n) { fail("an unclosed quote"); return null; }
+    } else if (c === "$" && text[i + 1] === '"') {
+      // `$"..."` is the locale-translated string: untranslated it is the plain double-quoted word, so the `$` is dropped and the quote that follows is read as usual.
+    } else if (c === "$" && text[i + 1] === "'") {
+      const j = ansiCEnd(text, i);
+      if (j === -1) { fail("an unclosed quote"); return null; }
+      word = (word ?? "") + ansiCDecode(text.slice(i + 2, j)); i = j;
     } else if (c === "$" && text[i + 1] === "(") {
       const j = matchParen(text, i + 1);
       if (j === -1) { fail("an unclosed substitution"); return null; }
       cur.substs.push(text.slice(i + 2, j)); word = (word ?? "") + text.slice(i, j + 1); i = j;
+    } else if (c === "$" && text[i + 1] === "{" && /[\s|]/.test(text[i + 2] ?? "")) { fail("a current-shell substitution"); return null; // bash 5.3 runs `${ cmd; }` and `${| cmd; }` in this shell
     } else if (c === "`") {
       let j = i + 1; while (j < n && text[j] !== "`") j += text[j] === "\\" ? 2 : 1;
       if (j >= n) { fail("an unclosed substitution"); return null; }
@@ -491,19 +815,25 @@ function tokenize(text, fail) {
 }
 
 function removedDocs(cmd, docPaths, { writes = false } = {}) {
+  // A quoted grep/printf/echo argument next to a loop keyword is prose: its `rm` text is not a removal (blankProse leaves
+  // anything that could run it as it is; with a backslash, which it does not read, the raw text is judged: fail closed).
+  if (/\b(?:for|while|until)\b/.test(cmd) && !cmd.includes("\\")) cmd = blankProse(cmd);
   const hits = [];
   const unsafe = (why) => { hits.push("(command the parser cannot prove safe: " + why + ")"); };
   // The gate reads the text with its quotes and backslashes removed as well as the
   // raw text, so `r''m`, `r\m` and `"r"m` are removal words; a `>` redirect onto a
   // guarded (or unresolvable) path, read from the de-quoted targets, is one too.
-  const bare = cmd.replace(/['"\\]/g, "");
+  // decodeAnsiC does not see quotes, so a `$'` inside double quotes is decoded too: the NUL cut would drop the commands up to
+  // the next `'` (`echo "$'\0"; git ... ; echo "'"`) and an escape would rewrite an unquoted word (`cle\an`), so the gate reads
+  // the cut decoding, the uncut decoding, the undecoded text, the text with each backslash-newline joined and both decodings of it, as bash reads it (fail closed).
+  const joined = cmd.replace(/\\\n/g, ""), bare = [...new Set([decodeAnsiC(cmd), decodeAnsiC(cmd, false), cmd, joined, decodeAnsiC(joined), decodeAnsiC(joined, false)])].join("\n").replace(/['"\\]/g, "");
   const cdPresent = /\b(?:cd|pushd)\b/.test(bare);
   // A dynamic target ($VAR) is judged by the full analysis, and only when a removal word is present.
   // (self-protection also asks selfKind, which compares case-folded, so `> .CLAUDE/settings.local.json` is not waved through)
   const foldedSelf = (t) => {
     const abs = realResolve(process.cwd(), expandHome(t));
     const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
-    return (rel !== "" && !rel.startsWith("..") && !!selfKind(rel)) || !!mainStateRel(abs);
+    return (rel !== "" && !rel.startsWith("..") && !!selfKind(rel)) || !!mainStateRel(abs) || isGitFile(abs); // a redirect onto a gitfile reaches the parser, which refuses it in target()
   };
   const redirectBad = (t) => t && !/[$`]/.test(t) && !/^~[^/]/.test(t) && (touchesGuarded(expandHome(t), process.cwd(), docPaths) || (cdPresent && !path.isAbsolute(expandHome(t))) || (writes && foldedSelf(t)));
   const redirectsOntoDocs = () => {
@@ -517,8 +847,8 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     };
     return walk(cmd, 0);
   };
-  if (!REMOVAL_WORD.test(cmd) && !REMOVAL_WORD.test(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
-      && !(writes && WRITE_TEXT.test(bare)) && !redirectsOntoDocs()) return hits;
+  if (!removalGate(cmd) && !removalGate(bare) && !SHELL_C.test(cmd) && !SHELL_C.test(bare)
+      && !(writes && (WRITE_TEXT.test(bare) || WRITE_ANY_TEXT.test(bare))) && !redirectsOntoDocs()) return hits;
   const fork = (st) => ({ cwds: st.cwds && st.cwds.slice() });
 
   // One removal target, resolved from every directory the command may run in.
@@ -547,6 +877,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         if (rel !== "" && !rel.startsWith("..") && selfKind(rel) && !hits.includes(rel)) hits.push(rel);
         const stateRel = mainStateRel(abs); // the main checkout's session state, reached from a linked worktree
         if (stateRel && !hits.includes(stateRel)) hits.push(stateRel);
+        if (isGitFile(abs) && !hits.includes(GITFILE_HIT)) hits.push(GITFILE_HIT); // a gitfile rewritten, replaced or moved away: whatever it named is no longer the repository the guards found
       }
     }
     // Self-protection only: a path that is removed or moved takes everything under it along, so a directory that
@@ -557,8 +888,8 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
         if (rel !== "" && !rel.startsWith("..")) hits.push("remove:" + rel);
         // the main checkout's session state, removed from a linked worktree (a removed scope-required flag is a removed gate)
-        const mainRel = mainRelOf(abs);
-        if (mainRel && heldNever(mainRel)) hits.push("remove:" + mainRel);
+        const held = outerRelWhere(abs, heldNever);
+        if (held) hits.push("remove:" + held);
       }
     }
   }
@@ -596,37 +927,114 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   const isDirAt = (abs) => { try { return fs.statSync(abs).isDirectory(); } catch { return false; } };
   // `recursive` is true for cp -r/-R/-a, for rsync and for mv: a directory source then brings every file under it, so
   // DEST/<each file> is judged as well as DEST/basename(SOURCE). A directory that cannot be listed is `unlisted`.
-  function placements(rest, st, recursive = false) {
-    const t = rest.findIndex((a) => a === "-t" || /^--target-directory(?:=|$)/.test(a));
-    const dirOpt = t < 0 ? undefined : rest[t].includes("=") ? rest[t].slice(rest[t].indexOf("=") + 1) : rest[t + 1];
-    const operands = targetsOf(t < 0 ? rest : rest.filter((_, i) => i !== t && !(i === t + 1 && !rest[t].includes("="))));
-    const sources = dirOpt !== undefined ? operands : operands.slice(0, -1);
-    const dest = dirOpt !== undefined ? dirOpt : operands[operands.length - 1];
+  function placements(rest, st, recursive = false, verb = "cp") {
+    const { dirs: dirOpts, used } = targetDirOptions(rest, VALUED_SHORT[verb]);
+    const operands = targetsOf(rest.filter((_, i) => !used.has(i)));
+    // `ln TARGET`, with one operand and no -t, makes a link named for TARGET in the working directory: that name is where the link lands.
+    const single = verb === "ln" && dirOpts.length === 0 && operands.length === 1;
+    const sources = dirOpts.length || single ? operands : operands.slice(0, -1);
+    const dests = dirOpts.length ? dirOpts : single ? [path.basename(operands[0].replace(/\/+$/, "")) || operands[0]] : operands.slice(-1);
+    const dest = dests[dests.length - 1];
     if (dest === undefined) return { sources: [], placed: [], unlisted: [], dest: undefined };
-    const asDir = dirOpt !== undefined || destIsDir(dest, st);
-    const dd = dest.replace(/\/+$/, "") || dest;
-    const join = (s) => dd + "/" + path.basename(s.replace(/\/+$/, ""));
-    const placed = !sources.length ? [dest] : asDir ? sources.map(join) : [dest];
-    const unlisted = [];
+    const placed = [], unlisted = [];
     const deep = recursive || rest.some((a) => (/^-[A-Za-z]*[rRa]/.test(a) && !a.startsWith("--")) || a === "--recursive" || a === "--archive");
-    if (deep) for (const s of sources) {
-      const dirs = (st.cwds || []).map((cwd) => realResolve(cwd, expandHome(s))).filter(isDirAt);
-      if (!dirs.length) continue;
-      const listing = dirs.map((d) => listTree(d)).find(Boolean);
-      if (!listing) { unlisted.push(dd, join(s)); continue; }
-      for (const e of listing) { placed.push(dd + "/" + e); if (asDir) placed.push(join(s) + "/" + e); }
+    for (const d of dests) { // every -t is judged: a second one is read as getopt might not
+      const asDir = dirOpts.length > 0 || (!single && destIsDir(d, st));
+      const dd = d.replace(/\/+$/, "") || d;
+      const join = (s) => dd + "/" + path.basename(s.replace(/\/+$/, ""));
+      for (const p of !sources.length ? [d] : asDir ? sources.map(join) : [d]) placed.push(p);
+      if (deep) for (const s of sources) {
+        const dirs = (st.cwds || []).map((cwd) => realResolve(cwd, expandHome(s))).filter(isDirAt);
+        if (!dirs.length) continue;
+        const listing = dirs.map((x) => listTree(x)).find(Boolean);
+        if (!listing) { unlisted.push(dd, join(s)); continue; }
+        for (const e of listing) { placed.push(dd + "/" + e); if (asDir) placed.push(join(s) + "/" + e); }
+      }
     }
     return { sources, dest, placed, unlisted };
   }
-  // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names.
-  function copyTargets(rest, st, env, recursive = false) {
-    const { placed, unlisted } = placements(rest, st, recursive);
+  // A source of links that is a directory holding craftsman state, or may name one. holds() leaves out the project root itself and target() reads no glob, so neither judged `cp -al .`, `cp -al ..` or `cp -l .crafts*an/...`.
+  // A literal source holds state when it is, or lies above, the project root, the main checkout, the git common dir or a superproject. A source with a glob character is read by the names it can match, from the longest
+  // literal directory before it: it may name state when that directory lies inside a state area (the state directory or a .git), or when its segments match the names on the way down to one (`.crafts*an` matches
+  // `.craftsman`; a leading `*` matches no dot name, unless the command sets dotglob or GLOBIGNORE), however many segments follow. No file has to exist, since the shell expands the glob later. A brace group that spans a `/` or holds a glob character, an unclosed one and an extglob group are not read: they count.
+  function linkSourceHoldsState(source, cwd) {
+    const arg = expandHome(source);
+    const cut = arg.search(/[*?[{]/);
+    if (cut === -1) {
+      const abs = realResolve(cwd, arg);
+      return stateHolders().some((holder) => holder === abs || holder.startsWith(abs.endsWith(path.sep) ? abs : abs + path.sep));
+    }
+    if (/\{[^}]*(?:[\/*?[]|$)|[@+!?*]\(/.test(arg)) return true;
+    const lead = arg.slice(0, cut).replace(/[^/]*$/, "");
+    const dir = realResolve(cwd, lead === "" ? "." : lead);
+    const segs = arg.slice(lead.length).split("/").filter((seg) => seg !== "" && seg !== ".");
+    if (segs.includes("..")) return true;
+    const dotted = /dotglob|GLOBIGNORE/i.test(cmd);
+    const matches = (seg, name) => segmentRe(seg, "i").test(name) && (!name.startsWith(".") || dotted || /^[.[{\\]/.test(seg));
+    try {
+      return stateAreas().some((area) => {
+        if (area === dir || area.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)) {
+          const down = path.relative(dir, area).split(path.sep).filter(Boolean);
+          return down.slice(0, segs.length).every((name, n) => matches(segs[n], name));
+        }
+        return dir.startsWith(area + path.sep);
+      });
+    } catch { return true; } // a glob the parser cannot read is not shown to miss the state
+  }
+  // The sources of a link (`ln`, `link`, `cp -l`, `cp -s`): what each one names is a path a later write can reach under the link's name, so it is judged like a write to it.
+  // A symlink holds the source as written and resolves it from the link's directory; a hard link takes the file `ln` or `cp` finds from the working directory. Both are judged.
+  // `label` is "holds" for a directory whose every file is linked (rsync --link-dest), so a directory that holds protected state is judged too.
+  function linkedSources(sources, placed, st, env, label = "write") {
+    sources.forEach((source, i) => {
+      for (const cwd of st.cwds || []) {
+        const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
+        const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
+        target(aimed, { cwds: [cwd] }, label, env);
+        if (!path.isAbsolute(source)) target(source, { cwds: [cwd] }, label, env);
+        // the project root, the main checkout, a directory above them, or a glob that may name the state directory: neither holds() nor target() reaches it
+        if ((linkSourceHoldsState(aimed, cwd) || (!path.isAbsolute(source) && linkSourceHoldsState(source, cwd))) && !hits.includes(LINKED_STATE_HIT)) hits.push(LINKED_STATE_HIT);
+      }
+    });
+  }
+  // A link whose name lands in the state directory would let a later Write reach the state under another name: every name that resolves into it, from each working directory, is a hit.
+  // From a linked worktree the state is the main checkout's (ARCH-SAFETY-13), so a name under that one counts as well.
+  function namesIntoState(names, st) {
+    const inState = (rel) => /^\.craftsman(?:\/|$)/i.test(rel); // case-folded, as selfKind compares: a case-insensitive filesystem reaches `.Craftsman` as it
+    for (const a of names) for (const cwd of st.cwds || []) {
+      const abs = realResolve(cwd, expandHome(a));
+      const main = mainRelOf(abs);
+      if (inState(path.relative(realRoot(), abs).split(path.sep).join("/")) || (main && inState(main))) hits.push(".craftsman (link)");
+    }
+  }
+  // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names. `linking` is a cp that links (-l, -s, linksNotCopies): each SOURCE is then a second
+  // name for the file, judged as the source of `ln` is, and a directory SOURCE (cp -al) names every file under it again, so it is judged as one that holds protected state.
+  // `linkDirs` are the directories an rsync is told to link its files to (--link-dest): each is a source of links, and a relative one is read from the destination directory as well as from the working directory.
+  function copyTargets(rest, st, env, recursive = false, linking = false, linkDirs = [], verb = "cp") {
+    const { sources, dest, placed, unlisted } = placements(rest, st, recursive, verb);
     for (const p of placed) target(p, st, "write", env);
     for (const u of unlisted) target(u, st, "holds", env);
+    if (linkDirs.length) {
+      const into = dest === undefined ? [] : [(dest.replace(/\/+$/, "") || dest) + "/link-dest"]; // a file of the destination directory: its directory is where a relative DIR is read from
+      linkedSources(linkDirs, into, st, env, "holds");
+    }
+    if (!linking) return;
+    linkedSources(sources, placed, st, env);
+    for (const source of sources) target(source, st, "holds", env);
+    namesIntoState(placed, st); // the name of the link, as the name of an `ln` is judged
+  }
+  // `rsync SOURCE... DEST` with --link-dest=DIR or --link-dest DIR (any number, anywhere before a `--`): rsync makes a file of DEST a hard link to the same file under DIR, so DIR is judged as a source of links.
+  function rsyncTargets(rest, st, env) {
+    const linkDirs = [], others = [];
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === "--") { others.push(...rest.slice(i)); break; }
+      if (a === "--link-dest") { if (i + 1 < rest.length) linkDirs.push(rest[++i]); } else if (a.startsWith("--link-dest=")) linkDirs.push(a.slice(12)); else others.push(a);
+    }
+    copyTargets(others, st, env, true, false, linkDirs.filter(Boolean), "rsync");
   }
   // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
   function moveTargets(rest, st, env) {
-    const { sources, placed, unlisted } = placements(rest, st, true);
+    const { sources, placed, unlisted } = placements(rest, st, true, "mv");
     for (const source of sources) target(source, st, "mv", env);
     for (const p of placed) target(p, st, "write", env);
     for (const u of unlisted) target(u, st, "holds", env);
@@ -713,23 +1121,13 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     const args = targetsOf(rest);
     let files = [];
     if (verb === "touch" || verb === "tee" || verb === "mkdir") files = args;
-    else if (verb === "ln") {
-      const { sources, placed } = placements(rest, st);
+    else if (verb === "ln" || verb === "link") { // coreutils `link SOURCE NAME` is a hard link, `ln` without -s: the same operands, judged the same way
+      const { sources, placed } = placements(rest, st, false, verb);
       files = placed;
-      // What each link points at is a path a later write can reach under another name, so it is judged like a write to it.
-      sources.forEach((source, i) => {
-        for (const cwd of st.cwds || []) {
-          const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
-          const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
-          target(aimed, { cwds: [cwd] }, "write", env);
-        }
-      });
-      // A link into the state directory would let a later Write reach it under another name.
-      for (const a of args) for (const cwd of st.cwds || []) {
-        const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
-        if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
-      }
-    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env);
+      linkedSources(sources, placed, st, env); // what each link points at is a path a later write can reach under another name
+      namesIntoState(args, st); // a link into the state directory would let a later Write reach it under another name
+      namesIntoState(placed, st); // and where the link lands: the one-operand form names it in the working directory, -t names the directory
+    } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env, false, verb === "cp" && linksNotCopies(rest), [], verb);
     else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
     else if (verb === "sed" || verb === "perl") {
       if (!rest.some((a) => /^-[A-Za-z]*i/.test(a) || /^--in-place(?:=|$)/.test(a))) return; // without -i or --in-place neither writes a named file
@@ -761,11 +1159,14 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       else {
         if (/^--config-env\b/.test(o)) bad = always = "git " + o + " (a config override)";
         if (/^--(?:icase-pathspecs|work-tree|git-dir|separate-git-dir)\b/.test(o)) bad = "git " + o;
-        i += /^--(?:git-dir|work-tree|namespace|super-prefix|config-env)$/.test(o) ? 2 : 1;
+        i += GIT_VALUED_OPTS.test(o) ? 2 : 1;
       }
     }
     const sub = rest[i];
-    if (/GIT_CONFIG/.test(cmd)) bad = always = "a GIT_CONFIG_* variable (a config override)";
+    if (/GIT_CONFIG/.test(cmd) || /GIT_CONFIG/.test(bare)) bad = always = "a GIT_CONFIG_* variable (a config override)";
+    if (sub !== undefined && !GIT_BUILTINS.has(sub) && (configIndirectGit(cmd) || configIndirectGit(bare))) bad = always = "a git config indirection (include, HOME or XDG_CONFIG_HOME) beside a non-builtin subcommand";
+    if (/help\.autocorrect/i.test(cmd) || /help\.autocorrect/i.test(bare)) bad = always = "git autocorrect (it may run a removal subcommand)";
+    if (sub !== undefined && /[*?[{]/.test(sub)) bad = always = "a globbed git subcommand: " + sub;
     if (sub !== "rm" && sub !== "mv" && sub !== "clean") {
       if (always) return unsafe(always);
       const args = rest.slice(i + 1);
@@ -778,7 +1179,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
     noteRemoval(sub, after, env);
     if (env.unseen) return unsafe("git " + sub + " with input the parser cannot see");
     if (bad) return unsafe(bad);
-    if (/GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(cmd)) return unsafe("a git environment variable that changes pathspec matching or the work tree");
+    if (/GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(cmd) || /GIT_ICASE_PATHSPECS|GIT_DIR|GIT_WORK_TREE/.test(bare)) return unsafe("a git environment variable that changes pathspec matching or the work tree");
     if (after.some((a) => /^--pathspec-from-file/.test(a))) return unsafe("git pathspecs read from a file");
     const specs = targetsOf(after);
     if (sub === "clean" && !specs.length) specs.push(".");
@@ -883,6 +1284,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       const w = words[i], b = path.basename(w), afterOption = i > 0 && words[i - 1].startsWith("-");
       if (CANDIDATES.has(b) || (writes && (WRITE_VERBS.has(b) || OTHER_WRITERS.has(b)))) { dispatchAt(words, i, c, prev, st, depth, env); if (!afterOption) return; continue; }
       if (WRAPPERS.has(b) || w.startsWith("-") || ASSIGNMENT.test(w) || afterOption || /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
+      if (b !== "[" && b !== "[[" && GLOB_CHAR.test(b) && globMayBeGit(w)) return unsafe("a globbed command word that may spell git");
       const args = words.slice(i + 1);
       const safe = SAFE_HEADS.has(b) || (b === "node" && args.length > 0 && /(?:^|\/)scripts\/[\w.-]+\.mjs$/.test(args[0]));
       const named = args.find((a) => REMOVAL_WORD.test(a));
@@ -897,7 +1299,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       noteRemoval(verb, rest, env);
       if (env.unseen) return unsafe(verb + " with input the parser cannot see");
       if (writes && verb === "mv") return moveTargets(rest, st, env);
-      if (writes && verb === "rsync") return copyTargets(rest, st, env, true);
+      if (writes && verb === "rsync") return rsyncTargets(rest, st, env);
       for (const t of targetsOf(rest)) target(t, st, verb, env);
     } else if (writes && WRITE_VERBS.has(verb)) writeTargets(verb, rest, st, env);
     else if (writes && OTHER_WRITERS.has(verb)) otherWriters(verb, rest, st, env);
@@ -958,7 +1360,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         if (CANDIDATES.has(b)) break;
         if (b === "env" || b === "sudo") { wrapper = b; continue; }
         if (!a.startsWith("-") || a === "--") continue;
-        if (wrapper === "env" && /^(?:-[A-Za-z]*S|--split-string)/.test(a)) return unsafe("env -S splits a string into a command");
+        if (wrapper === "env" && ENV_SPLIT.test(a)) return unsafe("env -S splits a string into a command");
         if ((wrapper === "env" && /^(?:-[A-Za-z]*C|--chdir)/.test(a)) || (wrapper === "sudo" && /^(?:-[A-Za-z]*D|--chdir)/.test(a))) at = { cwds: null };
       }
     }
@@ -1083,12 +1485,14 @@ const activeRoot = activeScope?.project_root || PROJECT_ROOT;
 const activeContext = { root: activeRoot, stateDir: path.join(activeRoot, ".craftsman"), offFlag: path.join(activeRoot, ".craftsman", "off") };
 const cfg = loadConfig(activeContext);
 if (!safetyEnabled()) process.exit(0); // ARCH-SAFETY-05: CRAFTSMAN_SAFETY=off in the user's environment only
+// A sandbox-bypass retry (dangerouslyDisableSandbox) is what auto mode refuses: counted for /craftsman:stats, before any verdict, never judged.
+if (tool === "Bash" && toolInput.dangerouslyDisableSandbox === true) logEvent({ ev: "sandbox_bypass", sid: sidOf(input), head: commandHead(command) });
 // The doc-write authority and tracker checks belong to the doc side, which follows enabled(): off for
 // CRAFTSMAN=off, .craftsman/off, enabled:false, and outside a git repo (ARCH-SAFETY-08). Everything else
 // in this file is safety and runs whatever enabled() says.
 const docSide = enabled(cfg, activeContext);
 const rel = target ? path.relative(activeRoot, target).split(path.sep).join("/") : "";
-if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool)) {
+if (activeScope && ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit"].includes(tool) && !(["Read", "Write", "Edit"].includes(tool) && insideScratchRoots(file, activeRoot, input, tool))) { // ARCH-STATE-18: a scratch Read, Write or Edit passes the scope and the ambiguity refusal, a Write that creates the file too (NotebookEdit, Glob and Grep never); the checks below still judge a Write or Edit target
   if (activeScope.scope_ambiguous) {
     process.stderr.write(`craftsman: ${tool} blocked because more than one active project scope matches this session. Activate the intended project scope explicitly before retrying.\n`);
     process.exit(2);
@@ -1141,7 +1545,7 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
 // at command position counts, so a message or an argument that merely holds `-n` does not. A command the lexer
 // cannot read with certainty returns false here and meets the text check above and below.
 // Options of a wrapper that take a value: the next word is that value, not the wrapped command.
-const WRAPPER_VALUE_SHORT = { env: "uCS", sudo: "ugCDhprtUTR", doas: "uC", nice: "n", timeout: "sk", stdbuf: "ioe", ionice: "cnpt", time: "fo" };
+const WRAPPER_VALUE_SHORT = { env: "uCS", sudo: "ugCDhprtUTR", doas: "uC", nice: "n", timeout: "sk", stdbuf: "ioe", ionice: "cnpt", time: "fo", xargs: "adEILnPs" };
 const WRAPPER_VALUE_LONG = new Set(["--unset", "--chdir", "--split-string", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--chroot", "--signal", "--kill-after"]);
 const COMMIT_VALUE_SHORT = new Set(["m", "F", "C", "c", "t"]); // value: the rest of the cluster, else the next word
 const COMMIT_ATTACHED_SHORT = new Set(["S", "u"]); // value is attached or absent
@@ -1149,18 +1553,18 @@ const COMMIT_VALUE_LONG = new Set(["--message", "--file", "--author", "--date", 
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // The index of the first word that is one of `targets`, looking through assignments and the shared WRAPPERS
 // (with their options, and the values of those that take one).
-function commandWordIndex(words, targets) {
+function commandWordIndex(words, targets, wrappers = WRAPPERS) {
   for (let i = 0; i < words.length; i++) {
     const word = words[i];
     if (ASSIGNMENT_WORD.test(word)) continue;
     const base = word.split("/").pop();
     if (targets.has(base)) return i;
-    if (!WRAPPERS.has(base)) return -1;
+    if (!wrappers.has(base)) return -1;
     const valued = WRAPPER_VALUE_SHORT[base] || "";
     while (i + 1 < words.length && (words[i + 1].startsWith("-") || /^\d+[smhd]?$/.test(words[i + 1]) || ASSIGNMENT_WORD.test(words[i + 1]))) {
       i++;
       const opt = words[i];
-      if ((/^-[A-Za-z]$/.test(opt) && valued.includes(opt[1])) || WRAPPER_VALUE_LONG.has(opt)) i++;
+      if ((/^-[A-Za-z]$/.test(opt) && valued.includes(opt[1])) || WRAPPER_VALUE_LONG.has(opt) || (base === "env" && opt.startsWith("--") && !opt.includes("=") && ENV_SPLIT.test(opt))) i++;
     }
   }
   return -1;
@@ -1196,12 +1600,12 @@ const HOME_ASSIGN = /^(?:HOME|XDG_CONFIG_HOME)=(?!\/dev\/null$)(?=.)/;
 // so it counts as set (a `read` of /dev/null is refused too).
 const HOME_SETTER = /^(?:read|mapfile|readarray|getopts|printf)$/;
 const setsHomeByName = (words) => HOME_SETTER.test(words[0]) && (words[0] !== "printf" || words.includes("-v")) && words.some((w) => w === "HOME" || w === "XDG_CONFIG_HOME");
-// The names the authority scripts and the state paths trust. A command sets one by assignment (`NAME=`, `${NAME:=}`), by a builtin
-// that takes the name (`read NAME`, `printf -v NAME`, `declare/export NAME`, `env NAME=`), or by naming it in a variable for a later
-// `"$X=value"`. A `$NAME` or `${NAME}` expansion, `printenv NAME` and a comparison set nothing.
+// The names the authority scripts and the state paths trust. A command sets one by assignment (`NAME=`, `${NAME:=}`, a program's `.NAME =`
+// or `[NAME] =`), by a builtin that takes the name (`read NAME`, `printf -v NAME`, `declare/export NAME`, `env NAME=`), or by naming it in a
+// variable for a later `"$X=value"`. A `$NAME` or `${NAME}` expansion, `printenv NAME` and a comparison set nothing.
 const SAFETY_VARS = "CLAUDE_CODE_SESSION_ID|CLAUDE_PROJECT_DIR|CRAFTSMAN_SAFETY";
 const SETS_SAFETY_VAR = [
-  new RegExp(`(?<![\\w$])(?:${SAFETY_VARS})\\+?=`),
+  new RegExp(`(?<![\\w$])(?:${SAFETY_VARS})\\+?=|[.\\[](?:${SAFETY_VARS})\\]?[ \\t]*\\+?=(?!=)`),
   new RegExp(`\\$\\{(?:${SAFETY_VARS}):?=`),
   new RegExp(`(?:^|[\\s;&|(])\\w+\\+?=(?:${SAFETY_VARS})(?!\\w)`),
   new RegExp(`\\b(?:read|mapfile|readarray|getopts|declare|typeset|export|readonly|local|env|printf\\s+-v)\\b[^;&|\\n]*(?<![\\w\${])(?:${SAFETY_VARS})\\b`),
@@ -1299,9 +1703,9 @@ function bypassesHooks(text, depth = 0) {
 // unconditional, for every commit/push with or without a worktree binding.
 // The flag test is linear; the commit/push one retries per `git`, so only a
 // command under 16 KB reaches it — a larger one with a bypass flag is blocked.
-if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(bypassView(command))
-    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(bypassView(command))))
-    || (command.length <= 16384 && bypassesHooks(bypassView(command))))) {
+if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=false|-c\s+core\.hooksPath=/.test(command)
+    && (command.length > 16384 || /\bgit\s+(?:-[A-Za-z]+(?:=\S+|\s+[^-\s]\S*)?\s+)*(?:commit|push)\b/.test(command)))
+    || (command.length <= 16384 && bypassesHooks(command)))) {
   logEvent({ ms: Date.now() - T0, ev: "verify_bypass_blocked", sid: sidOf(input), command });
   process.stderr.write(
     `craftsman: Git commit/push hook bypass BLOCKED (--no-verify, commit -n, --no-gpg-sign, gpgsign=false / ` +
@@ -1311,26 +1715,154 @@ if (tool === "Bash" && ((/--no-verify\b|--no-gpg-sign\b|-c\s+commit\.gpgsign=fal
   process.exit(2);
 }
 
-if (tool === "Bash" && binding && mutatesGit(command)) {
-  const cwd = path.resolve(process.cwd());
-  const worktree = path.resolve(binding.worktree_path);
-  if ((cwd !== worktree && !cwd.startsWith(worktree + path.sep)) || commandDirectoryTargets(command, worktree) || usesAlternateGitRoot(command)) {
-    logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command });
-    process.stderr.write(
-      `craftsman: Git mutation blocked outside the active worktree (${binding.worktree_path}). ` +
-      `Run implementation Git commands from that worktree, or release the binding before the locked merge.\n`
-    );
-    process.exit(2);
+// Where each mutating `git` of a command runs, proven from the text: the directory the command starts in, the
+// chained `cd`/`pushd` before it (joined only by `&&`, `;` or a newline), then each `-C`. Returns { dirs } or
+// { why }: anything it cannot prove (a variable, `~`, a subshell, a group, `&`, `|`, `popd`, a missing path) blocks.
+// A `cd` counts only when it provably ran in this shell: not before `||`, `|` or `&`, and not when an earlier command of
+// its `&&` chain may have skipped it before a `;` or newline. Wrappers (`env`, `sudo`, `xargs` ...) are looked through;
+// `eval`, `source`, `.`, `builtin cd` and `sh -c` are not resolved: with a mutating git verb in the text they block.
+const GIT_RESERVED = new Set(["{", "}", "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for", "case", "esac", "function", "!"]);
+const CHAINED = new Set([null, "&&", ";", "\n"]);
+const GIT_WRAPPERS = new Set([...WRAPPERS, "xargs"]);
+const CD_WORDS = new Set(["cd", "pushd", "popd"]);
+const UNRESOLVED_HEADS = new Set(["eval", "source", "."]);
+const MUTATING_VERBS = new Set(["add", "apply", "checkout", "clean", "commit", "merge", "mv", "rebase", "revert", "rm", "restore", "reset", "stash", "switch", "cherry-pick", "push"]);
+const NAMES_MUTATION_RE = /\bgit\b[\s\S]*?(?:\b(?:add|apply|checkout|clean|commit|merge|mv|rebase|revert|rm|restore|reset|stash|switch|cherry-pick|push)\b|\bbranch\s+-[dD]\b|\bworktree\s+(?:remove|move|prune)\b)/;
+// The raw text or the text with its quotes and backslashes removed (`g''it`, `"git"`) names a git mutation.
+const namesMutation = (t) => NAMES_MUTATION_RE.test(t) || NAMES_MUTATION_RE.test(t.replace(/['"\\]/g, ""));
+const ENV_ONLY = new Set(["env"]);
+const GIT_VALUED_LONG = new Set(["--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source", "--super-prefix", "--exec-path"]);
+const GIT_FLAG_LONG = new Set(["--no-pager", "--paginate", "--bare", "--no-replace-objects", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch", "--html-path", "--man-path", "--info-path", "--version", "--help"]);
+const GROUP_OPEN = new Set(["if", "for", "while", "until", "case", "{"]);
+const GROUP_CLOSE = new Set(["fi", "done", "esac", "}"]);
+// A command that names a git mutation passes only when its git call is found and resolved; these hide or redirect one:
+// a dynamic command word, an unknown wrapper before a `git` word, `env -S`, and any GIT_* assignment.
+function unresolvedConstruct(words, all) {
+  const gitAt = commandWordIndex(words, GIT_ONLY, GIT_WRAPPERS);
+  if (all.slice(0, all.length - words.length + (gitAt < 0 ? words.length : gitAt)).some((w) => /^GIT_[A-Z_]*=/.test(w))) return "a GIT_* variable moves the repository";
+  if (/[$`]/.test(words[0])) return "a command word that is not literal";
+  if (gitAt < 0 && words.slice(1).some((w) => w.split("/").pop() === "git")) return `"${words[0]}" is an unknown wrapper before git`;
+  const envAt = commandWordIndex(words, ENV_ONLY, GIT_WRAPPERS);
+  if (envAt >= 0) {
+    for (let j = envAt + 1; j < words.length && (words[j].startsWith("-") || ASSIGNMENT_WORD.test(words[j])); j++) {
+      if (ENV_SPLIT.test(words[j])) return "env -S runs a command string";
+    }
   }
-  let branch = "";
-  try { branch = execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8" }).trim(); } catch {}
-  if (!branch || branch !== binding.branch) {
-    logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, branch });
-    process.stderr.write(
-      `craftsman: Git mutation blocked because the active worktree is on branch "${branch || "(detached)"}", ` +
-      `not the bound branch "${binding.branch}".\n`
-    );
-    process.exit(2);
+  return "";
+}
+function gitTargets(text, start) {
+  let why = "";
+  const cmds = tokenize(stripHeredocs(text), (w) => { why = w; });
+  if (!cmds) return { why: why || "unparsable command", unparsed: true };
+  const dynamic = (w) => /[$`~*?\[{]/.test(w);
+  const dirs = [];
+  let dir = start;
+  let cdInChain = false, softCd = false, reserved = false, depth = 0;
+  const stat = (d) => { try { return fs.statSync(d).isDirectory(); } catch { return false; } };
+  const named = namesMutation(text);
+  for (let n = 0; n < cmds.length; n++) {
+    const cmd = cmds[n];
+    if (cmd.sep === ";" || cmd.sep === "\n") { if (softCd) dir = null; softCd = false; cdInChain = false; }
+    else if ((cmd.sep === "||" || cmd.sep === "|" || cmd.sep === "&") && cdInChain) dir = null;
+    if (cmd.substs.some((x) => mutatesGit(x))) return { why: "a git mutation inside a substitution" };
+    let words = [...cmd.words];
+    for (;;) {
+      if (words.length && ASSIGNMENT_WORD.test(words[0])) words.shift();
+      else if (words.length && GIT_RESERVED.has(words[0])) {
+        const w = words.shift();
+        reserved = true;
+        if (GROUP_OPEN.has(w)) depth++;
+        else if (GROUP_CLOSE.has(w) && --depth <= 0) { depth = 0; reserved = false; } // a closed construct no longer taints a later `cd W && git …`
+      }
+      else break;
+    }
+    if (!words.length) continue;
+    const shellAt = commandWordIndex(words, SHELLS, GIT_WRAPPERS);
+    if (named) {
+      const why = unresolvedConstruct(words, cmd.words);
+      if (why) return { why };
+    }
+    if (named && (UNRESOLVED_HEADS.has(words[0]) || commandWordIndex(words, CD_WORDS, GIT_WRAPPERS) > 0 || (shellAt >= 0 && shellBodyAfter(words.slice(shellAt + 1)).c))) {
+      return { why: `"${words[0]}" cannot be resolved to a directory` };
+    }
+    const chained = CHAINED.has(cmd.sep);
+    if (words[0] === "cd" || words[0] === "pushd") {
+      const after = n + 1 < cmds.length ? cmds[n + 1].sep : "";
+      if (!chained || reserved || after === "||" || after === "|" || after === "&") { dir = null; cdInChain = true; continue; }
+      if (cmd.sep === "&&") softCd = true;
+      cdInChain = true;
+      const arg = words.length === 2 ? words[1] : null;
+      if (dir === null || arg === null || arg === "-" || arg.startsWith("-") || dynamic(arg)) { dir = null; continue; }
+      const next = realResolve(dir, arg);
+      dir = stat(next) ? next : null;
+      continue;
+    }
+    if (words[0] === "popd") { dir = null; continue; }
+    const gitAt = commandWordIndex(words, GIT_ONLY, GIT_WRAPPERS);
+    if (gitAt < 0) {
+      continue;
+    }
+    const lead = words.slice(0, gitAt);
+    words = words.slice(gitAt);
+    let at = dir, i = 1, unknown = false;
+    // a wrapper that changes directory (`env -C`, `sudo -D`, `--chdir`) moves the call somewhere unproven
+    if (lead.some((w) => /^(?:-[CDR]|--chdir|--chroot)/.test(w))) at = null;
+    for (; i < words.length && words[i].startsWith("-"); i++) {
+      const name = words[i].split("=")[0];
+      if (words[i] === "-C") {
+        const arg = words[++i];
+        if (at === null || arg === undefined || dynamic(arg)) { at = null; continue; }
+        const next = realResolve(at, arg);
+        at = stat(next) ? next : null;
+      } else if (words[i] === "-c") i++;
+      else if (GIT_VALUED_LONG.has(name)) { if (!words[i].includes("=")) i++; }
+      else if (words[i].startsWith("--") && !GIT_FLAG_LONG.has(name)) unknown = true;
+    }
+    if (unknown && words.slice(i).some((w) => MUTATING_VERBS.has(w))) return { why: "an unknown git option before a mutating verb" };
+    const sub = words[i];
+    const mutating = mutatesGit(["git", sub ?? ""].join(" ")) || (sub === "branch" && /^-[dD]$/.test(words[i + 1] ?? "")) || (sub === "worktree" && /^(remove|move|prune)$/.test(words[i + 1] ?? ""));
+    if (!mutating) continue;
+    if (!chained) return { why: "a mutating git call joined by & or |" };
+    if (at === null) return { why: "a git directory that cannot be proven" };
+    dirs.push(at);
+  }
+  return { dirs };
+}
+
+if (tool === "Bash" && binding && namesMutation(command)) {
+  const rawMutation = mutatesGit(command);
+  const res = gitTargets(command, realDir(process.cwd()));
+  // Named, it passes only when proven: unparsed or unresolved blocks; else the calls found must all resolve to the worktree.
+  if (rawMutation || res.dirs?.length || res.why || (usesAlternateGitRoot(command) && namesMutation(command))) {
+    const gitOut = (cwd, args) => { try { return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return ""; } };
+    let realWorktree = null;
+    try { realWorktree = fs.realpathSync(path.resolve(binding.worktree_path)); } catch {}
+    let target = null, bad = !!res.why || !res.dirs.length || realWorktree === null || usesAlternateGitRoot(command);
+    if (!bad) {
+      for (const d of res.dirs) {
+        target = d;
+        let top = "";
+        try { top = fs.realpathSync(gitOut(d, ["rev-parse", "--show-toplevel"])); } catch {}
+        if (!top || top !== realWorktree) { bad = true; break; }
+      }
+    }
+    if (bad) {
+      logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, target });
+      process.stderr.write(
+        `craftsman: Git mutation blocked outside the active worktree (${binding.worktree_path}). ` +
+        `Run each git call in it: \`git -C ${binding.worktree_path} …\`, or \`cd ${binding.worktree_path} && git …\` in the same command.\n`
+      );
+      process.exit(2);
+    }
+    const branch = gitOut(target, ["branch", "--show-current"]);
+    if (!branch || branch !== binding.branch) {
+      logEvent({ ms: Date.now() - T0, ev: "git_guard_blocked", sid: sidOf(input), unit: binding.unit, command, branch, target });
+      process.stderr.write(
+        `craftsman: Git mutation blocked because the active worktree is on branch "${branch || "(detached)"}", ` +
+        `not the bound branch "${binding.branch}".\n`
+      );
+      process.exit(2);
+    }
   }
 }
 
@@ -1373,22 +1905,28 @@ function denySelfDisable(what, advice) {
   process.exit(2);
 }
 if (tool === "Bash" && command) {
+  // A quoted-delimiter heredoc body fed to cat or tee, or to node or python with no NODE_E_LIVE-like word, is inert (blankInertHeredocs); the link check and the bypass scan below read what is left.
+  const NODE_E_LIVE = /require|import|process|spawn|exec|eval|Function|child|constructor|globalThis|Reflect|\bfs\b/;
+  const live = blankInertHeredocs(command, NODE_E_LIVE);
+  // A link into the state directory would let a later Write reach it under another name. This cheap text check runs first: the parser below can need seconds for a long command, and the hook has a timeout.
+  if (linksIntoState(live)) denySelfDisable("a command that links into .craftsman");
   // Both gates are derived from lib/self-protect.mjs (the writer verbs, the never-written paths), so they cannot drift.
-  const verb = WRITER_AT_COMMAND.test(command) || /\bsed\s+-[A-Za-z]*i\b|\bperl\s+-[A-Za-z]*i\b/.test(command);
+  const verb = WRITER_AT_COMMAND.test(command) || new RegExp(INPLACE_TEXT).test(command.includes("\\") ? command : blankProse(command)) || new RegExp(INPLACE_TEXT).test(emptyQuoted(command)) || SED_W_TEXT.test(command); // blankProse does not read escaped quotes: with a backslash, test the raw text (fail closed)
   const never = NEVER_TEXT.test(command);
-  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
+  const sedW = SED_W_TEXT.test(command);
+  const scopedMentioned = SELF_SCOPED.filter((name) => new RegExp(`(?:^|[\\s"'=/${sedW ? "wW" : ""}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "i").test(command));
   const allHits = removedDocs(command, [...SELF_NEVER, ...SELF_SCOPED, ...SELF_SCOPED.map((p) => "**/" + p)], { writes: true });
   const concrete = allHits.filter((h) => !h.startsWith("(")).map((h) => h.replace(/^redirect:/, ""));
   // A "(...)" hit means the parser gave up on part of the command (a subshell, a construct it cannot read): what it
   // writes is unknown. Fail closed when such a command can write and also names craftsman state.
-  if (allHits.some((h) => h.startsWith("(")) && (command.includes(">") || WRITE_TEXT.test(command.replace(/['"\\]/g, ""))) && namesProtected(command)) {
+  if (allHits.some((h) => h.startsWith("(")) && (command.includes(">") || WRITE_TEXT.test(command.replace(/['"\\]/g, "")) || WRITE_ANY_TEXT.test(command.replace(/['"\\]/g, ""))) && namesProtected(command)) {
     denySelfDisable("a command the guard cannot read that writes and names craftsman state");
   }
   if (never && verb) denySelfDisable("a command that writes a craftsman grant, marker or off flag");
-  // A link into the state directory would let a later Write reach it under another name.
-  if (/(?:^|[\s;&|(])ln(?=\s)/.test(command) && command.includes(".craftsman")) denySelfDisable("a command that links into .craftsman");
   for (const hit of concrete) {
     if (hit === ".craftsman (link)") denySelfDisable("a command that links into .craftsman");
+    if (hit === LINKED_STATE_HIT) denySelfDisable("a command that links a directory or a glob that holds .craftsman state", "link the files you need by name: the project root, the main checkout, the git dir and a glob that can name .craftsman or .git each hold craftsman state, and a link is a second name for every file in it.");
+    if (hit === GITFILE_HIT) denySelfDisable("a command that writes, replaces or moves a .git file, which tells git where the repository is");
     if (hit.startsWith("remove:")) {
       // A removed or moved path takes everything under it along: a directory that holds craftsman state is as
       // protected as the state. Scoped files (hooks.json, the config, the settings) may go when a unit scope names them.
@@ -1405,8 +1943,9 @@ if (tool === "Bash" && command) {
   if (verb) for (const name of scopedMentioned) if (!scopeNames(name)) denySelfDisable(`a command that writes ${name}`);
   // The scripts that grant doc authority or flip the gates run only after the command that owns them.
   // Every `node … <name>.mjs` invocation counts, whatever node options precede it; `node --check` only parses.
-  // Read from the text with its quotes removed, so `tog""gle.mjs` is `toggle.mjs`.
-  const unquoted = command.replace(/['"\\]/g, "");
+  // Read from the text with its quotes removed, so `tog""gle.mjs` is `toggle.mjs`, and with each backslash-newline joined as well, as bash reads it.
+  const unquotedOf = (t) => (t.includes("\\\n") ? t + "\n" + t.replace(/\\\n/g, "") : t).replace(/['"\\]/g, "");
+  const unquoted = unquotedOf(command);
   const invocations = (name) => [...unquoted.matchAll(new RegExp(`\\bnode\\b([^;&|\\n]*?)[^\\s;&|]*\\b${name}\\.mjs(?:[ \\t]+([^\\s;&|)]*))?`, "g"))]
     .filter((m) => !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]))
     .map((m) => m[2] || "");
@@ -1414,7 +1953,14 @@ if (tool === "Bash" && command) {
   // command that sets either could borrow another session's record or point the state somewhere else.
   // CRAFTSMAN_SAFETY is read by SessionStart from the user's environment, so a command that sets it gains nothing there; it is
   // refused anyway so no script ever sees a spoofed one. A plain mention (`"$NAME"`, `printenv NAME`, a comparison) sets nothing.
-  if (SETS_SAFETY_VAR.some((re) => re.test(unquoted))) {
+  // A quoted grep/printf/echo argument (blankProse) or a plain `node -e '<code>'` literal that names `NAME=` assigns nothing; any text
+  // that could run it (pipe, redirect, substitution, eval, a node body that can spawn or load) is read as it stands.
+  const NODE_E_LITERAL = /(\bnode\s+(?:-e|-p|--eval|--print)\s+)'([^']*)'/g;
+  const inertNodeE = (text) => /[|>`<]|\$\(|\b(?:eval|source)\b/.test(text) ? text
+    : text.replace(NODE_E_LITERAL, (all, head, body) => NODE_E_LIVE.test(body) ? all : head + "'x'");
+  // The bypass scan reads the command with those inert heredoc bodies left out (live, above).
+  const safetyText = live.includes("\\") ? unquotedOf(live) : inertNodeE(blankProse(live)).replace(/['"\\]/g, "");
+  if (SETS_SAFETY_VAR.some((re) => re.test(unquoted) && re.test(safetyText))) {
     denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
   }
   if (invocations("goal-token").length && !commandInvoked(sidOf(input), ["instruction", "auto"], { context: { stateDir: STATE_DIR } })) {
@@ -1465,6 +2011,8 @@ if (["Write", "Edit", "NotebookEdit"].includes(tool)) {
   const realTarget = path.relative(realRoot(), realResolve(activeRoot, file)).split(path.sep).join("/");
   const kinds = [selfKind(rel), selfKind(realTarget), mainStateRel(realResolve(activeRoot, file)) ? "never" : null];
   if (kinds.includes("never")) denySelfDisable(`writing ${rel}`);
+  // A regular file named .git (a gitfile) says where the repository is; judged by its real path, so a symlink to one is the same file (the Bash writers are judged by target()).
+  if (isGitFile(realResolve(activeRoot, file))) denySelfDisable(`writing ${rel}, a file that tells git where the repository is`);
   // The exemption is for a scope that names the file itself (by its real path); a name that only reaches it through a
   // symlink the session made does not count. hooks.json is judged by both spellings of its path.
   if (kinds.includes("scoped") && !scopeNames(realTarget)) {
@@ -1565,14 +2113,177 @@ if (g.enabled !== false && writeTool && docSide) {
 logEvent({ ms: Date.now() - T0, ev: "preguard", sid: sidOf(input), tool, file: rel, result: "allowed" });
 process.exit(0);
 
-// Heredoc bodies are prose, not flags (ARCH-STATE-14), only when every remaining head is a listed prose consumer.
-function bypassView(command) {
-  if (!command.includes("<<") || command.length > 16384) return command;
-  const stripped = stripHeredocs(command);
-  return proseOnly(stripped) ? stripped : command;
+// The first command word of a Bash call, for the sandbox_bypass event: skips leading `cd <dir> &&` and plain `NAME=value`
+// prefixes and any path, and answers "?" for anything else, so an argument, a quoted value or a secret never reaches the log.
+function commandHead(text) {
+  let rest = String(text).trim();
+  for (;;) {
+    const next = rest.replace(/^cd\s+\S+\s*(?:&&|;)\s*/, "").replace(/^[A-Za-z_][A-Za-z0-9_]*=[\w./:@+,-]*\s+/, "");
+    if (next === rest) break;
+    rest = next;
+  }
+  const word = (rest.split(/\s+/)[0] || "").split("/").pop();
+  return !rest.split(/\s+/)[0].includes("=") && /^[\w.+-]{1,40}$/.test(word) ? word : "?";
 }
 
-function braceEnd(text, i) { // index of the `}` closing `${` at i (nesting-aware), else text.length: unterminated stays in view
-  for (let j = i + 2, d = 1; j < text.length; j++) { if (text[j] === "{") d++; else if (text[j] === "}" && --d === 0) return j; }
-  return text.length;
+// A bracket class from a glob word, for segmentRe and pathspecHit. A reversed range (`[a-1]`, `[z-a]`) is legal in a shell, where it
+// matches nothing and so the word is passed on literally: it is not a valid RegExp class. The word is therefore read both ways, as one
+// wildcard character (`any`) and as the literal text with its brackets (`literal`), so a file really named `L[a-1].md` stays caught
+// as well as its one-character twins; command text can never make the guard throw.
+function bracketClass(body, any = "[^/]", literal = "") {
+  const cls = "[" + body + "]";
+  try { new RegExp(cls); return cls; } catch { return literal ? "(?:" + any + "|" + literal + ")" : any; }
+}
+
+// ARCH-STATE-18 lets Read, Write and Edit take scratch files under the OS temp dir or $CLAUDE_JOB_DIR/tmp (NotebookEdit, Glob and Grep never).
+// Passing here skips only the scope check and the ambiguous-scope refusal: protectedPaths, the doc-write guard and the self-protection of a Write or Edit target run after it.
+// Judged by the real path the OS resolves (a `..` after a symlink included), against EVERY active scope of the session, not the
+// one readScope happens to pick: a file whose real path lies inside any scope's root or the session checkout stays governed there, and a scratch
+// root that is, or encloses, any scope's root (a TMPDIR pointing at the home dir, at /, or holding a unit worktree) never
+// qualifies. A relative path and a root that cannot be resolved fail closed, and so does a file that does not exist, except for a Write: it
+// creates the file, so it is judged by the real path of its nearest existing ancestor plus the missing rest (createdPath), by these same tests.
+// An existing Write or Edit target with more than one link is refused: the real path of a hard link does not show the other names of its inode,
+// so a hard link of the scope manifest, or of any protected file, would otherwise pass as a scratch file. The scopes are read only for a target
+// that really is under a scratch root, so an ordinary Read, Write or Edit costs what it did before (a Write that creates a file adds the stat calls that find its ancestor).
+function insideScratchRoots(target, project, hookInput, tool) {
+  if (typeof target !== "string" || !path.isAbsolute(target)) return false;
+  let real;
+  try { real = fs.realpathSync.native(target); } catch { real = tool === "Write" ? createdPath(target) : ""; }
+  if (!real) return false;
+  if (tool === "Write" || tool === "Edit") {
+    let st = null;
+    try { st = fs.statSync(real); } catch (error) { if (error?.code !== "ENOENT") return false; } // a path to be created has no inode yet
+    if (st && !st.isDirectory() && st.nlink > 1) return false; // a directory counts its subdirectories as links, so only a file is judged by its link count
+  }
+  const within = (dir, entry) => entry.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep);
+  const resolved = (root) => { try { return root ? fs.realpathSync.native(root) : ""; } catch { return ""; } };
+  const scratch = [os.tmpdir(), process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, "tmp") : ""].map(resolved).filter((root) => root && within(root, real));
+  if (!scratch.length) return false;
+  let governed;
+  try { governed = [project, PROJECT_ROOT, ...activeScopes(hookInput).map((scope) => scope.worktree_path || scope.project_root)].map((dir) => fs.realpathSync.native(dir)); } catch { return false; }
+  return scratch.some((root) => governed.every((dir) => dir !== root && !within(root, dir) && dir !== real && !within(dir, real)));
+}
+
+// The real path a Write would create: the real path of the nearest existing ancestor plus the missing rest, "" when it cannot be told.
+// A symlink counts as existing even when it dangles (lstat, not exists): it is judged by where it leads, and a dangling one fails closed
+// instead of being taken for a missing name. A rest holding `..` is refused: the OS does not walk a missing directory, so the text is no path.
+function createdPath(target) {
+  const rest = [];
+  let ancestor = target;
+  for (;;) {
+    try { fs.lstatSync(ancestor); break; } catch (error) { if (error?.code !== "ENOENT") return ""; }
+    rest.unshift(path.basename(ancestor));
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) return "";
+    ancestor = parent;
+  }
+  if (rest.includes("..")) return "";
+  try { return path.join(fs.realpathSync.native(ancestor), ...rest); } catch { return ""; }
+}
+
+// ARCH-SAFETY-13 / ARCH-SAFETY-15 / ARCH-STATE-16: the setter check that ends in denySelfDisable reads command text, and a quoted-delimiter
+// heredoc body is inert text there: the shell expands nothing in it, and the program it feeds only stores, prints or interprets it. This returns
+// the command with those bodies removed (the hook-bypass scan keeps reading the whole command; stripHeredocs is not reusable, it drops unquoted
+// bodies too). A body goes only when EVERY one of these holds; a heredoc that fails any one stays in the text and is read as it stands:
+//   - its tag is quoted or escaped (<<'EOF', <<"EOF", <<-'EOF'): an unquoted body is expanded by the shell;
+//   - it is not inside $(...), backticks or a subshell: the substitution's output can be run;
+//   - its command word is cat, tee, python3, python or node, bare (no path, no assignment prefix, no bash, sh, eval, source, env or wrapper),
+//     alone on its line up to the operator, or after `cd DIR &&`, with plain words and redirects before it and nothing else (no separator,
+//     no second heredoc, no substitution);
+//   - fed to node or python, which RUN the body, it also holds none of the words that let code set a variable (nodeLive, the `node -e` live-word
+//     test, and PY_LIVE, its python counterpart): `process.env.X = 'off'` there is a setter and stays in the text, a printed line is prose;
+//   - the body has a terminator line (an unterminated one is not provably a body);
+//   - the rest of the command, those bodies aside, has no pipe, no process substitution, no way to shadow a program name (a function, alias,
+//     hash, enable or a PATH change) and no command word that makes the shell read text it holds (source, a lone dot, eval, coproc), so neither
+//     a pipeline, a redefined `cat` nor `cat <<'EOF' > f` followed by `. f` can carry the body to a shell.
+// The tracking of quotes, comments, arithmetic and $(...) follows stripHeredocs; a `case` pattern's `)` ends the pattern, not a substitution, and a first pattern spelled esac ends the list (a bash syntax error, so nothing in it runs).
+// Stated limits (ARCH-SAFETY-15), not read: a stored body run by file name (bash f, ./f, node f) or by a later command, a call that is not an
+// assignment (os.putenv, os.environ.update) and a name built at run time. Files an interpreter writes stay with the sandbox (ARCH-SAFETY-01).
+function blankInertHeredocs(text, nodeLive) {
+  const INERT = new Set(["cat", "tee", "python3", "python", "node"]);
+  const PY_LIVE = /import|exec|eval|compile|open|environ|putenv|system|popen|spawn|subprocess|getattr|globals|locals|builtins|ctypes|\bos\b|\bsys\b/;
+  const RUNS_BODY = { node: nodeLive, python3: PY_LIVE, python: PY_LIVE };
+  const WORD = String.raw`(?:[\w./:=@%+,~$-]|'[^'\n]*'|"(?:[^"\\\`$\n]|\$(?=[\w"]))*")+`;
+  const HEAD = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+${WORD}[ \t]*&&[ \t]*)*([\w-]+)(?:[ \t]+(?:\d?>>?[ \t]*)?${WORD})*[ \t]*$`);
+  const REACHES_SHELL = new RegExp(String.raw`\||[<>]\(|(?<![\w.-])(?:alias|unalias|function|hash|enable)(?=\s)|\bPATH\+?=|\w\s*\(\s*\)|${AT_COMMAND}(?:source|eval|coproc|\.)(?=[ \t\n]|$)`);
+  const stack = ["cmd"], pending = [], bodies = [], cases = [];
+  let sq = false, stmt = 0, depth = 0, ticks = false;
+  // An open `case`: its pattern list ends each pattern with a `)` that closes nothing, so the depth count must not take it for a substitution's end.
+  // state: head (up to `in`), pat (between a pattern's start and its `)`), body (up to `;;` or `esac`); frame: the stack height it opened at.
+  const atCommand = (at) => new RegExp(`${AT_COMMAND}$`).test(text.slice(0, at));
+  const unwind = () => { while (cases.length && cases[cases.length - 1].frame > stack.length) cases.pop(); };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], top = stack[stack.length - 1];
+    if (sq) { if (c === "'") sq = false; continue; }
+    if (c === "\\" && i + 1 < text.length) { i++; continue; }
+    if (top === "dq") {
+      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { i = arithmeticEnd(text, i); continue; }
+      if (c === '"') { stack.pop(); unwind(); }
+      else if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; }
+      continue;
+    }
+    if (c === "'") { sq = true; continue; }
+    if (c === '"') { stack.push("dq"); continue; }
+    const kase = cases[cases.length - 1], here = kase && kase.frame === stack.length;
+    const opens = here && kase.state === "pat" && kase.fresh; // nothing yet in this pattern: an esac here ends the list, after `(` or `|` it is a word
+    if (here && kase.state === "pat") {
+      if (c === "(") { if (kase.fresh) kase.fresh = false; else kase.paren++; continue; } // a leading `(`, else an extglob group
+      if (c === ")") { if (kase.paren) kase.paren--; else kase.state = "body"; continue; }
+      if (!/\s/.test(c) && !(c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1])))) kase.fresh = false; // a comment is no pattern
+    }
+    if (here && kase.state === "body" && c === ";" && (text[i + 1] === ";" || text[i + 1] === "&")) { // `;;`, `;&` or `;;&`: the next pattern
+      i += text[i + 1] === ";" && text[i + 2] === "&" ? 2 : 1;
+      kase.state = "pat"; kase.fresh = true; kase.paren = 0;
+      continue;
+    }
+    if (c >= "a" && c <= "z" && (i === 0 || /[\s;&|(){}`]/.test(text[i - 1]))) {
+      const word = /[a-z]+(?![\w.\/=$@%+,:~-])/y;
+      word.lastIndex = i;
+      const found = word.exec(text)?.[0];
+      if (found === "case" && !(here && kase.state === "pat") && atCommand(i)) cases.push({ frame: stack.length, state: "head", paren: 0, fresh: true });
+      else if (found === "in" && here && kase.state === "head") { kase.state = "pat"; kase.fresh = true; kase.paren = 0; }
+      else if (found === "esac" && here && (opens || (kase.state === "body" && atCommand(i)))) cases.pop();
+      if (found) { i += found.length - 1; continue; }
+    }
+    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+      i = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1); continue;
+    }
+    if (c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) { const j = text.indexOf("\n", i); i = (j === -1 ? text.length : j) - 1; continue; }
+    if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; continue; }
+    if (c === "`") { ticks = !ticks; continue; }
+    if (c === "(") { stack.push("sub"); depth++; continue; } // a subshell, an array literal or an extglob group: its own `)` pops it
+    if (c === ")") { if (stack.length > 1) { stack.pop(); unwind(); } if (depth) depth--; continue; }
+    if (c === "<" && text.startsWith("<<<", i)) { i += 2; continue; }
+    if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
+      const op = /<<(-?)[ \t]*/y;
+      op.lastIndex = i;
+      const m = op.exec(text), w = m && heredocWord(text, i + m[0].length);
+      if (w) { pending.push({ tabs: m[1] === "-", tag: w.tag, quoted: w.quoted, head: text.slice(stmt, i), nested: depth > 0 || ticks }); i = w.end - 1; continue; }
+    }
+    if (c === "\n") {
+      let pos = i + 1;
+      for (const { tabs, tag, quoted, head, nested } of pending) {
+        const start = pos;
+        let end = pos, found = false;
+        while (pos < text.length) {
+          end = pos;
+          let eol = text.indexOf("\n", pos);
+          if (eol === -1) eol = text.length;
+          const line = text.slice(pos, eol);
+          pos = Math.min(eol + 1, text.length);
+          if ((tabs ? line.replace(/^\t+/, "") : line) === tag) { found = true; break; }
+        }
+        const word = HEAD.exec(head);
+        if (quoted && !nested && found && word && INERT.has(word[1]) && !RUNS_BODY[word[1]]?.test(text.slice(start, end))) bodies.push([start, end]);
+      }
+      pending.length = 0;
+      stmt = pos;
+      i = pos - 1;
+    }
+  }
+  if (!bodies.length) return text;
+  let live = "", from = 0;
+  for (const [start, end] of bodies) { live += text.slice(from, start); from = end; }
+  live += text.slice(from);
+  return REACHES_SHELL.test(live) ? text : live;
 }

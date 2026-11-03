@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { loadConfig } from "./lib/core.mjs";
-import { resolveArchive, archivePathFor, copyAndCommit, restoreCommand } from "./lib/archive.mjs";
+import { resolveArchive, archivePathFor, copyAndCommit, restoreCommand, classifyArchive, productIdFor } from "./lib/archive.mjs";
 
 const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), `craftsman-archive-${n}-`));
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -144,4 +144,176 @@ test("copyAndCommit: refuses a rules doc", () => {
 
 test("restoreCommand returns the git show string", () => {
   assert.equal(restoreCommand("/a/archive", "abc123", "prod/plans/p/docs/plans/p.md"), "git -C /a/archive show abc123:prod/plans/p/docs/plans/p.md");
+});
+
+test("classifyArchive: one table test per class (auto, rewrite, blocked, not-archivable)", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-classify-"));
+  const ctx = { root };
+  const plan = "docs/plans/p.md";
+  const on = { root: "/archive" };
+  const scan = (value) => ({ findReferrers: () => value });
+  const table = [
+    ["auto: no referrer", { archive: on, ...scan({ hits: [plan], blocking: [plan], rewritable: [] }) }, "auto", [], []],
+    ["auto: only exempt files (rollup, sibling, tracker, NEXT)", { archive: on, ...scan({ hits: ["docs/plans/p/TRACKER.md", "docs/plans/scrutinise-p.md", "docs/plans/TRACKER-archive.md", "docs/plans/NEXT.md"], blocking: ["docs/plans/p/TRACKER.md", "docs/plans/scrutinise-p.md", "docs/plans/TRACKER-archive.md", "docs/plans/NEXT.md"], rewritable: [] }) }, "auto", [], []],
+    ["auto: the removing set is exempt", { archive: on, removing: ["docs/plans/x.md"], ...scan({ hits: ["docs/plans/x.md"], blocking: [], rewritable: ["docs/plans/x.md"] }) }, "auto", [], []],
+    ["rewrite: prose referrer", { archive: on, ...scan({ hits: ["docs/plans/n.md"], blocking: [], rewritable: ["docs/plans/n.md"] }) }, "rewrite", [], ["docs/plans/n.md"]],
+    ["blocked: rules doc names the file", { archive: on, ...scan({ hits: ["docs/architecture/z.rules.md", "docs/plans/n.md"], blocking: ["docs/architecture/z.rules.md"], rewritable: ["docs/plans/n.md"] }) }, "blocked", ["docs/architecture/z.rules.md"], ["docs/plans/n.md"]],
+    ["blocked: scan failed", { archive: on, ...scan(null) }, "blocked", ["referrer scan failed"], []],
+    ["not-archivable: no archive project", { archive: { off: "none" }, ...scan({ hits: [], blocking: [], rewritable: [] }) }, "not-archivable", [], []],
+    ["blocked still names its file without an archive project", { archive: { off: "none" }, ...scan({ hits: ["README.md"], blocking: ["README.md"], rewritable: [] }) }, "blocked", ["README.md"], []],
+  ];
+  for (const [name, opts, cls, blocking, rewritable] of table) {
+    const v = classifyArchive(ctx, plan, opts);
+    assert.equal(v.class, cls, name);
+    assert.deepEqual(v.blocking, blocking, name);
+    assert.deepEqual(v.rewritable, rewritable, name);
+  }
+});
+
+test("productIdFor: the workspace project whose root is this checkout, else the directory name", () => {
+  const ws = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-pid-")));
+  const root = path.join(ws, "app");
+  fs.mkdirSync(root);
+  execFileSync("git", ["-C", root, "init", "-q"]);
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  try {
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = path.join(ws, "absent.json");
+    assert.equal(productIdFor({ root }), "app");
+    const manifest = path.join(ws, "craftsman.workspace.json");
+    fs.writeFileSync(manifest, JSON.stringify({ version: 1, projects: { shop: { root: "app" } } }));
+    process.env.CRAFTSMAN_WORKSPACE_MANIFEST = manifest;
+    assert.equal(productIdFor({ root }), "shop");
+  } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
+});
+
+test("copyAndCommit: a symlinked source is refused with no commit (ARCH-ARCHIVE-03)", () => {
+  const f = fixture();
+  fs.rmSync(path.join(f.src, "docs/plans/s.md"));
+  fs.symlinkSync(path.join(f.src, "docs/plans/p.md"), path.join(f.src, "docs/plans/s.md"));
+  assert.throws(() => copyAndCommit(f.args, f.seams), /symlink/);
+  assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
+  assert.equal(fs.existsSync(path.join(f.archive, "prod/plans/p/docs/plans/p.md")), false);
+});
+
+test("copyAndCommit: a symlinked archive subfolder is refused with no commit (ARCH-ARCHIVE-03)", () => {
+  const f = fixture();
+  const outside = tmp("outside");
+  fs.mkdirSync(path.join(f.archive, "prod"), { recursive: true });
+  fs.symlinkSync(outside, path.join(f.archive, "prod/plans"));
+  assert.throws(() => copyAndCommit(f.args, f.seams), /symlink/);
+  assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
+  assert.deepEqual(fs.readdirSync(outside), []);
+});
+
+test("copyAndCommit: a symlinked source directory is refused with no commit (ARCH-ARCHIVE-03)", () => {
+  const f = fixture();
+  const real = path.join(f.src, "docs/plans-real");
+  fs.renameSync(path.join(f.src, "docs/plans"), real);
+  fs.symlinkSync(real, path.join(f.src, "docs/plans"));
+  assert.throws(() => copyAndCommit(f.args, f.seams), /symlink/);
+  assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd: f.archive }).status !== 0, true);
+});
+
+// ---- impl-landing-token 5.3: one liveBlockers check, two callers (ARCH-DOCS-09, ARCH-DOCS-18) ----
+import { autoArchiveEligible, liveBlockers } from "./lib/archive.mjs";
+import { landingCapability } from "./doc-retire.mjs";
+import { buildIndex } from "./lib/plan-index.mjs";
+
+test("liveBlockers: one table case per blocker, and the clean cases", () => {
+  const P = "docs/plans/p.md";
+  const closedRow = (plan) => ({ plan, unit: "u", status: "COMPLETE" });
+  const openRow = (plan, status = "IN_PROGRESS") => ({ plan, unit: "o", status, });
+  const epic = (children) => ({ path: P, slug: "p", text: `---\nlevel: epic\nchildren: [${children.join(", ")}]\n---\n# p\n` });
+  const child = (slug) => ({ path: `docs/plans/${slug}.md`, slug, text: "---\nparent: p\n---\n# c\n" });
+  const run = ({ rows = [], siblings = [], docs = [] }) => liveBlockers({
+    plan: P, rowsOf: (p) => rows.filter((r) => r.plan === p), trackedSiblings: siblings, loadIndex: () => buildIndex(docs),
+  });
+  const table = [
+    ["an open scrutinise- sibling", { siblings: ["docs/plans/scrutinise-p.md"], rows: [openRow("docs/plans/scrutinise-p.md")] }, /open sibling plans keep docs\/plans\/p\.md: docs\/plans\/scrutinise-p\.md \(o=IN_PROGRESS\)/],
+    ["an open investigate- sibling", { siblings: ["docs/plans/investigate-p.md"], rows: [openRow("docs/plans/investigate-p.md", "PARKED")] }, /docs\/plans\/investigate-p\.md \(o=PARKED\)/],
+    ["a descendant with an open row", { docs: [epic(["c"]), child("c")], rows: [openRow("docs/plans/c.md")] }, /has live descendants: c$/],
+    ["a descendant with no row proving it closed", { docs: [epic(["c"]), child("c")] }, /has live descendants: c$/],
+  ];
+  // A derived or parent-level descendant with no rows is a descendant (retired with the plan), not a live blocker.
+  const derived = { path: "docs/plans/scrutinise-c.md", slug: "scrutinise-c", text: "---\nparent: p\n---\n# d\n" };
+  const story = { path: "docs/plans/s.md", slug: "s", text: "---\nparent: p\nlevel: story\n---\n# s\n" };
+  for (const [name, doc] of [["a derived descendant with no rows", derived], ["a parent-level (story) descendant with no rows", story]]) {
+    const out = run({ docs: [epic(doc.slug === "scrutinise-c" ? [] : [doc.slug]), doc] });
+    assert.deepEqual(out.live, [], name);
+    assert.deepEqual(out.descendants.map((d) => d.slug), [doc.slug], name);
+    assert.equal(out.reason, undefined, name);
+  }
+  for (const [name, input, reason] of table) {
+    const out = run(input);
+    assert.match(out.reason, reason, name);
+  }
+  const clean = run({ siblings: ["docs/plans/scrutinise-p.md"], rows: [closedRow("docs/plans/scrutinise-p.md"), closedRow("docs/plans/c.md")], docs: [epic(["c"]), child("c")] });
+  assert.equal(clean.reason, undefined);
+  assert.deepEqual(clean.siblings, ["docs/plans/scrutinise-p.md"]);
+  assert.deepEqual(clean.descendants.map((d) => d.slug), ["c"]);
+  assert.equal(clean.isParent, true);
+  assert.equal(run({ docs: [{ path: P, slug: "p", text: "# p\n" }] }).isParent, false);
+});
+
+test("liveBlockers: defined once and called by both autoArchiveEligible and retire", () => {
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const archiveSrc = fs.readFileSync(path.join(here, "lib/archive.mjs"), "utf8");
+  const retireSrc = fs.readFileSync(path.join(here, "doc-retire.mjs"), "utf8");
+  assert.equal((archiveSrc.match(/function liveBlockers\(/g) ?? []).length, 1);
+  assert.equal((retireSrc.match(/function liveBlockers\(/g) ?? []).length, 0, "doc-retire imports it, it does not redefine it");
+  assert.equal((archiveSrc.match(/(?<!function )liveBlockers\(\{/g) ?? []).length, 1, "autoArchiveEligible is a caller");
+  assert.equal((retireSrc.match(/liveBlockers\(\{/g) ?? []).length, 1, "retire is a caller");
+});
+
+test("autoArchiveEligible: the hierarchy at the landed commit is read with ls-tree -z and one cat-file --batch, multibyte text included", () => {
+  const root = repo(tmp("indexat"));
+  const put = (file, text) => { fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); fs.writeFileSync(path.join(root, file), text); };
+  put("docs/plans/p.md", "---\nlevel: epic\nchildren: [c]\n---\n# p éü 中文\n");
+  put("docs/plans/c.md", "---\nparent: p\n---\n# c é\n");
+  put("docs/plans/odd\nname.md", "# odd\n");
+  sh(root, "add", "-A");
+  sh(root, "commit", "-q", "-m", "plans");
+  const sha = sh(root, "rev-parse", "HEAD");
+  fs.rmSync(path.join(root, "docs/plans/c.md")); // the working tree no longer has the child: only the commit does
+  const calls = [];
+  const git = (args, ctx, opts) => { calls.push(args.slice(0, 2).join(" ")); return execFileSync("git", ["-C", ctx.root, ...args], { encoding: opts?.buffer ? "buffer" : "utf8", input: opts?.input === undefined ? undefined : Buffer.from(opts.input) }); };
+  const state = [{ plan: "docs/plans/p.md", unit: "u", status: "COMPLETE" }];
+  const verdict = autoArchiveEligible({ root }, "docs/plans/p.md", {
+    capability: landingCapability(), sha, git, resolveArchive: () => ({ root: "/tmp/archive" }), currentState: () => state,
+    findReferrers: () => ({ hits: [], blocking: [], rewritable: [] }),
+  });
+  assert.equal(verdict.eligible, false);
+  assert.match(verdict.reason, /has live descendants: c/);
+  assert.ok(calls.includes("ls-tree -z"), calls.join("|"));
+  assert.equal(calls.filter((c) => c === "cat-file --batch").length, 1);
+  assert.ok(!calls.some((c) => c.startsWith("show ")), "no per-file git show");
+});
+
+test("autoArchiveEligible: a cat-file --batch size that is not a safe integer, or runs past the buffer, is an unreadable hierarchy (S1)", () => {
+  const root = repo(tmp("indexat-bad"));
+  const state = [{ plan: "docs/plans/p.md", unit: "u", status: "COMPLETE" }];
+  const verdictFor = (name, answer) => autoArchiveEligible({ root }, "docs/plans/p.md", {
+    capability: landingCapability(), sha: "abc",
+    git: (args) => (args[0] === "ls-tree" ? `${name}\0` : args[0] === "cat-file" && args[1] === "--batch" ? Buffer.from(answer) : ""),
+    resolveArchive: () => ({ root: "/tmp/archive" }), currentState: () => state,
+    findReferrers: () => ({ hits: [], blocking: [], rewritable: [] }),
+  });
+  // A valid name, so the size check is what refuses: old code accepted a size that ran past the buffer or went negative.
+  for (const answer of ["0123 blob 99\nshort\n", "0123 blob -1\n\n"]) {
+    const v = verdictFor("docs/plans/q.md", answer);
+    assert.equal(v.eligible, false);
+    assert.match(v.reason, /cannot read the plan hierarchy/, answer);
+    assert.match(v.reason, /gave a bad size for docs\/plans\/q\.md/, answer);
+  }
+  // A header that is not `<hex oid> blob <size>` is unreadable whatever its size says (ARCH-DOCS-18).
+  for (const answer of ["zzzz blob 2\nhi\n", "0123 blob 2 extra\nhi\n", "0123 tree 2\nhi\n"]) {
+    const v = verdictFor("docs/plans/q.md", answer);
+    assert.equal(v.eligible, false, answer);
+    assert.match(v.reason, /cannot read docs\/plans\/q\.md/, answer);
+  }
+  // A name with spaces makes `<sha>:<name> missing` split into a fake header; it is refused as unreadable, not as a bad size.
+  const spaced = verdictFor("docs/plans/a blob 3.md", "abc:docs/plans/a blob 3.md missing\n");
+  assert.equal(spaced.eligible, false);
+  assert.match(spaced.reason, /cannot read docs\/plans\/a blob 3\.md/);
+  assert.doesNotMatch(spaced.reason, /bad size/);
 });

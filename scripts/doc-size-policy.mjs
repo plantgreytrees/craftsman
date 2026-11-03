@@ -10,6 +10,7 @@
 // or syntactically broken shipped file would.
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -37,7 +38,7 @@ export const FILE_CAPS = {
   "agents/scrutineer.md": 3590,
   "agents/security-auditor.md": 2184,
   "agents/standards-keeper.md": 2608,
-  "agents/ui-ux-reviewer.md": 2762,
+  "agents/ui-ux-reviewer.md": 886,
   "agents/unit-runner.md": 3605,
   "commands/_approval.md": 2130,
   "commands/_architect-backfill.md": 4582,
@@ -45,10 +46,10 @@ export const FILE_CAPS = {
   "commands/_architecture.md": 3634,
   "commands/_features.md": 3496,
   "commands/_network.md": 2573,
-  "commands/_scrutinise-deep.md": 5466,
+  "commands/_scrutinise-deep.md": 5457,
   "commands/_shared-analysis.md": 6314,
-  "commands/_shared-execution.md": 12769,
-  "commands/_shared-machinery.md": 6904,
+  "commands/_shared-execution.md": 12766,
+  "commands/_shared-machinery.md": 6892,
   "commands/_sync-docs-prune.md": 1565,
   "commands/account-switch.md": 8257,
   "commands/architect.md": 7034,
@@ -56,9 +57,9 @@ export const FILE_CAPS = {
   "commands/auto.md": 4561,
   "commands/baseline.md": 844,
   "commands/builtin-check.md": 6164,
-  "commands/digest.md": 599,
+  "commands/digest.md": 598,
   "commands/fix-tests.md": 5024,
-  "commands/idea.md": 7122,
+  "commands/idea.md": 6958,
   "commands/init.md": 4890,
   "commands/instruction.md": 8547,
   "commands/investigate.md": 6119,
@@ -67,13 +68,12 @@ export const FILE_CAPS = {
   "commands/plan.md": 8988,
   "commands/scrutinise.md": 8169,
   "commands/stats.md": 348,
-  "commands/sync-docs.md": 9196,
+  "commands/sync-docs.md": 8604,
   "commands/toggle.md": 397,
   "commands/understand.md": 6707,
   "commands/upgrade.md": 2145,
   "commands/workspace-init.md": 2691,
   "skills/deep-research/SKILL.md": 519,
-  "skills/design-review/SKILL.md": 2253,
   "skills/test-driven-development/SKILL.md": 505,
   "skills/systematic-debugging/SKILL.md": 541,
   "skills/verification-before-completion/SKILL.md": 500,
@@ -93,7 +93,7 @@ export const FILE_CAPS = {
   "skills/language-aware-planning/references/php.md": 1616,
   "skills/language-aware-planning/references/plan-template.md": 7293,
   "skills/language-aware-planning/references/python.md": 2059,
-  "skills/language-aware-planning/references/react-native.md": 2349,
+  "skills/language-aware-planning/references/react-native.md": 2324,
   "skills/language-aware-planning/references/ruby.md": 2053,
   "skills/language-aware-planning/references/rust.md": 2121,
   "skills/language-aware-planning/references/shell.md": 1627,
@@ -123,9 +123,9 @@ export const INVOCATION_CAPS = {
   "auto": 4561,
   "baseline": 844,
   "builtin-check": 6164,
-  "digest": 599,
+  "digest": 598,
   "fix-tests": 5024,
-  "idea": 13436,
+  "idea": 13272,
   "init": 4890,
   "instruction": 8547,
   "investigate": 12433,
@@ -200,7 +200,8 @@ export function raisedCaps(base, current) {
   return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Dependency-free on purpose: the ratchet test imports the merge-base copy of this file alone from a temp dir, so it must not import ./lib/core.mjs (isMain).
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   const findings = checkDocSizes();
   if (findings.length) {
     process.stderr.write(findings.join("\n") + "\n");

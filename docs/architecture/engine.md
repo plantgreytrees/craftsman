@@ -51,6 +51,7 @@ flowchart TD
 | ARCH-ENGINE-13 | `land-feature` as one `agent()` call; protocol in `_features.md` | ENGINE-03/04 hold; unit-runner has 2 bytes of budget | A new lander agent |
 | ARCH-ENGINE-14 | Features switch on when the plan declares `features:`; cap 8 | No toggle state, no migration; short-lived branches | Config toggle + cap |
 | ARCH-ENGINE-15 | Feature claim + plan `## Decisions` | Demand for a messaging channel is unproven; ~0 new state | A per-plan message channel |
+| ARCH-ENGINE-23 | Feature claim only (replaces 15, 2026-10-25) | The plan `## Decisions` section and `list-decisions` were never built; tracked in `scrutinise-plan-hierarchy.md` 20.1 and 21.1 | A per-plan message channel |
 
 ## Data & flows
 Workflow input (`args`) is the run manifest `.craftsman/runs/<slug>.json`;

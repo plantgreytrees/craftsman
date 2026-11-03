@@ -222,6 +222,22 @@ test("agent-mode-guard: execution.builtinAgents: [] turns the built-in allowance
   }
 });
 
+// ARCH-GATES-06: artist:design-critic is plain user config, no special case in the guard.
+test("agent-mode-guard: artist:design-critic passes only when listed in execution.builtinAgents", () => {
+  const dir = tmpProject();
+  try {
+    const dispatch = () => run(dir, { session_id: "s1", tool_name: "Agent", tool_input: { subagent_type: "artist:design-critic" } });
+    assert.equal(dispatch().status, 2, "blocked by default");
+    fs.writeFileSync(
+      path.join(dir, "craftsman.config.json"),
+      JSON.stringify({ execution: { builtinAgents: ["Explore", "artist:design-critic"] } }) + "\n"
+    );
+    assert.equal(dispatch().status, 0, "allowed when listed");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ARCH-STATE-02: the writer (orchestrate-scope-guard) and the spender
 // (agent-mode-guard) find one grant whatever cwd each hook runs in.
 function hook(script, cwd, dir, input, extraEnv = {}) {

@@ -4,7 +4,7 @@ goal: The approval flow, ledger guards, gate lookup and doc budgets from the sli
 level: feature
 parent: dev-lifecycle-docs-plan
 priority: P1
-classification: in-scope # /scrutinise rounds 1 (630b4de..80719a8), 2 (630b4de..a72e66a) 3 (630b4de..9a9fee0) and 4 (630b4de..f317620) of dev-lifecycle-docs-plan, every finding verified by root
+classification: in-scope # /scrutinise rounds 1 (630b4de..80719a8), 2 (630b4de..a72e66a) 3 (630b4de..9a9fee0) 4 (630b4de..f317620) 16 to 22 (630b4de..7b90bf9) of dev-lifecycle-docs-plan, every finding verified by root
 tracker_rows: []
 guards:
   blast_radius: done
@@ -33,7 +33,6 @@ units:
       docs: [docs/architecture/engine.rules.md, docs/architecture/landing.rules.md]
       write: [scripts/lib/gate-command.mjs, scripts/lib/gate-command.test.mjs, scripts/repo-exec.mjs, scripts/snapshot.mjs, scripts/doc-checks.mjs, scripts/doc-checks.test.mjs, scripts/tool-slots.test.mjs, EXTENDING.md]
     arch: [ARCH-ENGINE-20, ARCH-LAND-25]
-    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-approval-record
     scope_id: fix-approval-record
     project: .
@@ -46,7 +45,6 @@ units:
       docs: [docs/architecture/approval.rules.md]
       write: [scripts/approval.mjs, scripts/approval.test.mjs, scripts/lib/approval-page.mjs, scripts/lib/approval-page.test.mjs, scripts/lib/approval-gate.mjs]
     arch: [ARCH-APPROVAL-03, ARCH-APPROVAL-04, ARCH-APPROVAL-06]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-approval-scan
     scope_id: fix-approval-scan
     project: .
@@ -59,7 +57,6 @@ units:
       docs: [docs/architecture/approval.rules.md, docs/architecture/engine.rules.md]
       write: [scripts/approval.mjs, scripts/approval.test.mjs]
     arch: [ARCH-APPROVAL-01, ARCH-APPROVAL-02, ARCH-ENGINE-20]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-land-race
     scope_id: fix-land-race
     project: .
@@ -72,7 +69,6 @@ units:
       docs: [docs/architecture/landing.rules.md, docs/architecture/approval.rules.md]
       write: [scripts/repo-exec.mjs, scripts/lib/approval-gate.mjs, scripts/repo-exec-approval.test.mjs]
     arch: [ARCH-LAND-22, ARCH-LAND-25, ARCH-LAND-27, ARCH-APPROVAL-04]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-publish-trust
     scope_id: fix-publish-trust
     project: .
@@ -85,7 +81,6 @@ units:
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md]
       write: [scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs, commands/_features.md, commands/sync-docs.md, scripts/approval-protocol.test.mjs]
     arch: [ARCH-LAND-24, ARCH-LAND-22, ARCH-TRACKER-13, ARCH-ENGINE-13, ARCH-DOCS-14, ARCH-SLIM-02]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-sync-guard
     scope_id: fix-sync-guard
     project: .
@@ -98,7 +93,6 @@ units:
       docs: [docs/architecture/tracker.rules.md]
       write: [scripts/tracker.mjs, scripts/tracker-publish.mjs, scripts/lib/ledger-keys.mjs, scripts/tracker.test.mjs, scripts/tracker-publish.test.mjs]
     arch: [ARCH-TRACKER-13, ARCH-TRACKER-02, ARCH-TRACKER-11]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-budget-growth
     scope_id: fix-budget-growth
     project: .
@@ -111,7 +105,6 @@ units:
       docs: [docs/architecture/docs.rules.md]
       write: [scripts/arch-check.mjs, scripts/arch-check.test.mjs]
     arch: [ARCH-DOCS-10, ARCH-DOCS-03]
-    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-stats-and-prose
     scope_id: fix-stats-and-prose
     project: .
@@ -124,7 +117,6 @@ units:
       docs: [docs/architecture/mod.rules.md, docs/architecture/approval.rules.md, docs/architecture/auto.rules.md, docs/architecture/slim.rules.md]
       write: [scripts/stats.mjs, scripts/stats.test.mjs, commands/auto.md]
     arch: [ARCH-APPROVAL-06, ARCH-MOD-03, ARCH-AUTO-09, ARCH-SLIM-02, ARCH-LAND-22]
-    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-approval-hardening
     scope_id: fix-approval-hardening
     project: .
@@ -137,7 +129,6 @@ units:
       docs: [docs/architecture/approval.rules.md, docs/architecture/engine.rules.md]
       write: [scripts/approval.mjs, scripts/approval.test.mjs]
     arch: [ARCH-APPROVAL-01, ARCH-APPROVAL-03, ARCH-ENGINE-20]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-publish-single-use
     scope_id: fix-publish-single-use
     project: .
@@ -150,7 +141,6 @@ units:
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/approval.rules.md, docs/architecture/engine.rules.md, docs/architecture/docs.rules.md, docs/architecture/slim.rules.md]
       write: [scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs, scripts/approval.mjs, scripts/approval.test.mjs, scripts/repo-exec-approval.test.mjs, commands/_approval.md, scripts/approval-protocol.test.mjs]
     arch: [ARCH-LAND-24, ARCH-LAND-22, ARCH-TRACKER-13, ARCH-APPROVAL-01, ARCH-APPROVAL-04, ARCH-ENGINE-13, ARCH-ENGINE-20, ARCH-DOCS-14, ARCH-SLIM-02]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-merge-retire
     scope_id: fix-merge-retire
     project: .
@@ -163,7 +153,6 @@ units:
       docs: [docs/architecture/landing.rules.md, docs/architecture/approval.rules.md, docs/architecture/docs.rules.md]
       write: [scripts/repo-exec.mjs, scripts/lib/approval-gate.mjs, scripts/repo-exec-retire.test.mjs, scripts/repo-exec-approval.test.mjs]
     arch: [ARCH-LAND-26, ARCH-LAND-25, ARCH-APPROVAL-04, ARCH-DOCS-09]
-    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-publish-cli
     scope_id: fix-publish-cli
     project: .
@@ -176,7 +165,6 @@ units:
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md]
       write: [scripts/tracker.mjs, scripts/tracker-publish-cli.test.mjs]
     arch: [ARCH-TRACKER-11, ARCH-LAND-24]
-    tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-publish-atomic
     scope_id: fix-publish-atomic
     project: .
@@ -189,7 +177,6 @@ units:
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/docs.rules.md]
       write: [scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs, scripts/lib/ledger-keys.mjs]
     arch: [ARCH-LAND-24, ARCH-TRACKER-13, ARCH-ENGINE-13, ARCH-ENGINE-20, ARCH-DOCS-14]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-approval-reprepare
     scope_id: fix-approval-reprepare
     project: .
@@ -202,7 +189,6 @@ units:
       docs: [docs/architecture/approval.rules.md, docs/architecture/engine.rules.md, docs/architecture/landing.rules.md]
       write: [scripts/approval.mjs, scripts/approval.test.mjs, scripts/lib/approval-gate.mjs, scripts/repo-exec-approval.test.mjs]
     arch: [ARCH-APPROVAL-03, ARCH-APPROVAL-04, ARCH-ENGINE-20, ARCH-LAND-27]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
   - id: fix-cli-contract
     scope_id: fix-cli-contract
     project: .
@@ -215,7 +201,129 @@ units:
       docs: [docs/architecture/tracker.rules.md, docs/architecture/landing.rules.md, docs/architecture/approval.rules.md, docs/architecture/engine.rules.md, docs/architecture/docs.rules.md]
       write: [scripts/tracker.mjs, scripts/tracker-publish.mjs, scripts/tracker-publish.test.mjs, scripts/tracker-publish-cli.test.mjs, scripts/approval.mjs, scripts/approval.test.mjs]
     arch: [ARCH-TRACKER-11, ARCH-LAND-24, ARCH-APPROVAL-03, ARCH-ENGINE-13, ARCH-ENGINE-20, ARCH-DOCS-14]
+  - id: fix-approval-fallback
+    scope_id: fix-approval-fallback
+    project: .
+    depends_on: []
+    module: scripts/approval.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/approval.mjs, scripts/approval.test.mjs, scripts/approval-protocol.test.mjs, commands/_approval.md]
+      docs: [docs/architecture/approval.rules.md]
+      write: [scripts/approval.mjs, scripts/approval.test.mjs, scripts/approval-protocol.test.mjs, commands/_approval.md]
+    arch: [ARCH-APPROVAL-04, ARCH-APPROVAL-07]
+  - id: fix-approval-record-protect
+    scope_id: fix-approval-record-protect
+    project: .
+    depends_on: []
+    module: scripts/lib/self-protect.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard.test.mjs]
+      docs: [docs/architecture/approval.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard.test.mjs]
+    arch: [ARCH-APPROVAL-04, ARCH-SAFETY-05]
+  - id: fix-helper-form
+    scope_id: fix-helper-form
+    project: .
+    depends_on: []
+    module: commands/_approval.md
+    language: markdown + javascript
+    security: high
+    scope:
+      read: [commands/_approval.md, commands/_network.md, agents/unit-runner.md, scripts/pre-guard.test.mjs, scripts/script-authority.test.mjs]
+      docs: [docs/architecture/safety.rules.md, docs/architecture/approval.rules.md, docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/_approval.md, commands/_network.md, agents/unit-runner.md, scripts/pre-guard.test.mjs]
+    arch: [ARCH-SAFETY-05, ARCH-APPROVAL-04, ARCH-LAND-25, ARCH-ENGINE-04, ARCH-ENGINE-21, ARCH-SLIM-02]
+  - id: fix-scan-floor
+    scope_id: fix-scan-floor
+    project: .
+    depends_on: []
+    module: scripts/approval.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/approval.mjs, scripts/approval.test.mjs]
+      docs: [docs/architecture/approval.rules.md]
+      write: [scripts/approval.mjs, scripts/approval.test.mjs]
+    arch: [ARCH-APPROVAL-08, ARCH-APPROVAL-04]
+  - id: fix-claim-anchor
+    scope_id: fix-claim-anchor
+    project: .
+    depends_on: []
+    module: scripts/claim.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/claim.mjs, scripts/claim.test.mjs]
+      docs: [docs/architecture/state.rules.md]
+      write: [scripts/claim.mjs, scripts/claim.test.mjs]
+    arch: [ARCH-STATE-03]
+  - id: fix-claims-dir
+    scope_id: fix-claims-dir
+    project: .
+    depends_on: []
+    module: scripts/claim.mjs
+    language: javascript
+    security: normal
+    scope:
+      read: [scripts/claim.mjs, scripts/claim.test.mjs, scripts/account-switch.mjs, scripts/account-switch.test.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/engine.rules.md]
+      write: [scripts/claim.mjs, scripts/claim.test.mjs, scripts/account-switch.mjs, scripts/account-switch.test.mjs]
+    arch: [ARCH-STATE-03, ARCH-ENGINE-23]
+  - id: fix-merge-approval
+    scope_id: fix-merge-approval
+    project: .
+    depends_on: []
+    module: scripts/repo-exec.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/repo-exec.mjs, scripts/lib/approval-gate.mjs, scripts/repo-exec-approval.test.mjs]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/approval.rules.md]
+      write: [scripts/repo-exec.mjs, scripts/lib/approval-gate.mjs, scripts/repo-exec-approval.test.mjs]
+    arch: [ARCH-LAND-28, ARCH-APPROVAL-08]
+  - id: fix-helper-root
+    scope_id: fix-helper-root
+    project: .
+    depends_on: []
+    module: agents/unit-runner.md
+    language: markdown + javascript
+    security: normal
+    scope:
+      read: [agents/unit-runner.md, scripts/lib/core.mjs, scripts/claim.test.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [agents/unit-runner.md, scripts/claim.test.mjs]
+    arch: [ARCH-STATE-03, ARCH-ENGINE-21, ARCH-SLIM-02]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-merge-gate-target
+    scope_id: fix-merge-gate-target
+    project: .
+    depends_on: []
+    module: scripts/lib/approval-gate.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/approval-gate.mjs, scripts/repo-exec.mjs, scripts/repo-exec-approval.test.mjs, commands/merge.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/approval.rules.md, docs/architecture/tracker.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [scripts/lib/approval-gate.mjs, scripts/repo-exec.mjs, scripts/repo-exec-approval.test.mjs, commands/merge.md]
+    arch: [ARCH-LAND-28, ARCH-LAND-16, ARCH-APPROVAL-08, ARCH-TRACKER-08, ARCH-ENGINE-13, ARCH-SLIM-02]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
+  - id: fix-merge-gate-harden
+    scope_id: fix-merge-gate-harden
+    project: .
+    depends_on: []
+    module: scripts/lib/approval-gate.mjs
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/approval-gate.mjs, scripts/repo-exec.mjs, scripts/repo-exec-approval.test.mjs, commands/merge.md]
+      docs: [docs/architecture/landing.rules.md, docs/architecture/approval.rules.md, docs/architecture/tracker.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [scripts/lib/approval-gate.mjs, scripts/repo-exec.mjs, scripts/repo-exec-approval.test.mjs, commands/merge.md]
+    arch: [ARCH-LAND-28, ARCH-LAND-16, ARCH-APPROVAL-08, ARCH-TRACKER-08, ARCH-ENGINE-13, ARCH-SLIM-02]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [], guards: [arch-check], mcp: [] }
 ---
 
 # Plan: Fix round 1 for the slim-Craftsman programme
@@ -229,117 +337,178 @@ Findings come from `/scrutinise` round 1 of `docs/plans/dev-lifecycle-docs-plan.
 ### Step 1 — fix-gate-lookup (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-- [ ] 1.1 Add `scripts/lib/gate-command.test.mjs` first: a deepMerge'd project config that declares only `package.json` plus a justfile with no `check` recipe resolves to the `package.json` command; a missing `just` binary falls through; a `null` or empty marker is skipped, not returned; a justfile whose `just --summary` lists `check` resolves to `just check` → accept: red before the lib exists
-- [ ] 1.2 Implement the pure `findGateCommand(worktree, cfg, {onPath, justTargets})` in `scripts/lib/gate-command.mjs` and use it from `repo-exec.mjs` (keep its `findGateCommand` export) and `snapshot.mjs` → accept: new tests green, existing `repo-exec` and snapshot tests green
-- [ ] 1.3 Make `scripts/tool-slots.test.mjs` call the real function with a deepMerge'd config instead of its mirror → accept: the test fails if the lookup is reverted to first-existing-marker
-- [ ] 1.4 `doc-checks.mjs` `onPath` resolves a binary path containing `/` against the spawn `cwd` (`path.resolve(cwd, bin)`) → accept: `doc-checks.test.mjs` case with a relative binary
-- [ ] 1.5 `EXTENDING.md` says a project drops the marker by setting it to `null`, and that now works → accept: the sentence and a test agree
+- [ ] 1.1 Add …
+- [ ] 1.2 Implement the pure …
+- [ ] 1.3 Make `scripts/tool-slots.test.mjs` …
+- [ ] 1.4 `doc-checks.mjs` `onPath` resolves …
+- [ ] 1.5 `EXTENDING.md` says a project …
 
 ### Step 2 — fix-approval-record (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-- [ ] 2.1 `prepare` reads `repoExec.approval.prLines` from `loadConfig(projectContext(root))` and passes it to `recommend` → accept: a config value of 10 turns a 40-line diff into Open PR
-- [ ] 2.2 `prepare` takes `plan` and `feature`, sets `run = runIdFor(plan, feature)`, refuses an `input.run` that differs, and stores `feature` in the record → accept: mismatch refused, record has `feature`
-- [ ] 2.3 `prepare` refuses a `landed` record and moves an earlier decision into `history[]` instead of resetting it silently → accept: tests for both
-- [ ] 2.4 `check` requires `Date.parse(row.decided_at) >= Date.parse(record.requested_at)` → accept: a stale row with the right head_sha is refused
-- [ ] 2.5 `prepare` and `check` read-modify-write under a lock (`withLock`) → accept: two concurrent checks leave one decision
-- [ ] 2.6 Export `CHOICES` once from `scripts/lib/approval-page.mjs` and import it in `approval.mjs` and `approval-gate.mjs` → accept: no second literal list remains
-- [ ] 2.7 `RISKY` gains `.circleci/`, `Jenkinsfile`, `azure-pipelines.yml`, `bitbucket-pipelines.yml` → accept: rows in the recommendation-table test
+- [ ] 2.1 `prepare` reads …
+- [ ] 2.2 `prepare` takes `plan` and …
+- [ ] 2.3 `prepare` refuses a `landed` …
+- [ ] 2.4 `check` requires …
+- [ ] 2.5 `prepare` and `check` …
+- [ ] 2.6 Export `CHOICES` once from …
+- [ ] 2.7 `RISKY` gains `.circleci/`, …
 
 ### Step 3 — fix-approval-scan (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: fix-approval-record
-- [ ] 3.1 Add a test first where a secret exists only on the feature branch (committed there, absent from the main checkout) and `prepare` refuses → accept: red before the change
-- [ ] 3.2 `prepare` creates a detached temp worktree at `input.head_sha`, runs `cfg.security.check` there with the built-in `scanTree` as fallback, runs doc-checks and `pre-commit` there, and removes the worktree → accept: the test passes; the main checkout is untouched
-- [ ] 3.3 Run `scanContent` over the rendered Markdown and HTML text and refuse on any hit, listing file:line:rule only → accept: a test with a secret-shaped `risk` string refuses and the finding never echoes the value
+- [ ] 3.1 Add a test first where a secret …
+- [ ] 3.2 `prepare` creates a detached temp …
+- [ ] 3.3 Run `scanContent` over the …
 
 ### Step 4 — fix-land-race (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: fix-gate-lookup, fix-approval-scan
-- [ ] 4.1 Add a race test first: the feature head moves between the approval check and the lock, and the landing must not merge the new commit → accept: red before the change
-- [ ] 4.2 In `landFeature` take the feature lock before `gateFeature`; create the temp worktree with `worktree add --detach <temp> <gate.head>`; in the PR path push `<gate.head>:refs/heads/<feature>` → accept: the race test passes
-- [ ] 4.3 Log `approval_unenforced` from `merge()` once per merge when `repoExec.approval.required` is true and `planning.featureBranches` is off; never block it → accept: event logged, merge unchanged
-- [ ] 4.4 Add tests: an approved `open-pr` choice routes to the PR path and records `landed_mode: "open-pr"`; the approved choice overrides `repoExec.land`; a red re-run gate after a moved base PARKs; one end-to-end prepare → check → land through `approval.mjs` → accept: all pass
+- [ ] 4.1 Add a race test first: the feature …
+- [ ] 4.2 In `landFeature` take the feature …
+- [ ] 4.3 Log `approval_unenforced` from …
+- [ ] 4.4 Add tests: an approved `open-pr` …
 
 ### Step 5 — fix-publish-trust (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-- [ ] 5.1 Add refusal tests first: `on-approve` with `approved:true` but no run, or a run whose record is not `landed`, does not publish; `manual:true` publishes; a `landed` record publishes → accept: red before the change
-- [ ] 5.2 `publishTracker` in `on-approve` mode publishes only for a `landed` record named by `input.run`, or `input.manual === true`; log `tracker_publish_unapproved` when the legacy `push` mode is used → accept: tests green
-- [ ] 5.3 Reword `commands/_features.md` publish line to "after a land-feature that returned merged or pushed (not parked) pass `{approved:true, run}`" with no net growth → accept: `doc-size-policy` green
-- [ ] 5.4 `commands/sync-docs.md` tells `/sync-docs --tracker` to run `tracker.mjs publish` with `{manual:true}` after the owner confirms, within its cap → accept: `doc-size-policy` green, the sentence present
-- [ ] 5.5 `scripts/approval-protocol.test.mjs` asserts the corrected wording → accept: test green and fails on the old sentence
+- [ ] 5.1 Add refusal tests first: …
+- [ ] 5.2 `publishTracker` in `on-approve` …
+- [ ] 5.3 Reword `commands/_features.md` …
+- [ ] 5.4 `commands/sync-docs.md` tells …
+- [ ] 5.5 …
 
 ### Step 6 — fix-sync-guard (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: fix-publish-trust
-- [ ] 6.1 Add a 50-committed vs 5-local test for `syncTrackerDoc` first → accept: red before the change
-- [ ] 6.2 Move `committedKeys` and `archivedPlans` into `scripts/lib/ledger-keys.mjs`, used by `tracker-publish.mjs` and `syncTrackerDoc`; keep `tracker.mjs` growth to a few lines by trimming comments in the same file → accept: new test green, the `autonomous-e2e-loop` unit-context test green
-- [ ] 6.3 The existing publish guard tests stay green after the move → accept: `tracker-publish.test.mjs` unchanged and green
+- [ ] 6.1 Add a 50-committed vs 5-local test …
+- [ ] 6.2 Move `committedKeys` and …
+- [ ] 6.3 The existing publish guard tests …
 
 ### Step 7 — fix-budget-growth (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-- [ ] 7.1 Add tests first: a 10 KB plan grown to 11 KB under a 60 KB budget passes lint; a 70 KB plan that grows fails; a 70 KB plan that shrinks passes; a new file takes the default → accept: red before the change
-- [ ] 7.2 Cap an existing file at its merge-base size only when that size already exceeds the default; otherwise allow growth up to the default; keep the ratchet against the merge-base config and `enforce:false` report-only → accept: tests green, `arch-check lint` PASS on the repo
+- [ ] 7.1 Add tests first: a 10 KB plan …
+- [ ] 7.2 Cap an existing file at its …
 
 ### Step 8 — fix-stats-and-prose (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: fix-publish-trust
-- [ ] 8.1 Add `approvalSection(events)` to `stats.mjs`: pairs `approval_requested` with `approval_decided` by run and reports count, p50 and p95 seconds, indented under an existing line → accept: a `stats.test.mjs` case; no new top-level section name
-- [ ] 8.2 Rewrite the "Git authority" paragraph of `commands/auto.md` to ARCH-LAND-22/23 wording at no more bytes than today, keeping every phrase `auto-command.test.mjs` and `approval-protocol.test.mjs` assert → accept: both tests and `doc-size-policy` green, `INVOCATION_CAPS.auto` unchanged
+- [ ] 8.1 Add `approvalSection(events)` to …
+- [ ] 8.2 Rewrite the "Git authority" …
 
 ### Step 9 — fix-approval-hardening (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-- [ ] 9.1 Add tests first: `prepare` refuses a `head_sha` that is not a 40-hex commit (a branch name, a short sha, `--force`); `landed` and `attachUrl` cannot overwrite a concurrent re-prepare; `prepare` returns a refusal (not a crash) when the record is busy; `fallback` writes the Markdown that `prepare` rendered and scanned and ignores `input.markdown` → accept: red before the change
-- [ ] 9.2 `prepare` requires `head_sha` to match `^[0-9a-f]{40}$` and resolves it with `git rev-parse --verify <sha>^{commit}` before it is stored or handed to `git worktree add` → accept: the refusal tests pass
-- [ ] 9.3 `landed` and `attachUrl` run their read-modify-write under `withLock`; `prepare` catches a busy lock and returns `refuse(message)` → accept: tests pass
-- [ ] 9.4 `prepare` keeps the scanned Markdown in the record and `fallback` writes that text, never caller text → accept: a test where `fallback` is given a secret-shaped `markdown` writes the stored text
+- [ ] 9.1 Add tests first: `prepare` refuses …
+- [ ] 9.2 `prepare` requires `head_sha` to …
+- [ ] 9.3 `landed` and `attachUrl` run their …
+- [ ] 9.4 `prepare` keeps the scanned …
 
 ### Step 10 — fix-publish-single-use (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: fix-approval-hardening
-- [ ] 10.1 Add tests first: a second publish with the same `run` is refused; `archived:true` in the input no longer excuses a shrink; `tracker.publish: "push"` with `repoExec.approval.required` behaves as `on-approve`; `manual:true` logs `tracker_publish_manual` → accept: red before the change
-- [ ] 10.2 `approval.mjs` exports `markPublished(run)` (under the lock, sets `published_at`); `runLanded` in `tracker-publish.mjs` requires `status: "landed"` and no `published_at`; a successful publish marks the record → accept: single-use test green
-- [ ] 10.3 Remove the caller-set `archived` input from `render` and the `allArchived` parameter of `droppedKeys` call site; the existing "archived:true lets the shrink through" test asserts refusal → accept: updated test green
-- [ ] 10.4 With `approvalRequired(cfg)` a configured `push` mode takes the `on-approve` path; log `tracker_publish_manual` for `manual:true` so the bypass shows in stats → accept: tests green
-- [ ] 10.5 `commands/_approval.md` step 5 names `tracker.mjs` publish with `{approved:true, run}`; `approval-protocol.test.mjs` asserts it and fails on the old wording; the file stays at its `FILE_CAPS` size (trade bytes inside it) → accept: `approval-protocol.test.mjs` and `doc-size-policy` green
+- [ ] 10.1 Add tests first: a second publish …
+- [ ] 10.2 `approval.mjs` exports …
+- [ ] 10.3 Remove the caller-set `archived` …
+- [ ] 10.4 With `approvalRequired(cfg)` a …
+- [ ] 10.5 `commands/_approval.md` step 5 …
 
 ### Step 11 — fix-merge-retire (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-- [ ] 11.1 Add a test first in a new `scripts/repo-exec-retire.test.mjs` (small; copy the setup helper idea from `repo-exec-approval.test.mjs`, do not load the large `repo-exec.test.mjs`): a unit `merge()` that completes a plan's last row logs `doc_retire_candidate {plan, referrers}`; a throwing scan leaves the merge successful → accept: red before the change
-- [ ] 11.2 After promotion `merge()` runs the same non-mutating retire check `landFeature` uses (reuse the `approval-gate.mjs` helper; keep `repo-exec.mjs` growth under 1 KB) → accept: tests pass, the existing land tests stay green
-- [ ] 11.3 Strengthen the open-pr landing test in `repo-exec-approval.test.mjs`: assert `parked !== true` before reading `landed_mode` → accept: the test fails if the PR path regresses to a park
+- [ ] 11.1 Add a test first in a new …
+- [ ] 11.2 After promotion `merge()` runs …
+- [ ] 11.3 Strengthen the open-pr landing …
 
 ### Step 12 — fix-publish-cli (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-- [ ] 12.1 Add `scripts/tracker-publish-cli.test.mjs` first: spawn `node scripts/tracker.mjs` with `{"action":"publish"}` on stdin in a scratch git repo and assert exit 0 plus one JSON line (`published:false` in on-approve mode), and with `{"action":"publish","manual":true}` assert the process settles (exit is not 13, no "unsettled top-level await" on stderr) → accept: red before the change (exit 13)
-- [ ] 12.2 In `scripts/tracker.mjs` replace the top-level `await (await import("./tracker-publish.mjs"))` in the `publish` branch so `tracker.mjs` finishes evaluating before the module is imported (for example `import(...).then`, printing the result), with no net growth in bytes beyond about 100 → accept: the new test passes, the `autonomous-e2e-loop` unit-context test stays green
+- [ ] 12.1 Add …
+- [ ] 12.2 In `scripts/tracker.mjs` replace …
 
 ### Step 13 — fix-publish-atomic (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-- [ ] 13.1 Add tests first: two on-approve publishes with the same `run` where the first lands during the second's lock wait leave the second refused; a `markPublished` refusal after a push logs `tracker_publish_mark_failed`; an approved publish that ends `unchanged` consumes the token; an absent `tracker.publish` key behaves as on-approve → accept: red before the change
-- [ ] 13.2 Re-run `runLanded` after the base lock is taken; call `markPublished` on the `unchanged` return too (approved, non-manual); log `tracker_publish_mark_failed` when it returns not-ok → accept: tests pass
-- [ ] 13.3 Default `tracker.publish` to `on-approve` when the key is absent (ARCH-LAND-24); delete the dead `allArchived` parameter of `droppedKeys` → accept: tests pass, `tracker-publish.test.mjs` stays green
+- [ ] 13.1 Add tests first: two on-approve …
+- [ ] 13.2 Re-run `runLanded` after the base …
+- [ ] 13.3 Default `tracker.publish` to …
 
 ### Step 14 — fix-approval-reprepare (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
 Depends on: none
-- [ ] 14.1 Add tests first: after an approved open-pr landing (record `landed`, `landed_mode: "open-pr"`) `prepare` for the same run succeeds and keeps the old record in `history[]`; a record landed by a base merge is still refused; the `approval.mjs` CLI no longer accepts the `landed` action; a refused `approvalLanded` inside `afterLand` logs `approval_landed_refused` → accept: red before the change
-- [ ] 14.2 `prepare` supersedes a `landed` record whose `landed_mode` is `open-pr` (history entry, new `requested` record) and refuses only a base-merge landing → accept: tests pass
-- [ ] 14.3 Remove `landed` from the CLI `ACTIONS` (repo-exec reaches it through the module); `afterLand` logs `approval_landed_refused {run, reason}` when `approvalLanded` returns not-ok → accept: tests pass
+- [ ] 14.1 Add tests first: after an …
+- [ ] 14.2 `prepare` supersedes a `landed` …
+- [ ] 14.3 Remove `landed` from the CLI …
 
 ### Step 15 — fix-cli-contract (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · guards arch-check
 Depends on: none
-- [ ] 15.1 Add tests first in `scripts/tracker-publish-cli.test.mjs`: `tracker.mjs lookup` for an unknown plan prints exactly `null` and exits 0; the `manual:true` publish asserts `status === 0` and one JSON line, spawns `process.execPath`, and a case with a bare remote and a landed record asserts `published:true`, `published_at` set and a second call refused → accept: the lookup test is red before the change (empty stdout)
-- [ ] 15.2 In `scripts/tracker.mjs` print the result unless the action is `publish` (which prints for itself), so a `null` result is printed → accept: the new tests pass, the `autonomous-e2e-loop` unit-context test stays green
-- [ ] 15.3 `tracker-publish.mjs` returns `refused: "token spent"` and logs `tracker_publish_token_spent {run}` when the lock re-check finds the token spent → accept: a test in `tracker-publish.test.mjs`
-- [ ] 15.4 `approval.mjs` `prepare` keeps `landed_sha`, `landed_mode` and `published_at` in the `history[]` entry it writes when it supersedes a record → accept: a test in `approval.test.mjs`
+- [ ] 15.1 Add tests first in …
+- [ ] 15.2 In `scripts/tracker.mjs` print …
+- [ ] 15.3 `tracker-publish.mjs` returns …
+- [ ] 15.4 `approval.mjs` `prepare` keeps …
+
+### Step 16 — fix-approval-fallback (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 16.1 Add tests first in …
+- [ ] 16.2 `scripts/approval.mjs` `check` …
+- [ ] 16.3 `commands/_approval.md` step 6 …
+
+### Step 17 — fix-approval-record-protect (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 17.1 Add tests first …
+- [ ] 17.2 `SELF_NEVER` in …
+
+### Step 18 — fix-helper-form (., markdown + javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 18.1 Add tests first in …
+- [ ] 18.2 Rewrite the three helpers without …
+
+### Step 19 — fix-scan-floor (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 19.1 Add a test first in …
+- [ ] 19.2 The `secrets` runner in …
+
+### Step 20 — fix-claim-anchor (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+- [ ] 20.1 Add tests first in …
+- [ ] 20.2 `claimPath` in …
+
+### Step 21 — fix-claims-dir (., javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+- [ ] 21.1 Add tests first: an …
+- [ ] 21.2 `scripts/claim.mjs` exports …
+
+### Step 22 — fix-merge-approval (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 22.1 Add tests first in …
+- [ ] 22.2 `mergeOnly` in …
+
+### Step 23 — fix-helper-root (., markdown + javascript, normal)
+Tooling: implementer implementer · gates code-reviewer · guards arch-check
+Depends on: none
+- [ ] 23.1 Add a test first: from a …
+- [ ] 23.2 The `S` helper in …
+
+### Step 24 — fix-merge-gate-target (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 24.1 Add tests first in …
+- [ ] 24.2 `assertMergeAllowed` in …
+
+### Step 25 — fix-merge-gate-harden (., javascript, high)
+Tooling: implementer implementer · gates code-reviewer, security-auditor · guards arch-check
+Depends on: none
+- [ ] 25.1 Add tests first in `scripts/repo-exec-approval.test.mjs` for every bypass shape (base-named `feature_branch` in direct and pr mode, `refs/heads` alias, any `feature_branch` in pr mode, rename out of code into `docs/plans`, symlink, non-`.md` under `docs/plans`, local base ahead of origin, a commit added after the check) → accept: red before the change
+- [ ] 25.2 With the gate on, `merge` refuses any `feature_branch` and allows only a docs-only merge: `git diff --raw -z --no-renames` against `origin/<base>` when it exists, `.md` files under `docs/plans` or `docs/ideas` only, no symlink or gitlink; the checked HEAD sha is pinned and re-checked before the merge and after the lock → accept: 25.1 green
 
 ## Sequencing
 Independent now: fix-gate-lookup, fix-approval-record, fix-publish-trust, fix-budget-growth. Then fix-approval-scan (after record), fix-sync-guard and fix-stats-and-prose (after publish-trust), and fix-land-race last (after gate-lookup and approval-scan) because it shares `repo-exec.mjs` and `approval-gate.mjs`.
@@ -350,6 +519,8 @@ Round 3 units (fix-publish-cli, fix-publish-atomic, fix-approval-reprepare) touc
 
 Round 4 adds one unit, fix-cli-contract; it has no dependencies.
 
+Rounds 16 to 19 add fix-approval-fallback, fix-approval-record-protect, fix-helper-form, fix-scan-floor, fix-claim-anchor, fix-claims-dir, fix-merge-approval and fix-helper-root; their files are disjoint, so they run in parallel.
+
 ## Verification background   (citations — for the reviewer, not the executor)
 - `findGateCommand` takes the first existing marker in map order and `loadConfig` deep-merges defaults first — `scripts/repo-exec.mjs:315-326`, `scripts/lib/core.mjs:573-581`
 - `prepare` passes `prLines: input.prLines` — `scripts/approval.mjs:58`
@@ -358,9 +529,7 @@ Round 4 adds one unit, fix-cli-contract; it has no dependencies.
 - `syncTrackerDoc` has no dropped-key guard — `scripts/tracker.mjs` (`syncTrackerDoc`)
 - `lintBudgets` recomputes an existing file's cap from the merge-base every run — `scripts/arch-check.mjs:291`
 - Reproduced by root: a project declaring only `package.json: npm test` still resolves `just check`; one appended line to `docs/plans/dev-lifecycle-docs-plan.md` fails lint
-- Round 2: `runLanded` accepts any landed record and never consumes it — `scripts/tracker-publish.mjs:65`; `input.archived` disables the dropped-key guard — `scripts/tracker-publish.mjs:33`; `merge()` has no retire check — `scripts/repo-exec.mjs` (`merge`); `commands/_approval.md:13` documents `{approved:true}` without `run`; `head_sha` is stored unvalidated — `scripts/approval.mjs:96`
-- Round 3: `tracker.mjs publish` exits 13 (unsettled top-level await: `tracker-publish.mjs` imports `tracker.mjs` while it is still evaluating) — `scripts/tracker.mjs:558`, reproduced by root; `prepare` refuses a `landed` record, and an open-pr landing marks it `landed` at once — `scripts/approval.mjs:133`, `scripts/lib/approval-gate.mjs:61-63`; `runLanded` is checked before the base lock — `scripts/tracker-publish.mjs:69,101`
-- Round 4: `if (output)` hides the `null` that `lookupArchive` returns on a miss, so `tracker.mjs lookup` prints nothing — `scripts/tracker.mjs:557`, reproduced by root; the callers that need `null` are `commands/auto.md`, `commands/orchestrate.md`, `commands/instruction.md`
+- Round 22: `assertMergeAllowed` lets a base-named `feature_branch` through and its docs-only check follows renames, reads local base and is not pinned to the checked HEAD — `scripts/lib/approval-gate.mjs:24-34`, `scripts/repo-exec.mjs:353-401`
 
 CONSUMERS:
 - `findGateCommand` → `scripts/repo-exec.mjs` (merge gate), `scripts/snapshot.mjs`, `scripts/tool-slots.test.mjs`
@@ -368,7 +537,6 @@ CONSUMERS:
 - `publishTracker` → `scripts/tracker.mjs` publish action, `scripts/repo-exec.mjs`, `commands/_features.md`, `commands/sync-docs.md`
 - `committedKeys` / `archivedPlans` → `scripts/tracker-publish.mjs`, `scripts/tracker.mjs` after the move
 - `lintBudgets` → `arch-check lint` only
-- Round 2: `runLanded` / `publishTracker` → `commands/_approval.md` step 5, `commands/_features.md`, `scripts/approval-protocol.test.mjs`; `markPublished` is new in `scripts/approval.mjs`
 
 ## Risk & rollback
 - Each unit is one commit; revert it. fix-land-race touches the landing path: run `scripts/repo-exec.test.mjs` and `scripts/repo-exec-approval.test.mjs` before and after.
@@ -376,12 +544,15 @@ CONSUMERS:
 
 ## Decisions
 - **Follow-ups are ledger rows only, not units:** `profile-knobs` (PARKED on PR #1, needs `scripts/lib/core.mjs`), `approval-owner-trust`, `telemetry-baseline-marker`, `lease-glob-anchoring`, `workspace-key-collision` (PENDING, not driven).
-- **Criteria reopened by the review** (unticked in `.craftsman/acceptance.md`): `[unit:ledger-guard]` 1.2 → fix-sync-guard; `[unit:land-gate]` 16.1, 16.4 → fix-publish-trust, fix-land-race; `[unit:docs-budgets]` 9.1 and `[unit:profile-and-release]` 18.1 → profile-knobs.
 
-- **Round 2 (`/scrutinise`, range 630b4de..a72e66a):** criteria `[unit:ledger-guard]` 1.2 (the `archived:true` bypass) and `[unit:land-gate]` 16.4 (single-use publish token) are reopened and map to fix-publish-single-use. `manual:true` on publish stays an agent-asserted flag like `writer_is_owner`; it now logs `tracker_publish_manual` and is part of the `approval-owner-trust` follow-up.
-- **Round 2 follow-ups, ledger rows only:** `ledger-parser-dedupe` (one block parser for `committedKeys` and `parseBlockRows`, one `loadRecord` for approval records, one PATH lookup), `budget-ratchet-keys` (a deleted budget key or `enforce:false` on the branch escapes the merge-base ratchet), `lease-doc-claim` (auto.md names `--force-with-lease` before the guard is wired).
 
-- **Round 3 (`/scrutinise`, range 630b4de..9a9fee0):** `[unit:land-gate]` 16.4 stays open until fix-publish-cli lands (the documented publish entry point deadlocked). Round-3 follow-ups, ledger rows only: `approval-scan-config-source` (the scan's `security.check` comes from the feature worktree config), `offline-landed-record` (an offline land-feature marks the record landed while the push is only queued), `approval-lock-stale-race` (two waiters can both break a stale lock).
+
+- **Round 16 (`/scrutinise`, range 630b4de..90cb828):** two Warnings (fallback round trip, forged approval record) become fix-approval-fallback and fix-approval-record-protect; `approval-owner-trust` keeps only the agent-asserted `writer_is_owner`. Suggestions are ledger rows, not driven: `budget-key-removal`, `approval-prepare-derive-diff`, `approval-lock-break-race`, `approval-json-quoting`, `approval-loadrecord-dedupe`, `ledger-parse-dedupe2`, `onpath-dedupe`, `events-jsonl-protect`.
+- **Round 17 (`/scrutinise`, range 630b4de..bafa7a5):** one Critical (documented helpers blocked by the guard) and one Warning (config can replace the secrets floor) become fix-helper-form and fix-scan-floor.
+- **Round 18:** one Warning (claim lock not anchored at the main checkout) becomes fix-claim-anchor; Suggestions are PENDING rows: `approval-cli-refusal`, `publish-manual-owner`, `readme-safety-keys`.
+- **Round 19:** three Warnings become fix-claims-dir, fix-merge-approval and fix-helper-root; PENDING rows: `approval-floor-vs-stopgate-note`, `mainroot-missing-fallback`.
+- **Round 21:** one Critical and two Warnings (merge gate bypass, `/merge` refused, Phase-A exemption unbuilt) become fix-merge-gate-target. Owner chose to auto-resolve: docs-only exemption. PENDING rows: `unit-runner-claim-project`, `merge-gate-callers-test`.
+- **Round 22:** one Critical, three Warnings and a Suggestion (merge gate hardening) become fix-merge-gate-harden; criterion 24.2 was found UNMET and is re-opened until it lands.
 
 ## Out of scope
-- Wiring the lease exception, guard narrowing, the TDD step and the plugin `userConfig` knobs (all wait for PR #1); protecting `.craftsman/approvals` in pre-guard; the telemetry marker, lease glob anchoring and the workspace key collision (follow-ups above).
+- Wiring the lease exception, guard narrowing, the TDD step and the plugin `userConfig` knobs (all wait for PR #1); the telemetry marker, lease glob anchoring and the workspace key collision (follow-ups above).

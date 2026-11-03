@@ -83,3 +83,5 @@ flowchart LR
 - **Session queue:** NEXT.md entries in your order, then the computed ready list.
 - **Lane:** one of the first `execution.maxSessions` queue entries, meant to run in parallel sessions.
 - **Fingerprint:** mtimes and sizes of the dashboard's inputs, compared at Stop to skip a no-op render.
+
+Owner decision (external-project-board, D2): ARCH-VIEWS-04 -> 16 (the dashboard may read the workspace manifest and run a bounded read-only referrer scan, only to classify archive candidates), ARCH-VIEWS-08 -> 17 (the artifact URL lives in `.craftsman/export/dashboard.url`), ARCH-VIEWS-11 -> 18 (adds symlink-checked directories, temp-file-and-rename writes and the integrity hash on the pinned script). Rejected: changing the code to match the old rules, which would have removed the Archive tab's candidate classes.

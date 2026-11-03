@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, namesSelfScoped, realEntries, safetyProjection } from "./self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, namesSelfScoped, realEntries, safetyProjection, gitCommonDir, commonRel } from "./self-protect.mjs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { globToRe } from "./core.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
@@ -26,7 +27,7 @@ test("self-protect: namesSelfScoped matches exact names, suffixes, directories a
 });
 
 test("self-protect: SELF_NEVER holds the craftsman markers, the scope files and git's own config and hooks", () => {
-  for (const p of [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/scope*", "**/.git/config", "**/.git/hooks/**"]) {
+  for (const p of [".craftsman/off", ".craftsman/doc-write-pending", ".craftsman/sessions/**/doc-write", ".craftsman/sessions/**/scope*", "**/.git/{config,config.worktree}", "**/.git/hooks/**"]) {
     assert.ok(SELF_NEVER.includes(p), p);
   }
   const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
@@ -37,7 +38,7 @@ test("self-protect: SELF_NEVER holds the craftsman markers, the scope files and 
 test("self-protect: a linked worktree's own git config in the main .git is held too", () => {
   const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
   for (const rel of [".git/worktrees/wt/config.worktree", ".git/worktrees/wt/config", "a/.git/worktrees/x y/config.worktree"]) assert.ok(hit(rel), rel);
-  for (const rel of [".git/worktrees/wt/HEAD", ".git/worktrees/wt/gitdir", "src/worktrees/wt/config"]) assert.ok(!hit(rel), rel);
+  for (const rel of [".git/worktrees/wt/HEAD", ".git/worktrees/wt/index.lock", "src/worktrees/wt/config"]) assert.ok(!hit(rel), rel);
   for (const text of [".git/worktrees/wt/config.worktree", ".git/worktrees/wt/config"]) assert.match(text, NEVER_TEXT, text);
 });
 
@@ -62,7 +63,7 @@ test("self-protect: heldNever and heldScoped say which directories hold a protec
 
 test("self-protect: pre-guard keeps one writer-verb list and no hand-copied path regex (18.3)", () => {
   const source = fs.readFileSync(new URL("../pre-guard.mjs", import.meta.url), "utf8");
-  assert.deepEqual([...WRITER_VERBS].sort(), ["cp", "dd", "install", "ln", "mkdir", "mv", "perl", "sed", "tee", "touch", "truncate"]);
+  assert.deepEqual([...WRITER_VERBS].sort(), ["cp", "dd", "install", "link", "ln", "mkdir", "mv", "perl", "sed", "tee", "touch", "truncate"]);
   assert.doesNotMatch(source, /new Set\(\["touch"/, "no second verb list");
   assert.doesNotMatch(source, /\(\?:touch\|tee\|/, "no verb alternation typed out");
   assert.doesNotMatch(source, /\\\.craftsman\\\/\(\?:off\|doc-write-pending\)/, "the path regex is not hand-copied");
@@ -131,6 +132,20 @@ test("self-protect: safetyProjection reads dotted keys and the settings env", ()
   assert.deepEqual(st.env, { NODE_OPTIONS: "x" });
 });
 
+test("self-protect: the approval gate keys are safety keys, each resolves in the shipped config, and flipping either changes the projection", () => {
+  const shipped = JSON.parse(fs.readFileSync(new URL("../../craftsman.config.json", import.meta.url), "utf8"));
+  for (const key of ["repoExec.approval.required", "planning.featureBranches"]) {
+    assert.ok(SAFETY_CONFIG_KEYS.includes(key), `${key} is listed`);
+    const value = key.split(".").reduce((v, k) => (v && typeof v === "object" ? v[k] : undefined), shipped);
+    assert.equal(typeof value, "boolean", `${key} is a real boolean key of craftsman.config.json`);
+  }
+  const base = { repoExec: { approval: { required: true, prLines: 400 } }, planning: { featureBranches: true } };
+  const proj = (c) => JSON.stringify(safetyProjection("craftsman.config.json", c));
+  assert.notEqual(proj(base), proj({ ...base, repoExec: { approval: { required: false, prLines: 400 } } }));
+  assert.notEqual(proj(base), proj({ ...base, planning: { featureBranches: false } }));
+  assert.equal(proj(base), proj({ ...base, repoExec: { approval: { required: true, prLines: 10 } } }), "prLines stays editable");
+});
+
 test("self-protect: scope.mjs and pre-guard.mjs import the list; no second copy remains", () => {
   const read = (p) => fs.readFileSync(new URL(p, import.meta.url), "utf8");
   for (const file of ["../scope.mjs", "../pre-guard.mjs"]) {
@@ -139,4 +154,174 @@ test("self-protect: scope.mjs and pre-guard.mjs import the list; no second copy 
     assert.doesNotMatch(source, /const SELF_SCOPED\s*=/, `${file} keeps no copy of the list`);
   }
   assert.doesNotMatch(read("../scope.mjs"), /"hooks\/hooks\.json",\s*"craftsman\.config\.json"/);
+});
+
+test("self-protect: SELF_NEVER holds the approval record directory", () => {
+  assert.ok(SELF_NEVER.includes(".craftsman/approvals/**"));
+  assert.ok(SELF_NEVER.some((p) => globToRe(p).test(".craftsman/approvals/x.json")));
+});
+
+test("self-protect: a submodule's network queue under the superproject's .git/modules is a never-written path (ARCH-SAFETY-13)", () => {
+  assert.ok(SELF_NEVER.includes("**/.git/modules/**/.craftsman/network/**"));
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/.craftsman/network/queue.jsonl", ".git/modules/sub/.craftsman/network/queue.jsonl", "a/b/.git/modules/sub/.craftsman/network/fetched.json",
+    ".git/modules/libs/foo/.craftsman/network/queue.jsonl", ".git/modules/sub/modules/inner/.craftsman/network/queue.jsonl"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/modules/sub/HEAD", ".git/modules/sub/.craftsman/notes.md", ".git/modules/sub/config.bak", "src/modules/sub/.craftsman/network/queue.jsonl", ".git/modulesx/sub/.craftsman/network/q"]) assert.ok(!hit(rel), rel);
+  for (const text of [".git/modules/sub/.craftsman/network/queue.jsonl", "../.git/modules/sub/.craftsman/network/queue.jsonl", "/r/super/.git/modules/a/b/.craftsman/network/fetched.json", ".GIT/Modules/sub/.Craftsman/Network/queue.jsonl"]) assert.match(text, NEVER_TEXT, text);
+  for (const text of [".git/modules/sub/HEAD", ".git/modules/sub/.craftsman/notes.md", "src/modules/sub/.craftsman/network.md"]) assert.doesNotMatch(text, NEVER_TEXT, text);
+});
+
+test("self-protect: heldNever holds the queue's parent directories, so a forged one cannot take their place (ARCH-SAFETY-13)", () => {
+  for (const rel of [".git/.craftsman", ".git/.craftsman/network", "./.git/.craftsman/", "vendor/.git/.craftsman", ".GIT/.Craftsman", ".git/modules", "a/b/.git/modules"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of ["docs", "src", "src/.github", ".github", ".gitignore", ".gitmodules", "modules", "src/modules", ".git/modulesx", "src/.craftsman", "src/.craftsman/network", ".craftsman-notes", ".git/HEAD", ".git/refs", ".git/index.lock", "."]) assert.equal(heldNever(rel), false, rel);
+});
+
+test("self-protect: heldNever holds everything under .git/modules, where a submodule's name path may lead to a queue (ARCH-SAFETY-13)", () => {
+  for (const rel of [".git/modules/sub", ".git/modules/sub/.craftsman", ".git/modules/sub/.craftsman/network", ".git/modules/libs/foo", ".git/modules/sub/modules/inner/.craftsman", "a/.git/modules/sub", ".Git/Modules/Sub"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of [".git/modulesx/sub", "modules/sub", "src/modules/sub", ".git/refs/modules/x", ".git/objects", "sub", "sub/.craftsman"]) assert.equal(heldNever(rel), false, rel);
+});
+
+test("self-protect: commonRel spells a path under a git dir the way a session at the superproject would, and the patterns hold those names (ARCH-SAFETY-13)", () => {
+  const sub = "/r/super/.git/modules/sub", queue = `${sub}/.craftsman/network/queue.jsonl`;
+  assert.equal(commonRel(sub, queue), ".git/modules/sub/.craftsman/network/queue.jsonl");
+  assert.equal(commonRel("/r/main/.git", "/r/main/.git/.craftsman/network/queue.jsonl"), ".git/.craftsman/network/queue.jsonl");
+  assert.equal(commonRel("/r/super/.git/modules/sub/modules/inner", "/r/super/.git/modules/sub/modules/inner/.craftsman/network/queue.jsonl"), ".git/modules/sub/modules/inner/.craftsman/network/queue.jsonl");
+  // the git dir, the store above it and the .git above that are all inside the .git that holds the git dir
+  assert.deepEqual([sub, "/r/super/.git/modules", "/r/super/.git"].map((abs) => commonRel(sub, abs)), [".git/modules/sub", ".git/modules", ".git"]);
+  // a git dir under no .git (a bare or a separate one) is named as if it were one
+  assert.equal(commonRel("/srv/proj.git", "/srv/proj.git/.craftsman/network/queue.jsonl"), ".git/.craftsman/network/queue.jsonl");
+  // compared case-folded, as the patterns are
+  assert.equal(commonRel(sub, "/R/Super/.GIT/Modules/Sub/.Craftsman/Network/queue.jsonl"), ".git/modules/sub/.craftsman/network/queue.jsonl");
+  // outside that .git, and nothing to compare with: no name
+  for (const abs of ["/r/super", "/r/super/sub/a.txt", "/r/super/.gitx/x", "/r/super/.git-notes", "/r/sub-wt/b.txt", "/tmp/x"]) assert.equal(commonRel(sub, abs), null, abs);
+  assert.equal(commonRel(null, queue), null);
+  assert.equal(commonRel("", queue), null);
+  // the names it gives are the ones the patterns hold: written is never, removed is held; the other files of the git dir are not never-written
+  assert.ok(SELF_NEVER.some((p) => globToRe(p).test(commonRel(sub, queue))));
+  for (const gone of [sub, "/r/super/.git/modules", "/r/super/.git", `${sub}/.craftsman`, `${sub}/.craftsman/network`, queue]) assert.equal(heldNever(commonRel(sub, gone)), true, gone);
+  for (const ordinary of [`${sub}/info/exclude`, `${sub}/description`, `${sub}/HEAD`]) assert.ok(!SELF_NEVER.some((p) => globToRe(p).test(commonRel(sub, ordinary))), ordinary);
+});
+
+test("self-protect: gitCommonDir finds the common dir of a main checkout, a linked worktree and a submodule's linked worktree, and fails open outside a repository (ARCH-SAFETY-13)", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-common-dir-")));
+  try {
+    const git = (dir, ...args) => spawnSync("git", ["-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "protocol.file.allow=always", ...args], { encoding: "utf8" });
+    const make = (dir) => { fs.mkdirSync(dir); git(dir, "init", "-q"); git(dir, "commit", "-q", "--allow-empty", "-m", "init"); };
+    const main = path.join(base, "main"), origin = path.join(base, "origin"), sup = path.join(base, "super");
+    for (const dir of [main, origin, sup]) make(dir);
+    assert.equal(git(main, "worktree", "add", "-q", "-b", "feat/a", path.join(base, "main-wt")).status, 0);
+    assert.equal(git(sup, "submodule", "add", "-q", origin, "sub").status, 0);
+    const sub = path.join(sup, "sub");
+    assert.equal(git(sub, "worktree", "add", "-q", "-b", "feat/in", path.join(sub, ".claude", "worktrees", "wt")).status, 0);
+    assert.equal(git(sub, "worktree", "add", "-q", "-b", "feat/beside", path.join(base, "sub-wt")).status, 0);
+    const mainGit = path.join(main, ".git"), subGit = path.join(sup, ".git", "modules", "sub");
+    assert.equal(gitCommonDir(main), mainGit);
+    assert.equal(gitCommonDir(path.join(base, "main-wt")), mainGit);
+    for (const dir of [sub, path.join(sub, ".claude", "worktrees", "wt"), path.join(base, "sub-wt")]) assert.equal(gitCommonDir(dir), subGit, dir);
+    assert.equal(gitCommonDir(main), mainGit, "asked again");
+    const plain = path.join(base, "plain");
+    fs.mkdirSync(plain);
+    assert.equal(gitCommonDir(plain), null, "not a repository");
+    assert.equal(gitCommonDir(path.join(base, "missing")), null, "no such directory");
+    // a linked worktree of the submodule names the queue under the store the superproject would
+    assert.equal(commonRel(gitCommonDir(path.join(base, "sub-wt")), path.join(subGit, ".craftsman", "network", "queue.jsonl")), ".git/modules/sub/.craftsman/network/queue.jsonl");
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test("self-protect: a submodule's config, config.worktree, hooks and linked worktrees' config under .git/modules are never-written paths (ARCH-SAFETY-13, ARCH-SAFETY-15)", () => {
+  for (const p of ["**/.git/modules/**/{config,config.worktree}", "**/.git/modules/**/hooks/**", "**/.git/modules/**/worktrees/*/{config*,commondir,gitdir}"]) assert.ok(SELF_NEVER.includes(p), p);
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/modules/sub/config", ".git/modules/sub/config.worktree", ".git/modules/sub/hooks/pre-push", ".git/modules/sub/hooks/sub/dir/x", "a/b/.git/modules/sub/config",
+    ".git/modules/libs/foo/config", ".git/modules/libs/foo/hooks/post-merge", ".git/modules/sub/modules/inner/config", ".git/modules/sub/modules/inner/hooks/pre-commit",
+    ".git/modules/sub/worktrees/wt/config", ".git/modules/sub/worktrees/wt/config.worktree", ".git/modules/sub/worktrees/x y/config", ".git/modules/sub/modules/inner/worktrees/wt/config"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/modules/sub/HEAD", ".git/modules/sub/config.bak", ".git/modules/sub/configx", ".git/modules/sub/hooksx/pre-push", ".git/modules/sub/info/exclude", ".git/modules/sub/worktrees/wt/HEAD",
+    ".git/modules/sub/worktrees/wt/index.lock", ".git/modules/sub/worktrees/wt/configs/x", "src/modules/sub/config", "src/modules/sub/hooks/x", ".git/modulesx/sub/config", ".github/modules/sub/config"]) assert.ok(!hit(rel), rel);
+  for (const text of [".git/modules/sub/config", "../.git/modules/sub/config.worktree", "/r/super/.git/modules/a/b/hooks/pre-push", ".git/modules/sub/worktrees/wt/config", ".GIT/Modules/Sub/Hooks/Pre-Push"]) assert.match(text, NEVER_TEXT, text);
+  for (const text of [".git/modules/sub/HEAD", ".git/modules/sub/config.bak", "src/modules/sub/config", ".git/modules/sub/hooksx/a", ".git/modules/sub/worktrees/wt/HEAD"]) assert.doesNotMatch(text, NEVER_TEXT, text);
+});
+
+test("self-protect: a queue under a superproject's linked worktree, .git/worktrees/<wt>/modules/<name>, is a never-written path (ARCH-SAFETY-13)", () => {
+  assert.ok(SELF_NEVER.includes("**/.git/worktrees/*/modules/**/.craftsman/network/**"));
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/worktrees/wt/modules/sub/.craftsman/network/queue.jsonl", "a/b/.git/worktrees/wt/modules/sub/.craftsman/network/fetched.json", ".git/worktrees/x y/modules/libs/foo/.craftsman/network/queue.jsonl",
+    ".git/worktrees/wt/modules/sub/modules/inner/.craftsman/network/queue.jsonl"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/worktrees/wt/modules/sub/HEAD", ".git/worktrees/wt/modules/sub/.craftsman/notes.md", ".git/worktrees/wt/HEAD", ".git/worktrees/wt/modules", "src/worktrees/wt/modules/sub/.craftsman/network/queue.jsonl",
+    ".git/worktreesx/wt/modules/sub/.craftsman/network/queue.jsonl"]) assert.ok(!hit(rel), rel);
+  for (const text of [".git/worktrees/wt/modules/sub/.craftsman/network/queue.jsonl", "/r/super/.git/worktrees/wt/modules/a/b/.craftsman/network/fetched.json", ".GIT/Worktrees/Wt/Modules/Sub/.Craftsman/Network/queue.jsonl"]) assert.match(text, NEVER_TEXT, text);
+  for (const text of [".git/worktrees/wt/modules/sub/HEAD", ".git/worktrees/wt/modules/sub/.craftsman/notes.md", "src/worktrees/wt/modules/sub/.craftsman/network.md"]) assert.doesNotMatch(text, NEVER_TEXT, text);
+  // the name a session gives it is the one the pattern holds: the git dir of a submodule in a superproject's linked worktree sits under the superproject's .git/worktrees
+  const wtGitDir = "/r/super/.git/worktrees/wt/modules/sub", queue = `${wtGitDir}/.craftsman/network/queue.jsonl`;
+  assert.equal(commonRel(wtGitDir, queue), ".git/worktrees/wt/modules/sub/.craftsman/network/queue.jsonl");
+  assert.ok(SELF_NEVER.some((p) => globToRe(p).test(commonRel(wtGitDir, queue))));
+});
+
+test("self-protect: heldNever holds the parents of the submodule git surface, so a forged directory cannot take their place (ARCH-SAFETY-13)", () => {
+  for (const rel of [".git/modules/sub/hooks", ".git/modules/sub/hooks/pre-push", ".git/modules/sub/worktrees", ".git/modules/sub/worktrees/wt", ".git/modules/sub/worktrees/wt/config", ".git/modules/sub/config", ".git/modules/sub/config.worktree",
+    ".git/worktrees", ".git/worktrees/wt", ".git/worktrees/wt/modules", ".git/worktrees/wt/modules/sub", ".git/worktrees/wt/modules/sub/.craftsman", ".git/worktrees/wt/modules/sub/.craftsman/network",
+    ".git/worktrees/wt/modules/sub/.craftsman/network/queue.jsonl", ".git/worktrees/wt/modules/libs/foo", "a/b/.git/worktrees/wt/modules/sub/.craftsman", ".Git/Worktrees/Wt/Modules/Sub/.Craftsman"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of ["worktrees", "worktrees/wt", "src/worktrees/wt/modules", "src/worktrees/wt/modules/sub/.craftsman", ".git/worktreesx", ".git/worktreesx/wt/modules", ".claude/worktrees", ".claude/worktrees/wt", ".worktrees/wt"]) assert.equal(heldNever(rel), false, rel);
+});
+
+// worktree-surface-fixes (scrutinise-sandbox-auto-flow phase 2, round 4). A pattern with a `**` between names (the queue of a submodule checked out in a superproject's linked
+// worktree, `.git/worktrees/*/modules/**/.craftsman/network/**`) held everything under its first literal directory, so `rm -f .git/worktrees/wt/index.lock` was refused for a
+// repository with a linked worktree. Only the pattern's own anchor, read as a glob, and what lies beneath it is held.
+test("self-protect: heldNever holds the queue's directories under .git/worktrees/<wt>/modules and not the ordinary files of the worktree's admin dir (ARCH-SAFETY-13)", () => {
+  for (const rel of [".git/worktrees/wt/index.lock", ".git/worktrees/wt/logs", ".git/worktrees/wt/logs/HEAD", ".git/worktrees/wt/HEAD", ".git/worktrees/wt/ORIG_HEAD", ".git/worktrees/wt/index", ".git/worktrees/wt/locked",
+    ".git/worktrees/wt/refs", "a/b/.git/worktrees/wt/index.lock", ".Git/Worktrees/Wt/Index.Lock", ".git/worktrees/x y/logs", ".git/worktrees/wt/modulesx", ".git/worktrees/wt/modulesx/sub/.craftsman", ".git/worktrees/wt/xmodules/sub"]) {
+    assert.equal(heldNever(rel), false, rel);
+  }
+  const queue = ".git/worktrees/wt/modules/sub/.craftsman/network/queue.jsonl";
+  for (const rel of [queue, ".git/worktrees/wt/modules/sub/.craftsman/network", ".git/worktrees/wt/modules/sub/.craftsman", ".git/worktrees/wt/modules/sub", ".git/worktrees/wt/modules", ".git/worktrees/wt", ".git/worktrees", ".git",
+    ".git/worktrees/wt/modules/libs/foo", ".git/worktrees/wt/modules/sub/modules/inner/.craftsman", "a/b/.git/worktrees/wt/modules/sub/.craftsman", ".Git/Worktrees/Wt/Modules/Sub/.Craftsman/Network"]) assert.equal(heldNever(rel), true, rel);
+  // the other prefixes keep what they held: everything under the store of a submodule's git dir may lead to a queue, and the ordinary files of the .git beside it are not held
+  for (const rel of [".git/modules/sub/index.lock", ".git/modules/sub/worktrees/wt", ".git/modules/sub/worktrees/wt/commondir"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of [".git/index.lock", ".git/refs", ".git/HEAD", ".git/objects", ".git/logs/HEAD"]) assert.equal(heldNever(rel), false, rel);
+});
+
+test("self-protect: the config, config.worktree, hooks and linked worktrees' config of a worktree-modules git dir, and every commondir and gitdir file, are never-written paths (ARCH-SAFETY-13, ARCH-SAFETY-15)", () => {
+  for (const p of ["**/.git/worktrees/*/modules/**/{config,config.worktree}", "**/.git/worktrees/*/modules/**/hooks/**", "**/.git/worktrees/*/modules/**/worktrees/*/{config*,commondir,gitdir}",
+    "**/.git/worktrees/*/{config,config.worktree,commondir,gitdir}"]) assert.ok(SELF_NEVER.includes(p), p);
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/worktrees/wt/modules/sub/config", ".git/worktrees/wt/modules/sub/config.worktree", ".git/worktrees/wt/modules/sub/hooks/pre-push", ".git/worktrees/wt/modules/sub/hooks/sub/dir/x",
+    ".git/worktrees/wt/modules/sub/worktrees/subwt/config", ".git/worktrees/wt/modules/sub/worktrees/subwt/config.worktree", ".git/worktrees/wt/modules/sub/worktrees/x y/config.worktree", "a/b/.git/worktrees/wt/modules/sub/config",
+    ".git/worktrees/wt/modules/libs/foo/hooks/post-merge", ".git/worktrees/wt/modules/sub/modules/inner/config", ".git/worktrees/wt/modules/sub/modules/inner/hooks/pre-commit"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/worktrees/wt/commondir", ".git/worktrees/wt/gitdir", "a/b/.git/worktrees/x y/gitdir", ".git/modules/sub/worktrees/subwt/commondir", ".git/modules/sub/worktrees/subwt/gitdir",
+    ".git/modules/libs/foo/worktrees/x/commondir", ".git/modules/sub/modules/inner/worktrees/x/gitdir", ".git/worktrees/wt/modules/sub/worktrees/subwt/commondir", ".git/worktrees/wt/modules/sub/worktrees/subwt/gitdir"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/worktrees/wt/modules/sub/HEAD", ".git/worktrees/wt/modules/sub/config.bak", ".git/worktrees/wt/modules/sub/configx", ".git/worktrees/wt/modules/sub/hooksx/pre-push", ".git/worktrees/wt/modules/sub/info/exclude",
+    ".git/worktrees/wt/modules/sub/worktrees/subwt/HEAD", ".git/worktrees/wt/modules/sub/worktrees/subwt/index.lock", ".git/worktrees/wt/modules/sub/worktrees/subwt/configs/x", ".git/worktrees/wt/HEAD", ".git/worktrees/wt/index.lock",
+    ".git/worktrees/wt/logs/HEAD", ".git/worktrees/wt/gitdirx", ".git/worktrees/wt/commondirs", ".git/worktrees/wt/sub/gitdir", ".git/worktrees/gitdir", ".git/modules/sub/worktrees/wt/commondirx", ".git/modules/sub/worktrees/wt/index.lock",
+    ".git/modules/sub/gitdir", "src/worktrees/wt/gitdir", "src/worktrees/wt/modules/sub/config", ".git/worktreesx/wt/gitdir", ".git/worktreesx/wt/modules/sub/config", ".github/worktrees/wt/commondir", ".github/worktrees/wt/modules/sub/hooks/x"]) {
+    assert.ok(!hit(rel), rel);
+  }
+  for (const text of [".git/worktrees/wt/modules/sub/config", "../.git/worktrees/wt/modules/sub/config.worktree", "/r/super/.git/worktrees/wt/modules/a/b/hooks/pre-push", ".git/worktrees/wt/modules/sub/worktrees/subwt/config.worktree",
+    ".git/worktrees/wt/commondir", "/r/super/.git/worktrees/wt/gitdir", ".git/modules/sub/worktrees/subwt/commondir", "x > .git/modules/sub/worktrees/subwt/gitdir", ".GIT/Worktrees/Wt/Modules/Sub/Hooks/Pre-Push", ".GIT/Worktrees/Wt/GitDir"]) assert.match(text, NEVER_TEXT, text);
+  for (const text of [".git/worktrees/wt/HEAD", ".git/worktrees/wt/index.lock", ".git/worktrees/wt/gitdirx", ".git/worktrees/wt/commondir.bak", ".git/worktrees/wt/modules/sub/HEAD", ".git/worktrees/wt/modules/sub/config.bak", "src/worktrees/wt/gitdir"]) {
+    assert.doesNotMatch(text, NEVER_TEXT, text);
+  }
+});
+
+// The guard sits in front of every Bash call. The text gate put an optional `\S*/` in front of every pattern led by `**/` and ran it from every position of a word: a 4 KB word of `.git/modules/` took seconds. The check is
+// linear in the word now, and NEVER_TEXT is no longer than it was before the worktree twins, which fold their alternatives into one pattern each.
+test("self-protect: NEVER_TEXT, namesProtected and heldNever answer a 4 KB single word in under 150 ms, and NEVER_TEXT does not grow (ARCH-SAFETY-03, ARCH-SAFETY-13)", () => {
+  const words = {
+    "letters": "a".repeat(4096), "slashes": "/".repeat(4096), "dots": ".".repeat(4096), "a/ pairs": "a/".repeat(2048), "dotdot": "../".repeat(1365),
+    "a run of .git/": ".git/".repeat(819), "a run of .git/modules/": ".git/modules/".repeat(315), "a run of .git/worktrees/x/": ".git/worktrees/x/".repeat(240),
+    "a run of .git/worktrees/wt/modules/sub/": ".git/worktrees/wt/modules/sub/".repeat(136), "a run of .git/modules/sub/worktrees/x/": ".git/modules/sub/worktrees/x/".repeat(141),
+    "a run of .craftsman/sessions/s/": ".craftsman/sessions/s/".repeat(186), "a run of .git/worktrees/wt/modules/sub/worktrees/x/": ".git/worktrees/wt/modules/sub/worktrees/x/".repeat(98),
+  };
+  const best = (fn) => {
+    let ms = Infinity;
+    for (let again = 0; again < 3; again++) { const started = process.hrtime.bigint(); fn(); ms = Math.min(ms, Number(process.hrtime.bigint() - started) / 1e6); }
+    return ms;
+  };
+  const slow = [];
+  for (const [what, word] of Object.entries(words)) {
+    assert.ok(!/\s/.test(word) && word.length >= 4000 && word.length <= 4200, `${what}: one 4 KB word`);
+    for (const [name, fn] of [["NEVER_TEXT", () => NEVER_TEXT.test(word)], ["namesProtected", () => namesProtected(word)], ["heldNever", () => heldNever(word)]]) {
+      const ms = best(fn);
+      if (ms >= 150) slow.push(`${name} on ${what}: ${ms.toFixed(0)} ms`);
+    }
+  }
+  assert.deepEqual(slow, [], "a word answered in 150 ms or more at its best of three runs");
+  assert.ok(NEVER_TEXT.source.length <= 1168, `NEVER_TEXT is ${NEVER_TEXT.source.length} characters, which is more than the 1168 it had before the worktree twins: fold alternatives into one pattern`);
 });

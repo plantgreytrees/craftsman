@@ -67,6 +67,52 @@ const manifest = (sid, unit, write, worktree) => ({
 });
 const edit = (sid, file) => ({ session_id: sid, tool_name: "Write", tool_input: { file_path: file, content: "x" } });
 
+// scrutinise-sandbox-auto-flow 1.3: activeScopes is the live-manifest list readScope resolves from, in file-name order, so an
+// ambiguous scope resolves the same way on every run and pre-guard can judge a target against every scope at once.
+function inChild(root, js) {
+  const code = `import { activeScopes, readScope } from ${JSON.stringify(new URL("./scope.mjs", import.meta.url).href)};\n${js}`;
+  const got = spawnSync(process.execPath, ["--input-type=module", "-e", code], { cwd: root, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: root } });
+  assert.equal(got.status, 0, got.stderr);
+  return JSON.parse(got.stdout);
+}
+
+test("scope: activeScopes lists every live manifest in file-name order and drops one whose worktree is gone", () => {
+  const { root, trees: [a, b, c] } = repoWithWorktrees("unit-a", "unit-b", "unit-c");
+  try {
+    for (const [tree, unit] of [[a, "unit-a"], [b, "unit-b"], [c, "unit-c"]]) assert.equal(hook("scope.mjs", tree, root, manifest("s6", unit, [`${unit}.txt`], tree)).status, 0);
+    const dir = path.join(root, ".craftsman", "sessions", "s6");
+    const byName = fs.readdirSync(dir).filter((n) => /^scope.*\.json$/.test(n)).sort().map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")).unit);
+    assert.equal(byName.length, 3);
+    assert.deepEqual(inChild(root, `console.log(JSON.stringify(activeScopes({ session_id: "s6" }).map((s) => s.unit)));`), byName);
+    spawnSync("git", ["worktree", "remove", c], { cwd: root });
+    assert.deepEqual(inChild(root, `console.log(JSON.stringify(activeScopes({ session_id: "s6" }).map((s) => s.unit)));`), byName.filter((u) => u !== "unit-c"));
+    assert.deepEqual(inChild(root, `console.log(JSON.stringify(activeScopes({ session_id: "nobody" })));`), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("scope: readScope resolves as before for none, one and several non-ambiguous scopes, and by file name when ambiguous", () => {
+  const { root, trees: [a, b] } = repoWithWorktrees("unit-a", "unit-b");
+  try {
+    const resolve = (sid, file) => inChild(root, `const s = readScope({ session_id: ${JSON.stringify(sid)}, tool_input: { file_path: ${JSON.stringify(file)} } }); console.log(JSON.stringify(s && { unit: s.unit, ambiguous: s.scope_ambiguous === true }));`);
+    assert.equal(resolve("none", path.join(root, "x.txt")), null, "no scope");
+    assert.equal(hook("scope.mjs", a, root, manifest("s7", "unit-a", ["a.txt"], a)).status, 0);
+    assert.deepEqual(resolve("s7", path.join(root, "x.txt")), { unit: "unit-a", ambiguous: false }, "a lone scope is the scope, wherever the target is");
+    assert.equal(hook("scope.mjs", b, root, manifest("s7", "unit-b", ["b.txt"], b)).status, 0);
+    assert.deepEqual(resolve("s7", path.join(b, "b.txt")), { unit: "unit-b", ambiguous: false }, "the scope whose root holds the target");
+    assert.equal(hook("scope.mjs", root, root, manifest("s7", "unit-session", ["s.txt"])).status, 0);
+    assert.deepEqual(resolve("s7", path.join(root, "x.txt")), { unit: "unit-session", ambiguous: false }, "the lone session scope when no unit root holds the target");
+    // two unit scopes and no session scope: ambiguous, and the one reported is the first by file name, not by readdir order
+    const { root: other, trees: [c, d] } = repoWithWorktrees("unit-c", "unit-d");
+    try {
+      for (const [tree, unit] of [[c, "unit-c"], [d, "unit-d"]]) assert.equal(hook("scope.mjs", tree, other, manifest("s8", unit, [`${unit}.txt`], tree)).status, 0);
+      const dir = path.join(other, ".craftsman", "sessions", "s8");
+      const first = JSON.parse(fs.readFileSync(path.join(dir, fs.readdirSync(dir).filter((n) => /^scope.*\.json$/.test(n)).sort()[0]), "utf8")).unit;
+      const got = inChild(other, `const s = readScope({ session_id: "s8", tool_input: { file_path: ${JSON.stringify(path.join(other, "x.txt"))} } }); console.log(JSON.stringify({ unit: s.unit, ambiguous: s.scope_ambiguous === true }));`);
+      assert.deepEqual(got, { unit: first, ambiguous: true });
+    } finally { fs.rmSync(other, { recursive: true, force: true }); }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("scope: two worktrees hold two independent scopes in one session", () => {
   const { root, trees: [a, b] } = repoWithWorktrees("unit-a", "unit-b");
   try {
@@ -214,4 +260,69 @@ test("scope.mjs: a write entry that reaches a self-scoped file through a symlink
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Release refuses a worktree with uncommitted work (a wip: commit comes first).
+test("scope: release refuses a dirty worktree and succeeds once committed", () => {
+  const { root, trees: [w] } = repoWithWorktrees("dirty");
+  const dir = path.join(root, ".craftsman", "sessions", "s6");
+  const names = () => fs.readdirSync(dir);
+  const release = (tree = w) => hook("scope.mjs", root, root, { action: "release", session_id: "s6", project: ".", worktree_path: tree });
+  const commit = (msg) => spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", msg], { cwd: w });
+  try {
+    assert.equal(hook("scope.mjs", w, root, manifest("s6", "unit-a", ["a.txt"], w)).status, 0);
+    fs.writeFileSync(path.join(w, "tracked.txt"), "1\n");
+    spawnSync("git", ["add", "tracked.txt"], { cwd: w });
+    commit("t");
+    fs.writeFileSync(path.join(w, "tracked.txt"), "2\n");
+    const before = names().sort();
+    assert.ok(before.some((n) => n.startsWith("scope")), "scope file exists");
+    let result = release();
+    assert.equal(result.status, 2, "modified tracked file");
+    assert.ok(result.stderr.includes(w) && /uncommitted changes/.test(result.stderr), result.stderr);
+    assert.deepEqual(names().sort(), before, "nothing removed");
+    spawnSync("git", ["checkout", "--", "tracked.txt"], { cwd: w });
+    fs.writeFileSync(path.join(w, "new.txt"), "x\n");
+    result = release();
+    assert.equal(result.status, 2, "untracked file");
+    assert.deepEqual(names().sort(), before);
+    spawnSync("git", ["add", "new.txt"], { cwd: w });
+    commit("wip: t");
+    assert.equal(release().status, 0);
+    assert.equal(names().filter((n) => n.startsWith("scope")).length, 0, "scope gone");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("scope: release ignores gitignored files, a swept worktree; fails closed on a non-repo", () => {
+  const { root, trees: [w] } = repoWithWorktrees("ign");
+  const release = (tree) => hook("scope.mjs", root, root, { action: "release", session_id: "s7", project: ".", worktree_path: tree });
+  try {
+    fs.appendFileSync(path.join(root, ".git", "info", "exclude"), "junk.log\n");
+    fs.writeFileSync(path.join(w, "junk.log"), "x\n");
+    assert.equal(release(w).status, 0, "only a gitignored file");
+    spawnSync("git", ["worktree", "remove", "--force", w], { cwd: root });
+    assert.equal(release(w).status, 0, "swept worktree");
+    const plain = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plain-"));
+    try { assert.equal(release(plain).status, 2, "not a git repo"); } finally { fs.rmSync(plain, { recursive: true, force: true }); }
+    assert.equal(hook("scope.mjs", root, root, { action: "release", session_id: "s7", project: "." }).status, 0, "no worktree_path");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("scope: release on an unreadable worktree names git worktree prune, not a dirty tree", () => {
+  const { root, trees: [w] } = repoWithWorktrees("unread");
+  const release = (tree) => hook("scope.mjs", root, root, { action: "release", session_id: "s8", project: ".", worktree_path: tree });
+  const names = () => fs.readdirSync(path.join(root, ".craftsman", "sessions", "s8")).sort();
+  try {
+    assert.equal(hook("scope.mjs", w, root, manifest("s8", "unit-a", ["a.txt"], w)).status, 0);
+    const before = names();
+    fs.writeFileSync(path.join(w, ".git"), "gitdir: /nonexistent/nowhere\n");
+    const result = release(w);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /is not a readable git worktree/);
+    assert.match(result.stderr, /remove it, run `git worktree prune`, and release again/);
+    assert.doesNotMatch(result.stderr, /fatal:|uncommitted changes/);
+    assert.deepEqual(names(), before, "scope and binding remain");
+    const evs = fs.readFileSync(path.join(root, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.ok(evs.some((e) => e.ev === "scope_release_refused" && e.sid === "s8"), "refused event carries sid");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -10,8 +10,8 @@ import { sidOf } from "./lib/core.mjs";
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const GUARD = path.join(ROOT, "orchestrate-scope-guard.mjs");
 
-function run(dir, input) {
-  return spawnSync(process.execPath, [GUARD], {
+function run(dir, input, script = GUARD) {
+  return spawnSync(process.execPath, [script], {
     cwd: dir,
     input: JSON.stringify(input),
     encoding: "utf8",
@@ -147,8 +147,8 @@ test("orchestrate-scope-guard: a different command that merely starts with the s
   }
 });
 
-// ARCH-AUTO-06: /auto is treated like /orchestrate — scope-required, acceptance
-// ownership — and also arms the auto-active marker pre-guard reads (LAND-05).
+// ARCH-AUTO-10: /auto does not arm scope-required (Phase A writes docs); it keeps
+// acceptance ownership and arms the auto-active marker pre-guard reads (LAND-05).
 const autoPayloads = {
   typed: { session_id: "auto-typed", prompt: "/auto autonomous-e2e-loop" },
   namespaced: { session_id: "auto-ns", prompt: "/craftsman:auto autonomous-e2e-loop" },
@@ -156,19 +156,49 @@ const autoPayloads = {
   "skill-command-field": { session_id: "auto-command", tool_name: "Skill", tool_input: { command: "/craftsman:auto autonomous-e2e-loop" } },
 };
 for (const [shape, input] of Object.entries(autoPayloads)) {
-  test(`orchestrate-scope-guard: /auto (${shape}) arms scope-required, acceptance ownership and auto-active`, () => {
+  test(`orchestrate-scope-guard: /auto (${shape}) leaves scope-required unset but arms acceptance ownership, auto-active and runner grants`, () => {
     const dir = tmpProject();
     try {
       fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
       fs.writeFileSync(path.join(dir, ".craftsman", "acceptance.md"), "- [ ] [unit:u1] it works\n");
       assert.equal(run(dir, input).status, 0);
       const session = path.join(dir, ".craftsman", "sessions", sidOf(input));
-      assert.equal(fs.existsSync(requiredFile(dir, input)), true, "scope-required armed");
+      assert.equal(fs.existsSync(requiredFile(dir, input)), false, "scope-required not armed by /auto");
       assert.equal(fs.existsSync(path.join(session, "acceptance.ref")), true, "acceptance adopted");
       assert.equal(fs.existsSync(path.join(session, "auto-active")), true, "auto-active armed");
+      assert.ok(fs.readdirSync(session).some((f) => /grant|runner/i.test(f)), "runners granted");
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test("orchestrate-scope-guard: a following /orchestrate after /auto writes scope-required (ARCH-AUTO-10)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "auto-then-orch";
+    assert.equal(run(dir, { session_id: sid, prompt: "/auto some-slug" }).status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, { session_id: sid })), false);
+    assert.equal(run(dir, { session_id: sid, prompt: "/orchestrate some-slug" }).status, 0);
+    assert.equal(fs.existsSync(requiredFile(dir, { session_id: sid })), true);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: with /auto active, a docs edit passes pre-guard before any /orchestrate (ARCH-AUTO-10)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "auto-docs";
+    assert.equal(run(dir, { session_id: sid, prompt: "/auto some-slug" }).status, 0);
+    // /auto's Phase A runs /plan, which opens the doc-write gate (ARCH-SAFETY-05).
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: dir, CLAUDE_CODE_SESSION_ID: sid };
+    const go = (script, input) => spawnSync(process.execPath, [path.join(ROOT, script)], { cwd: dir, input: JSON.stringify(input), encoding: "utf8", env });
+    assert.equal(go("orchestrate-scope-guard.mjs", { session_id: sid, prompt: "/craftsman:plan some-slug" }).status, 0);
+    assert.equal(go("pre-guard.mjs", { session_id: sid, tool_name: "Bash", tool_input: { command: `node ${path.join(ROOT, "doc-write.mjs")} on` } }).status, 0);
+    assert.equal(go("doc-write.mjs", {}).status, 0);
+    for (const tool_name of ["Write", "Edit"]) {
+      const pre = go("pre-guard.mjs", { session_id: sid, tool_name, tool_input: { file_path: path.join(dir, "docs", "plans", "x.md"), content: "x" } });
+      assert.equal(pre.status, 0, pre.stderr);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("orchestrate-scope-guard: a prompt that merely mentions /auto, or /automate, arms nothing", () => {
   const dir = tmpProject();
@@ -333,4 +363,150 @@ test("orchestrate-scope-guard: /instruction is recorded too, which is what lets 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ARCH-AUTO-11: the scope-required marker belongs to the /orchestrate run that armed it. A craftsman
+// command the user types ends it (the marker and the session scope), a model's Skill call never does.
+const WORKTREE_HASH = "0123456789abcdef"; // a worktree hash: sha1(worktree).slice(0, 16)
+const ENDING_COMMANDS = ["plan", "sync-docs", "idea", "architect", "scrutinise", "instruction", "toggle", "builtin-check"];
+const sessionState = (dir, sid) => path.join(dir, ".craftsman", "sessions", sid);
+function seedSession(dir, sid) {
+  const session = sessionState(dir, sid);
+  fs.mkdirSync(session, { recursive: true });
+  fs.writeFileSync(path.join(session, "scope.json"), JSON.stringify({ plan: "p", unit: "u", scope: { read: [], docs: [], write: [] } }));
+  fs.writeFileSync(path.join(session, "scope-required"), "2026-11-02T00:00:00.000Z\n");
+}
+const sessionHeld = (dir, sid) => ({
+  marker: fs.existsSync(path.join(sessionState(dir, sid), "scope-required")),
+  scope: fs.existsSync(path.join(sessionState(dir, sid), "scope.json")),
+});
+// A unit's own files, keyed by its worktree: a scope, its scope-required marker, and its binding
+// (the binding lives under the git common dir, which is .git in a plain checkout).
+function worktreeKeyed(dir, sid) {
+  return [
+    path.join(sessionState(dir, sid), `scope-${WORKTREE_HASH}.json`),
+    path.join(sessionState(dir, sid), `scope-required-${WORKTREE_HASH}`),
+    path.join(sessionState(dir, sid), `${WORKTREE_HASH}-worktree-binding.json`),
+    path.join(dir, ".git", ".craftsman", "sessions", sid, `${WORKTREE_HASH}-worktree-binding.json`),
+  ];
+}
+function seedWorktreeKeyed(dir, sid) {
+  for (const file of worktreeKeyed(dir, sid)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ session_id: sid, worktree_path: "/tmp/w" }));
+  }
+}
+const typed = (name, form = "bare") => `/${form === "namespaced" ? "craftsman:" : ""}${name} some-slug`;
+
+for (const name of ENDING_COMMANDS) {
+  test(`orchestrate-scope-guard: a typed /${name} removes the session-level scope-required marker and scope (ARCH-AUTO-11)`, () => {
+    const dir = tmpProject();
+    try {
+      const sid = `end-${name}`;
+      for (const form of ["bare", "namespaced"]) {
+        seedSession(dir, sid);
+        const r = run(dir, { session_id: sid, hook_event_name: "UserPromptSubmit", prompt: typed(name, form) });
+        assert.equal(r.status, 0, r.stderr);
+        assert.deepEqual(sessionHeld(dir, sid), { marker: false, scope: false }, `${form} form`);
+      }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test(`orchestrate-scope-guard: the same /${name} as a Skill call removes neither (ARCH-AUTO-11)`, () => {
+    const dir = tmpProject();
+    try {
+      const sid = `skill-${name}`;
+      seedSession(dir, sid);
+      for (const tool_input of [{ skill: `craftsman:${name}`, args: "some-slug" }, { skill: name }, { command: typed(name, "namespaced") }]) {
+        const r = run(dir, { session_id: sid, hook_event_name: "PostToolUse", tool_name: "Skill", tool_input });
+        assert.equal(r.status, 0, r.stderr);
+        assert.deepEqual(sessionHeld(dir, sid), { marker: true, scope: true }, JSON.stringify(tool_input));
+      }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+test("orchestrate-scope-guard: a Skill payload that also carries a prompt is still a model's call and clears nothing (ARCH-AUTO-11)", () => {
+  const dir = tmpProject();
+  try {
+    seedSession(dir, "skill-and-prompt");
+    const r = run(dir, { session_id: "skill-and-prompt", tool_name: "Skill", tool_input: { skill: "craftsman:plan" }, prompt: "/plan x" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(sessionHeld(dir, "skill-and-prompt"), { marker: true, scope: true });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: a typed /orchestrate re-arms and keeps the scope; a typed /auto touches nothing (ARCH-AUTO-11)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "orch-auto";
+    seedSession(dir, sid);
+    fs.rmSync(path.join(sessionState(dir, sid), "scope-required"));
+    assert.equal(run(dir, { session_id: sid, prompt: "/orchestrate some-slug" }).status, 0);
+    assert.deepEqual(sessionHeld(dir, sid), { marker: true, scope: true }, "orchestrate arms the marker and leaves the scope");
+    assert.equal(run(dir, { session_id: sid, prompt: "/craftsman:orchestrate some-slug" }).status, 0);
+    assert.deepEqual(sessionHeld(dir, sid), { marker: true, scope: true });
+
+    seedSession(dir, "auto-only");
+    assert.equal(run(dir, { session_id: "auto-only", prompt: "/auto some-slug" }).status, 0);
+    assert.deepEqual(sessionHeld(dir, "auto-only"), { marker: true, scope: true }, "auto neither arms nor clears");
+    assert.equal(run(dir, { session_id: "auto-none", prompt: "/auto some-slug" }).status, 0);
+    assert.equal(sessionHeld(dir, "auto-none").marker, false, "auto arms nothing");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: while an /auto run is active a typed command removes nothing (ARCH-AUTO-11, ARCH-AUTO-10)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "auto-live";
+    assert.equal(run(dir, { session_id: sid, prompt: "/auto some-slug" }).status, 0);
+    assert.equal(fs.existsSync(path.join(sessionState(dir, sid), "auto-active")), true);
+    seedSession(dir, sid);
+    for (const name of ENDING_COMMANDS) {
+      assert.equal(run(dir, { session_id: sid, prompt: typed(name) }).status, 0);
+      assert.deepEqual(sessionHeld(dir, sid), { marker: true, scope: true }, `/${name} during /auto`);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: a finished /auto run no longer protects the marker, only an active one does (ARCH-AUTO-11)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "auto-done";
+    assert.equal(run(dir, { session_id: sid, prompt: "/auto some-slug" }).status, 0);
+    // every row of the run's plan has landed: the auto-active file is still there, autoActive is false
+    fs.mkdirSync(path.join(dir, ".craftsman", "tracker"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".craftsman", "tracker", "events.jsonl"), JSON.stringify({ key: "k", plan: "some-slug", unit: "u", status: "COMPLETE" }) + "\n");
+    seedSession(dir, sid);
+    assert.equal(run(dir, { session_id: sid, prompt: typed("plan") }).status, 0);
+    assert.deepEqual(sessionHeld(dir, sid), { marker: false, scope: false });
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: a typed command never removes a worktree-keyed scope, binding or marker, nor another session's (ARCH-AUTO-11, ARCH-STATE-03)", () => {
+  const dir = tmpProject();
+  try {
+    const sid = "keyed";
+    seedSession(dir, sid);
+    seedWorktreeKeyed(dir, sid);
+    seedSession(dir, "other-session");
+    assert.equal(run(dir, { session_id: sid, prompt: typed("plan") }).status, 0);
+    assert.deepEqual(sessionHeld(dir, sid), { marker: false, scope: false }, "the session-level pair goes");
+    for (const file of worktreeKeyed(dir, sid)) assert.equal(fs.existsSync(file), true, `${path.basename(file)} stays`);
+    assert.deepEqual(sessionHeld(dir, "other-session"), { marker: true, scope: true }, "another session is not touched");
+    // with no session-level pair at all the keyed files still stay
+    assert.equal(run(dir, { session_id: sid, prompt: typed("architect") }).status, 0);
+    for (const file of worktreeKeyed(dir, sid)) assert.equal(fs.existsSync(file), true, `${path.basename(file)} stays`);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("orchestrate-scope-guard: a prompt that only mentions a command, or names an unrecognised one, removes nothing (ARCH-AUTO-11)", () => {
+  const dir = tmpProject();
+  try {
+    seedSession(dir, "mention-end");
+    for (const prompt of ["why did /plan block my edit?", "/planning", "/craftsman:plan-deep x", "/craftsman:merge", "/automate", "just a sentence"]) {
+      assert.equal(run(dir, { session_id: "mention-end", prompt }).status, 0);
+      assert.deepEqual(sessionHeld(dir, "mention-end"), { marker: true, scope: true }, prompt);
+    }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

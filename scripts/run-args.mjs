@@ -8,7 +8,7 @@
 //   out: {"runs":[{"project","units":[…],"args":{…}}],"warnings":[…]}
 import fs from "node:fs";
 import path from "node:path";
-import { PLUGIN_ROOT, PROJECT_ROOT, acceptanceCriteria, loadConfig, loadWorkspaceManifest, mainCheckoutRoot, readStdin } from "./lib/core.mjs";
+import { PLUGIN_ROOT, PROJECT_ROOT, acceptanceCriteria, isMain, loadConfig, loadWorkspaceManifest, mainCheckoutRoot, readStdin } from "./lib/core.mjs";
 import { loadIndex, parseFrontmatter } from "./lib/plan-index.mjs";
 import { orderSteps, tagFeatures } from "./plan-graph.mjs";
 
@@ -87,7 +87,7 @@ export function buildRunArgs({ root, plan, sessionId, config = {}, workspace = n
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     if (!input.plan || !input.session_id) throw new Error('input needs {"plan":"docs/plans/<slug>.md","session_id":"<id>"}');

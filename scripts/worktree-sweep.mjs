@@ -28,7 +28,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { projectContext, readStdin, loadConfig, mainCheckoutRoot, globToRe } from "./lib/core.mjs";
+import { projectContext, readStdin, loadConfig, mainCheckoutRoot, globToRe, isMain } from "./lib/core.mjs";
 
 function git(root, args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -193,7 +193,7 @@ export function sweep(root, { paths = [], all_merged = false, cwd = process.cwd(
   return { removed, skipped };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");

@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  acceptanceCriteria, acceptancePath, atomicWrite, mainCheckoutRoot, projectContext, readStdin,
+  acceptanceCriteria, acceptancePath, atomicWrite, isMain, mainCheckoutRoot, projectContext, readStdin,
 } from "./lib/core.mjs";
 
 export function planSlug(plan) {
@@ -74,7 +74,7 @@ export function syncRunManifest(context, plan, rows) {
   return { file, changed: true };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
     const context = projectContext(input.project || ".");

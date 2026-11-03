@@ -1,7 +1,16 @@
 // Committed-row-key guard shared by publish and sync (ARCH-TRACKER-13).
 import fs from "node:fs";
 import path from "node:path";
-import { generatedBlock } from "../tracker.mjs";
+
+// The generated-block markers live here, not in tracker.mjs, so this module needs no tracker import (no static cycle).
+export const BLOCK_BEGIN = "<!-- craftsman:ledger:begin -->";
+export const BLOCK_END = "<!-- craftsman:ledger:end -->";
+export const BLOCK_RE = new RegExp(`${BLOCK_BEGIN}[\\s\\S]*?${BLOCK_END}`);
+
+// The generated block inside `text`, or null when it has none.
+export function generatedBlock(text) {
+  return BLOCK_RE.exec(String(text))?.[0] ?? null;
+}
 
 function read(file) {
   try { return fs.readFileSync(file, "utf8"); } catch { return ""; }

@@ -2,7 +2,7 @@
 // Create or explicitly update a workspace manifest from caller-supplied roots.
 import fs from "node:fs";
 import path from "node:path";
-import { atomicWrite, isGitRoot, loadWorkspaceManifest, readStdin, workspaceManifestPath } from "./lib/core.mjs";
+import { atomicWrite, isGitRoot, loadWorkspaceManifest, readStdin, workspaceManifestPath, isMain } from "./lib/core.mjs";
 
 function validateInput(input) {
   if (!input || typeof input !== "object" || !input.projects || typeof input.projects !== "object") {
@@ -22,12 +22,17 @@ function validateInput(input) {
 
 export function buildManifest(input, existing = null) {
   validateInput(input);
-  const projects = { ...(existing?.projects || {}) };
+  // existing comes from loadWorkspaceManifest(), whose root is an absolute realpath;
+  // write back only the declared relative root so an update never corrupts entries.
+  const projects = {};
+  for (const [id, entry] of Object.entries(existing?.projects || {})) {
+    projects[id] = { root: entry.declaredRoot ?? entry.root };
+  }
   for (const [id, root] of Object.entries(input.projects)) projects[id] = { root };
   return { version: 1, projects };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   try {
     const input = validateInput(JSON.parse(await readStdin() || "{}"));
     const file = input.manifest_path ? path.resolve(input.manifest_path) : workspaceManifestPath();
@@ -42,6 +47,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const workspaceRoot = fs.realpathSync(path.dirname(file));
     const roots = new Set();
     for (const [id, entry] of Object.entries(manifest.projects)) {
+      if (path.isAbsolute(entry.root)) throw new Error(`project ${id} needs a relative root`);
       const root = fs.realpathSync(path.resolve(workspaceRoot, entry.root));
       if (root !== workspaceRoot && !root.startsWith(workspaceRoot + path.sep)) {
         throw new Error(`project escapes workspace root: ${id}`);

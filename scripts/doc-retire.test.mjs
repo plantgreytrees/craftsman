@@ -5,8 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { grantValid, retire, retireCheck } from "./doc-retire.mjs";
+import { findReferrers, grantValid, landingCapability, retire, retireCheck } from "./doc-retire.mjs";
+import { resolveArchive as resolveArchiveReal } from "./lib/archive.mjs";
 import { loadIndex } from "./lib/plan-index.mjs";
+import { classifyArchive } from "./lib/archive.mjs";
 import { archivePath, ledgerPath, lookupArchive, transition } from "./tracker.mjs";
 
 const fixtures = new Set();
@@ -20,9 +22,10 @@ const PLAN = "docs/plans/alpha.md";
 const SIB = "docs/plans/scrutinise-alpha.md";
 
 // A real temp git repo: a plan, a closed sibling citing it, and COMPLETE ledger rows.
-function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", files = {}, goal = "Ship alpha" } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-"));
+function repo({ grant = true, sibStatus = "COMPLETE", planStatus = "COMPLETE", files = {}, goal = "Ship alpha", dirName = null } = {}) {
+  let root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-"));
   fixtures.add(root);
+  if (dirName) { root = path.join(root, dirName); fs.mkdirSync(root); }
   run(root, "init", "-q");
   run(root, "config", "user.email", "t@example.com");
   run(root, "config", "user.name", "t");
@@ -665,9 +668,366 @@ test("retireCheck lists referrers for a cited plan and none for an uncited one, 
   assert.ok(fs.existsSync(path.join(root, PLAN)));
 });
 
+test("retireCheck agrees with classifyArchive: the plan's own rollup and sibling are not referrers (ARCH-VIEWS-15)", () => {
+  const root = repo({ files: { "docs/plans/alpha/TRACKER.md": "rollup docs/plans/alpha.md\n", "docs/guide.md": "see docs/plans/alpha.md\n" } }).root;
+  const { referrers } = retireCheck([PLAN], root)[0];
+  assert.ok(referrers.includes("docs/guide.md"));
+  assert.ok(!referrers.includes("docs/plans/alpha/TRACKER.md"));
+  assert.ok(!referrers.includes(SIB));
+  assert.deepEqual(referrers, classifyArchive({ root }, PLAN, { slug: "alpha", archive: {} }).hits);
+});
+
 test("retireCheck never throws: an unreadable root returns an empty list and a reason", () => {
   const result = retireCheck([PLAN], path.join(os.tmpdir(), "craftsman-no-such-root-xyz"));
   assert.deepEqual(result[0].referrers, []);
   assert.match(result[0].reason, /scan failed/);
   assert.doesNotThrow(() => retireCheck(null, undefined));
+});
+
+// --- retire-copy: archive copy, NEXT.md, findReferrers ---
+function withArchive(fn) {
+  const ws = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-retire-ws-")));
+  fixtures.add(ws);
+  const archive = path.join(ws, "archive");
+  fs.mkdirSync(archive);
+  run(archive, "init", "-q");
+  run(archive, "config", "user.email", "t@example.com");
+  run(archive, "config", "user.name", "t");
+  run(archive, "config", "commit.gpgsign", "false");
+  const file = path.join(ws, "craftsman.workspace.json");
+  fs.writeFileSync(file, JSON.stringify({ version: 1, projects: { archive: { root: "archive" } } }));
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = file;
+  try { return fn(archive); } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
+}
+const noManifest = (fn) => {
+  const prev = process.env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  process.env.CRAFTSMAN_WORKSPACE_MANIFEST = path.join(os.tmpdir(), "craftsman-none-xyz", "craftsman.workspace.json");
+  try { return fn(); } finally { if (prev === undefined) delete process.env.CRAFTSMAN_WORKSPACE_MANIFEST; else process.env.CRAFTSMAN_WORKSPACE_MANIFEST = prev; }
+};
+
+test("findReferrers: classifies by referrer kind, with and without an archive project; NEXT.md ignored", () => {
+  const files = {
+    "docs/architecture/x.rules.md": "- **ARCH-X-01** cite: docs/plans/alpha.md\n",
+    "scripts/x.test.mjs": "// docs/plans/alpha.md\n",
+    "NOTES.md": "docs/plans/alpha.md\n",
+    "docs/plans/other.md": "related: alpha\n",
+    "docs/ideas/idea.md": "docs/plans/alpha.md\n",
+    "docs/plans/NEXT.md": "- docs/plans/alpha.md\n",
+  };
+  const context = repo({ files });
+  const blockingKinds = ["NOTES.md", "docs/architecture/x.rules.md", "scripts/x.test.mjs"];
+  const withoutArchive = noManifest(() => findReferrers(context, PLAN, "alpha"));
+  assert.ok(!withoutArchive.hits.includes("docs/plans/NEXT.md"));
+  assert.deepEqual(withoutArchive.rewritable, []);
+  assert.deepEqual(withoutArchive.blocking, withoutArchive.hits);
+  for (const f of [...blockingKinds, "docs/plans/other.md", "docs/ideas/idea.md"]) assert.ok(withoutArchive.blocking.includes(f), f);
+  const before = run(context.root, "status", "--porcelain");
+  const withArchiveOut = withArchive(() => findReferrers(context, PLAN, "alpha"));
+  assert.deepEqual(withArchiveOut.rewritable.slice().sort(), ["docs/ideas/idea.md", "docs/plans/alpha.md", "docs/plans/other.md", "docs/plans/scrutinise-alpha.md"]);
+  assert.deepEqual(withArchiveOut.blocking.sort(), blockingKinds);
+  assert.equal(run(context.root, "status", "--porcelain"), before);
+});
+
+test("doc-retire: NEXT.md is never a referrer and the retired plan line leaves in the retire commit", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n\n1. alpha — first\n2. scrutinise-alpha — sibling\n3. beta — second\n\nnotes about alpha stay\n" } }));
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n\n3. beta — second\n\nnotes about alpha stay\n");
+  assert.ok(run(context.root, "show", "--name-only", "--format=", "HEAD").includes("docs/plans/NEXT.md"));
+});
+
+test("doc-retire: a NEXT.md line that only mentions the slug as a word is kept", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n1. alpha — first\n2. beta — after alpha\n" } }));
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n2. beta — after alpha\n");
+});
+
+test("doc-retire: with an archive project the docs are copied first, the heading carries archive <sha>, the event too", () => {
+  const context = repo();
+  withArchive((archive) => {
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    const asha = run(archive, "rev-parse", "HEAD").trim();
+    const slugDir = fs.readdirSync(archive).find((d) => !d.startsWith("."));
+    assert.ok(fs.existsSync(path.join(archive, slugDir, "plans/alpha", PLAN)));
+    assert.ok(fs.existsSync(path.join(archive, slugDir, "plans/alpha", SIB)));
+    const text = fs.readFileSync(archivePath(context), "utf8");
+    assert.equal(text.split("\n").filter((l) => l.endsWith(` · archive ${asha}`)).length, 2);
+    assert.equal(lookupArchive({ plan: PLAN }, context).archive, asha);
+    assert.equal(events(context).find((e) => e.ev === "doc_retired").archive, asha);
+  });
+});
+
+test("doc-retire: a failed archive copy leaves every doc, the ledger and TRACKER-archive.md untouched", () => {
+  const context = repo();
+  withArchive((archive) => {
+    const slugDir = path.basename(fs.realpathSync(context.root));
+    const clash = path.join(archive, slugDir, "plans/alpha", PLAN);
+    fs.mkdirSync(path.dirname(clash), { recursive: true });
+    fs.writeFileSync(clash, "different\n");
+    const before = snapshot(context);
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.refused, true);
+    assert.match(out.reason, /archive copy failed/);
+    assert.deepEqual(snapshot(context), before);
+    assert.ok(fs.existsSync(path.join(context.root, PLAN)) && fs.existsSync(path.join(context.root, SIB)));
+    assert.equal(fs.existsSync(archivePath(context)), false);
+  });
+});
+
+test("doc-retire: without an archive project the event has no archive field and headings no archive sha", () => {
+  const context = repo();
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN);
+  assert.ok(!("archive" in events(context).find((e) => e.ev === "doc_retired")));
+  assert.ok(!/ · archive /.test(fs.readFileSync(archivePath(context), "utf8")));
+});
+
+// --- retire-rewrite: dry run, digest-confirmed rewrite, rollback, events ---
+const PROSE = { "docs/plans/other.md": "# other\nline two\nsee docs/plans/alpha.md here\n", "docs/ideas/idea.md": "related: alpha\n" };
+const tree = (context) => Object.fromEntries(Object.keys(PROSE).map((f) => [f, fs.readFileSync(path.join(context.root, f), "utf8")]));
+
+test("doc-retire rewrite: dry run lists each line with a pending pointer and writes nothing", () => {
+  const context = repo({ files: PROSE });
+  withArchive((archive) => {
+    const before = { snap: snapshot(context), files: tree(context), archive: fs.readdirSync(archive) };
+    const out = retire({ plan: PLAN, dry_run: true }, context);
+    assert.equal(out.dry_run, true, JSON.stringify(out));
+    assert.equal(out.rewrites.length, 2);
+    const other = out.rewrites.find((r) => r.file === "docs/plans/other.md");
+    assert.equal(other.line, 3);
+    assert.equal(other.before, "see docs/plans/alpha.md here");
+    assert.match(other.after, /^see archive:[^/]+\/plans\/alpha@pending here$/);
+    assert.match(out.rewrites.find((r) => r.file === "docs/ideas/idea.md").after, /^related: archive:.+\/plans\/alpha@pending$/);
+    assert.deepEqual(snapshot(context), before.snap);
+    assert.deepEqual(tree(context), before.files);
+    assert.deepEqual(fs.readdirSync(archive), before.archive);
+  });
+});
+
+test("doc-retire rewrite: a missing digest refuses and lists the referrers, changing nothing", () => {
+  const context = repo({ files: PROSE });
+  withArchive(() => {
+    const before = snapshot(context);
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.refused, true);
+    assert.deepEqual(out.referrers, ["docs/ideas/idea.md", "docs/plans/other.md"]);
+    assert.deepEqual(snapshot(context), before);
+    assert.deepEqual(tree(context), PROSE);
+  });
+});
+
+test("doc-retire rewrite: a stale digest refuses", () => {
+  const context = repo({ files: PROSE });
+  withArchive(() => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    fs.writeFileSync(path.join(context.root, "docs/ideas/idea.md"), "related: alpha, extra\n");
+    run(context.root, "commit", "-qam", "edit");
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.refused, true);
+    assert.match(out.reason, /stale/);
+    assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+  });
+});
+
+test("doc-retire rewrite: the matching digest rewrites to the archive sha in the removal commit and logs events", () => {
+  const context = repo({ files: PROSE });
+  withArchive((archive) => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    const asha = run(archive, "rev-parse", "HEAD").trim();
+    const files = tree(context);
+    assert.match(files["docs/plans/other.md"], new RegExp(`see archive:[^/]+/plans/alpha@${asha} here`));
+    assert.match(files["docs/ideas/idea.md"], new RegExp(`related: archive:[^/]+/plans/alpha@${asha}\n`));
+    const changed = run(context.root, "show", "--name-only", "--format=", "HEAD");
+    assert.ok(changed.includes("docs/plans/other.md") && changed.includes("docs/ideas/idea.md") && changed.includes(PLAN));
+    assert.equal(run(context.root, "status", "--porcelain").trim(), "");
+    const logged = events(context).filter((e) => e.ev === "archive_rewrite");
+    assert.deepEqual(logged.map((e) => e.file).sort(), ["docs/ideas/idea.md", "docs/plans/other.md"]);
+    assert.ok(logged.every((e) => e.plan === PLAN));
+  });
+});
+
+test("doc-retire rewrite: a rule, test or top-level doc citation still refuses even with a digest", () => {
+  for (const [file, text] of [["docs/architecture/x.rules.md", "cite: docs/plans/alpha.md\n"], ["scripts/x.test.mjs", "// docs/plans/alpha.md\n"], ["NOTES.md", "docs/plans/alpha.md\n"]]) {
+    const context = repo({ files: { ...PROSE, [file]: text } });
+    withArchive(() => {
+      const dry = retire({ plan: PLAN, dry_run: true }, context);
+      assert.equal(dry.refused, true);
+      assert.ok(dry.referrers.includes(file));
+      const out = retire({ plan: PLAN, confirm_rewrites: "anything" }, context);
+      assert.equal(out.refused, true);
+      assert.ok(out.referrers.includes(file));
+      assert.deepEqual(tree(context), PROSE);
+    });
+  }
+});
+
+test("doc-retire rewrite: a failing commit restores every rewritten file", () => {
+  const context = repo({ files: PROSE });
+  withArchive(() => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    const hook = path.join(context.root, ".git", "hooks", "pre-commit");
+    fs.writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const before = snapshot(context);
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.refused, true);
+    assert.deepEqual(snapshot(context), before);
+    assert.deepEqual(tree(context), PROSE);
+    assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+    assert.equal(events(context).some((e) => e.ev === "archive_rewrite"), false);
+  });
+});
+
+test("doc-retire rewrite: a product id equal to the slug yields one pointer, not a pointer rewritten again", () => {
+  const context = repo({ files: PROSE, dirName: "alpha" });
+  withArchive((archive) => {
+    const { digest } = retire({ plan: PLAN, dry_run: true }, context);
+    const out = retire({ plan: PLAN, confirm_rewrites: digest }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    const asha = run(archive, "rev-parse", "HEAD").trim();
+    assert.match(tree(context)["docs/plans/other.md"], new RegExp(`^see archive:alpha/plans/alpha@${asha} here$`, "m"));
+    assert.equal((tree(context)["docs/plans/other.md"].match(/archive:/g) ?? []).length, 1);
+  });
+});
+
+test("doc-retire: a NEXT.md line for a retired sibling is removed and lookup of the sibling prints its archived path", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "1. scrutinise-alpha — look\n2. beta — keep\n" } }));
+  withArchive((archive) => {
+    const out = retire({ plan: PLAN }, context);
+    assert.equal(out.retired, PLAN, out.reason);
+    assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "2. beta — keep\n");
+    const hit = lookupArchive({ plan: "scrutinise-alpha" }, context);
+    const slugDir = fs.readdirSync(archive).find((d) => !d.startsWith("."));
+    assert.ok(hit.restoreCommand.endsWith(`show ${hit.archive}:${slugDir}/plans/alpha/${SIB}`), hit.restoreCommand);
+    assert.ok(fs.existsSync(path.join(archive, slugDir, "plans/alpha", SIB)));
+  });
+});
+
+test("doc-retire rewrite: a pointer written for one doc is never rewritten for a descendant whose slug is the product id (ARCH-DOCS-13)", () => {
+  const files = {
+    [PLAN]: EPIC, "docs/plans/beta.md": CHILD,
+    "docs/plans/alpha/TRACKER.md": "alpha rollup\n", "docs/plans/beta/TRACKER.md": "beta rollup\n",
+    "docs/plans/other.md": "# other\nsee alpha here\n",
+  };
+  const context = repo({ files, dirName: "beta" });
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  withArchive(() => {
+    const out = retire({ plan: PLAN, dry_run: true }, context);
+    assert.equal(out.dry_run, true, JSON.stringify(out));
+    const hit = out.rewrites.find((r) => r.file === "docs/plans/other.md");
+    assert.equal(hit.after, "see archive:beta/plans/alpha@pending here");
+    assert.equal((hit.after.match(/archive:/g) ?? []).length, 1);
+  });
+});
+
+const docRetiredEvents = (context) => (fs.existsSync(path.join(context.stateDir, "events.jsonl")) ? events(context) : []).filter((e) => e.ev === "doc_retired");
+
+test("doc-retire: a call carrying the landing capability needs no grant and logs exactly one doc_retired with auto true (ARCH-DOCS-18)", () => {
+  const auto = noManifest(() => repo({ grant: false }));
+  assert.equal(withArchive(() => retire({ plan: PLAN }, auto, landingCapability())).retired, PLAN);
+  const autoEvents = docRetiredEvents(auto);
+  assert.equal(autoEvents.length, 1);
+  assert.equal(autoEvents[0].auto, true);
+});
+
+test("doc-retire: a manual retire is never logged auto, even when it passes auto:true (ARCH-DOCS-18)", () => {
+  const manual = noManifest(() => repo());
+  assert.equal(noManifest(() => retire({ plan: PLAN, auto: true }, manual)).retired, PLAN);
+  const manualEvents = docRetiredEvents(manual);
+  assert.equal(manualEvents.length, 1);
+  assert.equal("auto" in manualEvents[0], false);
+});
+
+test("doc-retire: auto:true without the capability keeps the grant requirement and logs nothing (ARCH-DOCS-18)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  const before = snapshot(context);
+  for (const forged of [undefined, true, { landing: true }, Object.freeze({ landing: true }), "landing"]) {
+    const out = noManifest(() => retire({ plan: PLAN, sid: "s", auto: true }, context, forged));
+    assert.equal(out.refused, true, String(forged));
+    assert.match(out.reason, /no doc-write grant/);
+  }
+  assert.deepEqual(snapshot(context), before);
+  assert.equal(docRetiredEvents(context).length, 0);
+});
+
+test("doc-retire: auto:true through the CLI path without a grant is refused and logs no doc_retired with auto (ARCH-DOCS-18)", () => {
+  const context = repo({ grant: false });
+  const before = snapshot(context);
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: context.root, CLAUDE_CODE_SESSION_ID: "cli" };
+  delete env.CRAFTSMAN_WORKSPACE_MANIFEST;
+  const r = spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), "doc-retire.mjs")], {
+    cwd: context.root, env, input: JSON.stringify({ plan: PLAN, auto: true, sid: "cli", landed_sha: "abc" }), encoding: "utf8" });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stdout, /no doc-write grant/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)), "the plan doc is untouched");
+  assert.equal(docRetiredEvents(context).filter((e) => e.auto === true).length, 0);
+});
+
+test("doc-retire: the landing capability skips only the grant; every other refusal still applies", () => {
+  const context = noManifest(() => repo({ grant: false, sibStatus: "IN_PROGRESS" }));
+  const out = withArchive(() => retire({ plan: PLAN }, context, landingCapability()));
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /open sibling plans keep/);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: the landing capability with no archive project is refused before anything is touched (ARCH-ARCHIVE-03, ARCH-DOCS-18)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  const before = snapshot(context);
+  const out = noManifest(() => retire({ plan: PLAN }, context, landingCapability()));
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /automatic archive needs an archive project/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)), "the plan doc is untouched");
+  assert.equal(docRetiredEvents(context).length, 0);
+});
+
+test("doc-retire: a landing retire copies into the archive resolved at its guard and never resolves a second time (ARCH-ARCHIVE-03, ARCH-DOCS-18)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  withArchive((archive) => {
+    // The real resolver answers once; any later resolve yields no root, as if the archive project vanished mid-retire.
+    let calls = 0;
+    const resolveArchive = (ctx) => { calls += 1; return calls === 1 ? resolveArchiveReal(ctx) : { off: "gone" }; };
+    const out = retire({ plan: PLAN }, context, landingCapability(), { resolveArchive });
+    assert.equal(out.retired, PLAN, out.reason);
+    assert.equal(calls, 1, "the archive resolved at the guard is the one copied into");
+    assert.ok(fs.readdirSync(archive).some((d) => !d.startsWith(".")), "the archive holds the copy");
+    assert.ok(!fs.existsSync(path.join(context.root, PLAN)), "removed only after the verified copy");
+  });
+});
+
+test("doc-retire: a landing retire whose archive has no root removes nothing (ARCH-ARCHIVE-03)", () => {
+  const context = noManifest(() => repo({ grant: false }));
+  const before = snapshot(context);
+  const out = retire({ plan: PLAN }, context, landingCapability(), { resolveArchive: () => ({ off: "gone" }) });
+  assert.equal(out.refused, true);
+  assert.match(out.reason, /automatic archive needs an archive project/);
+  assert.deepEqual(snapshot(context), before);
+  assert.ok(fs.existsSync(path.join(context.root, PLAN)));
+});
+
+test("doc-retire: NEXT.md lines of a retired descendant leave with it", () => {
+  const context = noManifest(() => repo({ files: {
+    [PLAN]: "---\nlevel: epic\nchildren: [beta]\n---\n# alpha\n",
+    "docs/plans/beta.md": CHILD,
+    "docs/plans/NEXT.md": "# Next\n\n1. alpha — first\n2. beta — child\n3. gamma — other\n",
+  } }));
+  addBetaRows(context, "COMPLETE");
+  settle(context);
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n\n3. gamma — other\n");
+});
+
+test("doc-retire: a NEXT.md line for a prefix slug is kept (alpha retired, alpha-two kept)", () => {
+  const context = noManifest(() => repo({ files: { "docs/plans/NEXT.md": "# Next\n\n1. alpha — first\n2. alpha-two — second\n" } }));
+  const out = noManifest(() => retire({ plan: PLAN }, context));
+  assert.equal(out.retired, PLAN, out.reason);
+  assert.equal(fs.readFileSync(path.join(context.root, "docs/plans/NEXT.md"), "utf8"), "# Next\n\n2. alpha-two — second\n");
 });
