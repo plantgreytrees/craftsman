@@ -1,6 +1,7 @@
 // ARCH-SAFETY-13: the network push queue under the git common dir is protected state. repo-exec's enqueuePush (its own process) is
 // its only writer; root's unattended drain (ARCH-LAND-36) trusts what is in it, so a forged entry would be pushed with the user's
-// credentials. A tool call (Write, Edit, or a Bash write) onto it is refused from the main checkout and from a linked worktree.
+// credentials. A tool call (Write, Edit, or a Bash write) onto it is refused from the main checkout, from a linked worktree, and from a linked
+// worktree of a submodule project (inside the submodule or beside it).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -149,7 +150,12 @@ function repoWithSubmodule() {
   assert.ok(fs.existsSync(info.common_git_dir), "the submodule's git dir is registered under the superproject's .git/modules");
   enqueuePush(sub, info, { sha: git(sub, "rev-parse", "HEAD").stdout.trim(), dst: "feat/sub", reason: "test" });
   const queue = path.join(info.common_git_dir, ".craftsman", "network", "queue.jsonl");
-  return { base, sup, sub, info, queue, before: fs.readFileSync(queue, "utf8") };
+  // Two linked worktrees of the submodule, the way a unit run gets them: one inside it (under .claude/worktrees) and one beside it. Both share the
+  // submodule's git dir, and so its queue, and git prints no superproject for a linked worktree, so a session there cannot walk up to one.
+  const inWt = path.join(sub, ".claude", "worktrees", "wt"), besideWt = path.join(base, "sub-wt");
+  assert.equal(git(sub, "worktree", "add", "-q", "-b", "feat/in", inWt).status, 0);
+  assert.equal(git(sub, "worktree", "add", "-q", "-b", "feat/beside", besideWt).status, 0);
+  return { base, sup, sub, inWt, besideWt, info, queue, before: fs.readFileSync(queue, "utf8") };
 }
 
 test("pre-guard: a tool call that writes a submodule's network queue is refused from the superproject root and from the submodule root", () => {
@@ -237,6 +243,96 @@ test("pre-guard: the submodule store (.git/modules) is held like the queue's par
       assert.deepEqual(notRefused(r.sub, gone(target), "queue-guard-modules-sub"), [], `allowed from the submodule root, ${target}`);
     }
     assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+// A session in a linked worktree of a submodule project, inside the submodule's work tree or beside it. Its git common dir is the submodule's git dir,
+// so the queue lies outside its root, and git prints no superproject for a linked worktree: the walk up that a session in the submodule itself takes finds none.
+const subWorktrees = (r) => [["inside", r.inWt], ["beside", r.besideWt]];
+// The Bash writers that name no writer verb: a redirect (tee -a, cp, mv and sed -i are in toolCalls).
+const redirects = (file) => [
+  ["Bash", { command: `echo '{"kind":"delete","dst":"main"}' > ${file}` }],
+  ["Bash", { command: `printf '%s\\n' '{"kind":"delete","dst":"main"}' >> ${file}` }],
+  ["Bash", { command: `cat forged.jsonl >> ${file}` }],
+];
+// The same writers with the queue named from inside its directory, so the guard has to resolve the target and cannot read it off the command text.
+const fromInside = (dir) => [
+  "echo x >> queue.jsonl", "echo x > queue.jsonl", "printf x >> queue.jsonl", "cat forged.jsonl >> queue.jsonl",
+  "tee -a queue.jsonl", "cp forged.jsonl queue.jsonl", "mv forged.jsonl queue.jsonl", "sed -i s/feat/main/ queue.jsonl",
+].map((command) => ["Bash", { command: `cd ${dir} && ${command}` }]);
+
+test("pre-guard: from a linked worktree of a submodule project, inside it and beside it, every tool call that writes the submodule's queue is refused", () => {
+  const r = repoWithSubmodule();
+  try {
+    const net = path.dirname(r.queue);
+    for (const [where, wt] of subWorktrees(r)) {
+      assert.ok(fs.existsSync(path.join(wt, ".git")), `${where}: a linked worktree`);
+      for (const file of [r.queue, path.relative(wt, r.queue)]) {
+        assert.deepEqual(notRefused(wt, [...toolCalls(file), ...redirects(file)], "queue-guard-subwt"), [], `allowed from the worktree ${where} the submodule, path ${file}`);
+      }
+      for (const dir of [net, path.relative(wt, net)]) assert.deepEqual(notRefused(wt, fromInside(dir), "queue-guard-subwt"), [], `allowed from the worktree ${where} the submodule, after cd ${dir}`);
+      assert.match(run(wt, "Bash", { command: `echo x >> ${r.queue}` }, "queue-guard-subwt").stderr, /craftsman:.*network/, "the refusal names the queue");
+    }
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: from a linked worktree of a submodule project, removing or moving the queue's directories, the submodule's git dir or the store that holds it is refused", () => {
+  const r = repoWithSubmodule();
+  try {
+    const common = r.info.common_git_dir;
+    const gone = (target) => [["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]];
+    const held = [path.join(common, ".craftsman", "network"), path.join(common, ".craftsman"), common, path.dirname(common), path.dirname(path.dirname(common)), r.queue];
+    for (const [where, wt] of subWorktrees(r)) {
+      for (const target of held.flatMap((abs) => [abs, path.relative(wt, abs)])) assert.deepEqual(notRefused(wt, gone(target), "queue-guard-subwt-gone"), [], `allowed from the worktree ${where} the submodule, ${target}`);
+      const state = path.join(common, ".craftsman");
+      const after = [`cd ${common} && rm -rf .craftsman`, `cd ${common} && mv .craftsman elsewhere`, `cd ${state} && rm -rf network`, `cd ${state} && mv network elsewhere`];
+      assert.deepEqual(notRefused(wt, after.map((command) => ["Bash", { command }]), "queue-guard-subwt-gone"), [], `allowed from the worktree ${where} the submodule, after cd`);
+    }
+    assert.match(run(r.inWt, "Bash", { command: `rm -rf ${path.join(common, ".craftsman")}` }, "queue-guard-subwt-gone").stderr, /craftsman:/, "the refusal is named");
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a Read of the queue and repo-exec's own enqueuePush still work from a linked worktree of a submodule project", () => {
+  const r = repoWithSubmodule();
+  try {
+    const script = path.join(path.dirname(GUARD), "repo-exec.mjs");
+    for (const [where, wt] of subWorktrees(r)) {
+      for (const file of [r.queue, path.relative(wt, r.queue)]) {
+        const read = run(wt, "Read", { file_path: file }, "queue-guard-subwt-read");
+        assert.equal(read.status, 0, `Read ${file} from the worktree ${where} the submodule: ${read.stderr}`);
+        for (const command of [`cat ${file}`, `grep -c push ${file}`, `wc -l < ${file}`]) assert.equal(run(wt, "Bash", { command }, "queue-guard-subwt-read").status, 0, `${command} from the worktree ${where} the submodule`);
+      }
+      // the script that writes the queue, named in a Bash call, is not what the guard refuses: it refuses the tool call that writes the file itself
+      const ran = run(wt, "Bash", { command: `printf '%s' '{"project":"."}' | node ${script} prepare` }, "queue-guard-subwt-read");
+      assert.notEqual(ran.status, 2, ran.stderr);
+      const sha = spawnSync("git", ["-C", wt, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+      enqueuePush(wt, r.info, { sha, dst: `feat/${where}`, reason: "again" });
+    }
+    assert.deepEqual(readQueue(r.info).map((e) => e.dst), ["feat/sub", "feat/inside", "feat/beside"]);
+    assert.ok(fs.readFileSync(r.queue, "utf8").startsWith(r.before), "the first entry is untouched");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: ordinary directories and the other files of the submodule's git dir keep their verdict from a linked worktree of a submodule project", () => {
+  const r = repoWithSubmodule();
+  try {
+    const common = r.info.common_git_dir;
+    for (const [where, wt] of subWorktrees(r)) {
+      for (const dir of ["build", "network", path.join("src", ".github"), ".github"]) fs.mkdirSync(path.join(wt, dir), { recursive: true });
+      fs.writeFileSync(path.join(wt, ".gitignore"), "node_modules\n");
+      const calls = [];
+      for (const target of ["build", "network", "src", ".github", ".gitignore"]) calls.push(["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]);
+      calls.push(["Write", { file_path: path.join(wt, "src", "a.txt"), content: "x" }], ["Write", { file_path: path.join(wt, "b.txt"), content: "x" }],
+        ["Write", { file_path: path.join(r.sub, "c.txt"), content: "x" }], ["Write", { file_path: path.join(r.sup, "d.txt"), content: "x" }],
+        ["Bash", { command: "echo x >> src/a.txt" }], ["Bash", { command: "echo x > b.txt" }], ["Bash", { command: "cat b.txt >> src/a.txt" }], ["Bash", { command: `echo x >> ${path.join(r.sub, "c.txt")}` }],
+        ["Bash", { command: "rm src/a.txt" }], ["Bash", { command: "cp b.txt src/e.txt" }],
+        ["Bash", { command: `echo x >> ${path.join(common, "info", "exclude")}` }], ["Bash", { command: `echo x > ${path.join(common, "description")}` }],
+        ["Write", { file_path: path.join(common, "description"), content: "x" }]);
+      const refused = calls.map(([tool, input]) => [label(tool, input), run(wt, tool, input, "queue-guard-subwt-ordinary")]).filter(([, got]) => got.status === 2).map(([name, got]) => `${name}: ${got.stderr.trim()}`);
+      assert.deepEqual(refused, [], `an ordinary path was refused from the worktree ${where} the submodule`);
+    }
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
 

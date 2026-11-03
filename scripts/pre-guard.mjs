@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { hasDocWriteGrant, loadConfig, enabled, safetyEnabled, commandInvoked, mintNonce, DOC_WRITER_COMMANDS, globToRe, STATE_DIR, PROJECT_ROOT, sidOf, sessionDir, logEvent, readStdin, readWorktreeBinding, mainCheckoutRoot, autoForceBlock } from "./lib/core.mjs";
 import { blankProse, forceBlocked, ownBranchesOf } from "./lib/force-block.mjs";
 import { shellSegments, UNEXPANDED } from "./lib/shell-words.mjs";
-import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection } from "./lib/self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, safetyProjection, gitCommonDir, commonRel } from "./lib/self-protect.mjs";
 import { activeScopes, insidePluginRoot, readScope, scopeRequired } from "./scope.mjs";
 import { generatedBlock } from "./tracker.mjs";
 import { rollupBlock } from "./lib/tracker-rollup.mjs";
@@ -191,7 +191,7 @@ function superprojectRoots() {
   return superRootsMemo;
 }
 // The first name `abs` has, from a root that keeps this session's state outside its own work tree, for which `test` holds: relative to the main checkout
-// (a linked worktree) or to a superproject (a submodule; looked up only for a path outside this session's root).
+// (a linked worktree), to a superproject (a submodule) or to the git common dir (a linked worktree of a submodule); the last two only for a path outside this session's root.
 function outerRelWhere(abs, test) {
   const up = (rel) => rel === ".." || rel.startsWith("../");
   const main = mainRelOf(abs);
@@ -201,7 +201,8 @@ function outerRelWhere(abs, test) {
     const rel = path.relative(sup, abs).split(path.sep).join("/");
     if (rel && !up(rel) && test(rel)) return rel;
   }
-  return null;
+  const common = commonRel(gitCommonDir(activeRoot), abs); // a linked worktree of a submodule has no superproject, and its main checkout is the git dir: the queue is judged where git says it is
+  return common && test(common) ? common : null;
 }
 const mainStateRel = (abs) => outerRelWhere(abs, (rel) => selfKind(rel) === "never");
 
