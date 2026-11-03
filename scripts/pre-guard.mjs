@@ -1766,7 +1766,8 @@ if (tool === "Bash" && command) {
   // The scripts that grant doc authority or flip the gates run only after the command that owns them.
   // Every `node … <name>.mjs` invocation counts, whatever node options precede it; `node --check` only parses.
   // Read from the text with its quotes removed, so `tog""gle.mjs` is `toggle.mjs`, and with each backslash-newline joined as well, as bash reads it.
-  const unquoted = (command.includes("\\\n") ? command + "\n" + command.replace(/\\\n/g, "") : command).replace(/['"\\]/g, "");
+  const unquotedOf = (t) => (t.includes("\\\n") ? t + "\n" + t.replace(/\\\n/g, "") : t).replace(/['"\\]/g, "");
+  const unquoted = unquotedOf(command);
   const invocations = (name) => [...unquoted.matchAll(new RegExp(`\\bnode\\b([^;&|\\n]*?)[^\\s;&|]*\\b${name}\\.mjs(?:[ \\t]+([^\\s;&|)]*))?`, "g"))]
     .filter((m) => !/(?:^|\s)(?:--check|-c)(?=\s|$)/.test(m[1]))
     .map((m) => m[2] || "");
@@ -1780,7 +1781,9 @@ if (tool === "Bash" && command) {
   const NODE_E_LIVE = /require|import|process|spawn|exec|eval|Function|child|constructor|globalThis|Reflect|\bfs\b/;
   const inertNodeE = (text) => /[|>`<]|\$\(|\b(?:eval|source)\b/.test(text) ? text
     : text.replace(NODE_E_LITERAL, (all, head, body) => NODE_E_LIVE.test(body) ? all : head + "'x'");
-  const safetyText = command.includes("\\") ? unquoted : inertNodeE(blankProse(command)).replace(/['"\\]/g, "");
+  // A quoted-delimiter heredoc body fed to cat, tee, python3, python or node is inert as well (blankInertHeredocs); the bypass scan above reads it.
+  const live = blankInertHeredocs(command);
+  const safetyText = live.includes("\\") ? unquotedOf(live) : inertNodeE(blankProse(live)).replace(/['"\\]/g, "");
   if (SETS_SAFETY_VAR.some((re) => re.test(unquoted) && re.test(safetyText))) {
     denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
   }
@@ -1972,4 +1975,79 @@ function insideScratchRoots(target, project, hookInput) {
   let governed;
   try { governed = [project, PROJECT_ROOT, ...activeScopes(hookInput).map((scope) => scope.worktree_path || scope.project_root)].map((dir) => fs.realpathSync.native(dir)); } catch { return false; }
   return scratch.some((root) => governed.every((dir) => dir !== root && !within(root, dir) && dir !== real && !within(dir, real)));
+}
+
+// ARCH-SAFETY-13 / ARCH-SAFETY-15 / ARCH-STATE-16: the setter check that ends in denySelfDisable reads command text, and a quoted-delimiter
+// heredoc body is inert text there: the shell expands nothing in it, and the program it feeds only stores, prints or interprets it. This returns
+// the command with those bodies removed (the hook-bypass scan keeps reading the whole command; stripHeredocs is not reusable, it drops unquoted
+// bodies too). A body goes only when EVERY one of these holds; a heredoc that fails any one stays in the text and is read as it stands:
+//   - its tag is quoted or escaped (<<'EOF', <<"EOF", <<-'EOF'): an unquoted body is expanded by the shell;
+//   - it is not inside $(...), backticks or a subshell: the substitution's output can be run;
+//   - its command word is cat, tee, python3, python or node, bare (no path, no assignment prefix, no bash, sh, eval, source, env or wrapper),
+//     alone on its line up to the operator, or after `cd DIR &&`, with plain words and redirects before it and nothing else (no separator,
+//     no second heredoc, no substitution);
+//   - the body has a terminator line (an unterminated one is not provably a body);
+//   - the rest of the command, those bodies aside, has no pipe, no process substitution and no way to shadow a program name (a function, alias,
+//     hash, enable or a PATH change), so neither a pipeline nor a redefined `cat` can carry the body to a shell.
+// The tracking of quotes, comments, arithmetic and $(...) follows stripHeredocs. Files an interpreter writes stay with the sandbox (ARCH-SAFETY-01).
+function blankInertHeredocs(text) {
+  const INERT = new Set(["cat", "tee", "python3", "python", "node"]);
+  const WORD = String.raw`(?:[\w./:=@%+,~$-]|'[^'\n]*'|"(?:[^"\\\`$\n]|\$(?=[\w"]))*")+`;
+  const HEAD = new RegExp(String.raw`^[ \t]*(?:cd[ \t]+${WORD}[ \t]*&&[ \t]*)*([\w-]+)(?:[ \t]+(?:\d?>>?[ \t]*)?${WORD})*[ \t]*$`);
+  const REACHES_SHELL = /\||[<>]\(|(?<![\w.-])(?:alias|unalias|function|hash|enable)(?=\s)|\bPATH\+?=|\w\s*\(\s*\)/;
+  const stack = ["cmd"], pending = [], bodies = [];
+  let sq = false, stmt = 0, depth = 0, ticks = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], top = stack[stack.length - 1];
+    if (sq) { if (c === "'") sq = false; continue; }
+    if (c === "\\" && i + 1 < text.length) { i++; continue; }
+    if (top === "dq") {
+      if (c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) { i = arithmeticEnd(text, i); continue; }
+      if (c === '"') stack.pop();
+      else if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; }
+      continue;
+    }
+    if (c === "'") { sq = true; continue; }
+    if (c === '"') { stack.push("dq"); continue; }
+    if ((c === "$" && ((text[i + 1] === "(" && text[i + 2] === "(") || text[i + 1] === "[")) || (c === "(" && text[i + 1] === "(" && text[i - 1] !== "$")) {
+      i = c === "$" ? arithmeticEnd(text, i) : arithmeticEnd(text, i - 1); continue;
+    }
+    if (c === "#" && (i === 0 || /[\s;&|(]/.test(text[i - 1]))) { const j = text.indexOf("\n", i); i = (j === -1 ? text.length : j) - 1; continue; }
+    if (c === "$" && text[i + 1] === "(") { stack.push("cmd"); depth++; i++; continue; }
+    if (c === "`") { ticks = !ticks; continue; }
+    if (c === "(") { depth++; continue; }
+    if (c === ")") { if (stack.length > 1) stack.pop(); if (depth) depth--; continue; }
+    if (c === "<" && text.startsWith("<<<", i)) { i += 2; continue; }
+    if (c === "<" && text[i + 1] === "<" && text[i + 2] !== "<") {
+      const op = /<<(-?)[ \t]*/y;
+      op.lastIndex = i;
+      const m = op.exec(text), w = m && heredocWord(text, i + m[0].length);
+      if (w) { pending.push({ tabs: m[1] === "-", tag: w.tag, quoted: w.quoted, head: text.slice(stmt, i), nested: depth > 0 || ticks }); i = w.end - 1; continue; }
+    }
+    if (c === "\n") {
+      let pos = i + 1;
+      for (const { tabs, tag, quoted, head, nested } of pending) {
+        const start = pos;
+        let end = pos, found = false;
+        while (pos < text.length) {
+          end = pos;
+          let eol = text.indexOf("\n", pos);
+          if (eol === -1) eol = text.length;
+          const line = text.slice(pos, eol);
+          pos = Math.min(eol + 1, text.length);
+          if ((tabs ? line.replace(/^\t+/, "") : line) === tag) { found = true; break; }
+        }
+        const word = HEAD.exec(head);
+        if (quoted && !nested && found && word && INERT.has(word[1])) bodies.push([start, end]);
+      }
+      pending.length = 0;
+      stmt = pos;
+      i = pos - 1;
+    }
+  }
+  if (!bodies.length) return text;
+  let live = "", from = 0;
+  for (const [start, end] of bodies) { live += text.slice(from, start); from = end; }
+  live += text.slice(from);
+  return REACHES_SHELL.test(live) ? text : live;
 }
