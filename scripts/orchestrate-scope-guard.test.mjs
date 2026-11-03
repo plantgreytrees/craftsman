@@ -367,7 +367,7 @@ test("orchestrate-scope-guard: /instruction is recorded too, which is what lets 
 
 // ARCH-AUTO-11: the scope-required marker belongs to the /orchestrate run that armed it. A craftsman
 // command the user types ends it (the marker and the session scope), a model's Skill call never does.
-const KEY = "0123456789abcdef"; // a worktree key: sha1(worktree).slice(0, 16)
+const WORKTREE_HASH = "0123456789abcdef"; // a worktree hash: sha1(worktree).slice(0, 16)
 const ENDING_COMMANDS = ["plan", "sync-docs", "idea", "architect", "scrutinise", "instruction", "toggle", "builtin-check"];
 const sessionState = (dir, sid) => path.join(dir, ".craftsman", "sessions", sid);
 function seedSession(dir, sid) {
@@ -384,10 +384,10 @@ const sessionHeld = (dir, sid) => ({
 // (the binding lives under the git common dir, which is .git in a plain checkout).
 function worktreeKeyed(dir, sid) {
   return [
-    path.join(sessionState(dir, sid), `scope-${KEY}.json`),
-    path.join(sessionState(dir, sid), `scope-required-${KEY}`),
-    path.join(sessionState(dir, sid), `${KEY}-worktree-binding.json`),
-    path.join(dir, ".git", ".craftsman", "sessions", sid, `${KEY}-worktree-binding.json`),
+    path.join(sessionState(dir, sid), `scope-${WORKTREE_HASH}.json`),
+    path.join(sessionState(dir, sid), `scope-required-${WORKTREE_HASH}`),
+    path.join(sessionState(dir, sid), `${WORKTREE_HASH}-worktree-binding.json`),
+    path.join(dir, ".git", ".craftsman", "sessions", sid, `${WORKTREE_HASH}-worktree-binding.json`),
   ];
 }
 function seedWorktreeKeyed(dir, sid) {
