@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, namesSelfScoped, realEntries, safetyProjection } from "./self-protect.mjs";
+import { SELF_SCOPED, SELF_NEVER, SAFETY_CONFIG_KEYS, SAFETY_ENV, WRITER_VERBS, NEVER_TEXT, heldNever, heldScoped, namesProtected, namesSelfScoped, realEntries, safetyProjection, gitCommonDir, commonRel } from "./self-protect.mjs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { globToRe } from "./core.mjs";
 
 test("self-protect: the self-scoped list is the hooks, the config and both settings files", () => {
@@ -178,4 +179,51 @@ test("self-protect: heldNever holds the queue's parent directories, so a forged 
 test("self-protect: heldNever holds everything under .git/modules, where a submodule's name path may lead to a queue (ARCH-SAFETY-13)", () => {
   for (const rel of [".git/modules/sub", ".git/modules/sub/.craftsman", ".git/modules/sub/.craftsman/network", ".git/modules/libs/foo", ".git/modules/sub/modules/inner/.craftsman", "a/.git/modules/sub", ".Git/Modules/Sub"]) assert.equal(heldNever(rel), true, rel);
   for (const rel of [".git/modulesx/sub", "modules/sub", "src/modules/sub", ".git/refs/modules/x", ".git/objects", "sub", "sub/.craftsman"]) assert.equal(heldNever(rel), false, rel);
+});
+
+test("self-protect: commonRel spells a path under a git dir the way a session at the superproject would, and the patterns hold those names (ARCH-SAFETY-13)", () => {
+  const sub = "/r/super/.git/modules/sub", queue = `${sub}/.craftsman/network/queue.jsonl`;
+  assert.equal(commonRel(sub, queue), ".git/modules/sub/.craftsman/network/queue.jsonl");
+  assert.equal(commonRel("/r/main/.git", "/r/main/.git/.craftsman/network/queue.jsonl"), ".git/.craftsman/network/queue.jsonl");
+  assert.equal(commonRel("/r/super/.git/modules/sub/modules/inner", "/r/super/.git/modules/sub/modules/inner/.craftsman/network/queue.jsonl"), ".git/modules/sub/modules/inner/.craftsman/network/queue.jsonl");
+  // the git dir, the store above it and the .git above that are all inside the .git that holds the git dir
+  assert.deepEqual([sub, "/r/super/.git/modules", "/r/super/.git"].map((abs) => commonRel(sub, abs)), [".git/modules/sub", ".git/modules", ".git"]);
+  // a git dir under no .git (a bare or a separate one) is named as if it were one
+  assert.equal(commonRel("/srv/proj.git", "/srv/proj.git/.craftsman/network/queue.jsonl"), ".git/.craftsman/network/queue.jsonl");
+  // compared case-folded, as the patterns are
+  assert.equal(commonRel(sub, "/R/Super/.GIT/Modules/Sub/.Craftsman/Network/queue.jsonl"), ".git/modules/sub/.craftsman/network/queue.jsonl");
+  // outside that .git, and nothing to compare with: no name
+  for (const abs of ["/r/super", "/r/super/sub/a.txt", "/r/super/.gitx/x", "/r/super/.git-notes", "/r/sub-wt/b.txt", "/tmp/x"]) assert.equal(commonRel(sub, abs), null, abs);
+  assert.equal(commonRel(null, queue), null);
+  assert.equal(commonRel("", queue), null);
+  // the names it gives are the ones the patterns hold: written is never, removed is held; the other files of the git dir are not never-written
+  assert.ok(SELF_NEVER.some((p) => globToRe(p).test(commonRel(sub, queue))));
+  for (const gone of [sub, "/r/super/.git/modules", "/r/super/.git", `${sub}/.craftsman`, `${sub}/.craftsman/network`, queue]) assert.equal(heldNever(commonRel(sub, gone)), true, gone);
+  for (const ordinary of [`${sub}/info/exclude`, `${sub}/description`, `${sub}/HEAD`]) assert.ok(!SELF_NEVER.some((p) => globToRe(p).test(commonRel(sub, ordinary))), ordinary);
+});
+
+test("self-protect: gitCommonDir finds the common dir of a main checkout, a linked worktree and a submodule's linked worktree, and fails open outside a repository (ARCH-SAFETY-13)", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-common-dir-")));
+  try {
+    const git = (dir, ...args) => spawnSync("git", ["-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "protocol.file.allow=always", ...args], { encoding: "utf8" });
+    const make = (dir) => { fs.mkdirSync(dir); git(dir, "init", "-q"); git(dir, "commit", "-q", "--allow-empty", "-m", "init"); };
+    const main = path.join(base, "main"), origin = path.join(base, "origin"), sup = path.join(base, "super");
+    for (const dir of [main, origin, sup]) make(dir);
+    assert.equal(git(main, "worktree", "add", "-q", "-b", "feat/a", path.join(base, "main-wt")).status, 0);
+    assert.equal(git(sup, "submodule", "add", "-q", origin, "sub").status, 0);
+    const sub = path.join(sup, "sub");
+    assert.equal(git(sub, "worktree", "add", "-q", "-b", "feat/in", path.join(sub, ".claude", "worktrees", "wt")).status, 0);
+    assert.equal(git(sub, "worktree", "add", "-q", "-b", "feat/beside", path.join(base, "sub-wt")).status, 0);
+    const mainGit = path.join(main, ".git"), subGit = path.join(sup, ".git", "modules", "sub");
+    assert.equal(gitCommonDir(main), mainGit);
+    assert.equal(gitCommonDir(path.join(base, "main-wt")), mainGit);
+    for (const dir of [sub, path.join(sub, ".claude", "worktrees", "wt"), path.join(base, "sub-wt")]) assert.equal(gitCommonDir(dir), subGit, dir);
+    assert.equal(gitCommonDir(main), mainGit, "asked again");
+    const plain = path.join(base, "plain");
+    fs.mkdirSync(plain);
+    assert.equal(gitCommonDir(plain), null, "not a repository");
+    assert.equal(gitCommonDir(path.join(base, "missing")), null, "no such directory");
+    // a linked worktree of the submodule names the queue under the store the superproject would
+    assert.equal(commonRel(gitCommonDir(path.join(base, "sub-wt")), path.join(subGit, ".craftsman", "network", "queue.jsonl")), ".git/modules/sub/.craftsman/network/queue.jsonl");
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });

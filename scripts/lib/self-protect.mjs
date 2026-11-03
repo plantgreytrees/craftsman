@@ -3,6 +3,7 @@
 // run; pre-guard.mjs gives the exemption only to a scope that names one. Both import it from here.
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { globToRe } from "./core.mjs";
 
 export const SELF_SCOPED = Object.freeze([
@@ -163,3 +164,34 @@ function holds(rel, pattern) {
 export const heldNever = (rel) => SELF_NEVER.some((pattern) => holds(rel, pattern));
 // Only the project-root names: a directory that merely might hold a nested copy of one is not what this guards.
 export const heldScoped = (rel) => SELF_SCOPED.filter((name) => holds(rel, name));
+
+// The git common dir of the repository `root` belongs to, as a real path; null when it cannot be told (not a repository, no git, no answer), so a caller
+// that asks fails open to the verdicts it had before. Asked once per root: a guard process judges one. Git prints it relative to `root` for a main checkout and
+// absolute for a linked worktree. A linked worktree of a submodule has no superproject to walk up to (git prints none for it) and `git worktree list` names the
+// submodule's git dir as its main checkout, so the queue there is only found where git says the common dir is (ARCH-SAFETY-13).
+const commonDirs = new Map();
+export function gitCommonDir(root) {
+  if (commonDirs.has(root)) return commonDirs.get(root);
+  let dir = null;
+  try {
+    const out = execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (out) dir = fs.realpathSync(path.resolve(root, out)); // an empty answer would resolve to the root itself
+  } catch { /* not a repository, or git is not there */ }
+  commonDirs.set(root, dir);
+  return dir;
+}
+
+// `abs` (a real path) spelled the way a session at the superproject would spell it, so the patterns above judge it: from the directory that holds the `.git` that
+// holds the git dir `common` (a submodule's git dir is .git/modules/<name>, a plain repository's is .git itself; a git dir under no `.git` is named as if it
+// were one). That `.git`, the store above the git dir and everything under it keep the names SELF_NEVER and heldNever hold. Null outside that `.git`;
+// compared case-folded, as the patterns are.
+export function commonRel(common, abs) {
+  if (!common) return null;
+  let dotGit = common;
+  for (let dir = common, hops = 0; hops < 16 && dir !== path.dirname(dir); dir = path.dirname(dir), hops++) {
+    if (path.basename(dir).toLowerCase() === ".git") { dotGit = dir; break; }
+  }
+  const root = dotGit.toLowerCase(), here = String(abs).toLowerCase();
+  if (here !== root && !here.startsWith(root + path.sep)) return null;
+  return (".git" + here.slice(root.length)).split(path.sep).join("/");
+}
