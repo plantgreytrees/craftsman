@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   FILE_CAPS, INVOCATION_CAPS, INVOCATION_DOCS, checkDocSizes, invocationTotals, raisedCaps,
 } from "./doc-size-policy.mjs";
+import * as policy from "./doc-size-policy.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -58,6 +59,70 @@ test("a command total over its per-invocation cap fails (ARCH-SLIM-03)", () => {
 test("raisedCaps flags a rise, ignores falls and new entries", () => {
   assert.deepEqual(raisedCaps({ a: 5, b: 5 }, { a: 6, b: 4, c: 99 }), ["a: 5 -> 6"]);
   assert.deepEqual(raisedCaps({ a: 5 }, { a: 5 }), []);
+});
+
+// ARCH-SLIM-16: a cap rises only through a recorded, paid CAP_TRADES entry. Called through the
+// namespace so each case fails on its own while ratchetFindings does not exist.
+const TRADE = { raise: "agents/a.md", lower: "commands/c.md", bytes: 5, rule: "ARCH-SLIM-16", decided: "2026-11-03" };
+const BASE = { "agents/a.md": 100, "agents/b.md": 100, "commands/c.md": 500 };
+const caps = (over) => ({ ...BASE, ...over });
+
+test("ratchetFindings refuses a rise no CAP_TRADES entry names (ARCH-SLIM-16)", () => {
+  const f = policy.ratchetFindings(BASE, caps({ "agents/a.md": 103 }), []);
+  assert.equal(f.length, 1);
+  assert.match(f[0], /agents\/a\.md: cap 100 -> 103 has no CAP_TRADES entry/);
+  assert.equal(policy.ratchetFindings(BASE, caps({ "agents/b.md": 103, "commands/c.md": 495 }), [TRADE]).length, 1);
+});
+
+test("ratchetFindings refuses a rise larger than its trade's bytes", () => {
+  const f = policy.ratchetFindings(BASE, caps({ "agents/a.md": 106, "commands/c.md": 494 }), [TRADE]);
+  assert.equal(f.length, 1);
+  assert.match(f[0], /agents\/a\.md: cap rose 6 bytes, more than its trade's 5/);
+});
+
+test("ratchetFindings refuses an unpaid trade: the lower cap fell by less than bytes", () => {
+  const f = policy.ratchetFindings(BASE, caps({ "agents/a.md": 105, "commands/c.md": 496 }), [TRADE]);
+  assert.equal(f.length, 1);
+  assert.match(f[0], /commands\/c\.md: cap fell 4 bytes, short of the 5 its trades owe \(unpaid\)/);
+  // One fall cannot pay two trades.
+  const both = [TRADE, { ...TRADE, raise: "agents/b.md" }];
+  const g = policy.ratchetFindings(BASE, caps({ "agents/a.md": 105, "agents/b.md": 105, "commands/c.md": 495 }), both);
+  assert.equal(g.length, 1);
+  assert.match(g[0], /short of the 10 its trades owe \(unpaid\)/);
+});
+
+test("ratchetFindings refuses a trade whose lower file no invocation loads", () => {
+  const f = policy.ratchetFindings(BASE, caps({ "agents/a.md": 105, "agents/b.md": 95 }), [{ ...TRADE, lower: "agents/b.md" }]);
+  assert.ok(f.some((x) => /CAP_TRADES\[0\]: lower agents\/b\.md is not loaded by any invocation/.test(x)), f.join("\n"));
+});
+
+test("ratchetFindings refuses a malformed entry or one whose raise equals its lower", () => {
+  const bad = [
+    { ...TRADE, rule: undefined },
+    { ...TRADE, rule: "SLIM-16" },
+    { ...TRADE, decided: "3 Nov 2026" },
+    { ...TRADE, bytes: 0 },
+    { ...TRADE, bytes: 2.5 },
+    { ...TRADE, raise: "" },
+    { ...TRADE, lower: undefined },
+    { ...TRADE, raise: "commands/c.md" },
+    null,
+  ];
+  const f = policy.ratchetFindings(BASE, BASE, bad);
+  assert.equal(f.length, bad.length, f.join("\n"));
+  f.forEach((x, i) => assert.match(x, new RegExp(`^CAP_TRADES\\[${i}\\]: malformed entry`)));
+});
+
+test("ratchetFindings returns [] for a covered, paid rise and for any fall", () => {
+  assert.deepEqual(policy.ratchetFindings(BASE, caps({ "agents/a.md": 105, "commands/c.md": 495 }), [TRADE]), []);
+  assert.deepEqual(policy.ratchetFindings(BASE, caps({ "agents/a.md": 103, "commands/c.md": 490 }), [TRADE]), []);
+  assert.deepEqual(policy.ratchetFindings(BASE, caps({ "agents/a.md": 90, "commands/c.md": 400, "agents/new.md": 999 }), []), []);
+  assert.deepEqual(policy.ratchetFindings(BASE, BASE, [TRADE]), []);
+});
+
+test("every shipped CAP_TRADES entry is well-formed", () => {
+  assert.ok(Array.isArray(policy.CAP_TRADES));
+  assert.deepEqual(policy.ratchetFindings({}, {}, policy.CAP_TRADES), []);
 });
 
 test("every INVOCATION_DOCS entry names a capped file", () => {
