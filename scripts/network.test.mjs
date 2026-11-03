@@ -521,3 +521,22 @@ test("network: the NeedsNetwork message and commands/_network.md name the user-s
   assert.match(doc, /like `needs_network`/);
   assert.match(doc, /park nothing/i);
 });
+
+test("network: commands/_network.md tells root a drain that exits 3 with parked[] PARKs each entry and then stops, and its park-nothing sentence carves that case out (ARCH-LAND-35, ARCH-ENGINE-19)", () => {
+  const doc = fs.readFileSync(new URL("../commands/_network.md", import.meta.url), "utf8");
+  // step 3 is where a drain's parked[] entries become PARKED tracker rows
+  assert.match(doc, /^3\. \*\*Drain after\.\*\*[^\n]*`parked\[\]` entry[^\n]*`PARKED`/m);
+  const section = doc.split(/^## /m).find((part) => part.startsWith("A run returns `needs_network`"));
+  assert.ok(section, "the needs_network section exists");
+  const sentences = section.split(/(?<=[.!?])\s+/);
+  const drain = sentences.find((sentence) => /exits? 3/.test(sentence));
+  assert.ok(drain, "the needs_network section tells root what a drain that exits 3 means");
+  assert.match(drain, /\bdrain\b/);
+  assert.match(drain, /`parked\[\]`/);
+  assert.match(drain, /\bPARKs? each entry\b/);
+  assert.match(drain, /as step 3 does/);
+  assert.match(drain, /then stops?\b/);
+  for (const sentence of sentences.filter((text) => /park nothing/i.test(text))) {
+    assert.match(sentence, /\bdrain\b/, "park nothing is never said of a drain that carries parked[]");
+  }
+});
