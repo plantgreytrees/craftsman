@@ -548,6 +548,106 @@ test("pre-guard: the coreutils link verb is judged like ln: a hard link of the s
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
+// cp-link-sources (scrutinise-sandbox-auto-flow phase 2, round 2). `cp -l` / `--link` makes a hard link and `cp -s` / `--symbolic-link` a symlink, as `ln` does, so each source of
+// such a copy gets a second name that a later write can reach protected state under. The Bash guard judges it as a write to that source, as it judges the source of `ln` and `link`.
+// A command that spells a protected name is also refused by the text check on that name, so the rows that must fail on the old guard reach the source without spelling it:
+// through a symlinked directory, by a relative name after `cd`, or as a directory (`cp -al DIR`) that holds it.
+test("pre-guard: cp with -l, --link or -s judges its sources like ln: a link to the scope manifest or the push queue is refused, a copy is not", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t), sessionDir = path.dirname(manifest), name = path.basename(manifest);
+    const queue = path.join(t.dir, ".git", ".craftsman", "network", "queue.jsonl"), netDir = path.dirname(queue);
+    fs.mkdirSync(netDir, { recursive: true });
+    fs.writeFileSync(queue, '{"kind":"push","dst":"feat/x"}\n');
+    fs.symlinkSync(sessionDir, path.join(tmp, "sess"));
+    fs.symlinkSync(netDir, path.join(tmp, "net"));
+    fs.mkdirSync(path.join(tmp, "plain-dir"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    fs.writeFileSync(path.join(tmp, "plain-dir", "f.txt"), "f");
+    fs.mkdirSync(path.join(t.dir, "src"));
+    fs.writeFileSync(path.join(t.dir, "src", "a.txt"), "a");
+    assert.equal(fs.statSync(path.join(tmp, "sess", name)).ino, fs.statSync(manifest).ino, "the fixture: the symlinked directory reaches the manifest");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2); // every row is judged, so a red run names them all
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    // Every spelling of the option that links, with the protected source named only through a symlinked directory.
+    const linking = ["-l", "--link", "--li", "-al", "-sl", "-ls", "-fl", "-s", "--symbolic-link", "--sy"];
+    const unspelled = linking.flatMap((opt) => [`cp ${opt} ${tmp}/sess/${name} ${tmp}/h.json`, `cp ${opt} ${tmp}/net/queue.jsonl ${tmp}/q.jsonl`]);
+    for (const command of unspelled) assert.doesNotMatch(command, /\.craftsman/, "the fixture: the command text never spells the state directory");
+    assert.deepEqual(notRefused(unspelled), [], "a linking cp whose source is the manifest or the queue, named through a symlinked directory");
+    assert.deepEqual(notRefused([
+      `cp -l -t ${tmp} ${tmp}/sess/${name}`, `cp --link --target-directory=${tmp} ${tmp}/net/queue.jsonl`, // the destination directory named by an option
+      `cp -l ${tmp}/src.txt ${tmp}/sess/${name} ${tmp}/plain-dir`, `cp -l ${tmp}/sess/${name} ${tmp}/src.txt ${tmp}/plain-dir`, // the protected source is any of several
+    ]), [], "the destination given by -t or --target-directory, and a protected source among several");
+    assert.deepEqual(notRefused([
+      `cd ${sessionDir} && cp -l ${name} ${tmp}/h.json`, `cd ${tmp}/sess && cp --link ${name} ../h.json`, `cd ${netDir} && cp -s queue.jsonl ${tmp}/q.jsonl`,
+      `cd ${tmp}/sess && cp -l ${name} ${tmp}/h.json`, `cd ${t.dir} && cp -l .git/.craftsman/network/queue.jsonl ${tmp}/q.jsonl`,
+    ]), [], "a relative source is read from the working directory the command ran in");
+    assert.deepEqual(notRefused([
+      `cp -al ${tmp}/sess/ ${tmp}/sessions-copy`, `cp -al ${tmp}/net/ ${tmp}/net-copy`, `cp --link -r ${sessionDir} ${tmp}/sessions-copy`, `cp -al ${t.dir}/.craftsman ${tmp}/state-copy`,
+    ]), [], "a directory source that holds protected state: cp -al makes a second name for every file under it");
+    // The spelled form was already refused by the text check on the protected name; it stays refused.
+    assert.deepEqual(notRefused([`cp -l ${manifest} ${tmp}/h.json`, `cp --link ${queue} ${tmp}/q.jsonl`, `cp -s ${manifest} ${tmp}/s.json`, `cp -al ${queue} ${tmp}/q.jsonl`]), [], "the spelled sources");
+    // Controls: only a copy that links is judged by its source. A copy makes a new file, not a second name; an option that merely resembles -l or -s is not one.
+    assert.deepEqual(notAllowed([
+      `cp ${tmp}/src.txt ${tmp}/x`, `cp -r ${tmp}/plain-dir ${tmp}/plain-copy`, `cp -rv ${tmp}/plain-dir ${tmp}/plain-copy2`,
+      `cp ${tmp}/sess/${name} ${tmp}/plain.json`, `cp -r ${tmp}/sess/ ${tmp}/plain-sessions`, `cp -L ${tmp}/sess/${name} ${tmp}/deref.json`,
+      `cp -t ${tmp}/plain-dir ${tmp}/sess/${name}`, `cp --sparse=always ${tmp}/sess/${name} ${tmp}/sparse.json`, `cp --strip-trailing-slashes ${tmp}/sess/${name} ${tmp}/strip.json`,
+      `cp -- ${tmp}/sess/${name} ${tmp}/dashes.json`,
+    ]), [], "controls: an ordinary copy of the protected source");
+    assert.deepEqual(notAllowed([
+      `cp -l ${tmp}/src.txt ${tmp}/c-l.txt`, `cp --link ${tmp}/src.txt ${tmp}/c-link.txt`, `cp -s ${tmp}/src.txt ${tmp}/c-s.txt`, `cp -sl ${tmp}/src.txt ${tmp}/c-sl.txt`,
+      `cp -al ${tmp}/plain-dir ${tmp}/plain-linked`, `cp -l -t ${tmp}/plain-dir ${tmp}/src.txt`, `cd ${tmp} && cp -l src.txt c-cd.txt`, `cd ${t.dir} && cp -al src ${tmp}/src-linked`,
+    ]), [], "controls: a linking cp whose sources are ordinary files and directories");
+    // rsync -l copies symlinks as links and rsync -s protects arguments: neither makes a link of the source, so the options mean nothing there.
+    assert.deepEqual(notAllowed([`rsync -l ${tmp}/sess/${name} ${tmp}/rs.json`, `rsync -s ${tmp}/sess/${name} ${tmp}/rs.json`]), [], "controls: the same letters on rsync");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: ln and link read a relative source from the working directory as well as from the link's directory", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const manifest = manifestOf(t), name = path.basename(manifest);
+    fs.symlinkSync(path.dirname(manifest), path.join(tmp, "sess"));
+    fs.mkdirSync(path.join(tmp, "plain-dir"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    assert.deepEqual(notRefused([
+      `cd ${tmp}/sess && ln ${name} ${tmp}/h-ln.json`, `cd ${tmp}/sess && link ${name} ${tmp}/h-link.json`, `cd ${tmp}/sess && ln -s ${name} ${tmp}/h-sym.json`, `cd ${tmp}/sess && ln ${name} ${tmp}/plain-dir`,
+    ]), [], "a relative source after cd into a symlinked directory, the link made in another directory");
+    assert.equal(t.call("Bash", { command: `cd ${tmp} && ln src.txt c-ln.txt` }).status, 0, "control: two scratch files link");
+    assert.equal(t.call("Bash", { command: `cd ${tmp} && ln -s plain-dir c-dir` }).status, 0, "control: a symlink to a scratch directory");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// The text check that refuses a link into the state directory read `ln` or `link` after any blank, so a search for the word (`grep -n link …/acceptance.md`) was a link. It reads the verb where a
+// command word stands, as the other verb checks do; a link that the parser reads (after a wrapper, in a find -exec, through xargs) is still refused by the parser.
+test("pre-guard: a search that only names ln or link under the state directory is not a link, and a real link there is refused wherever the verb stands", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    fs.mkdirSync(path.join(t.dir, ".craftsman"), { recursive: true });
+    fs.writeFileSync(path.join(t.dir, ".craftsman", "acceptance.md"), "- [ ] link the unit\n");
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    assert.deepEqual(notAllowed([
+      "grep -n link .craftsman/acceptance.md", "rg -n link .craftsman/", "grep -rn ln .craftsman", "grep -c link .craftsman/acceptance.md", "echo link .craftsman", "cat .craftsman/acceptance.md | grep -n link",
+      "git log --grep=link -- .craftsman", "grep -n 'ln -s' .craftsman/acceptance.md", "true && grep link .craftsman/acceptance.md",
+    ]), [], "a search or an echo that names the verb next to the state directory");
+    assert.deepEqual(notRefused([
+      "ln -s x .craftsman/x", "link " + tmp + "/src.txt .craftsman/x.json", "ln " + tmp + "/src.txt .craftsman/x.json", "true; ln -s x .craftsman/x", "true&&ln -s x .craftsman/x", "cd " + t.dir + " && ln -s x .craftsman/x",
+      "echo hi\nln -s x .craftsman/x", "FOO=1 ln -s x .craftsman/x", "if true; then ln -s x .craftsman/x; fi", "(ln -s x .craftsman/x)", "{ ln -s x .craftsman/x; }", "x=$(ln -s y .craftsman/z)", "ls | while read f; do ln -s $f .craftsman/x; done",
+      "sudo ln -s x .craftsman/x", "env ln -s x .craftsman/x", "nohup ln -s x .craftsman/x", "timeout 5 ln -s x .craftsman/x", "nice -n 5 ln -s x .craftsman/x", "command ln -s x .craftsman/x", "time ln -s x .craftsman/x",
+      "sudo -u root ln -s x .craftsman/x", "env FOO=1 ln -s x .craftsman/x", "echo x | xargs ln -s .craftsman/x", "echo x | xargs -I{} ln -s {} .craftsman/x", "find . -name x -exec ln -s {} .craftsman/x +",
+    ]), [], "a link into the state directory, whatever stands before the verb");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
 test("pre-guard: a scoped Write of a new file whose nearest existing ancestor is a scratch root passes; an Edit, a Read, NotebookEdit, Glob and Grep of it do not", () => {
   const t = scratchProject();
   try {
