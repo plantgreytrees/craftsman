@@ -22,6 +22,8 @@ export const SELF_NEVER = Object.freeze([
   ".craftsman/approvals/**",
   // The network push queue in the git common dir (repo-exec's enqueuePush is its only writer): root's unattended drain pushes what it holds with the user's credentials, so a forged entry must not reach it (ARCH-SAFETY-13, ARCH-LAND-36).
   "**/.git/.craftsman/network/**",
+  // A submodule project's git dir is the superproject's .git/modules/<name> (nested ones add /modules/<inner>), so its queue is not under a bare .git/.craftsman.
+  "**/.git/modules/**/.craftsman/network/**",
   // git's own config and hooks decide which hooks run (core.hooksPath, aliases): a tool call must not write them.
   "**/.git/config", "**/.git/config.worktree", "**/.git/hooks/**",
   // a linked worktree's own config (extensions.worktreeConfig, e.g. after sparse-checkout) is read from the main .git
@@ -135,6 +137,9 @@ const literalBase = (glob) => {
   for (const part of glob.split("/")) { if (/[*?[{]/.test(part)) break; parts.push(part); }
   return parts.join("/");
 };
+// A pattern led by `**/` has no literal base of its own: it is anchored at whatever directory holds the rest, so the base of its
+// remainder (`.git/.craftsman/network` for `**/.git/.craftsman/network/**`) is the anchor, found at the end of any path.
+const anchoredBase = (pattern) => (pattern.startsWith("**/") ? literalBase(pattern.slice(3)).toLowerCase() : "");
 // Does removing or moving `rel` (relative to the project root) take `pattern`'s files with it: is it one, inside one,
 // or a directory that holds one? The project root itself is not counted (that is destroying the project, which the
 // sandbox and the ask rules own).
@@ -144,7 +149,16 @@ function holds(rel, pattern) {
   const re = ci(pattern);
   if (re.test(r) || re.test(r + "/" + lastSegment(pattern))) return true;
   const base = literalBase(pattern).toLowerCase(), rl = r.toLowerCase();
-  return base !== "" && (base === rl || base.startsWith(rl + "/"));
+  if (base !== "") return base === rl || base.startsWith(rl + "/");
+  // The anchor, or a directory above it (`.git`, `.git/.craftsman`) wherever it sits: removing or moving it takes the protected files along
+  // and lets a forged directory be put in its place. A name that only starts like one (`.github`, `src/.gitx`) is not one.
+  const anchor = anchoredBase(pattern).split("/").filter(Boolean);
+  for (let n = 1; n <= anchor.length; n++) {
+    const above = anchor.slice(0, n).join("/");
+    if (rl === above || rl.endsWith("/" + above)) return true;
+  }
+  // A `**` between names (`.git/modules/**/.craftsman/...`: a submodule's name path) swallows any directories, so anything under the anchor may sit above a match.
+  return anchor.length > 0 && /\/\*\*\//.test(pattern.slice(3)) && ("/" + rl + "/").includes("/" + anchor.join("/") + "/");
 }
 export const heldNever = (rel) => SELF_NEVER.some((pattern) => holds(rel, pattern));
 // Only the project-root names: a directory that merely might hold a nested copy of one is not what this guards.

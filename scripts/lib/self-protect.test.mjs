@@ -159,3 +159,23 @@ test("self-protect: SELF_NEVER holds the approval record directory", () => {
   assert.ok(SELF_NEVER.includes(".craftsman/approvals/**"));
   assert.ok(SELF_NEVER.some((p) => globToRe(p).test(".craftsman/approvals/x.json")));
 });
+
+test("self-protect: a submodule's network queue under the superproject's .git/modules is a never-written path (ARCH-SAFETY-13)", () => {
+  assert.ok(SELF_NEVER.includes("**/.git/modules/**/.craftsman/network/**"));
+  const hit = (rel) => SELF_NEVER.some((p) => globToRe(p).test(rel));
+  for (const rel of [".git/.craftsman/network/queue.jsonl", ".git/modules/sub/.craftsman/network/queue.jsonl", "a/b/.git/modules/sub/.craftsman/network/fetched.json",
+    ".git/modules/libs/foo/.craftsman/network/queue.jsonl", ".git/modules/sub/modules/inner/.craftsman/network/queue.jsonl"]) assert.ok(hit(rel), rel);
+  for (const rel of [".git/modules/sub/HEAD", ".git/modules/sub/.craftsman/notes.md", ".git/modules/sub/config.bak", "src/modules/sub/.craftsman/network/queue.jsonl", ".git/modulesx/sub/.craftsman/network/q"]) assert.ok(!hit(rel), rel);
+  for (const text of [".git/modules/sub/.craftsman/network/queue.jsonl", "../.git/modules/sub/.craftsman/network/queue.jsonl", "/r/super/.git/modules/a/b/.craftsman/network/fetched.json", ".GIT/Modules/sub/.Craftsman/Network/queue.jsonl"]) assert.match(text, NEVER_TEXT, text);
+  for (const text of [".git/modules/sub/HEAD", ".git/modules/sub/.craftsman/notes.md", "src/modules/sub/.craftsman/network.md"]) assert.doesNotMatch(text, NEVER_TEXT, text);
+});
+
+test("self-protect: heldNever holds the queue's parent directories, so a forged one cannot take their place (ARCH-SAFETY-13)", () => {
+  for (const rel of [".git/.craftsman", ".git/.craftsman/network", "./.git/.craftsman/", "vendor/.git/.craftsman", ".GIT/.Craftsman", ".git/modules", "a/b/.git/modules"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of ["docs", "src", "src/.github", ".github", ".gitignore", ".gitmodules", "modules", "src/modules", ".git/modulesx", "src/.craftsman", "src/.craftsman/network", ".craftsman-notes", ".git/HEAD", ".git/refs", ".git/index.lock", "."]) assert.equal(heldNever(rel), false, rel);
+});
+
+test("self-protect: heldNever holds everything under .git/modules, where a submodule's name path may lead to a queue (ARCH-SAFETY-13)", () => {
+  for (const rel of [".git/modules/sub", ".git/modules/sub/.craftsman", ".git/modules/sub/.craftsman/network", ".git/modules/libs/foo", ".git/modules/sub/modules/inner/.craftsman", "a/.git/modules/sub", ".Git/Modules/Sub"]) assert.equal(heldNever(rel), true, rel);
+  for (const rel of [".git/modulesx/sub", "modules/sub", "src/modules/sub", ".git/refs/modules/x", ".git/objects", "sub", "sub/.craftsman"]) assert.equal(heldNever(rel), false, rel);
+});

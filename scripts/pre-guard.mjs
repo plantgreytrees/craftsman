@@ -174,7 +174,36 @@ function mainRelOf(abs) {
   const rel = path.relative(main, abs).split(path.sep).join("/");
   return rel && !rel.startsWith("..") ? rel : null;
 }
-const mainStateRel = (abs) => { const rel = mainRelOf(abs); return rel && selfKind(rel) === "never" ? rel : null; };
+// A submodule session keeps its git dir, and so its push queue, in the superproject: .git/modules/<name>. `git worktree list` names that git dir as the
+// session's main checkout, so a name relative to it has lost the `.git/modules/<name>` the queue pattern holds. The same path named from the
+// superproject's work tree keeps it (ARCH-SAFETY-13). The superprojects, nearest first (a submodule inside a submodule has two), are looked up once.
+let superRootsMemo;
+function superprojectRoots() {
+  if (superRootsMemo) return superRootsMemo;
+  superRootsMemo = [];
+  for (let dir = activeRoot, depth = 0; depth < 8; depth++) {
+    let up = ""; // empty outside a submodule, and realpathSync("") is the cwd, so an empty answer ends the walk before it
+    try { up = execFileSync("git", ["-C", dir, "rev-parse", "--show-superproject-working-tree"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { break; }
+    if (!up) break;
+    try { dir = fs.realpathSync(up); } catch { break; }
+    superRootsMemo.push(dir);
+  }
+  return superRootsMemo;
+}
+// The first name `abs` has, from a root that keeps this session's state outside its own work tree, for which `test` holds: relative to the main checkout
+// (a linked worktree) or to a superproject (a submodule; looked up only for a path outside this session's root).
+function outerRelWhere(abs, test) {
+  const up = (rel) => rel === ".." || rel.startsWith("../");
+  const main = mainRelOf(abs);
+  if (main && test(main)) return main;
+  if (!up(path.relative(realRoot(), abs).split(path.sep).join("/"))) return null;
+  for (const sup of superprojectRoots()) {
+    const rel = path.relative(sup, abs).split(path.sep).join("/");
+    if (rel && !up(rel) && test(rel)) return rel;
+  }
+  return null;
+}
+const mainStateRel = (abs) => outerRelWhere(abs, (rel) => selfKind(rel) === "never");
 
 // `p` resolved from `cwd`, each component through realpath while it exists, so a
 // symlink (`d -> docs`) is followed; the rest of a missing tail stays lexical.
@@ -782,8 +811,8 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
         const rel = path.relative(realRoot(), abs).split(path.sep).join("/");
         if (rel !== "" && !rel.startsWith("..")) hits.push("remove:" + rel);
         // the main checkout's session state, removed from a linked worktree (a removed scope-required flag is a removed gate)
-        const mainRel = mainRelOf(abs);
-        if (mainRel && heldNever(mainRel)) hits.push("remove:" + mainRel);
+        const held = outerRelWhere(abs, heldNever);
+        if (held) hits.push("remove:" + held);
       }
     }
   }
