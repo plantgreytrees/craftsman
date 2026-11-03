@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -19,9 +20,9 @@ const HAND_FORMATTED = [
   "hooks/register.js",
 ];
 
-// prettier reads .prettierignore from its cwd, so every run starts at the repo root
-function prettier(args) {
-  return spawnSync("prettier", args, { cwd: ROOT, encoding: "utf8" });
+// prettier reads .prettierignore from its cwd, so each run names the directory it starts in
+function prettier(args, cwd = ROOT) {
+  return spawnSync("prettier", args, { cwd, encoding: "utf8" });
 }
 
 for (const file of HAND_FORMATTED) {
@@ -32,15 +33,20 @@ for (const file of HAND_FORMATTED) {
   });
 }
 
-test("prettier --write leaves scripts/lib/core.mjs byte-identical", { skip: SKIP }, () => {
-  const file = path.join(ROOT, "scripts/lib/core.mjs");
-  const before = fs.readFileSync(file);
+// The write runs on a temp copy of the source and the ignore file, so a broken
+// ignore file rewrites the copy and can never touch the live scripts/lib/core.mjs.
+test("prettier --write leaves a temp copy of scripts/lib/core.mjs byte-identical", { skip: SKIP }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-prettier-ignore-"));
   try {
-    const result = prettier(["--write", "--log-level", "silent", "scripts/lib/core.mjs"]);
+    const copy = path.join(dir, "scripts/lib/core.mjs");
+    fs.mkdirSync(path.dirname(copy), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, "scripts/lib/core.mjs"), copy);
+    fs.copyFileSync(path.join(ROOT, ".prettierignore"), path.join(dir, ".prettierignore"));
+    const before = fs.readFileSync(copy);
+    const result = prettier(["--write", "--log-level", "silent", "scripts/lib/core.mjs"], dir);
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(fs.readFileSync(file).equals(before), "prettier rewrote scripts/lib/core.mjs");
+    assert.ok(fs.readFileSync(copy).equals(before), "prettier rewrote the copy of scripts/lib/core.mjs");
   } finally {
-    // a rewrite must not leave the working tree dirty, whatever the assertion said
-    if (!fs.readFileSync(file).equals(before)) fs.writeFileSync(file, before);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
