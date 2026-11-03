@@ -1,222 +1,201 @@
 ---
 slug: scrutinise-sandbox-auto-flow-phase-2
-goal: The phase 2 guards close the holes an isolated review found: a submodule project's push queue and the queue's parent directory are protected, a hard link cannot carry a scoped Write or Edit to protected state, a per-unit hand-off keeps the scope requirement alive after compaction, and no refused queue entry leaves without a PARK.
+goal: The phase 2 guards close the holes isolated reviews found: every push queue (a submodule's, and from any linked worktree) and its parent directory is protected, a hard link cannot carry a scoped Write or Edit to protected state through the tools or through cp -l, a per-unit hand-off keeps the scope requirement alive after compaction, and no refused queue entry leaves without a PARK that root acts on.
 level: feature
 parent: sandbox-auto-flow-phase-2
 priority: P1
-classification: /scrutinise round 1 of sandbox-auto-flow-phase-2 (isolated scrutineer, 2026-11-03, range 55faf53..2b32191, committed state d87a8cf); 4 Warning, 5 Suggestion, 0 Critical, 0 Disputed
-tracker_rows: [TRACKER#handoff-arming, TRACKER#drain-rejected, TRACKER#prettier-test-copy, TRACKER#queue-protection, TRACKER#scratch-write-hardening, TRACKER#heredoc-limits]
+classification: /scrutinise rounds 1 and 2 of sandbox-auto-flow-phase-2 (isolated scrutineer, 2026-11-03; round 1 range 55faf53..2b32191, round 2 range d87a8cf..1c3f51c, committed state 6b04842); round 1: 4 Warning, 5 Suggestion; round 2: 0 Critical, 3 Warning, 5 Suggestion, 0 Disputed; round 3 (range 6b04842..cbb14e1): 0 Critical, 4 Warning, 4 Suggestion, 0 Disputed
+tracker_rows: [TRACKER#handoff-arming, TRACKER#drain-rejected, TRACKER#prettier-test-copy, TRACKER#queue-protection, TRACKER#scratch-write-hardening, TRACKER#heredoc-limits, TRACKER#network-consumer-doc, TRACKER#submodule-worktree-queue, TRACKER#cp-link-sources, TRACKER#ln-check-safe-exemption, TRACKER#submodule-git-surface, TRACKER#followup-heredoc-spellings]
 guards:
   blast_radius: done
   completeness_sweep: done
   blind_rederivation: skipped(config:never)
 coverage:
-  contract:      1.3 (new export handoffArmsScope in lib/core.mjs; handoff.mjs refuses a unit hand-off without remaining_units), 2.2 (drainQueue error and return shape), 5.3 (WRITER_VERBS gains link); consumers in CONSUMERS
-  data:          N/A(no persistence or migration; an old hand-off file without remaining_units is only read, never rewritten)
+  contract:      1.3 (handoffArmsScope), 2.2 (drainQueue error and return shape), 5.3 (WRITER_VERBS gains link), 7.1 (the exit-3 needs_network payload carries parked[]: its one documented consumer is commands/_network.md); consumers in CONSUMERS
+  data:          N/A(no persistence or migration)
   config:        N/A(no config key)
-  security:      4.1-4.3 (W1, W2: the queue and its parent), 5.1-5.4 (W3 hard link, S8 new-file Write), 6.1-6.3 (S7 heredoc bodies); security-auditor gate on units 2, 4, 5 and 6
-  tests:         every unit starts with red rows (1.1, 2.1, 3.1, 4.1, 5.1, 6.1); mutation checks 4.4, 5.5, 6.4
-  observability: 2.1-2.2 (a refused entry that cannot park is still logged drain_refused exactly once)
-  interface:     1.4 (commands/_shared-execution.md step 12 asks for remaining_units)
-  docs:          1.5, 2.4, 4.5, 5.6, 6.5 (cites re-pointed by the unit that moves them); the two wording gaps in the human docs are sync-docs work (Out of scope)
-  rollback:      one merge commit per unit; units 4, 5 and 6 are separate so one bypass found in review reverts alone
+  security:      4.x, 5.x, 6.x (round 1), 8.1-8.3 (queue from a submodule's linked worktree), 9.1-9.4 (cp -l / --link); security-auditor gate on units 2, 4, 5, 6, 8 and 9
+  tests:         every unit starts with red rows; mutation checks 4.4, 5.5, 6.4, 8.3, 9.4
+  observability: 2.1-2.2
+  interface:     1.4 (step 12 asks for remaining_units), 7.1 (commands/_network.md)
+  docs:          cites re-pointed by the unit that moves them; the last pre-guard unit (9.5) recomputes every pre-guard cite; the ARCH-STATE-18 text gap and the heredoc spellings are Out of scope
+  round3:        10.1-10.4 (security + tests: the ln text check back to its old default plus a linear exemption, latency rows), 11.1-11.6 (security + tests: submodule config and hooks, rsync --link-dest, cp destination names in the state dir)
+  rollback:      one merge commit per unit; guard units are separate so one bypass found in review reverts alone
 units:
-  - id: 1
-    scope_id: handoff-arming
+  - { id: 1, scope_id: handoff-arming, project: ., depends_on: [], module: "handoff.mjs, session-context.mjs, account-switch.mjs, lib/core.mjs", language: javascript, security: normal, scope: { read: [scripts/handoff.mjs, scripts/session-context.mjs, scripts/account-switch.mjs, commands/_shared-execution.md], docs: [docs/architecture/auto.rules.md, docs/architecture/slim.rules.md, docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/engine.rules.md], write: [scripts/handoff.mjs, scripts/handoff.test.mjs, scripts/session-context.mjs, scripts/session-context.test.mjs, scripts/account-switch.mjs, scripts/account-switch.test.mjs, scripts/lib/core.mjs, commands/_shared-execution.md, docs/architecture/auto.rules.md] }, arch: [ARCH-AUTO-11, ARCH-SLIM-02, ARCH-STATE-02, ARCH-SAFETY-04, ARCH-ENGINE-08], tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [arch-check], mcp: [] } }
+  - { id: 2, scope_id: drain-rejected, project: ., depends_on: [], module: "lib/network.mjs drainQueue", language: javascript, security: high, scope: { read: [scripts/lib/network.mjs, scripts/network.test.mjs], docs: [docs/architecture/landing.rules.md], write: [scripts/lib/network.mjs, scripts/network.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, docs/architecture/landing.rules.md] }, arch: [ARCH-LAND-36, ARCH-LAND-19], tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] } }
+  - { id: 3, scope_id: prettier-test-copy, project: ., depends_on: [], module: "prettier-ignore.test.mjs", language: javascript, security: normal, scope: { read: [scripts/prettier-ignore.test.mjs], docs: [], write: [scripts/prettier-ignore.test.mjs] }, arch: [], tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [], mcp: [] } }
+  - { id: 4, scope_id: queue-protection, project: ., depends_on: [], module: "lib/self-protect.mjs, pre-guard.mjs", language: javascript, security: high, scope: { read: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard-queue.test.mjs], docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md], write: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard.mjs, scripts/pre-guard-queue.test.mjs, docs/architecture/safety.rules.md] }, arch: [ARCH-SAFETY-13, ARCH-STATE-16], tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] } }
+  - { id: 5, scope_id: scratch-write-hardening, project: ., depends_on: [queue-protection], module: "pre-guard.mjs insideScratchRoots, self-protect.mjs WRITER_VERBS", language: javascript, security: high, scope: { read: [scripts/lib/self-protect.mjs], docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md], write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md] }, arch: [ARCH-STATE-18, ARCH-SAFETY-13], tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] } }
+  - { id: 6, scope_id: heredoc-limits, project: ., depends_on: [scratch-write-hardening], module: "pre-guard.mjs blankInertHeredocs", language: javascript, security: high, scope: { read: [], docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md], write: [scripts/pre-guard.mjs, scripts/pre-guard-heredoc.test.mjs, docs/architecture/safety.rules.md] }, arch: [ARCH-SAFETY-15, ARCH-SAFETY-13, ARCH-STATE-16], tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] } }
+  - id: 7
+    scope_id: network-consumer-doc
     project: .
     depends_on: []
-    module: scripts/handoff.mjs, scripts/session-context.mjs, scripts/account-switch.mjs, scripts/lib/core.mjs
+    module: commands/_network.md, scripts/network.test.mjs
     language: javascript
     security: normal
     scope:
-      read: [scripts/handoff.mjs, scripts/session-context.mjs, scripts/account-switch.mjs, commands/_shared-execution.md]   # core.mjs is 60 KB: grep -n "^export" first, read by range with Bash
-      docs: [docs/architecture/auto.rules.md, docs/architecture/slim.rules.md, docs/architecture/state.rules.md, docs/architecture/safety.rules.md, docs/architecture/engine.rules.md]
-      write: [scripts/handoff.mjs, scripts/handoff.test.mjs, scripts/session-context.mjs, scripts/session-context.test.mjs, scripts/account-switch.mjs, scripts/account-switch.test.mjs, scripts/lib/core.mjs, commands/_shared-execution.md, docs/architecture/auto.rules.md]   # rules docs: cite: line ranges only
-    arch: [ARCH-AUTO-11, ARCH-SLIM-02, ARCH-STATE-02, ARCH-SAFETY-04, ARCH-ENGINE-08]
+      read: [commands/_network.md, scripts/network.test.mjs]   # repo-exec.mjs is 50 KB: grep -n "needs_network\|parkRejected" first, read by range with Bash
+      docs: [docs/architecture/landing.rules.md, docs/architecture/engine.rules.md, docs/architecture/slim.rules.md]
+      write: [commands/_network.md, scripts/network.test.mjs, docs/architecture/landing.rules.md]   # rules docs: cite: line ranges only
+    arch: [ARCH-LAND-36, ARCH-LAND-35, ARCH-LAND-19, ARCH-ENGINE-19, ARCH-SLIM-01, ARCH-SLIM-02]
     tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [arch-check], mcp: [] }
-  - id: 2
-    scope_id: drain-rejected
+  - id: 8
+    scope_id: submodule-worktree-queue
     project: .
     depends_on: []
-    module: scripts/lib/network.mjs drainQueue
+    module: scripts/pre-guard.mjs superprojectRoots, outerRelWhere, mainRelOf, scripts/lib/self-protect.mjs
     language: javascript
     security: high
     scope:
-      read: [scripts/lib/network.mjs, scripts/network.test.mjs]   # repo-exec.mjs is 50 KB and repo-exec.test.mjs 67 KB: grep -n "drainQueue\|networkAction\|landingPark" first, read by range with Bash
-      docs: [docs/architecture/landing.rules.md]
-      write: [scripts/lib/network.mjs, scripts/network.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec.test.mjs, docs/architecture/landing.rules.md]   # rules docs: cite: line ranges only
-    arch: [ARCH-LAND-36, ARCH-LAND-19]
-    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
-  - id: 3
-    scope_id: prettier-test-copy
-    project: .
-    depends_on: []
-    module: scripts/prettier-ignore.test.mjs
-    language: javascript
-    security: normal
-    scope:
-      read: [scripts/prettier-ignore.test.mjs]
-      docs: []
-      write: [scripts/prettier-ignore.test.mjs]
-    arch: []
-    tooling: { implementer: implementer, gates: [code-reviewer], skills: [test-driven-development], guards: [], mcp: [] }
-  - id: 4
-    scope_id: queue-protection
-    project: .
-    depends_on: []
-    module: scripts/lib/self-protect.mjs SELF_NEVER and holds, scripts/pre-guard.mjs path judgement
-    language: javascript
-    security: high
-    scope:
-      read: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard-queue.test.mjs]   # pre-guard.mjs is 140 KB and pre-guard.test.mjs 172 KB: grep -n first, read by range with Bash (ARCH-ENGINE-08)
+      read: [scripts/lib/self-protect.mjs, scripts/pre-guard-queue.test.mjs]   # pre-guard.mjs is 150 KB and pre-guard.test.mjs 180 KB: grep -n first, read by range with Bash (ARCH-ENGINE-08)
       docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard.mjs, scripts/pre-guard-queue.test.mjs, docs/architecture/safety.rules.md]   # rules docs: cite: line ranges only
+      write: [scripts/pre-guard.mjs, scripts/pre-guard-queue.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, docs/architecture/safety.rules.md]   # rules docs: cite: line ranges only
     arch: [ARCH-SAFETY-13, ARCH-STATE-16]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
-  - id: 5
-    scope_id: scratch-write-hardening
+  - id: 9
+    scope_id: cp-link-sources
     project: .
-    depends_on: [queue-protection]
-    module: scripts/pre-guard.mjs insideScratchRoots, scripts/lib/self-protect.mjs WRITER_VERBS
+    depends_on: [submodule-worktree-queue]
+    module: scripts/pre-guard.mjs copyTargets and the ln/link text check
     language: javascript
     security: high
     scope:
-      read: [scripts/lib/self-protect.mjs]   # pre-guard.mjs and pre-guard.test.mjs: grep -n "insideScratchRoots\|verb === \"ln\"" first, read by range
+      read: [scripts/lib/self-protect.mjs]   # pre-guard.mjs and pre-guard.test.mjs: grep -n "copyTargets\|links into .craftsman\|verb === \"ln\"" first, read by range
       docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: cite: line ranges only
-    arch: [ARCH-STATE-18, ARCH-SAFETY-13]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: cite: line ranges only
+    arch: [ARCH-SAFETY-13, ARCH-STATE-16, ARCH-STATE-18]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
-  - id: 6
-    scope_id: heredoc-limits
+  - id: 10
+    scope_id: ln-check-safe-exemption
     project: .
-    depends_on: [scratch-write-hardening]
-    module: scripts/pre-guard.mjs blankInertHeredocs
+    depends_on: [cp-link-sources]
+    module: scripts/pre-guard.mjs WRAPPED and LINK_AT_COMMAND (the ln/link text check)
     language: javascript
     security: high
     scope:
-      read: []   # pre-guard.mjs and pre-guard-heredoc.test.mjs: grep -n "blankInertHeredocs\|REACHES_SHELL\|NODE_E_LIVE" first, read by range
+      read: [scripts/lib/self-protect.mjs]   # pre-guard.mjs and pre-guard.test.mjs: grep -n "LINK_AT_COMMAND\|WRAPPED\|WRAPPERS" first, read by range
       docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
-      write: [scripts/pre-guard.mjs, scripts/pre-guard-heredoc.test.mjs, docs/architecture/safety.rules.md]   # rules docs: cite: line ranges only
-    arch: [ARCH-SAFETY-15, ARCH-SAFETY-13, ARCH-STATE-16]
+      write: [scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, docs/architecture/safety.rules.md, docs/architecture/state.rules.md]   # rules docs: cite: line ranges only
+    arch: [ARCH-SAFETY-03, ARCH-SAFETY-13, ARCH-SAFETY-15, ARCH-STATE-16]
+    tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
+  - id: 11
+    scope_id: submodule-git-surface
+    project: .
+    depends_on: [ln-check-safe-exemption]
+    module: scripts/lib/self-protect.mjs SELF_NEVER, scripts/pre-guard.mjs rsync and cp branches
+    language: javascript
+    security: high
+    scope:
+      read: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard-queue.test.mjs]   # pre-guard.mjs and pre-guard.test.mjs: grep -n first, read by range (ARCH-ENGINE-08)
+      docs: [docs/architecture/safety.rules.md, docs/architecture/state.rules.md]
+      write: [scripts/lib/self-protect.mjs, scripts/lib/self-protect.test.mjs, scripts/pre-guard.mjs, scripts/pre-guard.test.mjs, scripts/pre-guard-queue.test.mjs, docs/architecture/safety.rules.md]   # rules docs: cite: line ranges only
+    arch: [ARCH-SAFETY-13, ARCH-SAFETY-15, ARCH-STATE-16]
     tooling: { implementer: implementer, gates: [code-reviewer, security-auditor], skills: [test-driven-development], guards: [arch-check], mcp: [] }
 ---
 
-# Plan: scrutinise sandbox-auto-flow-phase-2 (round 1)
+# Plan: scrutinise sandbox-auto-flow-phase-2 (rounds 1 and 2)
 
 ## Outcome
-The eight phase 2 units are merged and the suite is green, but the isolated reviewer found four Warnings that this plan closes: the queue protection stops at a repo whose git dir is literally `.git` (a submodule's is `.git/modules/<name>`) and ignores the queue's parent directory; a hard link under a scratch root can carry a scoped Write or Edit to a protected file; and a mid-run unit hand-off no longer re-arms the scope requirement. Five Suggestions ride along in the same files. Done = `/scrutinise sandbox-auto-flow-phase-2` returns 0 Critical, 0 Warning, no UNMET.
+Round 1 (4 Warning) is fixed by units 1-6, all MERGED. Round 2 re-reviewed those merges (0 Critical, 3 Warning, 5 Suggestion) and found three holes the fixes left: the new `parked[]` on a drain's exit-3 payload contradicts the one doc that tells root to "park nothing", a session in a linked worktree of a submodule can still write the queue with plain Bash, and `cp -l` hard-links exactly like `ln` but its source is never judged. Units 7-9 close them. Round 3 (0 Critical, 4 Warning) found two regressions of unit 9's own narrowing of the ln text check (an exponential regex, and weaker refusals for unlisted wrappers) and two older gaps on the submodule surface (git config and hooks, rsync --link-dest); units 10-11 close them. Done = `/scrutinise sandbox-auto-flow-phase-2` returns 0 Critical, 0 Warning, no UNMET.
 
-## Round 1 findings (verified by root at file:line before planning)
+## Round 1 (history: this file at 6b04842 holds the full findings table and the six step texts)
+Units 1-6 are MERGED: handoff-arming 4b5623d (W4, S5), drain-rejected aa73e33 (S6), prettier-test-copy 346d74d (S9), queue-protection 771da11 (W1, W2), scratch-write-hardening 466710c (W3, S8), heredoc-limits 1c3f51c (S7, partly; see Out of scope).
+
+## Round 2 findings (isolated scrutineer, 2026-11-03, state 1c3f51c; all three Warnings re-verified by root: probe p5 reproduced, code read)
 | id | class / severity | where | unit |
 |---|---|---|---|
-| W1 | Security / Warning | `scripts/lib/self-protect.mjs:24` pattern misses `.git/modules/<name>/.craftsman/network/` (`network.mjs:83` uses `info.common_git_dir`) | 4 |
-| W2 | Security / Warning | `self-protect.mjs:141-148` `holds()`: a `**/` pattern has an empty literal base, so `rm -rf .git/.craftsman` and `mv .git/.craftsman x` exit 0 | 4 |
-| W3 | Security / Warning | `pre-guard.mjs:1322`, `insideScratchRoots` (~1967): realpath misses hard links; `link` is not in `WRITER_VERBS` (`self-protect.mjs:101`) | 5 |
-| W4 | Correctness / Warning | `session-context.mjs:166-172` with `_shared-execution.md:50` and `handoff.mjs:29`: the unit hand-off never asks for `remaining_units`, and a missing field becomes `[]` | 1 |
-| S5 | Cross-unit / Suggestion | `account-switch.mjs:501-507` arms the marker for any restored hand-off | 1 |
-| S6 | Correctness / Suggestion | `network.mjs:175-193`: a refused entry followed by an unreachable one is sliced out of the queue and its PARK is lost | 2 |
-| S7 | Security / Suggestion | `pre-guard.mjs:1993-2053`, `:1997`, `:1781`: node and python bodies blanked unconditionally; `REACHES_SHELL` gaps; case-pattern `)` miscounts `$(` depth | 6 |
-| S8 | Correctness / Suggestion | `pre-guard.mjs:1970`: a scoped Write cannot create a new scratch file | 5 |
-| S9 | Test-coverage / Suggestion | `prettier-ignore.test.mjs:36-46` runs `prettier --write` on the live `core.mjs` in parallel with other tests | 3 |
+| R2-W1 | Correctness / Warning | `commands/_network.md:13` says to PARK each `parked[]` entry, while the drain-failure sentence in the `needs_network` section says "park nothing"; `repo-exec.mjs:835-841,876-878` puts the PARKs of already-removed entries into the exit-3 payload | 7 |
+| R2-W2 | Security / Warning | `pre-guard.mjs:181-206` `superprojectRoots` / `outerRelWhere`: in a linked worktree of a submodule project `git rev-parse --show-superproject-working-tree` prints nothing, so `echo >>`, `echo >`, `printf >>`, `cat >>` onto `.git/modules/<name>/.craftsman/network/queue.jsonl`, and `rm`/`mv` of its directory, exit 0 (Write and Edit are refused only by accident) | 8 |
+| R2-W3 | Security / Warning | `pre-guard.mjs:876-880` `copyTargets`: `cp -l`, `cp --link` (and `-s`) never judge the source, so a hard link to a scope manifest or the queue can be made and then overwritten (the round-1 W3 class, through Bash) | 9 |
 
-Acceptance verdicts: `[unit:guard-paths]` UNMET (W1; its tick was reverted), the whole-plan line UNMET (evidence: root task R below), the other seven unit lines MET.
+Suggestions: R2-S4 (the text check matched a search for the word) and R2-S5 (stale ARCH-STATE-16 cite) are closed by unit 9, R2-S6 (no submodule linked-worktree row) by unit 8; R2-S7 (heredoc spellings) goes to followup-heredoc-spellings and R2-S8 (ARCH-STATE-18 text) to `/architect --update`.
+
+## Round 3 findings (isolated scrutineer, 2026-11-03, state cbb14e1; all five criteria MET; W1 and W4 re-verified by root on merged main)
+| id | class / severity | where | unit |
+|---|---|---|---|
+| R3-W1 | Security / Warning | `pre-guard.mjs:604-605` WRAPPED/LINK_AT_COMMAND backtracks exponentially: a harmless command with 26 `1=1` tokens after `sudo` takes 10 s (the pre-guard hook timeout, `hooks/hooks.json:10`); the check runs before the concrete refusals at :1799+ (reproduced) | 10 |
+| R3-W4 | Architecture / Warning | the same narrowing weakens refusals that existed: `setsid`, `chrt`, `flock`, `taskset`, `strace`, `unshare`, `fakeroot` or `watch` in front of ln into the state dir went from exit 2 to exit 0 (reproduced); ARCH-SAFETY-15 narrows only where text is provably inert | 10 |
+| R3-W2 | Security / Warning (older gap) | `self-protect.mjs:18-31` SELF_NEVER: a submodule's `.git/modules/<name>/config`, `config.worktree`, `hooks/**` and `worktrees/*/config*` are writable from every root; root pushes with the user's credentials (`network.mjs:57-58`) | 11 |
+| R3-W3 | Security / Warning | `pre-guard.mjs:~1178` rsync goes to `copyTargets`: `--link-dest=DIR` hard-links unchanged files from DIR, the R2-W3 class through rsync | 11 |
+| R3-S5 | Security / Suggestion | `self-protect.mjs:188-197` commonRel: a queue under `.git/worktrees/<wt>/modules/<name>/.craftsman/network` has no pattern | 11 |
+| R3-S6 | Cross-unit / Suggestion | `pre-guard.mjs:~900-1006` a cp that links does not get the ln branch's check that the link NAME lands in the state dir (`cp -s /tmp/x .craftsman/x` exits 0) | 11 |
+| R3-S7 | Architecture / Suggestion | ARCH-SAFETY-13 text still says only "ln"; `/architect --update` after the run, carry R2-S8 and these | /architect |
+| R3-S8 | Test-coverage / Suggestion | no unlisted-wrapper row and no latency row in `pre-guard.test.mjs:628-649` | 10 |
 
 ## Scope Steps (executable core)
 
-### Step 1 — handoff-arming (., javascript, normal)
+### Step 7 — network-consumer-doc (., javascript, normal)
 Tooling: implementer implementer · gates code-reviewer · skills test-driven-development
 Depends on: none
-- [ ] 1.1 RED rows in `scripts/handoff.test.mjs`: `normalizeHandoff` throws a message naming `remaining_units` when `unit` is set and `remaining_units` is not an array; `[]` and a non-empty array are accepted; a hand-off with no `unit` and no field is still accepted → accept: the refusal rows fail on main
-- [ ] 1.2 RED rows in `scripts/session-context.test.mjs` and `scripts/account-switch.test.mjs`: one shared predicate decides arming: SessionStart and `adopt` both arm for a non-empty `remaining_units` and neither arms for `[]`, a missing field or a non-array (the adopt rows for `[]` and for a missing field are new) → accept: the adopt rows fail on main
-- [ ] 1.3 Add `export const handoffArmsScope = (handoff) => Array.isArray(handoff?.remaining_units) && handoff.remaining_units.length > 0` to `scripts/lib/core.mjs`; use it at `session-context.mjs:169` and in the `adopt` action of `account-switch.mjs` (~:501-507, arm only when it is true; keep the hand-off copy itself); make `normalizeHandoff` (`handoff.mjs:~17`) refuse the unit-without-array case → accept: 1.1 and 1.2 green
-- [ ] 1.4 `commands/_shared-execution.md` step 12 (line 50): name `remaining_units` (ids, `[]` on the last unit) in the list of hand-off contents. The file is exactly at its 12,766-byte cap (ARCH-SLIM-02: caps only go down), so trim non-MUST prose in the same file to net growth <= 0; `commands/account-switch.md:47` points at step 12 and needs no edit → accept: `node scripts/doc-size-policy.mjs` PASS and `wc -c commands/_shared-execution.md` <= 12766
-- [ ] 1.5 Re-point the ARCH-AUTO-11 cite into `session-context.mjs` if 1.3 moved it (cite text only) → accept: `node scripts/arch-check.mjs lint` and `node --test scripts/safety-cites.test.mjs scripts/safety-claims.test.mjs scripts/safety-docs.test.mjs` pass
-- [ ] 1.6 Run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+- [ ] 7.1 RED row in `scripts/network.test.mjs` (next to the existing `_network.md` wording row): the doc text tells root that a drain which exits 3 with `parked[]` PARKs each entry (as step 3 does) and then stops, and the `needs_network` section no longer says to park nothing for that case → accept: the row fails on main
+- [ ] 7.2 Edit `commands/_network.md` (2,571 of its 2,573-byte cap, ARCH-SLIM-02: net growth <= 2 bytes, so trim non-MUST prose in the same file; no MUST sentence leaves, ARCH-SLIM-06): the drain-failure sentence names `parked[]` → accept: 7.1 green and `node scripts/doc-size-policy.mjs` PASS
+- [ ] 7.3 Re-point cites into `_network.md` if any moved → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
 
-### Step 2 — drain-rejected (., javascript, high)
+### Step 8 — submodule-worktree-queue (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development
-Depends on: none
-- [ ] 2.1 RED rows in `scripts/network.test.mjs`: a queue of [entry refused by `drainVerdict`, entry whose push is unreachable] and one of [entry origin-rejected, entry unreachable]: after the drain throws, the first entry is not lost: it is either still in the queue file or carried on the thrown error's `rejected` list, and `drain_refused` is logged once per refused entry → accept: the new rows fail on main
-- [ ] 2.2 In `drainQueue` (`scripts/lib/network.mjs:165-197`) make no entry leave the queue without being pushed or reaching a PARK decision. Either attach `rejected` to the thrown NetworkError and have `networkAction` (`repo-exec.mjs:~835`) turn them into the same `landingPark` decisions before it returns `needs_network`, or keep the refused and rejected entries until the drain ends; a pin is deleted only once its entry is final → accept: 2.1 green and the existing `network.test.mjs` rows stay green
-- [ ] 2.3 One `repo-exec.test.mjs` row: a drain that refuses one entry and then loses the network returns the PARK for the first and keeps the rest queued → accept: the row is green and fails with the 2.2 change removed (one temporary mutation, shown and restored by copying a saved copy back, not committed)
-- [ ] 2.4 Re-point cites into `network.mjs` and `repo-exec.mjs` that moved, in `landing.rules.md` (cite text only; ARCH-LAND-36 cites `network.mjs:145-171`-shaped ranges) → accept: lint passes; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+Depends on: none (guard units last; a conflict with another session's `pre-guard.mjs` rounds PARKs this unit with its branch kept)
+- [ ] 8.1 RED rows in `scripts/pre-guard-queue.test.mjs` (extend `repoWithSubmodule`): add a linked worktree of the submodule inside `sub/.claude/worktrees/wt` and one beside it (`<base>/sub-wt`); from each, a Write, an Edit, `echo >>`, `echo >`, `printf >>`, `cat f >>`, `tee -a`, `cp` and `sed -i` onto the queue (absolute and relative path), and `rm -rf`, `mv` of `<common>/.craftsman/network` and `<common>/.craftsman` exit 2; a Read exits 0; `enqueuePush` run by node still writes; ordinary directories stay allowed → accept: the `>>`, `>` and `rm`/`mv` rows fail on main (probes p5, p10 of the round 2 audit)
+- [ ] 8.2 In `pre-guard.mjs` judge the session's real git common dir directly: resolve `realpath(git rev-parse --git-common-dir)` once (memoised, failing open to today's behaviour) and refuse a write inside `<common>/.craftsman/network/**` and the removal or move of `<common>/.craftsman/network`, `<common>/.craftsman` or `<common>` by containment, in both the redirect and the writer-verb paths (or apply `selfKind` and `heldNever` to the absolute real path in `foldedSelf` and `target()`, as the Write path already does; pick one and say why) → accept: 8.1 green and `scripts/lib/self-protect.test.mjs`, `scripts/pre-guard*.test.mjs` stay green
+- [ ] 8.3 Mutation checks, each with one temporary edit shown red then restored by copying a saved copy back (never git checkout, restore or reset): drop the common-dir containment test; drop the redirect branch → accept: each turns its own rows red; `git status` clean after
+- [ ] 8.4 Re-point cites into `pre-guard.mjs` and `self-protect.mjs` this unit moved in `safety.rules.md` (cite text only) → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
 
-### Step 3 — prettier-test-copy (., javascript, normal)
-Tooling: implementer implementer · gates code-reviewer · skills test-driven-development
-Depends on: none
-- [ ] 3.1 RED row: the `prettier --write` test must not touch the live `scripts/lib/core.mjs`: copy `scripts/lib/core.mjs` and `.prettierignore` into a temp directory (under `os.tmpdir()`), run `prettier --write` there with that directory as cwd, assert the copy is byte-identical; the row stays skipped without prettier. Show the row is meaningful by running it once with the copy's `.prettierignore` emptied (one scratch demonstration, not committed) → accept: the new test passes with the ignore file and fails when the copy's `.prettierignore` is empty, and no run touches `scripts/lib/core.mjs`
-- [ ] 3.2 Run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
-
-### Step 4 — queue-protection (., javascript, high)
+### Step 9 — cp-link-sources (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development
-Depends on: none (guard units last; a conflict with the other session's `pre-guard.mjs` rounds PARKs this unit with its branch kept)
-- [ ] 4.1 RED rows in `scripts/pre-guard-queue.test.mjs` with a throwaway superproject plus a registered submodule `sub`: a Write and `echo x >>` to `.git/modules/sub/.craftsman/network/queue.jsonl` exit 2 from the superproject root and from the submodule root; `rm -rf .git/.craftsman` and `mv .git/.craftsman x` exit 2 while a queue exists; `rm -rf .git/.craftsman/network` still exits 2; ordinary directories (`docs`, `src/.github`, `.gitignore`) stay allowed; a Read of the queue still exits 0; `enqueuePush` run by node still writes the file → accept: the submodule and parent-directory rows fail on main
-- [ ] 4.2 Add `**/.git/modules/**/.craftsman/network/**` to `SELF_NEVER` (`self-protect.mjs:~24`) and make `holds()` (`:141-148`) test the literal base of a `**/` pattern's remainder (`.git/.craftsman/network`): the entry itself, an ancestor of it (`.git`, `.git/.craftsman`) or a path ending in `/<ancestor>` is held. If this changes an existing refusal row, restrict the rule to the network patterns; if the submodule root's view of the superproject's `.git/modules` needs `pre-guard.mjs` (`mainRelOf` ~:170), make that change too → accept: 4.1 green and `scripts/lib/self-protect.test.mjs` plus `scripts/pre-guard*.test.mjs` stay green
-- [ ] 4.3 The ordinary-directory rows of 4.1 are the false-positive guard: paths that hold no queue pattern keep their current verdict → accept: the rows pass before and after
-- [ ] 4.4 Mutation checks, each with one temporary edit shown red then restored by copying a saved copy back (never git checkout, restore or reset): drop the modules pattern; drop the base test in `holds()` → accept: each turns its own rows red; `git status` clean after
-- [ ] 4.5 Re-point cites into `self-protect.mjs` and `pre-guard.mjs` this unit moved in `safety.rules.md` (cite text only) → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+Depends on: submodule-worktree-queue (same file)
+- [ ] 9.1 RED rows in `scripts/pre-guard.test.mjs` (the hard-link group): with an active unit scope and the scratch dir on the project's filesystem, `cp -l <manifest> <scratch>/h.json`, `cp --link`, `cp -al`, `cp -sl`-style clusters and `cp -s <manifest> <scratch>/s.json` exit 2 like `ln`; the same for the push queue as source; `cp <ordinary> <scratch>/x` stays allowed; `grep -n link .craftsman/acceptance.md` and `rg -n link .craftsman/` exit 0 → accept: the `cp -l`/`--link` rows and the two search rows fail on main (probes p1, p11, p12)
+- [ ] 9.2 In `copyTargets`/`writeTargets` (`pre-guard.mjs:~876`) treat `cp` with `-l`, `--link`, `-s`, `--symbolic-link` (or a short-option cluster containing `l` or `s`) like `ln`: judge each source through the same `target(aimed, ..., "write")` path as the `ln`/`link` branch (`:~970-990`) → accept: the `cp` rows of 9.1 green
+- [ ] 9.3 Give the `ln`/`link` text check (`:~1778`) a command-position anchor (the `AT_COMMAND` pattern the other verbs use) so a search for the word `link` is not a link → accept: the search rows of 9.1 green and the existing `ln` rows stay green
+- [ ] 9.4 Mutation checks, each shown red then restored by copying a saved copy back: drop the `cp -l` source judgement; drop the anchor (the search rows go red) → accept: each turns its own rows red; `git status` clean after
+- [ ] 9.5 Recompute every `scripts/pre-guard.mjs` cite in `safety.rules.md` and `state.rules.md` against the final file (ARCH-STATE-16's `:1350-1367` is stale since queue-protection added 29 lines at `:177-206`; cite text only) → accept: lint and the three safety doc tests pass; every cited range opens on the construct its rule names; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
 
-### Step 5 — scratch-write-hardening (., javascript, high)
+### Step 10 — ln-check-safe-exemption (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development
-Depends on: queue-protection (same files)
-- [ ] 5.1 RED rows in `scripts/pre-guard.test.mjs` (the scratch Write/Edit group near the `insideScratchRoots` rows): with an active unit scope and the scratch dir on the same filesystem as the project, a hard link of the scope manifest (made with `fs.linkSync` in the test) under the scratch root: a Write and an Edit of it exit 2; a Bash `link <manifest> <scratch>/h.json` exits 2 like `ln`; a Write of a NEW file whose nearest existing ancestor is the scratch root exits 0; a new file below a symlinked directory that leads out, a new file with `..` out, a new file inside a governed root, a relative path and an env file (`protectedPaths`) still exit 2; an Edit or a Read of a missing file still exits 2; NotebookEdit, Glob and Grep still exit 2 → accept: the hard-link, `link` and new-file rows fail on main (the pinned "file that does not exist" row is flipped for Write only)
-- [ ] 5.2 In `insideScratchRoots` (`pre-guard.mjs:~1967`) take the tool name: return false for an existing Write or Edit target with `nlink > 1`; for Write only, when the target does not exist resolve the nearest existing ancestor with `realpathSync.native` and judge `ancestor + remainder` by the same containment and governed-root tests, rejecting a remainder holding `..`; update the call at `:1322` and the two comments → accept: 5.1 green
-- [ ] 5.3 Add `link` to `WRITER_VERBS` (`self-protect.mjs:101`) and judge it like `ln` in the source/destination branch (`pre-guard.mjs:~941`) → accept: the `link` rows of 5.1 green and the `WRITER_VERBS` row in `scripts/lib/self-protect.test.mjs` updated
-- [ ] 5.4 Check that the later Write/Edit checks (doc-write guard, `selfKind` by real path, `protectedPaths`) still run for a new-file target → accept: rows for a new file named like a protected path and a new `.env` file exit 2
-- [ ] 5.5 Mutation checks, each shown red then restored by copying a saved copy back: drop the `nlink` test; drop the nearest-ancestor containment test → accept: each turns its own rows red; `git status` clean after
-- [ ] 5.6 Re-point cites into `pre-guard.mjs` this unit moved in `safety.rules.md` and `state.rules.md` (cite text only; ARCH-STATE-18 cites `:1957-1975`-shaped ranges) → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+Depends on: cp-link-sources (same file)
+- [ ] 10.1 RED rows in `scripts/pre-guard.test.mjs` next to the cp/ln group: (a) `setsid`, `chrt 5`, `flock /x`, `taskset 1`, `strace -f`, `unshare -r`, `fakeroot` and `watch` in front of an ln whose link name or source is under the state dir exit 2 (the listed wrappers stay 2); (b) read-only searches that only name the word (`grep -n link .craftsman/acceptance.md`, `rg -n link .craftsman/`, `echo ln .craftsman`, `printf`, `cat`, `git log` heads) exit 0; a mixed command whose second segment is a real ln exits 2; (c) latency: the guard finishes in under 300 ms on `sudo` followed by 40 `1=1` tokens, `nice` followed by 40 digits, and 400 spaces → accept: the (a) and (c) rows fail on main (`setsid` exits 0; 26 tokens take 10 s)
+- [ ] 10.2 In `pre-guard.mjs` (`:601-609`, check at `~:1798`) replace WRAPPED and LINK_AT_COMMAND by the old unanchored check as the default (a command naming the state dir and the word ln or link as a whole word is refused) plus a linear exemption: split on `;`, `&&`, `||`, `|` and newlines with plain string operations; exempt the command only when every segment that holds the word starts with a read-only head from a fixed list (grep, egrep, fgrep, rg, echo, printf, cat, git log); no regex with nested or overlapping quantifiers → accept: 10.1 green and the existing cp/ln rows stay green
+- [ ] 10.3 Smoke the other Bash-path regexes with the latency rows' style (long runs of spaces, digits, `=`, quotes, parentheses): one-line fixes are made here, anything bigger is a PENDING row → accept: no input of 4 KB takes over 300 ms
+- [ ] 10.4 Mutation checks, each shown red then restored by copying a saved copy back (never git checkout, restore or reset): drop the head list (the search rows go red); drop the every-segment rule (the mixed row goes red) → accept: each turns its own rows red; `git status` clean after
+- [ ] 10.5 Re-point cites into `pre-guard.mjs` this unit moved in `safety.rules.md` and `state.rules.md` (cite text only) → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
 
-### Step 6 — heredoc-limits (., javascript, high)
+### Step 11 — submodule-git-surface (., javascript, high)
 Tooling: implementer implementer · gates code-reviewer, security-auditor · skills test-driven-development
-Depends on: scratch-write-hardening (same file)
-- [ ] 6.1 RED rows in `scripts/pre-guard-heredoc.test.mjs`: `node - <<'EOF'` and `python3 - <<'EOF'` whose body assigns a safety variable the way a live program does (`process.env.CRAFTSMAN_SAFETY='off'`, `os.environ['CRAFTSMAN_SAFETY']='off'`) exit 2 like the same `node -e` literal; prose that merely names the variable in a `cat <<'EOF'` body still exits 0; a body written by `cat <<'EOF' > f` and then run with `. f`, `source f`, `bash f`, `eval "$(cat f)"` or `coproc` exits 2 or is recorded as a stated limit (decide per spelling with the test, not the reverse); a `$(case a in a) ... cat <<'EOF' ... ;; esac)` form exits 2 → accept: the live-program, run-later and case-pattern rows fail on main
-- [ ] 6.2 In `pre-guard.mjs` (`blankInertHeredocs` ~:1993-2053, `REACHES_SHELL` ~:1997, `NODE_E_LIVE` ~:1781): keep the body visible to the setter check when the command word is node or python and the body matches `NODE_E_LIVE` or a python analogue; add `source`, `eval`, `coproc` and a leading `.` to `REACHES_SHELL`; make the `$(` depth count ignore a case-pattern `)`. Whatever 6.1 leaves allowed is written down as a stated limit in the ARCH-SAFETY-15 / ARCH-SAFETY-13 rules text, never silently → accept: 6.1 green and the 8 existing heredoc rows stay green
-- [ ] 6.3 A `--no-verify` inside a quoted body is still refused by the ARCH-STATE-16 whole-command scan → accept: the existing row stays green
-- [ ] 6.4 Mutation checks, each shown red then restored by copying a saved copy back: drop the node/python live-body test; drop the new `REACHES_SHELL` words → accept: each turns its own rows red; `git status` clean after
-- [ ] 6.5 Re-point cites into `pre-guard.mjs` this unit moved in `safety.rules.md` (cite text only); a stated-limit sentence is the only prose change → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
+Depends on: ln-check-safe-exemption (same file)
+- [ ] 11.1 RED rows in `scripts/pre-guard-queue.test.mjs` and `scripts/lib/self-protect.test.mjs`: from the superproject root, the submodule root, both submodule linked worktrees and the superproject's linked worktree, a Write and an `echo >>` onto `.git/modules/sub/config`, `.git/modules/sub/config.worktree`, `.git/modules/sub/hooks/pre-push` and `.git/modules/sub/worktrees/wt/config` exit 2 (the plain-repo `.git/config` and `.git/hooks` rows already do); the queue of a submodule checked out inside a superproject linked worktree (`.git/worktrees/<wt>/modules/sub/.craftsman/network/queue.jsonl`): Write, `>>` and `rm -rf` of its directory exit 2; a Read exits 0; ordinary directories stay allowed → accept: the config, hooks and worktree-modules rows fail on main
+- [ ] 11.2 Add to `SELF_NEVER` (`self-protect.mjs:18-31`) `**/.git/modules/**/config`, `**/.git/modules/**/config.worktree`, `**/.git/modules/**/hooks/**`, `**/.git/modules/**/worktrees/*/config*` and `**/.git/worktrees/*/modules/**/.craftsman/network/**`; check that `holds()` refuses the removal of their parents the way it does for the queue → accept: 11.1 green and `self-protect.test.mjs`, `pre-guard*.test.mjs` stay green
+- [ ] 11.3 RED rows in `scripts/pre-guard.test.mjs`: `rsync -a --link-dest=<dir> src/ out/` and `--link-dest <dir>` exit 2 when `<dir>` is the state dir or holds a protected state file; the same rsync without `--link-dest` and with an ordinary dir stays allowed; `cp -s /tmp/x .craftsman/x` and `cp -l /tmp/x .craftsman/x` exit 2 like `ln -s` → accept: the new rows fail on main (probes of the round 3 audit)
+- [ ] 11.4 In `pre-guard.mjs` judge `--link-dest[=]DIR` in the rsync branch (`~:1178`) as a linking source (`target(DIR, st, "holds", env)` and the linked-sources path used for cp), and run the ln branch's state-dir name containment (`~:997-1006`) over the destination names of a cp that links → accept: 11.3 green
+- [ ] 11.5 Record in the ARCH-SAFETY-13 rules text, as stated limits (ARCH-SAFETY-15), what stays unjudged: `cpio -pdl`, `pax -l`, an unlisted wrapper in front of a writer, quote-split names; one sentence, no other prose change → accept: lint and the three safety doc tests pass
+- [ ] 11.6 Mutation checks, each shown red then restored by copying a saved copy back: drop the modules config/hooks patterns; drop the `--link-dest` judgement; drop the cp name containment → accept: each turns its own rows red; `git status` clean after
+- [ ] 11.7 Re-point cites into `self-protect.mjs` and `pre-guard.mjs` this unit moved (cite text only) → accept: lint and the three safety doc tests pass; then run `node --test scripts/*.test.mjs scripts/lib/*.test.mjs` → accept: exit 0
 
-### Root task R — per-merge verification of sandbox-auto-flow-phase-2 (no unit, no worktree)
-- [x] R.1 Root extracts each merge sha (728fef9 53d0b28 ad83507 3d80366 72b890d e60fcbf 80a8846 2b32191) into a fresh scratch directory under the job tmp dir, runs the full suite, `arch-check.mjs lint` and `doc-size-policy.mjs` there, and records the table under Verification background → accept: every row is green
+### Root tasks (no unit, no worktree)
+- [x] R.1 Per-merge verification of sandbox-auto-flow-phase-2 and of units 1-6 (tables below) → accept: every row green
+- [x] R.2 Register `followup-heredoc-spellings` (PENDING, plan `sandbox-auto-flow.md`) for R2-S7 → accept: the row shows PENDING with the spellings listed
+- [x] R.3 After units 7-9 merge, run the per-merge check for their three merge shas and append the rows → accept: every row green
+- [x] R.4 After units 10-11 merge, run the per-merge check for their two merge shas and append the rows; then judge the plan's whole-plan line again → accept: every row green
 
 ## Sequencing
-Units run in plan-graph order: 1, 2, 3 first (independent, no guard files), then 4, 5, 6 (guard units last, each on the one before). After the run: `/scrutinise sandbox-auto-flow-phase-2` again until 0 Critical and 0 Warning; then `/sync-docs --all sandbox-auto-flow-phase-2` (it also re-points ARCH-APPROVAL-05's `session-context.mjs` cite and aligns ARCH-SAFETY-13's wording with python and the dash form), `/architect --update safety state landing auto`, and `/craftsman:merge`.
+Units run in plan-graph order: 7 (docs, independent), then 8 and 9 (guard units last, 9 on 8), then 10 and 11 (11 on 10). After the run: `/scrutinise sandbox-auto-flow-phase-2` again until 0 Critical and 0 Warning; then `/sync-docs --all sandbox-auto-flow-phase-2` (it also re-points ARCH-APPROVAL-05's `session-context.mjs` cite and aligns ARCH-SAFETY-13's wording), `/architect --update safety state landing auto` (ARCH-STATE-18's text and check clause gain the `nlink` refusal and the new-file Write), and `/craftsman:merge`.
 
 ## Verification background   (citations — for the reviewer, not the executor)
 CONSUMERS:
-- `normalizeHandoff` / `handoff.json` fields: written by `scripts/handoff.mjs`; read by `session-context.mjs:162-172` (arming), `session-end.mjs:20-21` (plan, unit, next_action only), `account-switch.mjs:495-510` (copy and arm); documented by `commands/_shared-execution.md:50`, `commands/orchestrate.md:50`, `commands/account-switch.md:47`. Tests: `handoff.test.mjs`, `session-context.test.mjs`, `session-end.test.mjs`, `account-switch.test.mjs`.
-- `handoffArmsScope` (new): `session-context.mjs`, `account-switch.mjs` only.
-- `drainQueue(root, info, { directLand })`: one caller, `repo-exec.mjs:835`; it returns `{ pushed, rejected }` and throws a NetworkError on an unreachable or auth failure.
-- `insideScratchRoots(target, project, hookInput)`: one caller, `pre-guard.mjs:1322`.
-- `WRITER_VERBS`: `pre-guard.mjs:16,558,568,569`; the `ln` source/destination branch at `:941`; tests `scripts/lib/self-protect.test.mjs`.
-- `SELF_NEVER`: `self-protect.mjs`, `pre-guard.mjs` (`selfKind`, `mainRelOf`), `scripts/safety-cites.test.mjs` HOLDS keys.
-Per-merge table (root task R.1, run 2026-11-03 on `git archive` copies with a fresh `git init`; `node --test scripts/*.test.mjs scripts/lib/*.test.mjs`, `arch-check.mjs lint`, `doc-size-policy.mjs`):
+- exit-3 `needs_network` payload (`repo-exec.mjs:~876-880`, gains `parked[]`): documented consumer `commands/_network.md` (sections "Around a workflow run" and "A run returns needs_network"); tests `repo-exec.test.mjs:~1194`, `network.test.mjs` wording row.
+- `superprojectRoots`/`outerRelWhere`/`mainRelOf` (`pre-guard.mjs:~170-206`): used by `mainStateRel` and the removal path; tests `pre-guard-queue.test.mjs`.
+- `copyTargets`/`writeTargets`/the `ln` branch (`pre-guard.mjs:~876, ~970-990`) and the text check at `~1778`: tests `pre-guard.test.mjs`, `self-protect.test.mjs` (`WRITER_VERBS`).
+- Round 1 consumers (`normalizeHandoff`, `handoffArmsScope`, `drainQueue`, `insideScratchRoots`, `WRITER_VERBS`, `SELF_NEVER`) are unchanged by units 7-9.
 
-| merge sha | unit | tests | fail | lint | doc-size |
-|---|---|---|---|---|---|
-| 728fef9 | prettier-ignore | 1520 | 0 | PASS (211 rules) | PASS |
-| 53d0b28 | command-records | 1523 | 0 | PASS | PASS |
-| ad83507 | marker-lifecycle | 1550 | 0 | PASS | PASS |
-| 3d80366 | init-settings | 1577 | 0 | PASS | PASS |
-| 72b890d | network-drain | 1604 | 0 | PASS | PASS |
-| e60fcbf | guard-paths | 1616 | 0 | PASS | PASS |
-| 80a8846 | guard-heredoc | 1624 | 0 | PASS | PASS |
-| 2b32191 | phase2-changelog | 1624 | 0 | PASS | PASS |
+Per-merge table of sandbox-auto-flow-phase-2 (root task R.1, run 2026-11-03 on `git archive` copies with a fresh `git init`; `node --test scripts/*.test.mjs scripts/lib/*.test.mjs`, `arch-check.mjs lint`, `doc-size-policy.mjs`; every row has one skipped test, `ratchet: no cap rises versus the merge-base (skips without git)`, because a copy has no merge-base; the real checkout runs 0 skipped):
 
-Every row has one skipped test, `ratchet: no cap rises versus the merge-base (skips without git)`: a copy has no merge-base. The real checkout at 2b32191 and d87a8cf runs 1624 tests, 0 skipped.
+tests per merge sha, 0 failures, lint PASS (211 rules) and doc-size PASS at each: 728fef9 prettier-ignore 1520 · 53d0b28 command-records 1523 · ad83507 marker-lifecycle 1550 · 3d80366 init-settings 1577 · 72b890d network-drain 1604 · e60fcbf guard-paths 1616 · 80a8846 guard-heredoc 1624 · 2b32191 phase2-changelog 1624.
 
-The same check for this plan's own merges (run 2026-11-03 after the six units landed; the real checkout at 1c3f51c runs 1660 tests, 0 skipped, gitleaks clean):
+The same for units 1-11 of this plan (real checkout at 1ef4081: 1680 tests, 0 skipped, gitleaks clean):
 
-| merge sha | unit | tests | fail | lint | doc-size |
-|---|---|---|---|---|---|
-| 4b5623d | handoff-arming | 1634 | 0 | PASS (211 rules) | PASS |
-| aa73e33 | drain-rejected | 1638 | 0 | PASS | PASS |
-| 346d74d | prettier-test-copy | 1638 | 0 | PASS | PASS |
-| 771da11 | queue-protection | 1648 | 0 | PASS | PASS |
-| 466710c | scratch-write-hardening | 1654 | 0 | PASS | PASS |
-| 1c3f51c | heredoc-limits | 1660 | 0 | PASS | PASS |
+tests per merge sha, 0 failures, lint and doc-size PASS at each: 4b5623d handoff-arming 1634 · aa73e33 drain-rejected 1638 · 346d74d prettier-test-copy 1638 · 771da11 queue-protection 1648 · 466710c scratch-write-hardening 1654 · 1c3f51c heredoc-limits 1660 · 9d360dc network-consumer-doc 1661 · 65a9c40 submodule-worktree-queue 1667 · cbb14e1 cp-link-sources 1670 · 1b8699c ln-check-safe-exemption 1672 · 1ef4081 submodule-git-surface 1680.
 
 ## Risk & rollback
-Units 4 to 6 edit the 140 KB `pre-guard.mjs`; another session may have touched it, so a conflict PARKs the unit with its branch kept. A `holds()` change that is too broad refuses ordinary deletes; 4.1/4.3 pin the allowed directories. Unit 5 loosens one thing (a new scratch file may be created) and tightens another (hard links), each mutation-checked. Rollback is one revert per unit.
+Units 8 and 9 edit the 150 KB `pre-guard.mjs`; another session may have touched it, so a conflict PARKs the unit with its branch kept. Unit 8's common-dir containment must not refuse an ordinary repo's `.git` writes outside the queue (8.1 pins the allowed paths). Unit 9 widens one text check and narrows another: the anchor (9.3) must not weaken the existing `ln` refusals. Rollback is one revert per unit.
 
 ## Out of scope
-`ARCH-APPROVAL-05` cites `session-context.mjs:283-301` (approval.rules.md is not in any unit's write list: `/sync-docs`). The human-doc wording of ARCH-SAFETY-13 (python, the dash form) is `/architect --update` work. Whether Claude Code honours `sandbox.network.allowedDomains` and how the auto-mode classifier reads `NETWORK_STEP_ALLOW` cannot be checked from this repo.
+R2-S7 heredoc spellings (`'source' f`, `\. f`, `time -p case`, NFKC identifiers) are a stated limit today and go to the follow-up row. R2-S8 (ARCH-STATE-18 text) is `/architect --update` work, not a unit. `ARCH-APPROVAL-05`'s `session-context.mjs` cite and ARCH-SAFETY-13's wording are `/sync-docs`. The scratch-Write root pin at `<tmpdir>/craftsman-roots/<sid>` (writable by a scoped scratch Write; the reviewer found no bypass) is recorded as residual risk. Whether Claude Code honours `sandbox.network.allowedDomains` and how the auto-mode classifier reads `NETWORK_STEP_ALLOW` cannot be checked from this repo. Round 3 stated limits (cpio -l, pax -l, unlisted wrappers before a writer, quote-split names) are recorded by unit 11 in ARCH-SAFETY-13, not fixed; the ARCH-SAFETY-13 wording for cp, the submodule common dir and the anchored check is `/architect --update` work.
