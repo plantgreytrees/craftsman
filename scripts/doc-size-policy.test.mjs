@@ -147,7 +147,7 @@ test("ratchet: no cap rises versus the merge-base (skips without git)", async (t
     fs.writeFileSync(file, baseSrc);
     const base = await import(pathToFileURL(file).href);
     if (!base.FILE_CAPS) return t.skip("merge-base predates per-file caps");
-    assert.deepEqual(raisedCaps(base.FILE_CAPS, FILE_CAPS), [], "per-file cap raised");
+    assert.deepEqual(policy.ratchetFindings(base.FILE_CAPS, FILE_CAPS, policy.CAP_TRADES), [], "per-file cap raised without a paid CAP_TRADES entry");
     assert.deepEqual(raisedCaps(base.INVOCATION_CAPS || {}, INVOCATION_CAPS), [], "per-invocation cap raised");
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
