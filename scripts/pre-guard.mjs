@@ -894,25 +894,52 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
   }
   // The sources of a link (`ln`, `link`, `cp -l`, `cp -s`): what each one names is a path a later write can reach under the link's name, so it is judged like a write to it.
   // A symlink holds the source as written and resolves it from the link's directory; a hard link takes the file `ln` or `cp` finds from the working directory. Both are judged.
-  function linkedSources(sources, placed, st, env) {
+  // `label` is "holds" for a directory whose every file is linked (rsync --link-dest), so a directory that holds protected state is judged too.
+  function linkedSources(sources, placed, st, env, label = "write") {
     sources.forEach((source, i) => {
       for (const cwd of st.cwds || []) {
         const linkAbs = realResolve(cwd, expandHome(placed[placed.length === sources.length ? i : 0] ?? source));
         const aimed = path.isAbsolute(source) ? source : path.resolve(path.dirname(linkAbs), source);
-        target(aimed, { cwds: [cwd] }, "write", env);
-        if (!path.isAbsolute(source)) target(source, { cwds: [cwd] }, "write", env);
+        target(aimed, { cwds: [cwd] }, label, env);
+        if (!path.isAbsolute(source)) target(source, { cwds: [cwd] }, label, env);
       }
     });
   }
+  // A link whose name lands in the state directory would let a later Write reach the state under another name: every name that resolves into it, from each working directory, is a hit.
+  // From a linked worktree the state is the main checkout's (ARCH-SAFETY-13), so a name under that one counts as well.
+  function namesIntoState(names, st) {
+    const inState = (rel) => rel === ".craftsman" || rel.startsWith(".craftsman/");
+    for (const a of names) for (const cwd of st.cwds || []) {
+      const abs = realResolve(cwd, expandHome(a));
+      const main = mainRelOf(abs);
+      if (inState(path.relative(realRoot(), abs).split(path.sep).join("/")) || (main && inState(main))) hits.push(".craftsman (link)");
+    }
+  }
   // `cp|install|rsync SOURCE... DEST`: DEST receives the joined and expanded names. `linking` is a cp that links (-l, -s, linksNotCopies): each SOURCE is then a second
   // name for the file, judged as the source of `ln` is, and a directory SOURCE (cp -al) names every file under it again, so it is judged as one that holds protected state.
-  function copyTargets(rest, st, env, recursive = false, linking = false) {
-    const { sources, placed, unlisted } = placements(rest, st, recursive);
+  // `linkDirs` are the directories an rsync is told to link its files to (--link-dest): each is a source of links, and a relative one is read from the destination directory as well as from the working directory.
+  function copyTargets(rest, st, env, recursive = false, linking = false, linkDirs = []) {
+    const { sources, dest, placed, unlisted } = placements(rest, st, recursive);
     for (const p of placed) target(p, st, "write", env);
     for (const u of unlisted) target(u, st, "holds", env);
+    if (linkDirs.length) {
+      const into = dest === undefined ? [] : [(dest.replace(/\/+$/, "") || dest) + "/link-dest"]; // a file of the destination directory: its directory is where a relative DIR is read from
+      linkedSources(linkDirs, into, st, env, "holds");
+    }
     if (!linking) return;
     linkedSources(sources, placed, st, env);
     for (const source of sources) target(source, st, "holds", env);
+    namesIntoState(placed, st); // the name of the link, as the name of an `ln` is judged
+  }
+  // `rsync SOURCE... DEST` with --link-dest=DIR or --link-dest DIR (any number, anywhere before a `--`): rsync makes a file of DEST a hard link to the same file under DIR, so DIR is judged as a source of links.
+  function rsyncTargets(rest, st, env) {
+    const linkDirs = [], others = [];
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === "--") { others.push(...rest.slice(i)); break; }
+      if (a === "--link-dest") { if (i + 1 < rest.length) linkDirs.push(rest[++i]); } else if (a.startsWith("--link-dest=")) linkDirs.push(a.slice(12)); else others.push(a);
+    }
+    copyTargets(others, st, env, true, false, linkDirs.filter(Boolean));
   }
   // `mv SOURCE... DEST`: every source is gone afterwards (a removal), and DEST receives the joined names (a write).
   function moveTargets(rest, st, env) {
@@ -1007,11 +1034,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       const { sources, placed } = placements(rest, st);
       files = placed;
       linkedSources(sources, placed, st, env); // what each link points at is a path a later write can reach under another name
-      // A link into the state directory would let a later Write reach it under another name.
-      for (const a of args) for (const cwd of st.cwds || []) {
-        const rel = path.relative(realRoot(), realResolve(cwd, expandHome(a))).split(path.sep).join("/");
-        if (rel === ".craftsman" || rel.startsWith(".craftsman/")) hits.push(".craftsman (link)");
-      }
+      namesIntoState(args, st); // a link into the state directory would let a later Write reach it under another name
     } else if (verb === "cp" || verb === "install") return copyTargets(rest, st, env, false, verb === "cp" && linksNotCopies(rest));
     else if (verb === "dd") files = rest.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
     else if (verb === "sed" || verb === "perl") {
@@ -1184,7 +1207,7 @@ function removedDocs(cmd, docPaths, { writes = false } = {}) {
       noteRemoval(verb, rest, env);
       if (env.unseen) return unsafe(verb + " with input the parser cannot see");
       if (writes && verb === "mv") return moveTargets(rest, st, env);
-      if (writes && verb === "rsync") return copyTargets(rest, st, env, true);
+      if (writes && verb === "rsync") return rsyncTargets(rest, st, env);
       for (const t of targetsOf(rest)) target(t, st, verb, env);
     } else if (writes && WRITE_VERBS.has(verb)) writeTargets(verb, rest, st, env);
     else if (writes && OTHER_WRITERS.has(verb)) otherWriters(verb, rest, st, env);
