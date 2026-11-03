@@ -320,6 +320,109 @@ test("network drain: refused entries in the middle of a queue leave it and the o
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
+// A hook on origin that answers per ref: `denied` is declined with a plain message (origin reachable, push refused);
+// `lost` is answered 401 (the credential died between two pushes, so the drain cannot reach origin as itself).
+function originAnswers(origin, { denied = [], lost = [] }) {
+  const arm = (names, text) => names.map((name) => `  refs/heads/${name}) echo "${text}" >&2; exit 1 ;;`);
+  const script = ["#!/bin/sh", 'case "$1" in', ...arm(denied, "protected branch"), ...arm(lost, "HTTP 401"), "esac", "exit 0", ""].join("\n");
+  fs.mkdirSync(path.join(origin, "hooks"), { recursive: true });
+  fs.writeFileSync(path.join(origin, "hooks", "update"), script, { mode: 0o755 });
+}
+
+function drainError(root, info, options) {
+  try { net.drainQueue(root, info, options); } catch (error) { return error; }
+  return assert.fail("the drain was expected to stop on an unreachable origin");
+}
+
+const pinsOf = (root) => git(root, ["for-each-ref", "--format=%(refname)", "refs/craftsman/pending"]).split("\n").filter(Boolean).sort();
+const refusals = (context) => eventsOf(context).filter((event) => event.ev === "drain_refused");
+
+// ARCH-LAND-36, ARCH-LAND-19: an entry that left the queue before the drain lost the network was dropped with the thrown
+// error. It must reach a PARK decision (carried on the error as `rejected`) or stay queued, and its pin goes only with it.
+test("network drain: a refused entry followed by an unreachable one is handed over on the thrown error and the rest stay queued", () => {
+  const data = drainFixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context, { base_branch: data.base });
+      const sha = git(data.root, ["rev-parse", "HEAD"]);
+      originAnswers(data.origin, { lost: ["feat/lost"] });
+      enqueuePush(data.root, info, { sha, dst: "develop" });
+      const lost = enqueuePush(data.root, info, { sha, dst: "feat/lost" });
+      const after = enqueuePush(data.root, info, { sha, dst: "feat/after" });
+      const before = heads(data.origin);
+
+      const error = drainError(data.root, info, { directLand: false });
+      assert.equal(error.needsNetwork, true);
+      assert.deepEqual(error.rejected.map(({ entry }) => entry.dst), ["develop"], "the refused entry is carried, not lost");
+      assert.equal(typeof error.rejected[0].refused, "string", "a refusal carries its reason");
+      assert.deepEqual(readQueue(info).map(({ id }) => id), [lost.id, after.id], "the unreachable entry and the one after it stay queued");
+      assert.deepEqual(pinsOf(data.root), [lost.pin, after.pin].sort(), "a pin goes only with a final entry");
+      assert.equal(heads(data.origin), before, "nothing reached origin");
+      assert.deepEqual(refusals(context).map(({ dst }) => dst), ["develop"], "drain_refused is logged once");
+
+      originAnswers(data.origin, {});
+      const resumed = net.drainQueue(data.root, info, { directLand: false });
+      assert.deepEqual(resumed.pushed.map(({ dst }) => dst), ["feat/lost", "feat/after"]);
+      assert.deepEqual(resumed.rejected, [], "the handed-over entry is not judged twice");
+      assert.deepEqual(readQueue(info), []);
+      assert.deepEqual(pinsOf(data.root), []);
+      assert.equal(refusals(context).length, 1);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("network drain: an origin-rejected entry followed by an unreachable one is handed over on the thrown error and the rest stay queued", () => {
+  const data = drainFixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context, { base_branch: data.base });
+      const sha = git(data.root, ["rev-parse", "HEAD"]);
+      originAnswers(data.origin, { denied: ["feat/denied"], lost: ["feat/lost"] });
+      enqueuePush(data.root, info, { sha, dst: "feat/denied" });
+      const lost = enqueuePush(data.root, info, { sha, dst: "feat/lost" });
+      const after = enqueuePush(data.root, info, { sha, dst: "feat/after" });
+      const before = heads(data.origin);
+
+      const error = drainError(data.root, info, { directLand: false });
+      assert.equal(error.needsNetwork, true);
+      assert.deepEqual(error.rejected.map(({ entry }) => entry.dst), ["feat/denied"], "the origin-rejected entry is carried, not lost");
+      assert.equal(error.rejected[0].refused, undefined, "origin answered; the verdict did not refuse it");
+      assert.match(error.rejected[0].error.stderr, /protected branch/);
+      assert.deepEqual(readQueue(info).map(({ id }) => id), [lost.id, after.id]);
+      assert.deepEqual(pinsOf(data.root), [lost.pin, after.pin].sort());
+      assert.equal(heads(data.origin), before);
+      assert.deepEqual(refusals(context), [], "origin refused it, the verdict did not");
+
+      originAnswers(data.origin, {});
+      const resumed = net.drainQueue(data.root, info, { directLand: false });
+      assert.deepEqual(resumed.pushed.map(({ dst }) => dst), ["feat/lost", "feat/after"]);
+      assert.deepEqual(resumed.rejected, []);
+      assert.deepEqual(readQueue(info), []);
+      assert.deepEqual(pinsOf(data.root), []);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("network drain: an unreachable first entry hands nothing over and leaves the queue and its pins as they were", () => {
+  const data = drainFixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context, { base_branch: data.base });
+      const sha = git(data.root, ["rev-parse", "HEAD"]);
+      originAnswers(data.origin, { lost: ["feat/lost"] });
+      const lost = enqueuePush(data.root, info, { sha, dst: "feat/lost" });
+      const after = enqueuePush(data.root, info, { sha, dst: "feat/after" });
+      const error = drainError(data.root, info, { directLand: false });
+      assert.deepEqual(error.rejected, []);
+      assert.deepEqual(readQueue(info).map(({ id }) => id), [lost.id, after.id]);
+      assert.deepEqual(pinsOf(data.root), [lost.pin, after.pin].sort());
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 test("network drain: a forged pin is refused and never reaches a refspec or update-ref -d", () => {
   const data = drainFixture();
   try {

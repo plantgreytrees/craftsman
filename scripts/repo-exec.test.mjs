@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { cleanup, inspectRepo, landUnit, landFeature, merge, networkAction, prepare, sync } from "./repo-exec.mjs";
-import { drainVerdict, readQueue } from "./lib/network.mjs";
+import { drainVerdict, enqueuePush, readQueue } from "./lib/network.mjs";
 import { plainArgs } from "./lib/land.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { projectContext, readSessionWorktrees } from "./lib/core.mjs";
@@ -1185,6 +1185,44 @@ test("repo-exec: an offline direct-land unit merge queues one push of base, whic
       assert.equal(git(origin, ["rev-parse", base]) === git(context.root, ["rev-parse", base]), false, "the runner pushed nothing");
       assert.deepEqual(networkAction(context, { step: "drain" }, info).pushed.map(({ branch }) => branch), [base]);
       assert.equal(git(origin, ["rev-parse", base]), git(context.root, ["rev-parse", base]));
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+// ARCH-LAND-36, ARCH-LAND-19: root's drain runs the CLI; a refused entry has already left the queue when a later push loses the network,
+// so the exit-3 payload must carry its PARK (the thrown error is all root sees) and the unpushed entries must stay queued.
+test("repo-exec: a drain that refuses one entry and then loses the network returns the PARK for it on needs_network and keeps the rest queued", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const base = git(context.root, ["branch", "--show-current"]);
+      const origin = path.join(data.workspace, "one-origin.git");
+      git(data.workspace, ["init", "-q", "--bare", origin]);
+      git(context.root, ["remote", "add", "origin", origin]);
+      git(context.root, ["push", "-q", origin, base]);
+      // Origin answers 401 for feat/lost: the credential died between two pushes of the same drain.
+      fs.mkdirSync(path.join(origin, "hooks"), { recursive: true });
+      fs.writeFileSync(path.join(origin, "hooks", "update"), '#!/bin/sh\ncase "$1" in refs/heads/feat/lost) echo "HTTP 401" >&2; exit 1 ;; esac\nexit 0\n', { mode: 0o755 });
+      const info = inspectRepo(context, { base_branch: base });
+      const sha = git(context.root, ["rev-parse", "HEAD"]);
+      enqueuePush(context.root, info, { sha, dst: "develop" });
+      enqueuePush(context.root, info, { sha, dst: "feat/lost" });
+      enqueuePush(context.root, info, { sha, dst: "feat/after" });
+      const before = git(origin, ["for-each-ref", "refs/heads"]);
+
+      const drain = spawnSync(process.execPath, [new URL("./repo-exec.mjs", import.meta.url).pathname], {
+        input: JSON.stringify({ action: "network", step: "drain", project: "one", network: "online" }), encoding: "utf8",
+        env: { ...process.env, CRAFTSMAN_WORKSPACE_MANIFEST: data.manifest },
+      });
+      assert.equal(drain.status, 3, drain.stderr);
+      const out = JSON.parse(drain.stdout);
+      assert.equal(out.needs_network, true);
+      assert.deepEqual(out.parked.map(({ reason, branch }) => [reason, branch]), [["drain-refused", "develop"]], "the refused entry PARKs even though the drain stopped");
+      assert.ok(out.parked[0].decision.options.length >= 2);
+      assert.match(out.parked[0].decision.question, /develop/);
+      assert.deepEqual(readQueue(info).map(({ dst }) => dst), ["feat/lost", "feat/after"], "the unpushed entries stay queued, in order");
+      assert.equal(git(origin, ["for-each-ref", "refs/heads"]), before, "nothing reached origin");
     });
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });

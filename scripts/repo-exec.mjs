@@ -832,15 +832,27 @@ function networkAction(context, input, info) {
     }
     return { ...info, step, fetched: [info.base_branch, ...(input.branches || [])] };
   }
-  const { pushed, rejected } = drainQueue(context.root, info, { directLand: loadConfig(context).planning?.featureBranches !== true });
+  let drained;
+  try { drained = drainQueue(context.root, info, { directLand: loadConfig(context).planning?.featureBranches !== true }); }
+  catch (error) {
+    // A drain that loses the network stops with the earlier refusals no longer queued: they PARK on this error's payload (exit 3).
+    if (error?.rejected?.length) error.parked = parkRejected(info, error.rejected);
+    throw error;
+  }
+  const { pushed, rejected } = drained;
   logEvent({ ev: "network_drain", project: info.project, pushed: pushed.length, rejected: rejected.length }, context);
   return {
     ...info, step,
     pushed: pushed.map(({ dst, sha }) => ({ branch: dst, sha })),
-    parked: rejected.map(({ entry, error, refused }) => refused
-      ? landingPark("drain-refused", { ...info, branch: shownRef(entry.dst), kind: shownRef(entry.kind), refused, merged: false }, error)
-      : landingPark("rejected-push", { ...info, branch: entry.dst, base_branch: entry.dst, land: "direct", merged: false, merged_locally: true }, error)),
+    parked: parkRejected(info, rejected),
   };
+}
+
+// Every drained entry that did not reach origin becomes the landing PARK for its reason (ARCH-LAND-06, ARCH-LAND-36).
+function parkRejected(info, rejected) {
+  return rejected.map(({ entry, error, refused }) => refused
+    ? landingPark("drain-refused", { ...info, branch: shownRef(entry.dst), kind: shownRef(entry.kind), refused, merged: false }, error)
+    : landingPark("rejected-push", { ...info, branch: entry.dst, base_branch: entry.dst, land: "direct", merged: false, merged_locally: true }, error));
 }
 
 if (isMain(import.meta.url)) {
@@ -862,7 +874,8 @@ if (isMain(import.meta.url)) {
   } catch (error) {
     if (error?.needsNetwork) {
       // One clear message naming the fix, plus the action root should run (ARCH-LAND-19).
-      process.stdout.write(JSON.stringify({ needs_network: true, message: scrub(error.message), action: error.action || null }) + "\n");
+      const parked = error.parked?.length ? { parked: error.parked } : {};
+      process.stdout.write(JSON.stringify({ needs_network: true, message: scrub(error.message), action: error.action || null, ...parked }) + "\n");
       process.stderr.write(`craftsman: needs network: ${scrub(error.message)}\n`);
       process.exitCode = 3;
     } else {

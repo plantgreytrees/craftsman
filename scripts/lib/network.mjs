@@ -158,16 +158,26 @@ export function drainVerdict(entry, { baseBranch, directLand = false } = {}) {
   return directLand ? { ok: true } : refuse("base is pushed only by a unit merge in direct-land mode (planning.featureBranches is on)");
 }
 
-// Root only. Replays the queue in order; an entry leaves the queue once it has
-// pushed, was refused by drainVerdict, or origin refused it (`rejected`, for the
-// caller to PARK; `refused` holds the verdict's reason). An auth or reachability
-// failure stops the drain and keeps that entry and everything after.
+// Root only. Replays the queue in order. An entry leaves the queue once it has
+// pushed or become a PARK decision: refused by drainVerdict or refused by origin
+// (`rejected`, for the caller to PARK; `refused` holds the verdict's reason). An
+// auth or reachability failure stops the drain and keeps that entry and everything
+// after it; the entries already in `rejected` ride on the thrown error
+// (`error.rejected`), since they are no longer queued and nothing else would ever
+// PARK them. A pin goes only once its entry is final: after the queue file stops
+// listing the entry, and for a rejected one only as the drain hands it over.
 export function drainQueue(root, info, { directLand = false } = {}) {
   const entries = readQueue(info);
   const pushed = [];
   const rejected = [];
-  let remaining = entries;
-  for (const entry of entries) {
+  // The first `done` entries are final: write the rest as the queue, then release their pins.
+  const settle = (done) => {
+    writeQueue(info, entries.slice(done));
+    for (const entry of entries.slice(0, done)) {
+      if (PIN.test(String(entry.pin))) spawnSync("git", ["-C", root, "update-ref", "-d", entry.pin], { stdio: "ignore" });
+    }
+  };
+  for (const [index, entry] of entries.entries()) {
     const verdict = drainVerdict(entry, { baseBranch: info.base_branch, directLand });
     if (!verdict.ok) {
       const state = info.project_root ? { root: info.project_root, stateDir: path.join(info.project_root, ".craftsman") } : null;
@@ -183,15 +193,13 @@ export function drainQueue(root, info, { directLand = false } = {}) {
         }
       } catch (error) {
         if (isUnreachable(error)) {
-          writeQueue(info, remaining);
-          throw networkError(error);
+          settle(index);
+          throw Object.assign(networkError(error), { rejected });
         }
         rejected.push({ entry, error });
       }
     }
-    if (PIN.test(String(entry.pin))) spawnSync("git", ["-C", root, "update-ref", "-d", entry.pin], { stdio: "ignore" });
-    remaining = remaining.slice(1);
   }
-  writeQueue(info, []);
+  settle(entries.length);
   return { pushed, rejected };
 }
