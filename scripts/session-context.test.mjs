@@ -316,3 +316,30 @@ test("ARCH-APPROVAL-05: SessionStart names approved-but-unlanded runs in one lin
     assert.doesNotMatch(lines[0], /p-b|p-c/);
   });
 });
+
+// One predicate (handoffArmsScope, lib/core.mjs) decides arming for SessionStart and for account-switch adopt;
+// two inline copies are how adopt came to arm a closing hand-off that SessionStart left alone.
+test("handoffArmsScope: true only for a hand-off whose remaining_units is a non-empty array (ARCH-AUTO-11)", async () => {
+  const { handoffArmsScope } = await import("./lib/core.mjs");
+  for (const [handoff, armed] of [
+    [{ remaining_units: ["u2"] }, true],
+    [{ remaining_units: [] }, false],
+    [{}, false],
+    [{ remaining_units: "u2" }, false],
+    [{ remaining_units: null }, false],
+    [{ remaining_units: { length: 1 } }, false],
+    [null, false],
+    [undefined, false],
+  ]) {
+    assert.equal(handoffArmsScope(handoff), armed, JSON.stringify(handoff));
+  }
+});
+
+test("session-context and account-switch both arm through handoffArmsScope, with no inline copy (ARCH-AUTO-11)", () => {
+  for (const file of ["session-context.mjs", "account-switch.mjs"]) {
+    const source = fs.readFileSync(path.join(ROOT, file), "utf8");
+    assert.match(source, /import\s*\{[^}]*\bhandoffArmsScope\b[^}]*\}\s*from "\.\/lib\/core\.mjs"/, `${file} imports it`);
+    assert.match(source, /\bhandoffArmsScope\(/, `${file} calls it`);
+    assert.doesNotMatch(source, /remaining_units\??\.length/, `${file} keeps no inline copy of the rule`);
+  }
+});

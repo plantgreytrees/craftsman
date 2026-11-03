@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import {
-  atomicWrite, claudeHome, clearWorktreeBinding, forgetSessionWorktree, isMain, liveClaudeSession, logEvent,
+  atomicWrite, claudeHome, clearWorktreeBinding, forgetSessionWorktree, handoffArmsScope, isMain, liveClaudeSession, logEvent,
   projectContext, readSessionWorktrees, readStdin, readWorktreeBindings, recordSessionWorktree,
   sessionDir, sharedStateDir, sidOf, writeWorktreeBinding,
 } from "./lib/core.mjs";
@@ -500,8 +500,9 @@ export function adopt({ context, from, to, confirm = false }) {
   } else if (handoff) {
     actions.push({ what: `plan hand-off (${handoff.plan}, unit ${handoff.unit || "phase"})`, apply: () => {
       atomicWrite(newHandoff, JSON.stringify({ ...handoff, session_id: to }, null, 2) + "\n");
-      // What SessionStart does for a restored hand-off: the run resumes only
-      // through a fresh scope activation.
+      // What SessionStart does for a restored hand-off (ARCH-AUTO-11, one predicate): a hand-off that
+      // still lists units resumes only through a fresh scope activation; a closing one arms nothing.
+      if (!handoffArmsScope(handoff)) return;
       const marker = requiredFile({ session_id: to });
       fs.mkdirSync(path.dirname(marker), { recursive: true });
       fs.writeFileSync(marker, "resume requires fresh scope activation\n");

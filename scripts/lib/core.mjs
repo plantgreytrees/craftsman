@@ -1203,3 +1203,8 @@ export function bindingAcceptance(text, { units = [], plans = [] } = {}) {
   }
   return { binding, legacy };
 }
+
+// ARCH-AUTO-11: a restored hand-off re-arms scope-required only while it still lists units to run. SessionStart and
+// account-switch adopt both ask this one question; a closing hand-off (remaining_units []), one without the field and
+// one whose field is not an array have nothing left to scope, and arming them locked a later /architect out of every Read.
+export const handoffArmsScope = (handoff) => Array.isArray(handoff?.remaining_units) && handoff.remaining_units.length > 0;

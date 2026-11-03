@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import {
   loadConfig, enabled, topRules, PLUGIN_ROOT, PROJECT_ROOT, STATE_DIR,
   sidOf, sessionDir, pruneSessions, logEvent, git, sha1, readStdin, markerPresent, have, projectContext,
-  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState, atomicWrite,
+  ROOT_SOURCE, rootUnanchored, writeRootPin, guardState, atomicWrite, handoffArmsScope,
 } from "./lib/core.mjs";
 import { requiredFile } from "./scope.mjs";
 import { recallMemory, pruneAllMemory } from "./plan-memory.mjs";
@@ -164,9 +164,9 @@ try {
   handoff = JSON.parse(fs.readFileSync(path.join(sessionDir(sid, context), "handoff.json"), "utf8"));
 } catch { /* no hand-off yet, or it was partially written */ }
 // ARCH-AUTO-11: a resume re-arms scope-required only while the hand-off still lists units to run. A closing
-// hand-off (remaining_units empty) or one without the field has nothing left to scope, and arming it
-// locked a later /architect out of every Read until it activated a scope.
-if (Array.isArray(handoff?.remaining_units) && handoff.remaining_units.length > 0) {
+// hand-off has nothing left to scope, and arming it locked a later /architect out of every Read; the one
+// predicate handoffArmsScope (lib/core.mjs) decides this here and in account-switch adopt.
+if (handoffArmsScope(handoff)) {
   fs.mkdirSync(path.dirname(requiredFile(input)), { recursive: true });
   fs.writeFileSync(requiredFile({ session_id: input.session_id }), "resume requires fresh scope activation\n");
 }
