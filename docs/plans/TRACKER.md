@@ -154,13 +154,13 @@ Only touch rows you created; never prune foreign rows without `/sync-docs --trac
 | [sandbox-auto-flow-phase-2](./sandbox-auto-flow-phase-2.md) | network-drain | scripts/lib/network.mjs, scripts/repo-exec.mjs, commands/_network.md | COMPLETE | every acceptance line ticked and judged MET by the isolated scrutineer (round 1… | 2026-11-03 |
 | [sandbox-auto-flow-phase-2](./sandbox-auto-flow-phase-2.md) | phase2-changelog | CHANGELOG.md | COMPLETE | every acceptance line ticked and judged MET by the isolated scrutineer (round 1… | 2026-11-03 |
 | [sandbox-auto-flow-phase-2](./sandbox-auto-flow-phase-2.md) | prettier-ignore | .prettierignore | COMPLETE | every acceptance line ticked and judged MET by the isolated scrutineer (round 1… | 2026-11-03 |
-| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-dynamic-link-source | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
-| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-find-delete-stale-consumer | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
-| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-gitfile-spellings | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
+| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-dynamic-link-source | scripts/pre-guard.mjs | CANCELLED | owner decision 2026-11-03 (AskUserQuestion): recorded as a stated limit in ARCH… | 2026-11-03 |
+| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-find-delete-stale-consumer | scripts/pre-guard.mjs | CANCELLED | owner decision 2026-11-03 (AskUserQuestion): recorded as a stated limit in ARCH… | 2026-11-03 |
+| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-gitfile-spellings | scripts/pre-guard.mjs | CANCELLED | owner decision 2026-11-03 (AskUserQuestion): recorded as a stated limit in ARCH… | 2026-11-03 |
 | [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-heredoc-spellings | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
 | [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-home-word-config-gate | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
-| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-last-segment-glob | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
-| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-multi-target-latency | scripts/pre-guard.mjs | PENDING | — | 2026-11-03 |
+| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-last-segment-glob | scripts/pre-guard.mjs | CANCELLED | owner decision 2026-11-03 (AskUserQuestion): recorded as a stated limit in ARCH… | 2026-11-03 |
+| [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-multi-target-latency | scripts/pre-guard.mjs | CANCELLED | owner decision 2026-11-03 (AskUserQuestion): recorded as a stated limit in ARCH… | 2026-11-03 |
 | [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-phase2-code | scripts/lib/network.mjs, scripts/pre-guard.mjs, scripts/lib/core.mjs, scripts/lib/settings-merge.mjs, commands/init.md, commands/_network.md | CANCELLED | superseded by plan sandbox-auto-flow-phase-2 (8 units, owner answers 2026-11-02… | 2026-11-02 |
 | [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-quality-gate-prettier | scripts/quality-gate.mjs | CANCELLED | fixed by sandbox-auto-flow-phase-2 unit prettier-ignore, 728fef9: .prettierigno… | 2026-11-02 |
 | [sandbox-auto-flow](./sandbox-auto-flow.md) | followup-set-upstream-writers | scripts/repo-exec.mjs | PENDING | found while running sandbox-auto-flow: repo-exec.mjs attachDetached (branch --s… | 2026-11-01 |
