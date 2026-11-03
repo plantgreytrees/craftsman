@@ -93,3 +93,6 @@ _Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was
     - an `excludedCommands` entry: it loosens the sandbox for a whole command text;
     - keeping today's behaviour: unattended runs stall.
   - **Placement:** it sits here rather than in `engine.rules.md`, beside ARCH-LAND-19, so the engine units' context budget (ARCH-ENGINE-08) holds.
+
+## Scoped pre-merge gate (2026-11-03)
+ARCH-LAND-37 lets the pre-merge gate use the same `{changed}` and `{changedDirs}` placeholders as Stop (ARCH-STATE-21), filled from `git diff --name-only <base>...HEAD` in the worktree being landed. An empty diff skips the gate and logs it; a diff that cannot be computed fails the gate as before. Rejected: running the whole-superproject gate on every land, which Gleam had to turn off. See [state](./state.md#service-scoped-gates-2026-11-03) and [service-scoped-gates](../ideas/service-scoped-gates.md).

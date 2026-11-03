@@ -85,3 +85,32 @@ _Verified at `a0cb8a2`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.m
 
 - **ARCH-STATE-18** replaces 17: Write and Edit join Read for files whose real path is under the OS temp dir or `$CLAUDE_JOB_DIR/tmp`. NotebookEdit, Glob and Grep stay refused, an enclosing root still rules a directory out, and `protectedPaths` still apply. A new file is judged by its nearest existing ancestor, and an existing target with more than one hard link is refused, because a link can carry a write to protected state. Why: under a scope, this `/architect` run couldn't write a probe script to the job dir and had to put one in the repo root, while ARCH-SAFETY-01 already leaves outside-root writes to the sandbox. Rejected: keeping Read only, which means scratch scripts end up in the repo.
 - Two other decisions from this pass touch state but live elsewhere. The scope-required marker's lifetime is **ARCH-AUTO-11** ([auto.md](./auto.md)), and the command-record lifetime is part of **ARCH-SAFETY-13** ([safety.md](./safety.md)). They moved there so unit contexts that load `state.rules.md` stay inside the ARCH-ENGINE-08 budget.
+
+## Service-scoped gates (2026-11-03)
+Source: [service-scoped-gates](../ideas/service-scoped-gates.md). Rules ARCH-STATE-19 to 22, plus ARCH-LAND-37 in [landing](./landing.md). A multi-service workspace such as Gleam (61 submodules, one repo per service) used to get one config, one tool cwd and one whole-repo test command. These four rules let each service use the workspace's settings, run tools in the right folder and test only what a session touched.
+
+```mermaid
+flowchart LR
+  edit[Edit hook: quality-gate] -->|appends path| changed[(sessions/sid/changed)]
+  edit -->|lang cwd nearest marker| tool[format and check tools]
+  cfgroot[workspace root config] -->|ARCH-STATE-19| load[loadConfig]
+  cfgproj[project or worktree config] --> load
+  load --> edit
+  changed --> stop[Stop: stop-gate]
+  stop -->|changed tokens expand to argv| scoped[scoped test command]
+  scoped -->|fail| block[SCOPED TESTS FAILED]
+  merge[repo-exec pre-merge gate] -->|git diff base...HEAD| scoped
+```
+
+| id | decision | why | rejected alternatives |
+|---|---|---|---|
+| ARCH-STATE-19 | A sub-project or unit worktree inherits the workspace root's config, with `{workspaceRoot}` for root-relative commands | Units were getting plugin defaults (csharp `dotnet format`, no `extraChecks`) because their root has no config; Gleam edits 3 lines | Opt-in `workspace.inheritConfig` (leaves the gap open); inherit non-command keys only (a root `stopGate` edit would not apply in units) |
+| ARCH-STATE-20 | `languages.<lang>.cwd = "nearest:<marker,...>"`, resolved downward from the file, never above root | One block serves all 61 services; deletes Gleam's ESLint wrapper | Static path per service (a per-repo list again); tool flags only (does not put `eslint` on PATH) |
+| ARCH-STATE-21 | `{changed}` / `{changedDirs}` whole-token placeholders from the session change list; never snapshotted; failure blocks as scoped | A snapshot cannot know the touched set at session start; `git status` would test other sessions' dirt | `git status` source; advisory-only failure |
+| ARCH-STATE-22 | Events carry `project` and a fixed skip-reason set | The idea's own kill test needed a count of dirty stops that ran nothing | One event per skipped command |
+
+**Correction to the idea.** An empty `stopGate.commands: {}` does not disable the defaults: `deepMerge` keeps every default key (`scripts/lib/core.mjs:590`), so Gleam's whole-solution `dotnet test` runs at every session start and is red, which is why Stop never runs a test. Only a `null` value drops a marker (`scripts/lib/gate-command.mjs:30`). Gleam's own stop events show about 65 dirty stops in 3 days with no test run.
+
+**Trade-offs.** Inheriting by default is the only behaviour change; it is called out under "Changed" in the CHANGELOG and shipped last, after Gleam's three root-relative commands use `{workspaceRoot}`. The session change list is blind to edits made only through Bash, as the `dirty` marker already is. A scoped failure in a service that was already red blocks until it is fixed or the marker is set to `null`. Deferred: resolving every file to its owning service and running an affected-set engine (idea recommendation 5).
+
+**Glossary.** *Change list*: root-relative paths the session edited, one per line, in `sessions/<sid>/changed`. *Scoped command*: a test or check command containing `{changed}` or `{changedDirs}`.
