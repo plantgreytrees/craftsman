@@ -62,7 +62,7 @@ test("self-protect: heldNever and heldScoped say which directories hold a protec
 
 test("self-protect: pre-guard keeps one writer-verb list and no hand-copied path regex (18.3)", () => {
   const source = fs.readFileSync(new URL("../pre-guard.mjs", import.meta.url), "utf8");
-  assert.deepEqual([...WRITER_VERBS].sort(), ["cp", "dd", "install", "ln", "mkdir", "mv", "perl", "sed", "tee", "touch", "truncate"]);
+  assert.deepEqual([...WRITER_VERBS].sort(), ["cp", "dd", "install", "link", "ln", "mkdir", "mv", "perl", "sed", "tee", "touch", "truncate"]);
   assert.doesNotMatch(source, /new Set\(\["touch"/, "no second verb list");
   assert.doesNotMatch(source, /\(\?:touch\|tee\|/, "no verb alternation typed out");
   assert.doesNotMatch(source, /\\\.craftsman\\\/\(\?:off\|doc-write-pending\)/, "the path regex is not hand-copied");

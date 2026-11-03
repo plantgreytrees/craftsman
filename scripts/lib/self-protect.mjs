@@ -100,7 +100,7 @@ export function namesSelfScoped(writeEntries) {
 }
 
 // The one list of commands that write or move a file. pre-guard builds its text gates and its dispatch from it.
-export const WRITER_VERBS = Object.freeze(["touch", "tee", "cp", "mv", "ln", "install", "dd", "truncate", "mkdir", "sed", "perl"]);
+export const WRITER_VERBS = Object.freeze(["touch", "tee", "cp", "mv", "ln", "link", "install", "dd", "truncate", "mkdir", "sed", "perl"]);
 
 // A glob as free text: how a command line would spell it before any quote is removed. `**/` may be empty.
 function globToText(glob) {
