@@ -782,6 +782,159 @@ test("pre-guard: the Bash guard answers long adversarial commands in under 300 m
   } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
 });
 
+// bash-writer-gaps (scrutinise-sandbox-auto-flow phase 2, round 4). GNU cp, mv, install and ln read the option `-t` the way getopt does: `-t DIR`, an attached `-tDIR`, a cluster that ends in t (`-ft DIR`) or
+// carries the directory (`-ft.git/x`), and `--target-directory` or an abbreviation of it; a letter that takes a value before the t (`-S`) swallows the rest of its cluster. The guard read only the word `-t`, so
+// `cp ../tmp/queue.jsonl -t.git/.craftsman/network` was a copy to a file named for the source. rsync's `-t` keeps times and takes no directory, so it is no target.
+test("pre-guard: an attached -tDIR and a short-option cluster that holds t name the target directory of cp, mv, install and ln", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    const net = path.join(t.dir, ".git", ".craftsman", "network");
+    fs.mkdirSync(net, { recursive: true });
+    fs.mkdirSync(path.join(tmp, "d"));
+    for (const name of ["queue.jsonl", "off"]) fs.writeFileSync(path.join(tmp, name), "x");
+    fs.symlinkSync(net, path.join(tmp, "net"));
+    fs.symlinkSync(path.join(t.dir, ".craftsman"), path.join(tmp, "state"));
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    // No trailing slash on the spelled directories: the text check on the queue path needs one, so the parser's reading of the option decides these rows. The symlinked ones do not spell the state at all.
+    const spellings = (file, dir) => [
+      `cp ${file} -t${dir}`, `cp -ft${dir} ${file}`, `cp -vt${dir} ${file}`, `cp ${file} -ft${dir}`, `cp -rt${dir} ${file}`, `cp -ft ${dir} ${file}`, `cp -S .bak -t${dir} ${file}`, `cp --backup -t${dir} ${file}`,
+      `mv ${file} -t${dir}`, `mv -ft${dir} ${file}`, `mv -vt${dir} ${file}`, `mv -ft ${dir} ${file}`,
+      `install ${file} -t${dir}`, `install -Dt${dir} ${file}`, `install -m 644 -t${dir} ${file}`, `install -Dm644 -t${dir} ${file}`, `install -Dt ${dir} ${file}`,
+      `ln -sft${dir} ${file}`, `ln -s -t${dir} ${file}`, `ln -sf -t${dir} ${file}`, `ln -st ${dir} ${file}`,
+    ];
+    const queueRows = [".git/.craftsman/network", "../tmp/net"].flatMap((dir) => spellings("../tmp/queue.jsonl", dir));
+    const stateRows = [".craftsman", "../tmp/state"].flatMap((dir) => spellings("../tmp/off", dir));
+    for (const command of [...spellings("../tmp/queue.jsonl", "../tmp/net"), ...spellings("../tmp/off", "../tmp/state")]) assert.doesNotMatch(command, /.craftsman/, "the fixture: these rows never spell the state directory");
+    assert.deepEqual(notRefused([...queueRows, ...stateRows]), [], "an attached -tDIR, a cluster ending in t and a cluster carrying the directory, for the queue directory and for the state directory");
+    // The spellings that were read before stay refused, and so do the abbreviations of the long option.
+    assert.deepEqual(notRefused([
+      "cp ../tmp/off -t .craftsman", "cp ../tmp/off --target-directory=.craftsman", "cp ../tmp/off --target-directory .craftsman", "cp ../tmp/off --target-dir=.craftsman", "cp ../tmp/off --target=.craftsman", "cp ../tmp/off --t=.craftsman",
+      "mv ../tmp/off --target-directory=.craftsman", "install ../tmp/off --target-directory=.craftsman", "cp ../tmp/off -t ../tmp/d -t.craftsman", "cp ../tmp/off -t.craftsman -t ../tmp/d", // a second -t: both are judged
+    ]), [], "the separate and the long spellings of the option");
+    // rsync's -t is --times: the destination is the last word, whatever -t is followed by.
+    assert.deepEqual(notRefused(["rsync -t ../tmp/queue.jsonl .git/.craftsman/network/", "rsync -at ../tmp/off .craftsman/", "rsync -t ../tmp/off ../tmp/state/"]), [], "rsync -t names no directory");
+    // Controls: the same spellings into an ordinary directory, and a cluster in which a letter that takes a value comes first (the rest of the cluster is that letter's value).
+    assert.deepEqual(notAllowed([
+      "cp ../tmp/off -t../tmp/d", "cp -ft../tmp/d ../tmp/off", "cp -t ../tmp/d ../tmp/off", "cp -vt ../tmp/d ../tmp/off", "mv ../tmp/off -t../tmp/d", "mv -ft../tmp/d ../tmp/off",
+      "install -Dt../tmp/d ../tmp/off", "install -m644 -o root -t../tmp/d ../tmp/off", "ln -sft../tmp/d ../tmp/off", "ln -s -t../tmp/d ../tmp/off",
+      "cp -S .bak ../tmp/off ../tmp/d", "cp -S.craftsman ../tmp/off ../tmp/d", "cp -St.craftsman ../tmp/off ../tmp/d", "cp -S .bak -t../tmp/d ../tmp/off",
+      "rsync -at ../tmp/off ../tmp/d/", "rsync -t ../tmp/off ../tmp/d/",
+    ]), [], "controls: an ordinary target directory, a suffix that happens to hold a t, rsync -t");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// bash-writer-gaps (round 4). A link makes a second name for the file it is given, and a directory source of `cp -al` or `rsync --link-dest` a second name for every file under it. Holds() does not count the
+// project root (removing it is the sandbox's business), so `cp -al .` linked every file of the state directory and the queue, and a write through the new name passed. The project root, the main checkout, the git
+// common dir and any directory above one of them hold the state; so does a source with a glob character that could name it (`.crafts*an` expands to the state directory, and the guard runs no shell to see which
+// names exist). The rows here never rely on a file the glob would match: a glob is judged by the names it can match.
+test("pre-guard: a link whose source is the project root, holds it or is a glob that could name the state directory is refused, and an ordinary directory or glob is not", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp"), worktree = path.join(t.dir, ".worktrees", "a");
+    t.scope("u-a", worktree);
+    fs.mkdirSync(path.join(t.dir, "docs"));
+    fs.mkdirSync(path.join(t.dir, "src"));
+    fs.writeFileSync(path.join(t.dir, "docs", "a.md"), "a");
+    fs.mkdirSync(path.join(tmp, "plain"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    const fromWorktree = (command) => run(GUARD, worktree, { session_id: "scratch", tool_name: "Bash", tool_input: { command } }, t.env).status;
+    assert.deepEqual(notRefused([
+      "cp -al . ../tmp/o1", "cp -lr . ../tmp/o2", "cp -al ../proj ../other/o3", "cp -al .. ../other/o4", `cp -al ${t.dir} ${tmp}/o5`, `cp -al ${t.base} ${tmp}/o6`, `cp -al / ${tmp}/o7`,
+      "cp --link -r . ../tmp/o8", "cp -lR ./ ../tmp/o9", "cp -al ./. ../tmp/o10", "cp -al -t ../tmp/d .", "cp -al . -t../tmp/d", "cp -a --link . ../tmp/o11", "cd docs && cp -al .. ../../tmp/o12",
+      "cp -alt../tmp/d .", "cp -sft../tmp/d .", "cp -s . ../tmp/o13", "ln -s . ../tmp/o14", "ln -s .. ../tmp/o15", `ln -s ${t.dir} ${tmp}/o16`, `link ${t.dir} ${tmp}/o17`,
+    ]), [], "a linking cp or ln whose source is the project root or a directory above it");
+    assert.deepEqual(notRefused([
+      "rsync -a --link-dest=.. src/ ../tmp/out1/", "rsync -a --link-dest=. docs/ ../tmp/out2/", "rsync -a --link-dest ../proj docs/ ../tmp/out3/", "rsync -a docs/ ../tmp/out4/ --link-dest=.",
+    ]), [], "rsync --link-dest naming the project root or a directory above it");
+    // A glob: judged by the names it can match, so none of them has to exist (there is no sessions/x here).
+    assert.deepEqual(notRefused([
+      "cp -l .craftsman/sessions/x/scope-* ../tmp/g0", "cp -l .crafts*an/sessions/x/scope-* ../tmp/g1", "cp -al .craftsma?/sessions ../tmp/g2", "cp -l .craft[s]man/sessions/x/f ../tmp/g3", "cp -l .{craftsman,x}/sessions/f ../tmp/g4",
+      "cp -al .c* ../tmp/g5", "cp -al .* ../tmp/g6", "cp -al .g* ../tmp/g7", "cp -l .git/hooks/* ../tmp/g8", "cp -l .git/*/x ../tmp/g9", "cp -al ../pro* ../tmp/g10", "cp -al ../*/ ../tmp/g11",
+      "cp -al /* ../tmp/g12", "cp -al ./.crafts*an ../tmp/g13", "cp --link .crafts*an/sessions/*/scope-* -t ../tmp", `cp -l ${t.dir}/.crafts*an/sessions/*/scope-* ${tmp}/g14`, "cd docs && cp -l ../.crafts*an/x ../../tmp/g15",
+      "ln .crafts*an/sessions/x/scope-* ../tmp/g16", "ln -s .crafts*an/sessions/x/scope-* ../tmp/g17", "link .crafts*an/sessions/x/scope-1.json ../tmp/g18", "ln .crafts*an/sessions/x/scope-* -t ../tmp",
+      "/bin/ln .crafts*an/sessions/x/scope-* ../tmp/g19", "rsync -a --link-dest=.crafts*an docs/ ../tmp/out5/", "rsync -a --link-dest=.git/* docs/ ../tmp/out6/",
+    ]), [], "a linking cp, ln, link or rsync whose source is a glob that could name the state directory or lies inside it");
+    // The same from the linked worktree: the main checkout, the directory that holds the worktree and the main checkout's state directory hold the state too.
+    assert.deepEqual([
+      `cp -al ${t.dir} ${tmp}/m1`, `cp -al ${t.dir}/.worktrees ${tmp}/m2`, `cp -al ${t.dir}/.craftsman ${tmp}/m3`, `cp -al ${t.dir}/.cra* ${tmp}/m4`, `cp -al ${t.dir}/.git ${tmp}/m5`, `cp -al . ${tmp}/m6`, `ln -s ${t.dir} ${tmp}/m7`,
+    ].filter((command) => fromWorktree(command) !== 2), [], "from a linked worktree: the main checkout and its state");
+    assert.deepEqual(["cp -al src ../../../tmp/w1", "cp -l docs/* ../../../tmp/w2"].filter((command) => fromWorktree(command) !== 0), [], "controls from the linked worktree: its own ordinary directories");
+    // Controls: an ordinary directory, a glob inside one, a glob at the root that does not reach a dot name, and copies that make no second name.
+    assert.deepEqual(notAllowed([
+      "cp -al docs ../tmp/d1", "cp -al docs/ ../tmp/d2", "cp -l docs/a.md ../tmp/d3", "cp -al src ../tmp/d4", "cp -al ../tmp/plain ../tmp/d5", "cp -l docs/* ../tmp/d6", "cp -l docs/*.md ../tmp/d7", "cp -al * ../tmp/d8",
+      "cp -al ../tmp/* ../other/", "cd docs && cp -al a.md ../../tmp/d9", "cd docs && ln -s a.md ../../tmp/d10", "ln docs/a.md ../tmp/d11", "ln -s docs/* ../tmp/plain", "ln -s ../tmp/plain ../tmp/d12",
+      "cp -a . ../tmp/c1", "cp -r . ../tmp/c2", "cp -Sl . ../tmp/c4", "cp -rSs . ../tmp/c5", "cp -a .crafts*an ../tmp/c3", "rsync -a docs/ ../tmp/out7/", "rsync -a --link-dest=../tmp/plain docs/ ../tmp/out8/", "rsync -a --link-dest=docs src/ ../tmp/out9/",
+    ]), [], "controls: ordinary sources, and copies that do not link");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
+// bash-writer-gaps (round 4). The text check for a link into the state directory (a) reads a quoted-delimiter heredoc body fed to cat or tee as the inert text it is (prose that names the verb and the
+// state directory is not a link, a real link before or after it is), (b) runs before the slow removal check, so a 48 KB command of link operands is answered in well under a second and not after the
+// seconds the parser needs (the hook has a timeout), (c) folds the case of the state directory's name, as selfKind does, and (d) is backed by a parser that judges where an `ln` lands: the one-operand form
+// makes a link named for its operand in the working directory, `-t` names a directory, and a path-qualified or quoted verb is the verb.
+test("pre-guard: the link check ignores quoted heredoc prose, answers a long command in under a second, folds case and judges where an ln lands", () => {
+  const t = scratchProject();
+  try {
+    const tmp = path.join(t.base, "tmp");
+    t.scope("u-a", path.join(t.dir, ".worktrees", "a"));
+    fs.mkdirSync(path.join(t.dir, ".craftsman", "approvals"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "plain"));
+    fs.writeFileSync(path.join(tmp, "src.txt"), "s");
+    fs.symlinkSync(path.join(t.dir, ".craftsman"), path.join(tmp, "state"));
+    const notRefused = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 2);
+    const notAllowed = (commands) => commands.filter((command) => t.call("Bash", { command }).status !== 0);
+    // (a) A heredoc body is prose to cat and tee. A body that is run (bash, a pipe to a shell, node with live words) or expanded (an unquoted tag) is read as it stands.
+    const prose = "note: ln -s x .craftsman/y is refused, and so is link .craftsman/z";
+    const heredoc = (head, body, tag = "'EOF'") => `${head} <<${tag}\n${body}\nEOF`;
+    assert.deepEqual(notAllowed([
+      heredoc(`cat > ${tmp}/n.txt`, prose), heredoc(`cat > ${tmp}/n.txt`, prose, '"EOF"'), heredoc(`tee ${tmp}/n.txt`, prose), heredoc(`cat >> ${tmp}/n.txt`, prose),
+      `${heredoc(`cat > ${tmp}/n.txt`, prose)}\necho done`, `cd ${tmp} && ${heredoc("cat > n.txt", prose)}`, heredoc(`cat > ${tmp}/n.txt`, `${prose}\nln\nlink .craftsman`),
+    ]), [], "a quoted-delimiter heredoc body fed to cat or tee that names the verb word and the state directory is prose");
+    assert.deepEqual(notRefused([
+      `${heredoc(`cat > ${tmp}/n.txt`, prose)}\nln -s x .craftsman/y`, `ln -s x .craftsman/y\n${heredoc(`cat > ${tmp}/n.txt`, prose)}`, `${heredoc(`cat > ${tmp}/n.txt`, prose)}\ncd .craftsman && ln -s ../tmp/src.txt z`,
+      `${heredoc(`cat > ${tmp}/n.txt`, prose)}; ln -s x .craftsman/y`, `ln -s x .craftsman/y; ${heredoc(`cat > ${tmp}/n.txt`, prose)}`,
+      heredoc(`cat > ${tmp}/n.txt`, prose, "EOF"), heredoc("bash", "ln -s x .craftsman/y"), `cat <<'EOF' | sh\n${prose}\nEOF`, heredoc("sh", prose),
+    ]), [], "a real link next to the heredoc, an unquoted tag, and a body that is run");
+    // (b) 48 KB of link operands into the state directory. A run that backtracks or scans for seconds is cut off after 5 s, so a regression fails here instead of hanging the suite; the best of three runs is read.
+    const timed = (command) => {
+      const started = Date.now();
+      const got = spawnSync(process.execPath, [GUARD], { cwd: t.dir, input: JSON.stringify({ session_id: "scratch", tool_name: "Bash", tool_input: { command } }), encoding: "utf8", timeout: 5000, env: { ...process.env, CLAUDE_PROJECT_DIR: t.dir, ...t.env } });
+      return { ms: Date.now() - started, status: got.status };
+    };
+    const long = { "repeated ln operands into the state directory": "ln -s x .craftsman/y ".repeat(2400), "ln commands joined by ;": "ln -s x .craftsman/y; ".repeat(2300), "link operands, one per line": "link x .craftsman/y\n".repeat(2500) };
+    for (const [what, command] of Object.entries(long)) {
+      assert.ok(command.length >= 48 * 1024, `${what}: the fixture is 48 KB`);
+      let got = timed(command);
+      for (let again = 0; again < 2 && got.ms >= 1000; again++) { const next = timed(command); if (next.ms < got.ms) got = next; }
+      assert.ok(got.ms < 1000, `${what}: the guard took ${got.ms} ms at its best of three runs (limit 1000 ms)`);
+      assert.equal(got.status, 2, `${what}: the verdict`);
+    }
+    // (c) The state directory's name is compared case-folded: a case-insensitive filesystem reaches .Craftsman as .craftsman.
+    assert.deepEqual(notRefused([
+      "ln -s ../tmp/plain .Craftsman/approvals", "ln -s ../tmp/src.txt .Craftsman/x", "ln -s ../tmp/src.txt .CRAFTSMAN/x", "ln ../tmp/src.txt .Craftsman/x", "link ../tmp/src.txt .Craftsman/x", "cp -l ../tmp/src.txt .Craftsman/x", "cp -s ../tmp/src.txt .CRAFTSMAN/x",
+      "cd .Craftsman && ln -s ../../tmp/src.txt x", "/bin/ln -s ../tmp/src.txt .Craftsman/x", "ln -s -t .Craftsman ../tmp/src.txt", "ln -sft.Craftsman ../tmp/src.txt",
+      "setsid ln -s ../tmp/src.txt .Craftsman/x", "flock /x ln -s ../tmp/src.txt .CRAFTSMAN/x", "chrt 5 link ../tmp/src.txt .Craftsman/x", "echo hi; setsid ln -s x .CRAFTSMAN/x", // behind a wrapper no list names: only the text check reads these
+    ]), [], "a link into the state directory spelled in another case");
+    // (d) Where an ln lands.
+    const here = (dir, command) => `cd ${dir} && ${command}`;
+    assert.deepEqual(notRefused([
+      here(path.join(tmp, "state"), "/bin/ln -s ../../tmp/approvals"), here(path.join(tmp, "state"), "ln -s ../../tmp/approvals"), here(path.join(tmp, "state"), "ln ../tmp/src.txt"), here(path.join(tmp, "state"), '"ln" -s ../tmp/plain'),
+      here(path.join(tmp, "state"), "'ln' -s ../tmp/plain"), here(path.join(tmp, "state"), "/usr/bin/ln -sf ../tmp/src.txt"), here(".craftsman", "/bin/ln -s ../../tmp/approvals"), here(".craftsman/approvals", "/usr/bin/ln -s ../../tmp/src.txt"),
+      `"ln" -sft.craftsman ../tmp/src.txt`, `'ln' -sft.craftsman ../tmp/src.txt`, `/bin/ln -sft.craftsman ../tmp/src.txt`, `ln -s -t.craftsman ../tmp/src.txt`, `ln -st .craftsman ../tmp/src.txt`, `l""n -sft.craftsman ../tmp/src.txt`,
+      `"ln" -sft../tmp/state ../tmp/src.txt`, `/bin/ln -sft../tmp/state ../tmp/src.txt`, `/usr/bin/link ../tmp/src.txt .craftsman/x`, `"link" ../tmp/src.txt .craftsman/x`, `ln -s ../tmp/src.txt ../tmp/state/x`, "ln -s ../tmp/src.txt ../tmp/state",
+    ]), [], "a link that lands in the state directory by its one operand, by -t, or through a quoted or path-qualified verb");
+    assert.deepEqual(notAllowed([
+      here(tmp, "/bin/ln -s plain"), here(tmp, "ln -s ../proj/docs"), here(path.join(tmp, "plain"), "/usr/bin/ln -s ../src.txt"), "ln -s ../tmp/plain", "/bin/ln -s ../tmp/src.txt", '"ln" -sft../tmp/plain ../tmp/src.txt',
+      "ln -sft ../tmp/plain ../tmp/src.txt", "/usr/bin/link ../tmp/src.txt ../tmp/plain/x", "ln -s ../tmp/src.txt ../tmp/plain",
+    ]), [], "controls: a link that lands in an ordinary directory, whatever its spelling");
+  } finally { fs.rmSync(t.base, { recursive: true, force: true }); }
+});
+
 test("pre-guard: a scoped Write of a new file whose nearest existing ancestor is a scratch root passes; an Edit, a Read, NotebookEdit, Glob and Grep of it do not", () => {
   const t = scratchProject();
   try {
