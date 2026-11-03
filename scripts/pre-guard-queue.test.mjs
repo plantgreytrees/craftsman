@@ -132,3 +132,137 @@ test("pre-guard: repo-exec's own enqueuePush, run directly by node, still writes
     assert.notEqual(ran.status, 2, ran.stderr);
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
+
+// A superproject with a registered submodule `sub`: the submodule's git dir, and so its push queue, is the superproject's
+// .git/modules/sub, outside the submodule's own work tree. enqueuePush writes it there the way repo-exec does for a project that is a submodule.
+const gitIn = (dir, ...args) => spawnSync("git", ["-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "protocol.file.allow=always", ...args], { encoding: "utf8" });
+const newRepo = (dir) => { fs.mkdirSync(dir); gitIn(dir, "init", "-q"); gitIn(dir, "commit", "-q", "--allow-empty", "-m", "init"); };
+function repoWithSubmodule() {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-queue-guard-sub-")));
+  const origin = path.join(base, "origin"), sup = path.join(base, "super");
+  for (const dir of [origin, sup]) newRepo(dir);
+  const git = gitIn;
+  assert.equal(git(sup, "submodule", "add", "-q", origin, "sub").status, 0);
+  git(sup, "commit", "-q", "-m", "add sub");
+  const sub = path.join(sup, "sub");
+  const info = { common_git_dir: path.join(sup, ".git", "modules", "sub") };
+  assert.ok(fs.existsSync(info.common_git_dir), "the submodule's git dir is registered under the superproject's .git/modules");
+  enqueuePush(sub, info, { sha: git(sub, "rev-parse", "HEAD").stdout.trim(), dst: "feat/sub", reason: "test" });
+  const queue = path.join(info.common_git_dir, ".craftsman", "network", "queue.jsonl");
+  return { base, sup, sub, info, queue, before: fs.readFileSync(queue, "utf8") };
+}
+
+test("pre-guard: a tool call that writes a submodule's network queue is refused from the superproject root and from the submodule root", () => {
+  const r = repoWithSubmodule();
+  try {
+    const inSuper = path.join(".git", "modules", "sub", ".craftsman", "network", "queue.jsonl");
+    for (const file of [inSuper, r.queue]) assert.deepEqual(notRefused(r.sup, toolCalls(file), "queue-guard-super"), [], `allowed from the superproject root, path ${file}`);
+    for (const file of [r.queue, path.relative(r.sub, r.queue)]) assert.deepEqual(notRefused(r.sub, toolCalls(file), "queue-guard-sub"), [], `allowed from the submodule root, path ${file}`);
+    assert.match(run(r.sup, "Write", { file_path: r.queue, content: "{}" }, "queue-guard-super").stderr, /craftsman:.*network/, "the refusal names the queue");
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a submodule's queue is judged by where a name leads: a symlinked directory and a case-folded spelling are refused from the submodule root", () => {
+  const r = repoWithSubmodule();
+  try {
+    fs.symlinkSync(path.join(r.info.common_git_dir, ".craftsman", "network"), path.join(r.sub, "q"));
+    for (const file of [path.join(r.sub, "q", "queue.jsonl"), path.join(r.sup, ".Git", "Modules", "sub", ".Craftsman", "Network", "queue.jsonl")]) {
+      const calls = [["Write", { file_path: file, content: "{}" }], ["Edit", { file_path: file, old_string: "push", new_string: "delete" }]];
+      assert.deepEqual(notRefused(r.sub, calls, "queue-guard-sub"), [], `allowed from the submodule root, ${file}`);
+    }
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a submodule inside a submodule keeps its queue protected from the outer and the inner root", () => {
+  const r = repoWithSubmodule();
+  try {
+    const origin = path.join(r.base, "inner-origin");
+    newRepo(origin);
+    assert.equal(gitIn(r.sub, "submodule", "add", "-q", origin, "inner").status, 0);
+    const inner = path.join(r.sub, "inner");
+    const info = { common_git_dir: path.join(r.info.common_git_dir, "modules", "inner") };
+    assert.ok(fs.existsSync(info.common_git_dir), "the inner git dir sits under the outer submodule's modules directory");
+    enqueuePush(inner, info, { sha: gitIn(inner, "rev-parse", "HEAD").stdout.trim(), dst: "feat/inner", reason: "test" });
+    const queue = path.join(info.common_git_dir, ".craftsman", "network", "queue.jsonl");
+    const before = fs.readFileSync(queue, "utf8");
+    const gone = (target) => [["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]];
+    for (const [dir, files] of [[r.sup, [path.relative(r.sup, queue), queue]], [r.sub, [path.relative(r.sub, queue), queue]], [inner, [path.relative(inner, queue), queue]]]) {
+      for (const file of files) assert.deepEqual(notRefused(dir, [...toolCalls(file), ...gone(path.dirname(path.dirname(file)))], "queue-guard-nested"), [], `allowed from ${path.relative(r.base, dir)}, path ${file}`);
+    }
+    assert.equal(fs.readFileSync(queue, "utf8"), before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: a Read of a submodule's queue and repo-exec's own enqueuePush still work", () => {
+  const r = repoWithSubmodule();
+  try {
+    for (const dir of [r.sup, r.sub]) {
+      const read = run(dir, "Read", { file_path: r.queue });
+      assert.equal(read.status, 0, `Read from ${dir}: ${read.stderr}`);
+      for (const command of [`cat ${r.queue}`, `grep -c push ${r.queue}`]) assert.equal(run(dir, "Bash", { command }).status, 0, `${command} from ${dir}`);
+    }
+    enqueuePush(r.sub, r.info, { sha: spawnSync("git", ["-C", r.sub, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(), dst: "feat/second", reason: "again" });
+    assert.deepEqual(readQueue(r.info).map((e) => e.dst), ["feat/sub", "feat/second"]);
+    assert.ok(fs.readFileSync(r.queue, "utf8").startsWith(r.before), "the first entry is untouched");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: removing or moving the queue's parent directories is refused, so a forged one cannot take their place", () => {
+  const r = repoWithQueue();
+  try {
+    const gone = (target) => [["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]];
+    for (const target of [".git/.craftsman", ".git/.craftsman/network", ".git/.craftsman/network/queue.jsonl", path.join(r.main, ".git", ".craftsman")]) {
+      assert.deepEqual(notRefused(r.main, gone(target), "queue-guard-parent"), [], `allowed from the main checkout, ${target}`);
+    }
+    for (const wt of [r.worktree, r.sibling]) {
+      const toMain = path.join(r.main, ".git", ".craftsman");
+      assert.deepEqual(notRefused(wt, gone(toMain), "queue-guard-parent-wt"), [], `allowed from the linked worktree ${path.basename(wt)}, ${toMain}`);
+    }
+    assert.match(run(r.main, "Bash", { command: "rm -rf .git/.craftsman" }, "queue-guard-parent").stderr, /craftsman:/, "the refusal is named");
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: the submodule store (.git/modules) is held like the queue's parents; its queue directory can neither go nor move", () => {
+  const r = repoWithSubmodule();
+  try {
+    const gone = (target) => [["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]];
+    for (const target of [".git/modules", ".git/modules/sub/.craftsman/network", ".git/modules/sub/.craftsman/network/queue.jsonl", path.join(r.sup, ".git", "modules")]) {
+      assert.deepEqual(notRefused(r.sup, gone(target), "queue-guard-modules"), [], `allowed from the superproject root, ${target}`);
+    }
+    // the submodule's own session reaches the same store by an absolute path or a `..` detour out of its work tree
+    for (const target of [path.join(r.sup, ".git", "modules"), path.join("..", ".git", "modules"), path.join("..", ".git", "modules", "sub", ".craftsman", "network"), r.queue]) {
+      assert.deepEqual(notRefused(r.sub, gone(target), "queue-guard-modules-sub"), [], `allowed from the submodule root, ${target}`);
+    }
+    assert.equal(fs.readFileSync(r.queue, "utf8"), r.before, "nothing reached the queue");
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test("pre-guard: ordinary directories and files that merely look like git state keep their verdict (the false-positive guard)", () => {
+  const verdicts = (dir, calls, session_id) => calls.map(([tool, input]) => [label(tool, input), run(dir, tool, input, session_id)]);
+  const r = repoWithQueue();
+  try {
+    for (const dir of ["build", "docs", path.join("src", ".github"), ".github"]) fs.mkdirSync(path.join(r.main, dir), { recursive: true });
+    fs.writeFileSync(path.join(r.main, ".gitignore"), "node_modules\n");
+    const calls = [];
+    for (const target of ["build", "src", "src/.github", ".github", ".gitignore"]) calls.push(["Bash", { command: `rm -rf ${target}` }], ["Bash", { command: `mv ${target} elsewhere` }]);
+    calls.push(["Write", { file_path: path.join(r.main, "src", "a.txt"), content: "x" }], ["Write", { file_path: path.join(r.main, "src", ".github", "w.yml"), content: "x" }],
+      ["Write", { file_path: path.join(r.main, ".gitignore"), content: "x\n" }], ["Bash", { command: "echo x >> src/.github/w.yml" }], ["Bash", { command: "rm src/.github/w.yml" }]);
+    assert.deepEqual(verdicts(r.main, calls, "queue-guard-ordinary").filter(([, got]) => got.status === 2).map(([name]) => name), [], "an ordinary path was refused");
+    // `docs` is a guarded doc path in this repo's config: whatever its verdict, it is the doc-write guard's and never a claim that it holds craftsman state
+    for (const [name, got] of verdicts(r.main, [["Bash", { command: "rm -rf docs" }], ["Bash", { command: "mv docs elsewhere" }]], "queue-guard-ordinary")) {
+      assert.doesNotMatch(got.stderr, /holds craftsman state|craftsman grant|network/, `${name}: ${got.stderr}`);
+    }
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+  const s = repoWithSubmodule();
+  try {
+    fs.mkdirSync(path.join(s.sup, "build"));
+    fs.mkdirSync(path.join(s.sup, "src"));
+    const inSuper = [["Bash", { command: "rm -rf build" }], ["Bash", { command: "mv build elsewhere" }], ["Bash", { command: "rm -rf sub/src" }], ["Write", { file_path: path.join(s.sup, "src", "a.txt"), content: "x" }]];
+    assert.deepEqual(verdicts(s.sup, inSuper, "queue-guard-ordinary").filter(([, got]) => got.status === 2).map(([name]) => name), [], "an ordinary path was refused in the superproject");
+    const inSub = [["Write", { file_path: path.join(s.sub, "a.txt"), content: "x" }], ["Bash", { command: "echo x >> a.txt" }], ["Write", { file_path: path.join(s.sup, "b.txt"), content: "x" }]];
+    assert.deepEqual(verdicts(s.sub, inSub, "queue-guard-ordinary").filter(([, got]) => got.status === 2).map(([name]) => name), [], "an ordinary path was refused in the submodule");
+  } finally { fs.rmSync(s.base, { recursive: true, force: true }); }
+});
