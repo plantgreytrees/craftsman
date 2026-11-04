@@ -214,8 +214,11 @@ folder as `cwd` (root-relative) whenever it is not the root.
   the `dirty` marker, and its failure blocks as
   `SCOPED TESTS FAILED (not baselined): <cmd>`, never as a regression. If
   `stopGate.totalBudgetMs` kills it, that is said once per session instead of
-  passing silently. A scoped command whose program is not installed is skipped
-  without blocking and said once per session, and one that exceeds its own
+  passing silently. A scoped `extraChecks` command whose program is not installed is skipped
+  without blocking and said once per session; a `stopGate.commands` entry whose
+  program is not installed is not usable at all, so Stop and the pre-merge gate skip
+  it (Stop logs `no-command`, the gate logs `pre_merge_gate` with `skipped: true`)
+  rather than fail the land. One that exceeds its own
   `stopGate.testTimeoutMs` blocks as
   `SCOPED TESTS INCOMPLETE: <cmd> did not finish within its own configured limit`.
 
@@ -255,9 +258,9 @@ placeholder command):
 | `reason` | Meaning |
 |---|---|
 | `clean` | no test-relevant edit this session (the `dirty` marker is absent; a docs-only edit leaves it clean) |
-| `snapshot-pending` | dirty, a snapshot was started at session start but has produced no result (still running, or dropped because files changed while it ran) |
-| `no-command` | dirty, and no snapshot was taken: no test command matched the project, or snapshots are off |
-| `red-at-start` | dirty, but every test command was already red at session start |
+| `snapshot-pending` | dirty, and SessionStart started a snapshot (it wrote `snapshot-started`) that has landed no `session-start.json`: still running, or dropped because files changed while it ran |
+| `no-command` | dirty, and nothing was left to run: no snapshot was started (no usable test command matched the project when the session began, a command's program is not installed, or snapshots are off), or the snapshot ran and listed no command |
+| `red-at-start` | dirty, but every test command in `session-start.json` was already red at session start |
 | `no-changes` | a placeholder command, and the session change list is empty (or every file in it has since been deleted) |
 | `changes-unknown` | a placeholder command, and the change list is missing or unreadable |
 

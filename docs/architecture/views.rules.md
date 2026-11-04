@@ -3,8 +3,8 @@ area: views
 governs: ["scripts/lib/dashboard.mjs", "scripts/lib/export-notes.mjs", "scripts/lib/next-queue.mjs", "scripts/dashboard.test.mjs", "scripts/export-notes.test.mjs", "scripts/next-queue.test.mjs", "commands/digest.md", "commands/idea.md", "docs/plans/NEXT.md"]
 human: docs/architecture/views.md
 source: docs/ideas/external-project-board.md
-verified_at: eb6c31bdcb94660df165dab8863148d6a72e3aa6
-updated: 2026-11-04
+verified_at: 9a92eb7487aa43853cf7df2f884550c6fb06f086
+updated: 2026-11-05
 ---
 # ARCH views — enforced rules
 
@@ -14,7 +14,7 @@ updated: 2026-11-04
 - **ARCH-VIEWS-04** [superseded by ARCH-VIEWS-16] Scope is the single project projectContext resolves; the workspace manifest is not read — check: dashboard.test.mjs with a manifest present renders one project — cite: scripts/lib/core.mjs:104
 - **ARCH-VIEWS-05** [decided] The dashboard regenerates on `node scripts/digest.mjs --html` (prints the file path) and at Stop inside tracker-sync.mjs; at Stop it re-renders only when an input fingerprint (ledger and docs/{ideas,plans,architecture} mtimes and sizes) changed, is fail-open, exits 0 and stays inside tracker-sync's 10 s hook timeout — check: tracker-sync test skip-when-unchanged and throw-still-exits-0 — cite: hooks/hooks.json:32
 - **ARCH-VIEWS-06** [decided] docs/plans/NEXT.md is the only hand-written view input: an ordered list of `N. <slug> — <intent>` lines and nothing else; it MUST NOT hold ledger states or status words; slugs resolve through plan-index (ARCH-PLAN-06); arch-check lint warns on an unresolved slug, a status word or a COMPLETE plan; a model edit needs the doc-write grant (docWriteGuard) — check: next-queue.test.mjs parse and lint cases — cite: scripts/lib/next-queue.mjs:17,84
-- **ARCH-VIEWS-07** [decided] The session queue lists NEXT.md entries in their written order, then the computed ready list: plans with at least one PENDING or IN_PROGRESS row, none of them PARKED or BLOCKED, ordered by priority P0..P3 (ARCH-PLAN-05), then the parent's children: order, then oldest updated_at; the first execution.maxSessions entries are marked as this session's lanes, and the mod still never reads maxSessions — check: next-queue.test.mjs ordering table — cite: scripts/lib/next-queue.mjs:47-83
+- **ARCH-VIEWS-07** [decided] The session queue lists NEXT.md entries in their written order, then the computed ready list: plans with at least one PENDING or IN_PROGRESS row, none of them PARKED or BLOCKED, ordered by priority P0..P3 (ARCH-PLAN-05), then the parent's children: order, then oldest updated_at; the first execution.maxSessions entries are marked as this session's lanes, and the mod still never reads maxSessions — check: next-queue.test.mjs ordering table — cite: scripts/lib/next-queue.mjs:47-81
 - **ARCH-VIEWS-08** [superseded by ARCH-VIEWS-17] Publishing happens only when the user runs `/digest --html --publish`: the model publishes the generated file as a private claude.ai Artifact with the Artifact tool, republishing to the URL kept in .craftsman/dashboard.url; no hook, /auto, /goal run or script ever publishes — check: digest.md wording; wiring.test.mjs no publish path in hooks — cite: commands/digest.md:1-19
 - **ARCH-VIEWS-09** [decided] Bytes added to commands/digest.md for --html and --publish are traded under ARCH-SLIM-02; rendering and queue logic live in scripts/lib (ARCH-SLIM-07) — check: doc-size-policy green — cite: docs/architecture/slim.rules.md:27
 - **ARCH-VIEWS-10** [decided] Events go to .craftsman/events.jsonl: dashboard_render {ms, skipped, sections} and next_queue_lint {slug, problem}; stats.mjs reports dashboard_render p50/p95 beside hook latency — check: dashboard.test.mjs events — cite: scripts/lib/core.mjs:1129, scripts/lib/dashboard.mjs:226
