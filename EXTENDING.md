@@ -174,20 +174,33 @@ folder as `cwd` (root-relative) whenever it is not the root.
   sorted unique folders (`.` for the top level), POSIX paths relative to the
   command's folder.
 - Whole tokens only, and there is no shell: nothing is quoted, joined or split on
-  spaces, so a path with spaces stays one argument. A placeholder inside a longer
-  token (`--files={changed}`) is never expanded; the command does not run and Stop
-  says so once.
+  spaces, so a path with spaces stays one argument. An embedded placeholder (inside
+  a longer token, such as `--files={changed}`) is never expanded and its command is
+  never snapshotted; Stop says so once per session and skips it, and it fails the
+  merge gate like any red gate, so the land parks instead of skipping the check.
 - At Stop the set is the session change list: every source file edited this
-  session, recorded beside the `dirty` marker (a docs-only edit is not recorded).
-  The command runs only when the session is dirty. An empty set skips it
-  (`no-changes`); a missing or unreadable list skips it and says so once per
-  session (`changes-unknown`).
+  session, recorded beside the `dirty` marker. Docs, craftsman state and ignored
+  paths are never recorded (a docs-only edit leaves the list alone), so the Stop
+  set excludes them. A file that was deleted after it was edited drops out of the
+  Stop set before the command runs. The command runs only when the session is
+  dirty. An empty set, or one whose files are all gone, skips it (`no-changes`); a
+  missing or unreadable list skips it and says so once per session
+  (`changes-unknown`).
 - In the pre-merge gate the set is `git diff --name-only <target>...HEAD` in the
   worktree being landed, where the target is the branch the merge lands onto
   (the base branch, the feature branch, or `origin/<base>`). Deleted files are
-  left out; an empty diff skips the gate and logs it (`no-changes`); a diff that
-  cannot be computed fails the gate like any red gate. A command with no
-  placeholder runs exactly as before.
+  left out; an empty diff skips the gate and logs it (`no-changes`); a deletion-only
+  branch (the diff holds deletions and nothing else) fails the merge gate, because
+  there is nothing left to name, so run the suite unscoped; a diff that cannot be
+  computed fails the gate like any red gate. A command with no placeholder runs
+  exactly as before.
+- The two sets are not the same. The merge `{changed}` set is the diff against the
+  target, so it includes docs and other non-source files (`README.md`, a lockfile,
+  a fixture) that the branch touched. The Stop set is only the files edited this
+  session and excludes docs, state and ignored paths. One command can therefore
+  pass at Stop and fail at merge: a test runner handed `README.md` by the merge
+  gate was never handed it at Stop. Write a scoped command so it tolerates, or
+  filters out, files that are not source.
 - A placeholder command is never snapshotted: it is not run at session start,
   never appears in `session-start.json`, and does not need to be green first. It
   runs at Stop whenever the session is dirty, counts as the test run that clears
@@ -235,7 +248,7 @@ placeholder command):
 | `snapshot-pending` | dirty, but no `session-start.json` has been written yet |
 | `no-command` | dirty, but no test command matched the project |
 | `red-at-start` | dirty, but every test command was already red at session start |
-| `no-changes` | a placeholder command, and the session change list is empty |
+| `no-changes` | a placeholder command, and the session change list is empty (or every file in it has since been deleted) |
 | `changes-unknown` | a placeholder command, and the change list is missing or unreadable |
 
 ### Running units in fresh contexts (`/craftsman:auto`)
