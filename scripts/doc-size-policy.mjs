@@ -201,7 +201,7 @@ export function raisedCaps(base, current) {
   return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
 }
 
-// Recorded cap trades (ARCH-SLIM-16). A per-file cap may rise only when an entry names the file as `raise`, the
+// Recorded cap trades (ARCH-SLIM-17). A per-file cap may rise only when an entry names the file as `raise`, the
 // rise is at most `bytes`, and the `lower` file, one an invocation loads, had its cap fall by at least `bytes`
 // against the merge-base. Each entry cites the owner-approved rule and the date it was decided.
 export const CAP_TRADES = [
@@ -239,7 +239,7 @@ export function ratchetFindings(base, current, trades = CAP_TRADES) {
     const named = valid.filter((t) => t.raise === rel);
     const fits = named.filter((t) => rise <= t.bytes);
     const covering = fits.find((t) => fallOf(t.lower) - (owed[t.lower] || 0) >= t.bytes) || fits[0];
-    if (!named.length) findings.push(`${rel}: cap ${base[rel]} -> ${current[rel]} has no CAP_TRADES entry (ARCH-SLIM-16)`);
+    if (!named.length) findings.push(`${rel}: cap ${base[rel]} -> ${current[rel]} has no CAP_TRADES entry (ARCH-SLIM-17)`);
     else if (!covering) findings.push(`${rel}: cap rose ${rise} bytes, more than its trade's ${Math.max(...named.map((t) => t.bytes))}`);
     else owed[covering.lower] = (owed[covering.lower] || 0) + covering.bytes;
   }

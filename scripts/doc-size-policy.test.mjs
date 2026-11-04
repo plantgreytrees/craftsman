@@ -61,13 +61,13 @@ test("raisedCaps flags a rise, ignores falls and new entries", () => {
   assert.deepEqual(raisedCaps({ a: 5 }, { a: 5 }), []);
 });
 
-// ARCH-SLIM-16: a cap rises only through a recorded, paid CAP_TRADES entry. Called through the
+// ARCH-SLIM-17: a cap rises only through a recorded, paid CAP_TRADES entry. Called through the
 // namespace so each case fails on its own while ratchetFindings does not exist.
 const TRADE = { raise: "agents/a.md", lower: "commands/c.md", bytes: 5, rule: "ARCH-SLIM-16", decided: "2026-11-03" };
 const BASE = { "agents/a.md": 100, "agents/b.md": 100, "commands/c.md": 500 };
 const caps = (over) => ({ ...BASE, ...over });
 
-test("ratchetFindings refuses a rise no CAP_TRADES entry names (ARCH-SLIM-16)", () => {
+test("ratchetFindings refuses a rise no CAP_TRADES entry names (ARCH-SLIM-17)", () => {
   const f = policy.ratchetFindings(BASE, caps({ "agents/a.md": 103 }), []);
   assert.equal(f.length, 1);
   assert.match(f[0], /agents\/a\.md: cap 100 -> 103 has no CAP_TRADES entry/);
