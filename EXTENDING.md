@@ -134,6 +134,106 @@ project hasn't made in a month stops being narrated every session:
 
 (one week, shown as an example — the default is 30 days).
 
+### Multi-service workspaces: tool folders, scoped tests, inherited config
+
+Four opt-in pieces make the gates work per service. A repository with no
+`cwd` key, no placeholder and no workspace root above it behaves exactly as before.
+
+**Run a language's tools in the service folder.** `languages.<lang>.cwd` takes
+`"nearest:<marker>[,<marker>]"`:
+
+```json
+{ "languages": { "typescript": { "cwd": "nearest:package.json,pnpm-lock.yaml" } } }
+```
+
+From the edited file's folder up to and including the project root, the first
+folder holding any marker wins (markers are tried in the order written); the
+`format` and `check` commands run there. `{file}` and `{dir}` become POSIX paths
+relative to that folder, and a tool written with a `/` (such as `./node_modules/.bin/eslint`)
+is looked up from it. No marker found, a malformed spec, or a folder that
+resolves outside the root (a symlink) falls back to the project root, with one
+notice per session. It never looks above the root. A `gate` event carries the
+folder as `cwd` (root-relative) whenever it is not the root.
+
+**Test only what the session touched.** In `stopGate.commands` and
+`stopGate.extraChecks` (at Stop) and in the command the pre-merge gate picks from
+`stopGate.commands`, two placeholders name the changed files:
+
+```json
+{
+  "stopGate": {
+    "commands": { "package.json": "node scripts/test-changed.mjs {changed}" },
+    "extraChecks": ["node scripts/lint-dirs.mjs {changedDirs}"]
+  }
+}
+```
+
+- `{changed}` becomes one argument per changed file and `{changedDirs}` the
+  sorted unique folders (`.` for the top level), POSIX paths relative to the
+  command's folder.
+- Whole tokens only, and there is no shell: nothing is quoted, joined or split on
+  spaces, so a path with spaces stays one argument. A placeholder inside a longer
+  token (`--files={changed}`) is never expanded; the command does not run and Stop
+  says so once.
+- At Stop the set is the session change list: every source file edited this
+  session, recorded beside the `dirty` marker (a docs-only edit is not recorded).
+  The command runs only when the session is dirty. An empty set skips it
+  (`no-changes`); a missing or unreadable list skips it and says so once per
+  session (`changes-unknown`).
+- In the pre-merge gate the set is `git diff --name-only <target>...HEAD` in the
+  worktree being landed, where the target is the branch the merge lands onto
+  (the base branch, the feature branch, or `origin/<base>`). Deleted files are
+  left out; an empty diff skips the gate and logs it (`no-changes`); a diff that
+  cannot be computed fails the gate like any red gate. A command with no
+  placeholder runs exactly as before.
+- A placeholder command is never snapshotted: it is not run at session start,
+  never appears in `session-start.json`, and does not need to be green first. It
+  runs at Stop whenever the session is dirty, counts as the test run that clears
+  the `dirty` marker, and its failure blocks as
+  `SCOPED TESTS FAILED (not baselined): <cmd>`, never as a regression. If
+  `stopGate.totalBudgetMs` kills it, that is said once per session instead of
+  passing silently.
+
+**Inherit the workspace root's config.** A sub-project (or a unit worktree) now
+inherits the workspace root's config. Later layers win, and the order is:
+
+1. the plugin defaults;
+2. machine-wide `userConfig`;
+3. the workspace root's `craftsman.config.json`, then its `craftsman.project.json`;
+4. the sub-project's (or worktree's) own `craftsman.config.json`, then `craftsman.project.json`.
+
+The same folder reached by two spellings (a symlink) adds no layer, and nothing
+walks to a parent or reads a sibling. Objects merge key by key and arrays and
+scalars replace. To drop an inherited entry set it to `null`
+(`{ "stopGate": { "commands": { "justfile": null } } }`); an empty `{}` merges
+into what is already there, so it does **not** clear the defaults or the
+inherited values. A malformed inherited file is ignored with a warning naming it,
+and `enabled: false` in the workspace root's file says which file turned the gate off.
+Inheriting `protectedPaths` only ever adds protection.
+
+An inherited command that names a workspace file relative to the root now runs
+from the sub-project's folder, so write it with `{workspaceRoot}`, which every
+configured command (`format`, `check`, `stopGate.commands`, `extraChecks`, the
+pre-merge gate) expands to the workspace root's absolute path:
+
+```json
+{ "stopGate": { "extraChecks": ["python3 {workspaceRoot}/scripts/check_arch.py"] } }
+```
+
+**Read what happened in `.craftsman/events.jsonl`.** The `gate`, `stop` and
+`stop-tests-skipped` events carry `project`: the unit scope's project id or the
+workspace project's id, and `"."` at the workspace root. A Stop that is dirty but
+queues no test logs one `stop-tests-skipped` with a `reason`:
+
+| `reason` | Meaning |
+|---|---|
+| `clean` | nothing was edited this session |
+| `snapshot-pending` | dirty, but no `session-start.json` has been written yet |
+| `no-command` | dirty, but no test command matched the project |
+| `red-at-start` | dirty, but every test command was already red at session start |
+| `no-changes` | a placeholder command, and the session change list is empty |
+| `changes-unknown` | a placeholder command, and the change list is missing or unreadable |
+
 ### Running units in fresh contexts (`/craftsman:auto`)
 
 `/craftsman:auto` never runs a unit in the root context. Two keys control how:
