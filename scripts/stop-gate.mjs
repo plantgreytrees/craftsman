@@ -5,7 +5,7 @@
 // other's baseline, authority, or acceptance criteria.
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped, markerPresent } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
@@ -177,7 +177,7 @@ if (cfg.security?.enabled && shouldScan) {
 //    multi-minute suite on every question-answering turn.
 const dirtyPath = path.join(sdir, "dirty");
 const isDirty = fs.existsSync(dirtyPath);
-const baselineDir = sessionDir(sid, projectContext(input.project || ".")); // the ROOT's: SessionStart and snapshot.mjs write the baseline there, not in a unit scope's (ARCH-STATE-22)
+const baselineDir = sessionDir(sid, baselineContext()); // the root's, while the scope is of the same repository: SessionStart and snapshot.mjs write the baseline there (ARCH-STATE-22)
 let start = null;
 try { start = JSON.parse(fs.readFileSync(path.join(baselineDir, "session-start.json"), "utf8")); } catch {}
 let results = [];
@@ -501,3 +501,25 @@ process.stdout.write(JSON.stringify({
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
   ...(notice ? { systemMessage: notice } : {}),
 }));
+
+// The baseline belongs to the repository SessionStart snapshotted (ARCH-STATE-22). Its session directory, the root context's, holds
+// session-start.json and snapshot-started, and a scope of that same repository (a unit's worktree) reads them there. A workspace
+// sub-project scope is another repository, so its own session directory is read instead and holds neither: it has no baseline,
+// and the root's commands never run in it. `dirty`, the change list and the scoped-task state are the scope's in both cases.
+function baselineContext() {
+  const root = projectContext(input.project || ".");
+  return sameRepository(root.root, context.root) ? root : context;
+}
+
+// Equal real paths are the same repository. Otherwise both roots must share one git common directory, each resolved against its
+// own directory (git prints it relative to the cwd) and compared by real path. A git failure, a missing directory or a directory
+// that is not a repository is NOT the same repository. Git is asked only when the two roots differ.
+function sameRepository(rootDir, scopeDir) {
+  try {
+    if (fs.realpathSync(rootDir) === fs.realpathSync(scopeDir)) return true;
+    const commonDir = (dir) => fs.realpathSync(path.resolve(dir, execFileSync(
+      "git", ["rev-parse", "--git-common-dir"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 }
+    ).trim()));
+    return commonDir(rootDir) === commonDir(scopeDir);
+  } catch { return false; }
+}

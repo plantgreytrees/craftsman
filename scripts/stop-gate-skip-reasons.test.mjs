@@ -179,15 +179,8 @@ test("stop-gate: the stop event carries project \".\" on both the pass and the b
 });
 
 test("stop-gate: inside a unit scope the stop and skip events carry the scope's project id (ARCH-STATE-22)", async () => {
-  const dir = makeFixture();
-  const unitRoot = makeFixture();
-  try {
+  await underScope("scoped", async (dir, unitRoot) => {
     const sid = "scoped";
-    const sessions = path.join(dir, ".craftsman", "sessions", sid);
-    fs.mkdirSync(sessions, { recursive: true });
-    fs.writeFileSync(path.join(sessions, "scope.json"), JSON.stringify({
-      plan: "docs/plans/p.md", unit: "u", project: "svc-a", project_root: unitRoot, scope: { read: [], docs: [], write: [] }, arch: [],
-    }));
     seed(unitRoot, sid, { dirty: true });
     seed(dir, sid, { start: { results: [] } }); // the baseline sits in the root context's directory (ARCH-STATE-22)
     const { events } = await runStop(dir, sid);
@@ -196,34 +189,56 @@ test("stop-gate: inside a unit scope the stop and skip events carry the scope's 
     assert.equal(skip.project, "svc-a");
     const stop = events.find((e) => e.ev === "stop");
     assert.equal(stop.project, "svc-a");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(unitRoot, { recursive: true, force: true });
-  }
+  });
 });
 
-// ARCH-STATE-22: SessionStart and snapshot.mjs write session-start.json and snapshot-started at the project ROOT's session directory,
-// so under a unit scope Stop reads those two from the root, while `dirty`, the change list and the scoped-task state stay in the
-// scope's own directory, where quality-gate.mjs writes them.
+// ARCH-STATE-22: SessionStart and snapshot.mjs write session-start.json and snapshot-started at the project ROOT's session directory.
+// Stop reads those two from the root only when the scope's root belongs to the same repository (a unit's worktree does); a workspace
+// sub-project is a separate repository, so it has no baseline and reads neither. `dirty`, the change list and the scoped-task state
+// stay in the scope's own directory either way, where quality-gate.mjs writes them.
 const FAILS = 'node -e "process.exit(1)"';
 const RED_NOW = { results: [{ cmd: FAILS, green: true }] }; // green at session start, red now: a regression if it is run
 
-// Two throwaway repositories: the root the session started in, and a unit's worktree a scope for `sid` points Stop at.
-async function underScope(sid, run) {
+// A linked worktree of `dir`, as a unit's worktree is. craftsman.config.json is untracked in the fixture, so the worktree is given a copy.
+function addWorktree(dir) {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), "stop-gate-wt-"));
+  const r = spawnSync("git", ["worktree", "add", "-q", "--detach", worktree], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  fs.copyFileSync(path.join(dir, "craftsman.config.json"), path.join(worktree, "craftsman.config.json"));
+  return worktree;
+}
+
+// A directory that is not a git repository, with the root's configuration.
+function addPlainDir(dir) {
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), "stop-gate-plain-"));
+  fs.copyFileSync(path.join(dir, "craftsman.config.json"), path.join(plain, "craftsman.config.json"));
+  return plain;
+}
+
+// The root the session started in, and the scope root (made by `makeScopeRoot(root)`) a scope for `sid` points Stop at.
+async function withScope(sid, makeScopeRoot, run) {
   const dir = makeFixture();
-  const unitRoot = makeFixture();
+  let scopeRoot;
   try {
+    scopeRoot = makeScopeRoot(dir);
     const sessions = path.join(dir, ".craftsman", "sessions", sid);
     fs.mkdirSync(sessions, { recursive: true });
     fs.writeFileSync(path.join(sessions, "scope.json"), JSON.stringify({
-      plan: "docs/plans/p.md", unit: "u", project: "svc-a", project_root: unitRoot, scope: { read: [], docs: [], write: [] }, arch: [],
+      plan: "docs/plans/p.md", unit: "u", project: "svc-a", project_root: scopeRoot, scope: { read: [], docs: [], write: [] }, arch: [],
     }));
-    await run(dir, unitRoot);
+    await run(dir, scopeRoot);
   } finally {
+    if (scopeRoot) fs.rmSync(scopeRoot, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(unitRoot, { recursive: true, force: true });
   }
 }
+
+// A unit scope: the scope root is a real worktree of the root's repository.
+const underScope = (sid, run) => withScope(sid, addWorktree, run);
+// A workspace sub-project scope: the scope root is a separate repository.
+const subProjectScope = (sid, run) => withScope(sid, () => makeFixture(), run);
+// A scope root that is not a git repository.
+const plainDirScope = (sid, run) => withScope(sid, addPlainDir, run);
 
 test("stop-gate: under a unit scope a green session-start.json in the root's directory queues the regression command and logs no skip (ARCH-STATE-22)", async () => {
   await underScope("base", async (dir, unitRoot) => {
@@ -272,4 +287,37 @@ test("stop-gate: without a scope the baseline and the dirty marker are read from
     assert.deepEqual(skipped(events), []);
     assert.match(stdout, /REGRESSION: tests passed at session start but fail now/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// A workspace sub-project (scope.mjs requires its root to be a Git root) is a separate repository: the root's session-start.json and
+// snapshot-started marker describe the root's repository, so Stop reads neither for it and never runs the root's commands in it.
+test("stop-gate: under a sub-project scope a green session-start.json in the root's directory queues nothing: no-command, no REGRESSION (ARCH-STATE-22)", async () => {
+  await subProjectScope("subbase", async (dir, svc) => {
+    seed(dir, "subbase", { start: RED_NOW });
+    seed(svc, "subbase", { dirty: true });
+    const { stdout, events } = await runStop(dir, "subbase");
+    assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["no-command", "svc-a"]]);
+    assert.doesNotMatch(stdout, /REGRESSION/);
+    assert.equal(events.find((e) => e.ev === "stop").result, "pass");
+  });
+});
+
+test("stop-gate: under a sub-project scope a snapshot-started marker in the root's directory does not make a baseline-less dirty Stop snapshot-pending (ARCH-STATE-22)", async () => {
+  await subProjectScope("subpend", async (dir, svc) => {
+    markStarted(dir, "subpend");
+    seed(svc, "subpend", { dirty: true });
+    const { events } = await runStop(dir, "subpend");
+    assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["no-command", "svc-a"]]);
+  });
+});
+
+test("stop-gate: a scope root that is not a git repository counts as a different repository: the root's baseline is not read (ARCH-STATE-22)", async () => {
+  await plainDirScope("plain", async (dir, plain) => {
+    seed(dir, "plain", { start: RED_NOW });
+    markStarted(dir, "plain");
+    seed(plain, "plain", { dirty: true });
+    const { stdout, events } = await runStop(dir, "plain");
+    assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["no-command", "svc-a"]]);
+    assert.doesNotMatch(stdout, /REGRESSION/);
+  });
 });
