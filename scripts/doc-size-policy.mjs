@@ -232,17 +232,19 @@ export function ratchetFindings(base, current, trades = CAP_TRADES) {
     else valid.push(t);
   });
   const owed = {};
+  const fallOf = (lower) => (lower in base && lower in current ? Math.max(0, base[lower] - current[lower]) : 0);
   for (const rel of Object.keys(base)) {
     if (!(rel in current) || current[rel] <= base[rel]) continue;
     const rise = current[rel] - base[rel];
     const named = valid.filter((t) => t.raise === rel);
-    const covering = named.find((t) => rise <= t.bytes);
+    const fits = named.filter((t) => rise <= t.bytes);
+    const covering = fits.find((t) => fallOf(t.lower) - (owed[t.lower] || 0) >= t.bytes) || fits[0];
     if (!named.length) findings.push(`${rel}: cap ${base[rel]} -> ${current[rel]} has no CAP_TRADES entry (ARCH-SLIM-16)`);
     else if (!covering) findings.push(`${rel}: cap rose ${rise} bytes, more than its trade's ${Math.max(...named.map((t) => t.bytes))}`);
     else owed[covering.lower] = (owed[covering.lower] || 0) + covering.bytes;
   }
   for (const [lower, need] of Object.entries(owed)) {
-    const fall = lower in base && lower in current ? Math.max(0, base[lower] - current[lower]) : 0;
+    const fall = fallOf(lower);
     if (fall < need) findings.push(`${lower}: cap fell ${fall} bytes, short of the ${need} its trades owe (unpaid)`);
   }
   return findings;
