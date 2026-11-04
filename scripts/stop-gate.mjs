@@ -235,7 +235,7 @@ if (isDirty) {
         `craftsman: stop-gate skipped ${embedded.join(", ")} ({changed} and {changedDirs} must be a whole argument, never part of one), advisory only`, embedded);
     }
   }
-  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: !start ? "snapshot-pending" : !results.length ? "no-command" : "red-at-start" });
+  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (await snapshotComing() ? "snapshot-pending" : "no-command") });
 } else {
   logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: "clean" });
 }
@@ -501,3 +501,14 @@ process.stdout.write(JSON.stringify({
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
   ...(notice ? { systemMessage: notice } : {}),
 }));
+
+// With no session-start.json, config decides whether the snapshot is still to come (ARCH-STATE-22). SessionStart starts it
+// only when a stopGate.commands marker is present (session-context.mjs), and a scoped command is never snapshotted
+// (ARCH-STATE-21), so a non-scoped entry whose marker is present and usable is the one thing a late snapshot waits for;
+// without one the file never lands and the reason is no-command. Declared here so the line cited by ARCH-STATE-22 stays put.
+async function snapshotComing() {
+  for (const [marker, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
+    if (await markerPresent(marker, context) && gateUsable(context.root, marker, cmd, { markerOk: true }) && !isScoped(cmd)) return true;
+  }
+  return false;
+}

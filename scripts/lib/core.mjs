@@ -854,7 +854,7 @@ export function resolveToolCwd(file, lang, context = null) {
     return { cwd: root, reason: `malformed spec ${JSON.stringify(spec)} (want nearest:<marker>[,<marker>])` };
   }
   const base = path.resolve(root);
-  const abs = path.resolve(file);
+  const abs = path.resolve(root, file);
   if (!isInside(base, abs)) return { cwd: root, reason: "the file is outside the project root" };
   for (let dir = path.dirname(abs); ; dir = path.dirname(dir)) {
     if (markers.some((m) => fs.existsSync(path.join(dir, m)))) {

@@ -9,7 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as core from "./core.mjs";
 
 const QUALITY_GATE = fileURLToPath(new URL("../quality-gate.mjs", import.meta.url));
@@ -133,6 +133,44 @@ test("resolveToolCwd: a file outside the root falls back to the root", () => {
   put(base, "package.json");
   const file = put(base, "elsewhere/x.fx");
   const r = core.resolveToolCwd(file, lang("nearest:package.json"), { root });
+  assert.equal(r.cwd, root);
+  assert.match(r.reason, /outside/);
+});
+
+// A relative file is the context root's, never the process working directory's (ARCH-STATE-20). Each call runs in a child
+// started in `cwd`, so the answer cannot lean on this test process's own directory.
+function resolveFrom(cwd, root, file, spec) {
+  const probe = `import * as core from ${JSON.stringify(pathToFileURL(CORE_SRC).href)};
+const [root, file, spec] = JSON.parse(process.argv[1]);
+process.stdout.write(JSON.stringify(core.resolveToolCwd(file, { cwd: spec }, { root })));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", probe, JSON.stringify([root, file, spec])], { cwd, encoding: "utf8", env: cleanEnv() });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test("resolveToolCwd: a relative file resolves against the context root from any working directory, like its absolute spelling", () => {
+  const base = scratch();
+  const root = path.join(base, "repo");
+  put(root, "svc/package.json");
+  put(root, "svc2/package.json");
+  const abs = put(root, "svc/src/deep/a.fx");
+  const rel = path.relative(root, abs);
+  const spec = "nearest:package.json";
+  const want = { cwd: path.join(root, "svc") };
+  const elsewhere = scratch("tool-cwd-elsewhere-");
+  assert.deepEqual(resolveFrom(elsewhere, root, abs, spec), want, "absolute, from outside the root: as before");
+  assert.deepEqual(resolveFrom(elsewhere, root, rel, spec), want, "relative, from a directory outside the root");
+  assert.deepEqual(resolveFrom(path.join(root, "svc2"), root, rel, spec), want, "relative, from another service inside the root");
+  assert.deepEqual(resolveFrom(path.join(root, "svc2"), root, abs, spec), want, "absolute, from another service inside the root: as before");
+  assert.deepEqual(resolveFrom(root, root, rel, spec), want, "relative, from the root itself");
+});
+
+test("resolveToolCwd: a relative file that climbs out of the root is still outside it, whatever the working directory", () => {
+  const base = scratch();
+  const root = path.join(base, "repo");
+  put(root, "package.json");
+  put(base, "x.fx");
+  const r = resolveFrom(root, root, "../x.fx", "nearest:package.json");
   assert.equal(r.cwd, root);
   assert.match(r.reason, /outside/);
 });
