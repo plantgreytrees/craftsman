@@ -255,8 +255,8 @@ placeholder command):
 | `reason` | Meaning |
 |---|---|
 | `clean` | no test-relevant edit this session (the `dirty` marker is absent; a docs-only edit leaves it clean) |
-| `snapshot-pending` | dirty, but no `session-start.json` has been written yet |
-| `no-command` | dirty, but no test command matched the project |
+| `snapshot-pending` | dirty, a snapshot was started at session start but has produced no result (still running, or dropped because files changed while it ran) |
+| `no-command` | dirty, and no snapshot was taken: no test command matched the project, or snapshots are off |
 | `red-at-start` | dirty, but every test command was already red at session start |
 | `no-changes` | a placeholder command, and the session change list is empty (or every file in it has since been deleted) |
 | `changes-unknown` | a placeholder command, and the change list is missing or unreadable |
