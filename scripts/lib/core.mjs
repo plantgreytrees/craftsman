@@ -570,18 +570,18 @@ export function loadConfig(context = null) {
   const defaults = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, "craftsman.config.json"), "utf8")
   );
-  // The project's own values: craftsman.config.json, then craftsman.project.json over it. The second file exists for a repo
+  // Each root's values: craftsman.config.json, then craftsman.project.json over it. The second file exists for a repo
   // whose craftsman.config.json IS the shipped default (this plugin's own), which cannot hold project-only values.
+  // configRoots puts the workspace root's files under the context root's own (ARCH-STATE-19), never above a root.
   // An absent file adds nothing; a malformed one is ignored with a warning.
-  const root = context?.root || PROJECT_ROOT;
   let merged = applyUserConfig(defaults, process.env);
-  for (const name of PROJECT_CONFIG_FILES) {
+  for (const root of configRoots(context)) for (const name of PROJECT_CONFIG_FILES) {
     const file = path.join(root, name);
     if (!fs.existsSync(file)) continue;
     try {
       merged = deepMerge(merged, JSON.parse(fs.readFileSync(file, "utf8")));
     } catch (e) {
-      warn(`ignoring malformed ./${name}: ${e.message}`);
+      warn(`ignoring malformed ${root === (context?.root || PROJECT_ROOT) ? `./${name}` : file}: ${e.message}`);
     }
   }
   return merged;
@@ -697,12 +697,12 @@ export function advisorySkipped(hook, reason, { env = process.env, stateDir = ST
 export const launcherMarker = (sid, tmp = os.tmpdir()) => path.join(
   tmp, `craftsman-launcher-${process.getuid?.() ?? 0}`, `node-missing-${/^[A-Za-z0-9_-]+$/.test(String(sid || "")) ? sid : "shared"}`);
 
-// Which of the project config files hold a value (`test` on its parsed content), as "a.json and b.json" for a message.
+// Which of the config files loadConfig merges hold a value (`test` on its parsed content), as "a.json and /ws/b.json" for a message: the workspace root's by path.
 function projectFilesSetting(context, test) {
-  const root = context?.root || PROJECT_ROOT;
-  const names = PROJECT_CONFIG_FILES.filter((name) => {
+  const own = context?.root || PROJECT_ROOT;
+  const names = configRoots(context).flatMap((root) => PROJECT_CONFIG_FILES.filter((name) => {
     try { return Boolean(test(JSON.parse(fs.readFileSync(path.join(root, name), "utf8")))); } catch { return false; }
-  });
+  }).map((name) => (root === own ? name : path.join(root, name))));
   return names.join(" and ");
 }
 
@@ -866,10 +866,10 @@ export function resolveToolCwd(file, lang, context = null) {
 
 // Quote-aware token split shared by tokenize() (per-file {file}/{dir}
 // substitution) and splitCmd() (no per-file template — a plain configured
-// command like a secrets scan or an extraCheck).
+// command like a secrets scan or an extraCheck). {workspaceRoot} is PROJECT_ROOT in both (ARCH-STATE-19).
 function splitTokens(str) {
   const raw = str.match(/"[^"]*"|'[^']*'|\S+/g) || [];
-  return raw.map((tok) => tok.replace(/^["']|["']$/g, ""));
+  return raw.map((tok) => tok.replace(/^["']|["']$/g, "").replaceAll("{workspaceRoot}", () => PROJECT_ROOT));
 }
 
 // `cwd` is a resolved tool cwd (resolveToolCwd): {file} and {dir} become POSIX
@@ -889,7 +889,7 @@ export function tokenize(cmdTemplate, file, context = null, cwd = null) {
 /** Quote-aware split for a configured command with no per-file template
  * (stop-gate.mjs's secrets/test/extraChecks commands, snapshot.mjs's test
  * commands) — same quoting rules as tokenize(), minus the {file}/{dir}
- * substitution these call sites have no use for. */
+ * substitution these call sites have no use for ({workspaceRoot} still expands). */
 export function splitCmd(str) {
   return splitTokens(str);
 }
@@ -1254,3 +1254,18 @@ export function bindingAcceptance(text, { units = [], plans = [] } = {}) {
 // account-switch adopt both ask this one question; a closing hand-off (remaining_units []), one without the field and
 // one whose field is not an array have nothing left to scope, and arming them locked a later /architect out of every Read.
 export const handoffArmsScope = (handoff) => Array.isArray(handoff?.remaining_units) && handoff.remaining_units.length > 0;
+
+// -------------------------------------------------------- config layering ---
+
+// The directories whose PROJECT_CONFIG_FILES loadConfig merges, lowest first (ARCH-STATE-19): the workspace root
+// (PROJECT_ROOT) when the context root is a different directory, so a sub-project or a unit worktree inherits the
+// workspace root's settings, then the context root. One directory under two spellings (a symlink, a trailing "/.",
+// /home -> /var/home) adds no layer. It never walks to a parent or scans a sibling (ARCH-STATE-01).
+function configRoots(context = null) {
+  const own = context?.root || PROJECT_ROOT;
+  return sameDir(own, PROJECT_ROOT) ? [own] : [PROJECT_ROOT, own];
+}
+function sameDir(a, b) {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; }
+}

@@ -1038,30 +1038,39 @@ test("sharedStateDir is quiet outside a repository, so a pre-guard call there wr
 });
 
 // Round 4 (32.1): a repo whose craftsman.config.json is also the shipped default (this one) needs a place for project-only values.
+// loadConfig for a project at `dir`, run in a node whose cwd is `dir` so core's PROJECT_ROOT is `dir` and no workspace-root layer is added
+// (ARCH-STATE-19). In this process PROJECT_ROOT is the plugin checkout, whose own craftsman.config.json and craftsman.project.json would
+// sit under the fixture's files and fill the keys the fixture leaves unset. Returns { cfg, stderr }.
+function loadConfigAt(dir) {
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) {
+    if (k.startsWith("CLAUDE_PLUGIN_OPTION_") || ["CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID", "CRAFTSMAN_WORKSPACE_MANIFEST"].includes(k)) delete env[k];
+  }
+  const src = `import { loadConfig } from ${JSON.stringify(new URL("./core.mjs", import.meta.url).href)};\nprocess.stdout.write(JSON.stringify(loadConfig({ root: process.cwd() })));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src], { cwd: dir, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return { cfg: JSON.parse(r.stdout), stderr: r.stderr };
+}
+
 test("loadConfig merges an optional craftsman.project.json after craftsman.config.json; absent changes nothing, malformed is ignored (32.1)", () => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-projcfg-")));
-  const write = process.stderr.write;
   try {
-    assert.deepEqual(coreNs.loadConfig({ root: dir }).stopGate.markdownTests, [], "the shipped default");
+    assert.deepEqual(loadConfigAt(dir).cfg.stopGate.markdownTests, [], "the shipped default");
     fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ timeoutMs: 111, stopGate: { requireAcceptanceCriteria: false } }));
-    assert.equal(coreNs.loadConfig({ root: dir }).timeoutMs, 111, "the base project file");
+    assert.equal(loadConfigAt(dir).cfg.timeoutMs, 111, "the base project file");
     fs.writeFileSync(path.join(dir, "craftsman.project.json"), JSON.stringify({ timeoutMs: 222, stopGate: { markdownTests: ["README.md"] } }));
-    const merged = coreNs.loadConfig({ root: dir });
+    const { cfg: merged } = loadConfigAt(dir);
     assert.equal(merged.timeoutMs, 222, "the override wins over the base project file");
     assert.deepEqual(merged.stopGate.markdownTests, ["README.md"]);
     assert.equal(merged.stopGate.requireAcceptanceCriteria, false, "keys the override does not name keep the base value");
     assert.equal(merged.stopGate.enabled, true, "and the shipped default");
-    let warned = "";
-    process.stderr.write = (chunk) => { warned += chunk; return true; };
     fs.writeFileSync(path.join(dir, "craftsman.project.json"), "{ not json");
-    const ignored = coreNs.loadConfig({ root: dir });
-    process.stderr.write = write;
+    const { cfg: ignored, stderr: warned } = loadConfigAt(dir);
     assert.equal(ignored.timeoutMs, 111, "a malformed override is ignored, the base file still applies");
     assert.match(warned, /craftsman\.project\.json/, "and it says so");
     fs.rmSync(path.join(dir, "craftsman.project.json"));
-    assert.equal(coreNs.loadConfig({ root: dir }).timeoutMs, 111, "absent: today's behaviour");
+    assert.equal(loadConfigAt(dir).cfg.timeoutMs, 111, "absent: today's behaviour");
   } finally {
-    process.stderr.write = write;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
