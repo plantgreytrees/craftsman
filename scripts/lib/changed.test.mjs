@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { recordChanged, readChanged, hasChangePlaceholder, embeddedChangePlaceholder, expandChangePlaceholders } from "./changed.mjs";
+import { recordChanged, readChanged, hasChangePlaceholder, embeddedChangePlaceholder, isScoped, expandChangePlaceholders } from "./changed.mjs";
 
 const QUALITY_GATE = fileURLToPath(new URL("../quality-gate.mjs", import.meta.url));
 
@@ -164,6 +164,51 @@ test("expand: an embedded placeholder stays literal, runs nothing and warns", ()
   assert.deepEqual(expandChangePlaceholders("tool pre{changedDirs}post", files, { cwd: svc, root }), { warn: "embedded-placeholder" });
   assert.deepEqual(expandChangePlaceholders("tool {changed} --files={changed}", files, { cwd: svc, root }), { warn: "embedded-placeholder" }, "a whole token beside an embedded one does not rescue it");
   assert.deepEqual(expandChangePlaceholders("tool --files={changed}", [], { cwd: svc, root }), { warn: "embedded-placeholder" }, "a config fault is a fault whatever the file set");
+});
+
+test("expand: a relative path that starts with '-' gets './' so a tool never reads it as an option", () => {
+  assert.deepEqual(expandChangePlaceholders("tool {changed}", ["-rf.js"], { cwd: root, root }), { argv: ["tool", "./-rf.js"] });
+  assert.deepEqual(expandChangePlaceholders("tool {changed}", ["svc/-a.js", "svc/ok.js", "svc/-x/b.js", "svc/--force"], { cwd: svc, root }), {
+    argv: ["tool", "./-a.js", "ok.js", "./-x/b.js", "./--force"],
+  }, "the prefix lands wherever the relative path starts with a dash, and nowhere else");
+  assert.deepEqual(expandChangePlaceholders("tool {changed}", ["svc/a-b.js", "other/-c.js"], { cwd: svc, root }), {
+    argv: ["tool", "a-b.js", "../other/-c.js"],
+  }, "a dash inside a path, or after a '..', is not a leading dash");
+});
+
+test("expand: {changedDirs} prefixes a directory named with a leading '-', and '.' stays '.'", () => {
+  assert.deepEqual(expandChangePlaceholders("go test {changedDirs}", ["-rf.js", "-x/a.js", "svc/b.js"], { cwd: root, root }), {
+    argv: ["go", "test", ".", "./-x", "svc"],
+  });
+  assert.deepEqual(expandChangePlaceholders("go test {changedDirs}", ["svc/-x/a.js", "svc/-x/deep/b.js", "svc/c.js"], { cwd: svc, root }), {
+    argv: ["go", "test", ".", "./-x", "./-x/deep"],
+  });
+});
+
+test("expand: a command with no whole placeholder is left alone, dashes in its own arguments included", () => {
+  assert.deepEqual(expandChangePlaceholders("tool -rf --force", ["-rf.js"], { cwd: root, root }), { argv: ["tool", "-rf", "--force"] });
+});
+
+// ------------------------------------------------------------------------- isScoped ---
+
+test("isScoped: a whole token, an embedded placeholder, or both, makes a command scoped", () => {
+  for (const cmd of ["eslint {changed}", "go test {changedDirs}", "{changed}", "tool --files={changed}", "tool {changed}.bak", "tool pre{changedDirs}post",
+    "tool {changed} --files={changed}", 'tool "{changed}"', 'tool "--dirs={changedDirs}"']) {
+    assert.equal(isScoped(cmd), true, cmd);
+  }
+});
+
+test("isScoped: a plain command, a look-alike and a non-string are not scoped", () => {
+  for (const cmd of ["npm test", "node --test", "tool {file} {dir}", "tool {changedX}", "tool {change}", "tool changed", ""]) {
+    assert.equal(isScoped(cmd), false, cmd);
+  }
+  for (const v of [undefined, null, 7, ["{changed}"]]) assert.equal(isScoped(v), false);
+});
+
+test("isScoped is exactly: has a whole placeholder token, or has an embedded one", () => {
+  for (const cmd of ["eslint {changed}", "tool --files={changed}", "tool {changed} --files={changed}", "npm test", "tool {changedX}"]) {
+    assert.equal(isScoped(cmd), hasChangePlaceholder(cmd) || embeddedChangePlaceholder(cmd), cmd);
+  }
 });
 
 // ------------------------------------------------------- quality-gate records the path ---

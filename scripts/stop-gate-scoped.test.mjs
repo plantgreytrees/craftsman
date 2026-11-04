@@ -42,12 +42,19 @@ function makeFixture(stopGate = {}) {
 }
 
 // A session's state: the dirty marker, the change list (undefined = no list at all, [] = an empty one) and an
-// optional session-start.json.
-function seed(root, sid, { dirty = true, changed, start } = {}) {
+// optional session-start.json. Stop drops a listed path that no longer exists before it expands anything, so each
+// listed file is created on disk unless the test names it in `gone`.
+function seed(root, sid, { dirty = true, changed, start, gone = [] } = {}) {
   const sessions = path.join(root, ".craftsman", "sessions", sid);
   fs.mkdirSync(sessions, { recursive: true });
   if (dirty) fs.writeFileSync(path.join(sessions, "dirty"), String(Date.now()));
-  if (changed !== undefined) fs.writeFileSync(path.join(sessions, "changed"), changed.map((f) => f + "\n").join(""));
+  if (changed !== undefined) {
+    fs.writeFileSync(path.join(sessions, "changed"), changed.map((f) => f + "\n").join(""));
+    for (const f of changed.filter((f) => !gone.includes(f))) {
+      fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+      fs.writeFileSync(path.join(root, f), "x\n");
+    }
+  }
   if (start !== undefined) fs.writeFileSync(path.join(sessions, "session-start.json"), JSON.stringify(start));
 }
 
@@ -291,4 +298,94 @@ test("scoped: a snapshot command and a scoped command run side by side, the snap
     assert.match(r.out.reason, /REGRESSION: tests passed at session start but fail now \(node fail\.mjs\)/);
     assert.doesNotMatch(r.out.reason, /SCOPED TESTS FAILED/);
     assert.deepEqual(runs(dir), [["src/a.js"]]);
+  }));
+
+// 1.2 - a marker that lives under a sub-directory selects the scoped command, as it does at snapshot time -----------
+
+test("scoped: a stopGate.commands marker found only under a sub-directory runs on the change list, with no snapshot-pending skip (1.2)", () =>
+  withFixture({ commands: { "package.json": "node check.mjs {changed}" } }, async (dir) => {
+    fs.mkdirSync(path.join(dir, "services", "api"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "services", "api", "package.json"), "{}\n");
+    fs.writeFileSync(path.join(dir, "services", "api", "x.js"), "x\n");
+    spawnSync("git", ["add", "-A"], { cwd: dir });
+    spawnSync("git", ["commit", "-q", "-m", "services/api"], { cwd: dir });
+    assert.ok(!fs.existsSync(path.join(dir, "package.json")), "the marker is not at the root");
+    seed(dir, "s12a", { changed: ["services/api/x.js"] });
+    const r = await runStop(dir, "s12a");
+    assert.deepEqual(runs(dir), [["services/api/x.js"]], "the check received the edited file");
+    assert.deepEqual(skipped(r.events), [], "a dirty Stop that ran a test logs no skip reason, snapshot-pending least of all");
+    assert.notEqual(r.out.decision, "block");
+  }));
+
+test("scoped: a sub-directory marker with a glob is found the same way (1.2)", () =>
+  withFixture({ commands: { "*.csproj": "node check.mjs {changedDirs}" } }, async (dir) => {
+    fs.mkdirSync(path.join(dir, "src", "App"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "App", "App.csproj"), "<Project/>\n");
+    spawnSync("git", ["add", "-A"], { cwd: dir });
+    spawnSync("git", ["commit", "-q", "-m", "csproj"], { cwd: dir });
+    seed(dir, "s12b", { changed: ["src/App/Program.cs"] });
+    const r = await runStop(dir, "s12b");
+    assert.deepEqual(runs(dir), [["src/App"]]);
+    assert.deepEqual(skipped(r.events), []);
+  }));
+
+test("scoped: a sub-directory marker that exists nowhere still selects nothing, and says nothing (1.2)", () =>
+  withFixture({ commands: { "package.json": "node check.mjs {changed}" } }, async (dir) => {
+    fs.mkdirSync(path.join(dir, "services", "api"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "services", "api", "other.json"), "{}\n");
+    spawnSync("git", ["add", "-A"], { cwd: dir });
+    spawnSync("git", ["commit", "-q", "-m", "services/api"], { cwd: dir });
+    seed(dir, "s12c", { changed: ["services/api/x.js"] });
+    const r = await runStop(dir, "s12c");
+    assert.deepEqual(runs(dir), []);
+    assert.doesNotMatch(msg(r), /stop-gate skipped/);
+  }));
+
+// 1.3 - a path that no longer exists is dropped before the list is expanded --------------------------------------
+
+test("scoped: a change list whose only file is gone runs nothing, logs no-changes and does not block, twice in a row (1.3)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    seed(dir, "s13a", { changed: ["gone.js"], gone: ["gone.js"] });
+    assert.ok(!fs.existsSync(path.join(dir, "gone.js")));
+    const first = await runStop(dir, "s13a");
+    assert.deepEqual(runs(dir), [], "nothing ran, in particular not with a path that is not there");
+    assert.deepEqual(skipped(first.events).map((e) => e.reason), ["no-changes"]);
+    assert.notEqual(first.out.decision, "block");
+    assert.ok(fs.existsSync(dirtyMarker(dir, "s13a")), "nothing was tested, so the session stays dirty");
+
+    const second = await runStop(dir, "s13a");
+    assert.deepEqual(runs(dir), []);
+    assert.deepEqual(skipped(second.events).map((e) => e.reason), ["no-changes", "no-changes"], "logged on each Stop");
+    assert.notEqual(second.out.decision, "block");
+  }));
+
+test("scoped: a change list of a gone file and a kept file passes only the kept one (1.3)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    seed(dir, "s13b", { changed: ["gone.js", "kept.js"], gone: ["gone.js"] });
+    const r = await runStop(dir, "s13b");
+    assert.deepEqual(runs(dir), [["kept.js"]]);
+    assert.deepEqual(skipped(r.events), []);
+    assert.notEqual(r.out.decision, "block");
+  }));
+
+test("scoped: {changedDirs} is built from the files that are left, not from the gone ones (1.3)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changedDirs}"] }, async (dir) => {
+    seed(dir, "s13c", { changed: ["old/gone.js", "src/kept.js"], gone: ["old/gone.js"] });
+    await runStop(dir, "s13c");
+    assert.deepEqual(runs(dir), [["src"]]);
+  }));
+
+test("scoped: a file that was deleted after it was edited does not fail the check with a path that is not there (1.3)", () =>
+  withFixture({ extraChecks: ["node fail.mjs {changed}"] }, async (dir) => {
+    seed(dir, "s13d", { changed: ["gone.js"], gone: ["gone.js"] });
+    const r = await runStop(dir, "s13d");
+    assert.notEqual(r.out.decision, "block", "the failing check never ran against a deleted file");
+    assert.doesNotMatch(r.out.reason || "", /SCOPED TESTS FAILED/);
+  }));
+
+test("scoped: an unknown change list stays unknown after the existence filter; it is not turned into an empty one (1.3)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    seed(dir, "s13e");
+    const r = await runStop(dir, "s13e");
+    assert.deepEqual(skipped(r.events).map((e) => e.reason), ["changes-unknown"]);
   }));

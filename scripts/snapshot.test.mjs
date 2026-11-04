@@ -80,3 +80,25 @@ test("snapshot: with only placeholder commands nothing runs and session-start.js
   assert.deepEqual(readStart(root, "snap-only").results, []);
   assert.equal(fs.existsSync(ranLog(root)), false, "the placeholder command was never started");
 });
+
+// A placeholder inside a longer argument (`--files={changed}`) is a scoped command too: it can never be expanded, so
+// running it here would hand the tool the literal braces, and listing it would make Stop treat it as a baselined test.
+test("snapshot: an embedded-placeholder command is neither run nor listed in session-start.json", () => {
+  const root = fixture({ "embedded.fixture": "node STUB --files={changed}" });
+  const r = snapshot(root, "snap-embedded");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readStart(root, "snap-embedded").results, []);
+  assert.equal(fs.existsSync(ranLog(root)), false, "the embedded-placeholder command was never started");
+});
+
+test("snapshot: whole, embedded and plain commands side by side - only the plain one is run and listed", () => {
+  const root = fixture({
+    "plain.fixture": "node STUB plain",
+    "whole.fixture": "node STUB whole {changed}",
+    "embedded.fixture": "node STUB --files={changed}",
+    "embeddedDirs.fixture": "node STUB --dirs={changedDirs}",
+  });
+  assert.equal(snapshot(root, "snap-three").status, 0);
+  assert.deepEqual(readStart(root, "snap-three").results.map((x) => x.cmd.split(/\s+/).pop()), ["plain"]);
+  assert.equal(fs.readFileSync(ranLog(root), "utf8"), "plain\n", "nothing but the plain command was started");
+});
