@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { gateUsable } from "./lib/gate-command.mjs";
 import { isScoped } from "./lib/changed.mjs";
+import { withoutCraftsmanState } from "./lib/craftsman-state.mjs";
 import { loadConfig, enabled, sessionDir, markerPresent, splitCmd, projectContext, git, sha1 } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
@@ -32,11 +33,15 @@ for (const cmd of entries) {
   if (isScoped(cmd)) continue;
   const [bin, ...args] = splitCmd(cmd);
   let green = false;
-  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: context.root }); green = true; } catch {}
+  try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: context.root }); green = true; } catch (error) {
+    // A program that is not installed was never a red test: skipped like a scoped command, so Stop has no baseline entry to call red-at-start (ARCH-STATE-22).
+    if (error?.code === "ENOENT") continue;
+  }
   results.push({ cmd, green });
 }
 
-const endingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${await git(["status", "--porcelain", "--untracked-files=all"], context)}`);
+// Craftsman's own state is not the user's work: a repo that does not gitignore `.craftsman/` must not drop its baseline for it (ARCH-STATE-04).
+const endingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${withoutCraftsmanState(await git(["status", "--porcelain", "--untracked-files=all"], context))}`);
 if (startingTree && startingTree !== endingTree) process.exit(0);
 
 try {

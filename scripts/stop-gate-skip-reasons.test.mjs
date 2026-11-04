@@ -188,7 +188,8 @@ test("stop-gate: inside a unit scope the stop and skip events carry the scope's 
     fs.writeFileSync(path.join(sessions, "scope.json"), JSON.stringify({
       plan: "docs/plans/p.md", unit: "u", project: "svc-a", project_root: unitRoot, scope: { read: [], docs: [], write: [] }, arch: [],
     }));
-    seed(unitRoot, sid, { dirty: true, start: { results: [] } });
+    seed(unitRoot, sid, { dirty: true });
+    seed(dir, sid, { start: { results: [] } }); // the baseline sits in the root context's directory (ARCH-STATE-22)
     const { events } = await runStop(dir, sid);
     const [skip] = skipped(events);
     assert.equal(skip.reason, "no-command");
@@ -199,4 +200,76 @@ test("stop-gate: inside a unit scope the stop and skip events carry the scope's 
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(unitRoot, { recursive: true, force: true });
   }
+});
+
+// ARCH-STATE-22: SessionStart and snapshot.mjs write session-start.json and snapshot-started at the project ROOT's session directory,
+// so under a unit scope Stop reads those two from the root, while `dirty`, the change list and the scoped-task state stay in the
+// scope's own directory, where quality-gate.mjs writes them.
+const FAILS = 'node -e "process.exit(1)"';
+const RED_NOW = { results: [{ cmd: FAILS, green: true }] }; // green at session start, red now: a regression if it is run
+
+// Two throwaway repositories: the root the session started in, and a unit's worktree a scope for `sid` points Stop at.
+async function underScope(sid, run) {
+  const dir = makeFixture();
+  const unitRoot = makeFixture();
+  try {
+    const sessions = path.join(dir, ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(path.join(sessions, "scope.json"), JSON.stringify({
+      plan: "docs/plans/p.md", unit: "u", project: "svc-a", project_root: unitRoot, scope: { read: [], docs: [], write: [] }, arch: [],
+    }));
+    await run(dir, unitRoot);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(unitRoot, { recursive: true, force: true });
+  }
+}
+
+test("stop-gate: under a unit scope a green session-start.json in the root's directory queues the regression command and logs no skip (ARCH-STATE-22)", async () => {
+  await underScope("base", async (dir, unitRoot) => {
+    seed(dir, "base", { start: RED_NOW });
+    seed(unitRoot, "base", { dirty: true });
+    const { stdout, events } = await runStop(dir, "base");
+    assert.deepEqual(skipped(events), [], "no skip: the command was queued");
+    assert.match(stdout, /REGRESSION: tests passed at session start but fail now/);
+    assert.equal(events.find((e) => e.ev === "stop").result, "block");
+  });
+});
+
+test("stop-gate: under a unit scope a snapshot-started marker in the root's directory makes a baseline-less dirty Stop snapshot-pending (ARCH-STATE-22)", async () => {
+  await underScope("pend", async (dir, unitRoot) => {
+    markStarted(dir, "pend");
+    seed(unitRoot, "pend", { dirty: true });
+    const { events } = await runStop(dir, "pend");
+    assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["snapshot-pending", "svc-a"]]);
+  });
+});
+
+test("stop-gate: under a unit scope the baseline is the root's alone: one in the scope's own directory is not read (ARCH-STATE-22)", async () => {
+  await underScope("own", async (dir, unitRoot) => {
+    seed(unitRoot, "own", { dirty: true, start: RED_NOW });
+    const { stdout, events } = await runStop(dir, "own");
+    assert.deepEqual(skipped(events).map((e) => e.reason), ["no-command"]);
+    assert.doesNotMatch(stdout, /REGRESSION/);
+  });
+});
+
+test("stop-gate: under a unit scope `dirty` is the scope's: one in the root's directory does not make the Stop dirty (ARCH-STATE-22)", async () => {
+  await underScope("flag", async (dir, unitRoot) => {
+    seed(dir, "flag", { dirty: true, start: RED_NOW });
+    seed(unitRoot, "flag", {});
+    const { stdout, events } = await runStop(dir, "flag");
+    assert.deepEqual(skipped(events).map((e) => e.reason), ["clean"]);
+    assert.doesNotMatch(stdout, /REGRESSION/);
+  });
+});
+
+test("stop-gate: without a scope the baseline and the dirty marker are read from the one session directory, as before (ARCH-STATE-22)", async () => {
+  const dir = makeFixture();
+  try {
+    seed(dir, "flat", { dirty: true, start: RED_NOW });
+    const { stdout, events } = await runStop(dir, "flat");
+    assert.deepEqual(skipped(events), []);
+    assert.match(stdout, /REGRESSION: tests passed at session start but fail now/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

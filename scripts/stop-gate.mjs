@@ -172,14 +172,14 @@ if (cfg.security?.enabled && shouldScan) {
   for (const cmd of cfg.security.check || []) tasks.push({ kind: "secret", cmd, timeoutMs: 60000 });
 }
 
-// 2. Tests — only if they were green when THIS session began, AND this
-//    session touched a real source file since then (PostToolUse's "dirty"
-//    marker). No edits since start means nothing new to regress, so skip
-//    re-running a multi-minute suite on every question-answering turn.
+// 2. Tests — only if they were green when THIS session began, AND this session touched a real source file since then (PostToolUse's "dirty"
+//    marker; quality-gate.mjs writes it in the scope's directory). No edits since start means nothing new to regress, so skip re-running a
+//    multi-minute suite on every question-answering turn.
 const dirtyPath = path.join(sdir, "dirty");
 const isDirty = fs.existsSync(dirtyPath);
+const baselineDir = sessionDir(sid, projectContext(input.project || ".")); // the ROOT's: SessionStart and snapshot.mjs write the baseline there, not in a unit scope's (ARCH-STATE-22)
 let start = null;
-try { start = JSON.parse(fs.readFileSync(path.join(sdir, "session-start.json"), "utf8")); } catch {}
+try { start = JSON.parse(fs.readFileSync(path.join(baselineDir, "session-start.json"), "utf8")); } catch {}
 let results = [];
 if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
@@ -235,7 +235,7 @@ if (isDirty) {
         `craftsman: stop-gate skipped ${embedded.join(", ")} ({changed} and {changedDirs} must be a whole argument, never part of one), advisory only`, embedded);
     }
   }
-  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (fs.existsSync(path.join(sdir, "snapshot-started")) ? "snapshot-pending" : "no-command") });
+  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (fs.existsSync(path.join(baselineDir, "snapshot-started")) ? "snapshot-pending" : "no-command") });
 } else {
   logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: "clean" });
 }
