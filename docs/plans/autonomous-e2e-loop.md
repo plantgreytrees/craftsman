@@ -219,7 +219,7 @@ units:
     language: Markdown
     security: normal
     scope:
-      read: [README.md, EXTENDING.md, CHANGELOG.md]   # autonomous-e2e-loop-evidence.md dropped (11 KB): the unit had shipped and README.md/CHANGELOG.md keep growing (plan sandbox-auto-flow-phase-2)
+      read: [README.md, CHANGELOG.md]   # autonomous-e2e-loop-evidence.md dropped (11 KB): the unit had shipped and README.md/CHANGELOG.md keep growing (plan sandbox-auto-flow-phase-2); EXTENDING.md dropped too (still in write) after it grew with the scoped-gates docs (plan service-scoped-gates); the unit had already shipped
       docs: [docs/architecture/engine.rules.md]
       write: [README.md, EXTENDING.md, CHANGELOG.md]
     arch: [ARCH-ENGINE-10]
