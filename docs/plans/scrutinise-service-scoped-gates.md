@@ -6,7 +6,7 @@ parent: service-scoped-gates
 priority: P2
 idea: docs/ideas/service-scoped-gates.md
 classification: in-scope  # /scrutinise service-scoped-gates, main 7af0bd8: no Critical, 6 Warnings (all verified at file:line by root), 7 Suggestions; nothing disputed
-tracker_rows: [fix-stop-snapshot, fix-merge-gate, fix-config-robustness, fix-extending-docs, fix-skip-reason, fix-snapshot-fact, fix-baseline-session, fix-gate-usable]
+tracker_rows: [fix-stop-snapshot, fix-merge-gate, fix-config-robustness, fix-extending-docs, fix-skip-reason, fix-snapshot-fact, fix-baseline-session, fix-gate-usable, fix-baseline-owner]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -16,8 +16,8 @@ coverage:
   data:          N/A(no persistence or migration; the change list file keeps its format)
   config:        3.1 (a null language entry from layering is skipped)
   security:      1.4 (a path starting with '-' is never read as an option) | 3.1 | 2.2 (a deletion-only branch no longer skips the gate)
-  tests:         1.1 | 1.2 | 1.3 | 1.4 | 2.1 | 2.2 | 3.1 | 3.2 | 5.1 | 5.2 | 6.1 | 6.2 | 7.1 | 7.2 | 7.3 | 7.4 | 8.1 | 8.2
-  observability: 1.2 (the wrong snapshot-pending reason disappears) | 1.3 (all-gone logs no-changes) | 5.1 (a markerless dirty Stop logs no-command, not snapshot-pending)
+  tests:         1.1 | 1.2 | 1.3 | 1.4 | 2.1 | 2.2 | 3.1 | 3.2 | 5.1 | 5.2 | 6.1 | 6.2 | 7.1 | 7.2 | 7.3 | 7.4 | 8.1 | 8.2 | 9.1 | 9.2
+  observability: 1.2 (the wrong snapshot-pending reason disappears) | 1.3 (all-gone logs no-changes) | 5.1 (a markerless dirty Stop logs no-command, not snapshot-pending) | 9.1 (a sub-project scope logs no-command and never runs the root's regression command)
   interface:     N/A(no UI; hook and CLI messages are in the tasks)
   docs:          4.1
   rollback:      see Risk & rollback
@@ -126,6 +126,19 @@ units:
       write: [scripts/lib/gate-command.mjs, scripts/lib/gate-command.test.mjs, scripts/repo-exec.mjs, scripts/repo-exec-scoped.test.mjs, scripts/snapshot.test.mjs]
     arch: [ARCH-LAND-37, ARCH-LAND-06, ARCH-ENGINE-22]
     tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
+  - id: fix-baseline-owner
+    scope_id: fix-baseline-owner
+    project: .
+    depends_on: []
+    module: scripts/stop-gate.mjs
+    language: JavaScript (Node ESM)
+    security: normal
+    scope:
+      read: [scripts/stop-gate.mjs, scripts/stop-gate-skip-reasons.test.mjs]
+      docs: [docs/architecture/state.rules.md]
+      write: [scripts/stop-gate.mjs, scripts/stop-gate-skip-reasons.test.mjs]
+    arch: [ARCH-STATE-22]
+    tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
 ---
 
 # Plan: Fix round for the service-scoped gates review
@@ -161,8 +174,18 @@ MERGED (f7062bc, implementer e7711af). The starting and ending tree hashes ignor
 ### Step 8 - fix-gate-usable (., JavaScript, normal)
 MERGED (9a92eb7: d8c796a, df7566a). `gateUsable` requires a non-`just` command's program (on `PATH`, or an existing file when it names a path), so the pre-merge gate skips it instead of throwing and parking the land, and `verifyGateBeforeMerge` logs `pre_merge_gate {skipped: true, reason: "no-command"}`. 8.3 parked once on `snapshot.test.mjs:198`; that file joined the unit's write scope and the assertion now says no `session-start.json` is written. [R5-W3]
 
+### Step 9 - fix-baseline-owner (., JavaScript, normal)
+Tooling: implementer implementer - gates none - skills test-driven-development - guards none
+Depends on: none
+Rule: ARCH-STATE-22 (the baseline belongs to the repository SessionStart snapshotted).
+Unattended-run rules: never run `rm`, `rmdir`, `unlink` or `find -delete` and never write one even as a no-op filler such as `rm -rf /dev/null` (use `mktemp -d` under the OS temp dir and leave it); finish with `node --test scripts/safety-cites.test.mjs`, and if it fails ONLY because a cited line range in `docs/architecture/**` moved, do not edit those docs: PARK naming each cite and its new range.
+- [ ] 9.1 [R6-W1] `stop-gate.mjs:180-185` reads `session-start.json` and `snapshot-started` from the workspace root's session directory under ANY scope, including a workspace sub-project scope whose root is a different git repository (`scope.mjs:205`), so Stop queues the root project's green-at-start commands and runs them there (`stop-gate.mjs:280`, `cwd: context.root`): a red sub-project suite blocks as a false REGRESSION, and a real regression is checked only when the root's suite was green. Add a small `sameRepository(rootDir, scopeDir)` to `stop-gate.mjs`: equal real paths are the same repository; otherwise both `git rev-parse --git-common-dir` results, each resolved against its own directory and compared by `fs.realpathSync`, must be equal; a git failure is NOT the same repository; compute it only when the two roots differ. Read the root context's session directory only when it is the same repository; otherwise read the scope's own directory as before `fix-baseline-session` 7.2, so a sub-project scope has no baseline, a dirty Stop logs `no-command` (never `snapshot-pending`) and the root's commands never run there. `dirty`, the change list and the scoped-task state stay in the scope's directory → accept: the cases of 9.2 pass and fail without this change.
+- [ ] 9.2 [R6-W1, R6-S6] In `scripts/stop-gate-skip-reasons.test.mjs` make `underScope` (`:206-235`) create the scope root as a real `git worktree add` of the root fixture and keep its four scope cases green on it (the regression command is queued; `snapshot-pending` from the root's marker; a baseline in the scope's own directory is not read; `dirty` is the scope's). Add a `subProjectScope` helper (a separate repository, project `svc-a`) with cases: a green root baseline queues nothing, logs `no-command` and prints no REGRESSION; a root `snapshot-started` marker does not make it `snapshot-pending`; a scope root that is not a git repository counts as not the same repository; the existing no-scope case is unchanged → accept: the kept and new cases pass, and with 9.1 reverted the sub-project cases fail.
+- [ ] 9.3 Run `node --test scripts/stop-gate-skip-reasons.test.mjs scripts/stop-gate.test.mjs scripts/stop-gate-scoped.test.mjs scripts/session-context.test.mjs scripts/snapshot.test.mjs scripts/safety-cites.test.mjs` → accept: exits 0 (or the unit PARKS naming only moved cite ranges).
+
 ## Sequencing
 `fix-baseline-session` (round 6) then `fix-gate-usable`: the second changes `gateUsable`, which the first's tests and `stop-gate`/`snapshot` also call. Earlier steps are merged.
+`fix-baseline-owner` (round 7) is independent of every other step: it touches only `stop-gate.mjs` and its skip-reason test, after Steps 7 and 8 landed.
 `fix-snapshot-fact` (round 4) and `fix-skip-reason` (round 3) are independent of the four steps above, which are merged; `fix-snapshot-fact` replaces round 3's config recomputation with a recorded fact. `fix-skip-reason` (round 3) is independent of the four steps above, which are merged. Within the original round, `fix-stop-snapshot` first: it owns the shared `isScoped` and `expandChangePlaceholders` that `fix-merge-gate` calls, and edits `stop-gate.mjs`. `fix-merge-gate` next (`repo-exec.mjs`). `fix-config-robustness` after them (`core.mjs`, `quality-gate.mjs`; no overlap, run last among the code units so any cite drift in `core.mjs` is the final one). `fix-extending-docs` last, so it describes the final behaviour. Root then re-points drifted rule cites and repairs `slim.rules.md` under `/architect --update` (below) before re-running `/scrutinise`.
 
 ## Verification background   (citations - for the reviewer, not the executor)
@@ -185,6 +208,7 @@ CONSUMERS:
 ## Not units (findings recorded for root or flagged, not driven)
 - **Architecture / UNMET plan criterion** (`/architect --update`, root, after the code units; the owner approved this fix path): `docs/architecture/state.rules.md` and `landing.rules.md` `check:` fields name test files that hold none of the cases (STATE-19 -> `scripts/lib/config-layering.test.mjs`; STATE-20 -> `scripts/lib/tool-cwd.test.mjs`; STATE-21 -> `scripts/stop-gate-scoped.test.mjs`; STATE-22 -> `scripts/stop-gate-skip-reasons.test.mjs` and `scripts/quality-gate-events.test.mjs`; LAND-37 -> `scripts/repo-exec-scoped.test.mjs`); cites drifted (ARCH-LAND-36 `repo-exec.mjs:411` is now `:438`; ARCH-LAND-37 `326-339` is now `gateArgv` 331-344 and `verifyGateBeforeMerge` 347-365; ARCH-STATE-20 `core.mjs:842-870` is now `resolveToolCwd` 839-867); and `docs/architecture/slim.rules.md:12` ARCH-SLIM-02 carries the malformed state `[superseded by ARCH-SLIM-16, then ARCH-SLIM-17]` (the lint grammar takes one target), which makes `arch-check lint` fail and leaves `[plan:service-scoped-gates]` UNMET; the fix is `[superseded by ARCH-SLIM-17]`.
 - **Follow-up rows, flagged not driven:** `arch-check.mjs:335` with `--root <other repo>` now inherits the session repo's config through `loadConfig` layering (needs a design choice: an opt-out context, or layering only under `PROJECT_ROOT` or a registered project); `repo-exec.mjs:534-535` `land-unit` without `unit_worktree` while the feature worktree sits on the feature branch makes `feature...HEAD` empty so the scoped gate is skipped (`planning.featureBranches` is off today).
+- **Round 7 follow-ups, flagged not driven:** `followup-gate-spawn-error-message` (`repo-exec.mjs:325,365-368`: `gateOutput` joins only stdout and stderr, so a gate program that cannot start, an `EACCES` on a non-executable `./gradlew` that `programPresent` accepts or an `E2BIG` on a huge `{changed}` argv, parks the land with an empty "did not pass in <wt>:" message; fall back to `error.code: error.message` as `stop-gate.mjs:352-353` does, and refuse or batch an over-long `{changed}`); `followup-tokenize-leading-dash` (`core.mjs:879-889` `tokenize` passes `{file}` and `{dir}` bare relative to a `nearest:` tool cwd, so `services/api/-c.my` becomes the option-like argument `-c.my`, reproduced, while `changed.mjs:63` already writes `./-x`; apply the `./` prefix there and add a `tool-cwd.test.mjs` case); `followup-land-unit-empty-diff` already covers `repo-exec.mjs:540-541`.
 - **Residual risks, not actions:** spawned-script tests inherit `CLAUDE_PROJECT_DIR`; `/home` against `/var/home` path spelling in `resolveToolCwd`; concurrent appends to the change list are assumed line-atomic.
 
 ## Risk & rollback
@@ -204,3 +228,7 @@ No Critical; rules all HOLD; both plan criteria MET (suite 1859 of 1859, lint PA
 
 ## Round 6 (2026-11-05, Steps 7 and 8 landed; docs pass)
 Both units merged: `fix-baseline-session` (f7062bc) and `fix-gate-usable` (9a92eb7); suite 1891 of 1891, arch lint PASS. Root's docs pass repoints the cites that moved (ARCH-APPROVAL-05, AUTO-11, SAFETY-04, STATE-21, VIEWS-07), adds the new ones (STATE-20 `quality-gate.mjs:29`; STATE-22 the marker, the root-directory baseline read, the missing-program skip and the state-line hash; LAND-37 the three callers and `gateUsable`), words the recorded-fact baseline into ARCH-STATE-22 and the missing-program skip into ARCH-LAND-37, widens the EXTENDING.md reason table and CHANGELOG, and stamps `verified_at`. Every cite into a file the units touched was checked by an identifier in the cited range.
+
+## Round 7 (2026-11-05, isolated scrutineer on main abf3dca, range 23027f9..abf3dca; the hooks, the merge gate and layering driven in throwaway repositories)
+No Critical; every `cite:` and `check:` of ARCH-STATE-19..22, LAND-37, LAND-06, SLIM-08, SAFETY-04, APPROVAL-05, AUTO-11 and VIEWS-07, 09, 10 shows what its rule says; both plan criteria MET for all sixteen units (suite 1891 of 1891, lint PASS). One Warning, verified by root at `stop-gate.mjs:180-185`, `scope.mjs:205`, `snapshot.mjs:51` and the fixture `stop-gate-skip-reasons.test.mjs:206-235`: Step 7.2 reads the workspace root's baseline under any scope, so a sub-project scope (a separate repository) runs the root's commands (Step 9). Five Suggestions: two flagged above, one already a follow-up row, one a docs fix, one covered by Step 9's tests.
+- **Root, after the unit:** (a) ARCH-STATE-22 says Stop reads the baseline and marker from the root context's session directory "even under a unit scope": narrow it to a unit worktree of the same repository and say a sub-project scope has no baseline and logs `no-command`; (b) EXTENDING.md:209 "lands without one (nothing is logged)" now says the `pre_merge_gate` `no-command` skip is logged (`repo-exec.mjs:357`); (c) the EXTENDING.md `no-command` row and the CHANGELOG sentence say a unit worktree of the same repository; (d) every `stop-gate.mjs` cite in docs/architecture is re-checked by identifier after the unit (it shifts lines near 180-185) and `verified_at` is stamped.
