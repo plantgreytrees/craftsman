@@ -354,7 +354,7 @@ function verifyGateBeforeMerge(context, worktree, ref) {
   const cfg = loadConfig(context);
   if (cfg.stopGate?.enabled === false || cfg.repoExec?.verifyTestsBeforeMerge === false) return;
   const command = findGateCommand(worktree, cfg);
-  if (!command) return; // no detected test command for this stack — nothing to verify
+  if (!command) { logEvent({ ev: "pre_merge_gate", skipped: true, reason: "no-command", ref, worktree }, context); return; } // no usable test command (none for this stack, or its program is absent) — nothing to verify (ARCH-ENGINE-22)
   const expanded = gateArgv(command, worktree, ref);
   if (expanded.warn) throw new Error(`pre-merge gate failed — {changed}/{changedDirs} must be a whole argument in "${command}"`);
   if (expanded.skip) {

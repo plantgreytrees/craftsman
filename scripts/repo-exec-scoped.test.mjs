@@ -242,3 +242,65 @@ test("land-feature: the gate in the temp worktree diffs against origin/<base> af
     assert.deepEqual(runs[0].argv, ["src/a.js"]);
   } finally { cleanup(t); fs.rmSync(other, { recursive: true, force: true }); }
 });
+
+// ARCH-ENGINE-22 / ARCH-LAND-37: a gate whose program is absent is skipped silently, the skip is logged, and the land goes on.
+test("merge: a gate whose program is missing lands, and one no-command event is logged", () => {
+  const t = fixture("", { stopGate: { commands: { "package.json": "craftsman-no-such-program --check" } } });
+  try {
+    const u = unit(t, (wt) => write(wt, "src/a.js", "a2\n"));
+    const before = git(t.root, "rev-parse", "main");
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    assert.notEqual(git(t.root, "rev-parse", "main"), before);
+    assert.equal(t.runs().length, 0);
+    const events = t.gateEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].skipped, true);
+    assert.equal(events[0].reason, "no-command");
+    assert.equal(events[0].ref, "main");
+    assert.equal(path.basename(events[0].worktree), "u1");
+  } finally { cleanup(t); }
+});
+
+test("merge: a relative gate program that does not exist lands and logs the no-command event", () => {
+  const t = fixture("", { stopGate: { commands: { "package.json": "./tools/gate.mjs --check" } } });
+  try {
+    const u = unit(t, (wt) => write(wt, "src/a.js", "a2\n"));
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    const events = t.gateEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].reason, "no-command");
+  } finally { cleanup(t); }
+});
+
+test("merge: a project whose only gate marker is dropped lands and logs the no-command event", () => {
+  const t = fixture("", { stopGate: { commands: { "package.json": null } } });
+  try {
+    const u = unit(t, (wt) => write(wt, "src/a.js", "a2\n"));
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    const events = t.gateEvents();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].reason, "no-command");
+  } finally { cleanup(t); }
+});
+
+test("merge: a gate whose relative program exists is still run, and logs no skip", () => {
+  const t = fixture("");
+  try {
+    const log = path.join(t.root, ".craftsman", "gate.log");
+    write(t.root, "tools/gate.mjs", `#!/usr/bin/env node\n${STUB}`);
+    fs.chmodSync(path.join(t.root, "tools", "gate.mjs"), 0o755);
+    write(t.root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": `./tools/gate.mjs ${log} --check` } } }));
+    commit(t.root, "relative gate program");
+    const u = unit(t, (wt) => write(wt, "src/a.js", "a2\n"));
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    const runs = t.runs();
+    assert.equal(runs.length, 1);
+    assert.deepEqual(runs[0].argv, ["--check"]);
+    assert.equal(runs[0].cwd, u.real);
+    assert.deepEqual(t.gateEvents(), []);
+  } finally { cleanup(t); }
+});
