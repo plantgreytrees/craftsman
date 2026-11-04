@@ -108,11 +108,14 @@ const addPackageJson = (dir) => {
 };
 
 const NODE_0 = { "package.json": "node -e 0" };
+// A `just` command no machine can run, whether or not `just` is installed (not on PATH, or the target is not in its summary).
+const UNUSABLE_JUST = `just nosuchtarget-${process.pid}-${Date.now()}`;
 const UNSEEDED = [
   ["no-command", {}, {}, sessionStart, "a markerless repo: SessionStart started no snapshot"],
   ["no-command", { snapshotAtStart: false, commands: NODE_0 }, PKG, sessionStart, "snapshotAtStart is false with a marker and a command: SessionStart started no snapshot"],
   ["no-command", { commands: NODE_0 }, {}, (dir, sid) => { sessionStart(dir, sid); addPackageJson(dir); }, "a package.json created after SessionStart: no snapshot was started"],
   ["no-command", { commands: { "package.json": null } }, PKG, sessionStart, "the marker is present but its command is dropped (null): SessionStart started no snapshot"],
+  ["no-command", { commands: { justfile: UNUSABLE_JUST } }, { justfile: "default:\n\t@echo hi\n" }, sessionStart, "the only present marker maps to an unusable command (a justfile whose `just` target does not exist): SessionStart started no snapshot"],
   ["snapshot-pending", { commands: NODE_0 }, PKG, markStarted, "a snapshot was started and left no result file (still running, or dropped because files changed)"],
   ["snapshot-pending", {}, PKG, markStarted, "a snapshot was started with the default command and left no result file"],
   ["snapshot-pending", { commands: NODE_0 }, { "services/api/package.json": "{}\n" }, markStarted, "a snapshot was started for a marker under a sub-directory and left no result file"],

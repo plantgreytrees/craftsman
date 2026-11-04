@@ -379,6 +379,8 @@ function sessionStartAt(dir, { stopGate = {}, files = {}, sid = "snap", before }
 }
 
 const NODE_0 = { "package.json": "node -e 0" };
+// A `just` command no machine can run, whether or not `just` is installed (not on PATH, or the target is not in its summary).
+const UNUSABLE_JUST = `just nosuchtarget-${process.pid}-${Date.now()}`;
 
 test("session-context: the snapshot-started marker is written where the snapshot is spawned, and the snapshot lands beside it (ARCH-STATE-22)", () => {
   withProject((dir) => {
@@ -417,6 +419,8 @@ for (const [why, options] of [
   ["stopGate.snapshotAtStart is false, with a marker and a command", { stopGate: { snapshotAtStart: false, commands: NODE_0 }, files: { "package.json": "{}\n" } }],
   ["stopGate.enabled is false, with a marker and a command", { stopGate: { enabled: false, commands: NODE_0 }, files: { "package.json": "{}\n" } }],
   ["the marker is present but its command is dropped (null)", { stopGate: { commands: { "package.json": null } }, files: { "package.json": "{}\n" } }],
+  // snapshot.mjs applies gateUsable and exits with no result when no entry is usable, so SessionStart must not record a start it cannot make.
+  ["the only present marker maps to an unusable command (a justfile whose `just` target does not exist)", { stopGate: { commands: { justfile: UNUSABLE_JUST } }, files: { justfile: "default:\n\t@echo hi\n" } }],
 ]) {
   test(`session-context: no snapshot is spawned and no snapshot-started marker is written when ${why} (ARCH-STATE-22)`, () => {
     withProject((dir) => {
