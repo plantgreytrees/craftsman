@@ -6,9 +6,14 @@ All notable changes to craftsman are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Service-scoped gates for a multi-service workspace** (ARCH-STATE-19..22, ARCH-LAND-37; see EXTENDING.md): `languages.<lang>.cwd = "nearest:<marker,...>"` runs a language's tools in the nearest service folder (`{file}` and `{dir}` are relative to it; one notice per session when it falls back to the root). `{changed}` and `{changedDirs}` in `stopGate.commands`, `stopGate.extraChecks` and the pre-merge gate expand to the files the session (or the branch, against the branch it lands onto) changed, as whole argv tokens with no shell: an empty set skips, they are never snapshotted, and a failure blocks as `SCOPED TESTS FAILED`. `gate`, `stop` and `stop-tests-skipped` events carry `project` (`gate` also `cwd` outside the root), and `stop-tests-skipped` names why: `clean`, `no-command`, `red-at-start`, `snapshot-pending`, `no-changes` or `changes-unknown`.
+
 ### Changed
 
 - The ui gate is routed through `scripts/ui-gate.mjs` to the optional Artist plugin (ARCH-SLIM-15, ARCH-GATES-01..07); `ui-ux-reviewer` is reduced to an accessibility floor and the `design-review` skill is removed.
+- **Sub-projects and unit worktrees inherit the workspace root's config** (ARCH-STATE-19): `loadConfig` layers the defaults, user config, the workspace root's `craftsman.config.json` and `craftsman.project.json`, then the project's own; a project `null` drops an inherited entry and `{}` changes nothing. A command in the workspace root's config that names a root-relative file (`python3 scripts/check_arch.py`) now runs from the sub-project's folder, so write it with `{workspaceRoot}` (`python3 {workspaceRoot}/scripts/check_arch.py`).
 
 ### Fixed
 
