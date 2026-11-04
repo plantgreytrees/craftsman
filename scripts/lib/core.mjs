@@ -836,6 +836,34 @@ export async function have(bin) {
   return whichCache.get(bin);
 }
 
+/** The directory a language's tools run in (ARCH-STATE-20). `lang.cwd` is
+ * "nearest:<marker>[,<marker>]": the first directory from the edited file's own
+ * up to and including the context root that holds any marker (markers tried in
+ * order within a directory) is the cwd. Never above the root and never from the
+ * process cwd. No `lang.cwd` is the root; no marker, a malformed spec, a file
+ * outside the root or a hit that resolves outside it (a symlinked directory) is
+ * the root too, with a `reason` the caller can say. */
+export function resolveToolCwd(file, lang, context = null) {
+  const root = context?.root || PROJECT_ROOT;
+  const spec = lang?.cwd;
+  if (spec === undefined || spec === null) return { cwd: root };
+  const markers = (typeof spec === "string" && spec.startsWith("nearest:") ? spec.slice("nearest:".length).split(",") : []).map((m) => m.trim());
+  if (!markers.length || !markers.every((m) => m && m !== "." && m !== ".." && !/[\\/\0]/.test(m))) {
+    return { cwd: root, reason: `malformed spec ${JSON.stringify(spec)} (want nearest:<marker>[,<marker>])` };
+  }
+  const base = path.resolve(root);
+  const abs = path.resolve(file);
+  if (!isInside(base, abs)) return { cwd: root, reason: "the file is outside the project root" };
+  for (let dir = path.dirname(abs); ; dir = path.dirname(dir)) {
+    if (markers.some((m) => fs.existsSync(path.join(dir, m)))) {
+      let inside = false;
+      try { inside = isInside(fs.realpathSync(base), fs.realpathSync(dir)); } catch {}
+      return inside ? { cwd: dir } : { cwd: root, reason: `${path.relative(base, dir).split(path.sep).join("/") || "."} resolves outside the project root` };
+    }
+    if (dir === base || dir === path.dirname(dir)) return { cwd: root, reason: `no marker found (${markers.join(", ")})` };
+  }
+}
+
 // Quote-aware token split shared by tokenize() (per-file {file}/{dir}
 // substitution) and splitCmd() (no per-file template — a plain configured
 // command like a secrets scan or an extraCheck).
@@ -844,8 +872,12 @@ function splitTokens(str) {
   return raw.map((tok) => tok.replace(/^["']|["']$/g, ""));
 }
 
-export function tokenize(cmdTemplate, file, context = null) {
-  const rel = path.relative(context?.root || PROJECT_ROOT, file) || file;
+// `cwd` is a resolved tool cwd (resolveToolCwd): {file} and {dir} become POSIX
+// paths relative to it. Without one they are relative to the root, as ever.
+export function tokenize(cmdTemplate, file, context = null, cwd = null) {
+  const rel = cwd
+    ? path.relative(cwd, file).split(path.sep).join("/") || file
+    : path.relative(context?.root || PROJECT_ROOT, file) || file;
   const dir = path.dirname(rel);
   // Substitute per-token so a {file}/{dir} value containing a space still
   // becomes exactly one argument, instead of splitting the path in two.
@@ -862,12 +894,18 @@ export function splitCmd(str) {
   return splitTokens(str);
 }
 
-async function runOne(cmdTemplate, file, timeoutMs, context = null) {
-  const [bin, ...args] = tokenize(cmdTemplate, file, context);
-  if (!(await have(bin))) return { skipped: true, bin };
+// `toolCwd` is the resolved cwd of a language that names one (null otherwise:
+// the root, with the PATH probe as ever). A bin containing "/" is then looked
+// for against that directory, not the process's, and the tool runs there.
+async function runOne(cmdTemplate, file, timeoutMs, context = null, toolCwd = null) {
+  const [bin, ...args] = tokenize(cmdTemplate, file, context, toolCwd);
+  const present = toolCwd && (bin.includes("/") || bin.includes(path.sep))
+    ? fs.existsSync(path.resolve(toolCwd, bin))
+    : await have(bin);
+  if (!present) return { skipped: true, bin };
   try {
     const { stdout, stderr } = await pexec(bin, args, {
-      timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, cwd: context?.root || PROJECT_ROOT,
+      timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, cwd: toolCwd || context?.root || PROJECT_ROOT,
     });
     return { ok: true, out: (stdout + stderr).trim(), bin };
   } catch (e) {
@@ -920,13 +958,15 @@ function normalizeEslintJson(result) {
  * to be unavailable this session, which are not run again. */
 export async function runChecks(file, lang, cfg, context = null, { skipBins = [] } = {}) {
   const t0 = Date.now();
-  for (const f of lang.format || []) await runOne(f, file, cfg.timeoutMs ?? 20000, context);
+  // Only a language that names a cwd leaves the root-relative behaviour (ARCH-STATE-20).
+  const toolCwd = lang.cwd == null ? null : resolveToolCwd(file, lang, context).cwd;
+  for (const f of lang.format || []) await runOne(f, file, cfg.timeoutMs ?? 20000, context, toolCwd);
 
   const results = await Promise.all(
     (lang.check || []).map(async (c) => {
-      const [bin] = tokenize(c, file, context);
+      const [bin] = tokenize(c, file, context, toolCwd);
       if (skipBins.includes(bin)) return { skipped: true, bin };
-      const result = await runOne(c, file, cfg.timeoutMs ?? 20000, context);
+      const result = await runOne(c, file, cfg.timeoutMs ?? 20000, context, toolCwd);
       return usesEslintJson(bin, c) ? normalizeEslintJson(result) : result;
     })
   );
@@ -1033,21 +1073,27 @@ export function filterAttributed(lines, rel) {
 
 // ---------------------------------------------------------------- caching ---
 
-export function cacheKey(file, lang, cfg) {
+export function cacheKey(file, lang, cfg, context = null) {
   const content = fs.existsSync(file) ? fs.readFileSync(file) : Buffer.alloc(0);
-  return crypto.createHash("sha1")
+  const hash = crypto.createHash("sha1")
     .update(content)
     .update(lang.name)
     .update(JSON.stringify(lang.check || []))
     // Deliberate allow-list, not every lang.* field: extensions/ignore don't
     // affect check/format output, so a future field that does needs a human
-    // decision to add it here, not silent omission.
+    // decision to add it here, not silent omission. The one non-field input is
+    // the resolved tool cwd (relative to the root): the same content under two
+    // services is two runs. A language without `cwd` adds nothing, so its keys
+    // are the ones it always had.
     .update(JSON.stringify(lang.format || []))
-    .update(String(!!lang.projectScoped))
-    // invalidate the cache whenever config changes, so edits to checks,
-    // noise filters or ignore rules take effect immediately
-    .update(JSON.stringify({ n: cfg.noisePatterns, i: cfg.ignore, b: cfg.baselineNewOnly }))
-    .digest("hex");
+    .update(String(!!lang.projectScoped));
+  if (lang.cwd != null) {
+    const root = context?.root || PROJECT_ROOT;
+    hash.update("cwd:" + (path.relative(root, resolveToolCwd(file, lang, context).cwd).split(path.sep).join("/") || "."));
+  }
+  // invalidate the cache whenever config changes, so edits to checks,
+  // noise filters or ignore rules take effect immediately
+  return hash.update(JSON.stringify({ n: cfg.noisePatterns, i: cfg.ignore, b: cfg.baselineNewOnly })).digest("hex");
 }
 
 export function cacheHit(key, context = null) {

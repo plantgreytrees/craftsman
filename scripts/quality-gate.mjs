@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
-  filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure,
+  filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure, resolveToolCwd,
   readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { acceptanceNotice, reconcileAcceptance } from "./tracker.mjs";
@@ -63,9 +63,32 @@ if (!isDocOrState && !isIgnored(file, cfg, lang, context)) {
 
 if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 
+// Where this language's tools run (ARCH-STATE-20). The gate event names it when it is not the root, and a spec that
+// fell back to the root is said once per session (a marker in session state is the cache, as for tool-unavailable).
+const tool = resolveToolCwd(file, lang, context);
+const toolRel = path.relative(context.root, tool.cwd).split(path.sep).join("/");
+const cwdField = toolRel ? { cwd: toolRel } : {};
+let cwdNotice = "";
+if (tool.reason) {
+  const marker = path.join(sessionDir(sidOf(input), context), "tool-cwd-fallback");
+  if (!fs.existsSync(marker)) {
+    try { atomicWrite(marker, String(Date.now())); } catch {}
+    cwdNotice = `craftsman: languages.${lang.name}.cwd ${JSON.stringify(lang.cwd)} fell back to the project root (${tool.reason}; first seen on ${rel0}), so its tools run there. Said once per session.`;
+  }
+}
+
+// What the user is told is one systemMessage document on stdout, however many notices a run has. The fallback notice
+// rides stderr instead when the run blocks: stdout is not read on exit 2.
+const said = [];
+const leave = (code) => {
+  const lines = code === 0 && cwdNotice ? [...said, cwdNotice] : said;
+  if (lines.length) process.stdout.write(JSON.stringify({ systemMessage: lines.join("\n") }));
+  process.exit(code);
+};
+
 // Content-hash cache: unchanged file + unchanged check set => skip entirely.
-const key = cacheKey(file, lang, cfg);
-if (cacheHit(key, context)) { logEvent({ ev: "gate", project: context.id ?? ".", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
+const key = cacheKey(file, lang, cfg, context);
+if (cacheHit(key, context)) { logEvent({ ev: "gate", project: context.id ?? ".", file, ...cwdField, result: "cached", ms: Date.now() - t0 }); leave(0); }
 
 // A tool that crashed is unavailable, never a finding: say so once per session
 // and do not run it again (a marker in session state is the cache).
@@ -79,17 +102,15 @@ for (const bin of newlyUnavailable) {
   try { atomicWrite(unavailableMarker(bin), String(Date.now())); } catch {}
 }
 if (newlyUnavailable.length) {
-  logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: "tool-unavailable", tools: newlyUnavailable });
-  process.stdout.write(JSON.stringify({
-    systemMessage: `craftsman: ${newlyUnavailable.join(", ")} crashed and is unavailable, so its check is skipped for the rest of this session (not a finding in your code).`,
-  }));
+  logEvent({ ev: "gate", project: context.id ?? ".", file, ...cwdField, lang: lang.name, result: "tool-unavailable", tools: newlyUnavailable });
+  said.push(`craftsman: ${newlyUnavailable.join(", ")} crashed and is unavailable, so its check is skipped for the rest of this session (not a finding in your code).`);
 }
 
 if (failures.length === 0) {
-  if (unavailable.length || skipBins.length) process.exit(0); // an unchecked file is not a pass: never cached
+  if (unavailable.length || skipBins.length) leave(0); // an unchecked file is not a pass: never cached
   cacheStore(key, context);
-  logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
-  process.exit(0); // a timeout is never a finding you wrote — never blocks, never shown
+  logEvent({ ev: "gate", project: context.id ?? ".", file, ...cwdField, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
+  leave(0); // a timeout is never a finding you wrote — never blocks, never shown
 }
 
 // Split into lines and drop anything already present at baseline.
@@ -108,8 +129,8 @@ const newLines = cfg.baselineNewOnly ? filterBaseline(file, rawLines, context) :
 
 if (newLines.length === 0) {
   cacheStore(key, context);
-  logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: "pass-baselined", ms, preexisting: rawLines.length });
-  process.exit(0);
+  logEvent({ ev: "gate", project: context.id ?? ".", file, ...cwdField, lang: lang.name, result: "pass-baselined", ms, preexisting: rawLines.length });
+  leave(0);
 }
 
 for (const f of failures) {
@@ -118,13 +139,14 @@ for (const f of failures) {
 
 const shown = newLines.slice(0, cfg.maxFeedbackLines ?? 40);
 const more = newLines.length - shown.length;
-logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: "fail", ms, findings: newLines.length,
+logEvent({ ev: "gate", project: context.id ?? ".", file, ...cwdField, lang: lang.name, result: "fail", ms, findings: newLines.length,
            tools: failures.map((f) => f.bin) });
 
 process.stderr.write(
   `craftsman: ${newLines.length} new issue(s) introduced in ${file}. ` +
   `Fix these now, before editing anything else. Pre-existing issues are excluded — ` +
   `do not fix unrelated code.\n\n${shown.join("\n")}` +
-  (more > 0 ? `\n… and ${more} more (run the checks yourself to see all).\n` : "\n")
+  (more > 0 ? `\n… and ${more} more (run the checks yourself to see all).\n` : "\n") +
+  (cwdNotice ? `\n${cwdNotice}\n` : "")
 );
-process.exit(2); // exit 2 => stderr becomes model-visible feedback
+leave(2); // exit 2 => stderr becomes model-visible feedback
