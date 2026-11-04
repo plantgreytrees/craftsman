@@ -96,7 +96,8 @@ units:
     scope:
       read: [scripts/lib/core.mjs, scripts/workspace.test.mjs]
       docs: [docs/architecture/state.rules.md]
-      write: [scripts/lib/core.mjs, scripts/lib/config-layering.test.mjs]
+      # scope.write widened (owner-approved 2026-11-04, after step 6.5 parked): core.test.mjs and user-config.test.mjs hold two in-process fixtures (core.test.mjs:1045, user-config.test.mjs:58) whose tmp root now inherits the plugin repo's own config; they are isolated from it, not special-cased in core.mjs. Write-only, so ENGINE-08 context is unchanged.
+      write: [scripts/lib/core.mjs, scripts/lib/config-layering.test.mjs, scripts/lib/core.test.mjs, scripts/lib/user-config.test.mjs]
     arch: [ARCH-STATE-19]
     tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
   - id: docs-changelog
