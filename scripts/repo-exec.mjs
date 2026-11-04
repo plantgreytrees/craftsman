@@ -326,18 +326,24 @@ const gateOutput = (error) => ((error.stdout || "") + (error.stderr || "")).toSt
 
 // The gate command as argv, or why it must not run (ARCH-LAND-37). `{changed}` / `{changedDirs}` (ARCH-STATE-21) expand from
 // the files the worktree's branch changed against `ref`, the branch it lands onto: `-z` keeps every path whole and deleted
-// files are left out, so a linter is never handed a path that is gone. A diff that cannot be computed fails the gate like any
-// red gate (ARCH-LAND-06). A command with no placeholder is only split: no diff is taken and nothing else changes.
+// files are left out, so a linter is never handed a path that is gone. Only an empty diff skips the gate; a diff that cannot be
+// computed, or that only deletes files (nothing left to name), fails it like any red gate (ARCH-LAND-06). A command with no
+// placeholder is only split: no diff is taken and nothing else changes.
 function gateArgv(command, worktree, ref) {
   const embedded = embeddedChangePlaceholder(command);
   if (!embedded && !hasChangePlaceholder(command)) return { argv: splitCmd(command) };
   let files = [];
   if (!embedded) { // an embedded placeholder is never expanded, so the diff would go unused
-    try {
-      files = execFileSync("git", ["-C", worktree, "diff", "--name-only", "-z", "--diff-filter=d", "--end-of-options", `${ref}...HEAD`], { encoding: "utf8", timeout: 60000, env: { ...process.env, LC_ALL: "C" }, stdio: ["ignore", "pipe", "pipe"] }).split("\0").filter(Boolean);
-    } catch (error) {
-      throw new Error(`pre-merge gate failed — could not list the files changed against ${ref} ("git diff --name-only ${ref}...HEAD") in ${worktree}:\n${gateOutput(error) || error.message}`);
-    }
+    const diff = (...filter) => {
+      try {
+        return execFileSync("git", ["-C", worktree, "diff", "--name-only", "-z", ...filter, "--end-of-options", `${ref}...HEAD`], { encoding: "utf8", timeout: 60000, env: { ...process.env, LC_ALL: "C" }, stdio: ["ignore", "pipe", "pipe"] }).split("\0").filter(Boolean);
+      } catch (error) {
+        throw new Error(`pre-merge gate failed — could not list the files changed against ${ref} ("git diff --name-only ${ref}...HEAD") in ${worktree}:\n${gateOutput(error) || error.message}`);
+      }
+    };
+    if (!diff().length) return { skip: "no-changes" }; // empty means the unfiltered diff: a branch that only deletes is not empty
+    files = diff("--diff-filter=d");
+    if (!files.length) throw new Error("pre-merge gate failed — this branch only deletes files, so a scoped command has nothing to name; run the suite unscoped");
   }
   return expandChangePlaceholders(command, files, { cwd: worktree, root: worktree });
 }
@@ -350,9 +356,9 @@ function verifyGateBeforeMerge(context, worktree, ref) {
   const command = findGateCommand(worktree, cfg);
   if (!command) return; // no detected test command for this stack — nothing to verify
   const expanded = gateArgv(command, worktree, ref);
-  const reason = expanded.skip || expanded.warn;
-  if (reason) {
-    logEvent({ ev: "pre_merge_gate", skipped: true, reason, ref, worktree }, context);
+  if (expanded.warn) throw new Error(`pre-merge gate failed — {changed}/{changedDirs} must be a whole argument in "${command}"`);
+  if (expanded.skip) {
+    logEvent({ ev: "pre_merge_gate", skipped: true, reason: expanded.skip, ref, worktree }, context);
     return;
   }
   const [bin, ...args] = expanded.argv;

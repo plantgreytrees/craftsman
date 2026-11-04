@@ -133,14 +133,40 @@ test("merge: an unscoped command is never given a diff, so a base it cannot diff
   } finally { cleanup(t); }
 });
 
-test("merge: a placeholder embedded in a token is never expanded, never run, and logged", () => {
+test("merge: a placeholder embedded in a token fails the gate, is never run, and nothing lands", () => {
   const t = fixture("--files={changed}");
   try {
     const u = unit(t, (wt) => write(wt, "src/a.js", "a2\n"));
+    const before = git(t.root, "rev-parse", "main");
+    assert.throws(() => merge(t.context, u.input, t.info), (error) => /^pre-merge gate failed — \{changed\}\/\{changedDirs\} must be a whole argument in "node gate\.mjs [^"]*--files=\{changed\}"/.test(error.message));
+    assert.equal(t.runs().length, 0);
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+    assert.deepEqual(t.gateEvents(), []);
+  } finally { cleanup(t); }
+});
+
+test("merge: a branch that only deletes files fails a scoped gate with the deletions-only message, and nothing lands", () => {
+  const t = fixture("{changed}");
+  try {
+    const u = unit(t, (wt) => fs.unlinkSync(path.join(wt, "src", "b.js")));
+    const before = git(t.root, "rev-parse", "main");
+    assert.throws(() => merge(t.context, u.input, t.info), (error) => error.message === "pre-merge gate failed — this branch only deletes files, so a scoped command has nothing to name; run the suite unscoped");
+    assert.equal(t.runs().length, 0);
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+    assert.deepEqual(t.gateEvents(), []);
+  } finally { cleanup(t); }
+});
+
+test("merge: a branch that deletes one file and adds another expands only the added one", () => {
+  const t = fixture("{changed} -- {changedDirs}");
+  try {
+    const u = unit(t, (wt) => { fs.unlinkSync(path.join(wt, "src", "b.js")); write(wt, "lib/new.js"); });
     const r = merge(t.context, u.input, t.info);
     assert.equal(r.merged, true);
-    assert.equal(t.runs().length, 0);
-    assert.deepEqual(t.gateEvents().map((e) => e.reason), ["embedded-placeholder"]);
+    const runs = t.runs();
+    assert.equal(runs.length, 1);
+    assert.deepEqual(runs[0].argv, ["lib/new.js", "--", "lib"]);
+    assert.deepEqual(t.gateEvents(), []);
   } finally { cleanup(t); }
 });
 
