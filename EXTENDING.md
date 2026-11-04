@@ -209,7 +209,8 @@ scalars replace. To drop an inherited entry set it to `null`
 into what is already there, so it does **not** clear the defaults or the
 inherited values. A malformed inherited file is ignored with a warning naming it,
 and `enabled: false` in the workspace root's file says which file turned the gate off.
-Inheriting `protectedPaths` only ever adds protection.
+`protectedPaths` is an array, so a workspace root's list replaces the default
+list for a sub-project that sets none.
 
 An inherited command that names a workspace file relative to the root now runs
 from the sub-project's folder, so write it with `{workspaceRoot}`, which every
