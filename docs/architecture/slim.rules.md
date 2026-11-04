@@ -3,13 +3,13 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: e5b891646cdda82d9fdfd9832cb950ef799923f7
-updated: 2026-11-03
+verified_at: 79c76936857fa70847661747837fa3240c2f80f3
+updated: 2026-11-04
 ---
 # ARCH slim — enforced rules
 
 - **ARCH-SLIM-01** [decided] Every shipped .md a command or the harness can load (commands, _* shared docs, agents, SKILL.md, skill references) has a byte cap in doc-size-policy.mjs; an unmatched file is a failure, not a skip — check: doc-size-policy in init --update and CI — cite: scripts/doc-size-policy.mjs:17-20,178-196
-- **ARCH-SLIM-02** [superseded by ARCH-SLIM-16, then ARCH-SLIM-17]
+- **ARCH-SLIM-02** [superseded by ARCH-SLIM-17]
 - **ARCH-SLIM-03** [decided] Load is also capped per invocation: a command's bytes plus every shared doc it reads unconditionally; doc-size-policy reports and caps the total per command — check: doc-size-policy per-invocation table — cite: scripts/doc-size-policy.mjs:106-143,167-196
 - **ARCH-SLIM-04** [decided] Detail that applies only under a config or plan condition lives in a reference doc read at the point of need, never in the always-read body — check: Read placement review — cite: commands/_shared-execution.md:6
 - **ARCH-SLIM-05** [decided] Duplicate prose is removed in this order: delete what a hook or script enforces; else move it into a doc the command already reads; never into a newly loaded doc. Call-site directives kept on purpose are asserted in a test — check: wiring.test.mjs prose assertions — cite: scripts/wiring.test.mjs:152-160

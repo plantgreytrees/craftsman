@@ -96,3 +96,6 @@ _Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.md) phase 2; `/idea` was
 
 ## Scoped pre-merge gate (2026-11-03)
 ARCH-LAND-37 lets the pre-merge gate use the same `{changed}` and `{changedDirs}` placeholders as Stop (ARCH-STATE-21), filled from `git diff --name-only <base>...HEAD` in the worktree being landed. An empty diff skips the gate and logs it; a diff that cannot be computed fails the gate as before. Rejected: running the whole-superproject gate on every land, which Gleam had to turn off. See [state](./state.md#service-scoped-gates-2026-11-03) and [service-scoped-gates](../ideas/service-scoped-gates.md).
+
+## Review fixes to the scoped pre-merge gate (2026-11-04)
+ARCH-LAND-37 now also fails the gate (rather than skipping it) for an embedded placeholder and for a branch that only deletes files; only an empty diff skips. Its test file is `scripts/repo-exec-scoped.test.mjs`. The retire-check cites of ARCH-LAND-26, 30 and 33 were off by about eight lines before this work and now point at the real sites (`afterUnitLand` and `afterLand`).

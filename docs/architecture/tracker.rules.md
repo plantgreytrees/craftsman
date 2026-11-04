@@ -3,8 +3,8 @@ area: tracker
 governs: ["scripts/tracker.mjs", "scripts/tracker-publish.mjs", "scripts/tracker-sync.mjs", "scripts/digest.mjs", "scripts/run-manifest.mjs"]
 human: docs/architecture/tracker.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: ab8f25f502eafe923ca6a5565024aaabf8ca91d1
-updated: 2026-10-27
+verified_at: 79c76936857fa70847661747837fa3240c2f80f3
+updated: 2026-11-04
 ---
 # ARCH tracker — enforced rules
 
@@ -15,7 +15,7 @@ updated: 2026-10-27
 - **ARCH-TRACKER-05** [decided] Each unit starts with a smoke run of the repo's gate command before editing — check: unit-runner.md step — cite: agents/unit-runner.md:14
 - **ARCH-TRACKER-06** [decided] FEATURE_MERGED is a unit landed on its feature branch: it needs ticked [unit:] criteria like MERGED, is never auto-promoted, and reaches COMPLETE only through land-feature, which promotes every row of the feature with the landing sha — check: tracker.test.mjs transitions — cite: scripts/tracker.mjs:17-29,397
 - **ARCH-TRACKER-07** [decided] Ledger events gain optional feature and feature_branch; the run manifest keeps features[] as units and adds feature_groups; no migration rewrites scope_id — check: run-manifest.test.mjs — cite: scripts/run-manifest.mjs:26-48
-- **ARCH-TRACKER-08** [decided] A `[feature:<id>]` criterion gates its feature's land-feature; untagged criteria gate only the last feature's land-feature — check: core.test.mjs, tracker.test.mjs — cite: scripts/lib/core.mjs:515-520, scripts/repo-exec.mjs:207-212, scripts/repo-exec.mjs:579-589
+- **ARCH-TRACKER-08** [decided] A `[feature:<id>]` criterion gates its feature's land-feature; untagged criteria gate only the last feature's land-feature — check: core.test.mjs, tracker.test.mjs — cite: scripts/lib/core.mjs:515-520, scripts/repo-exec.mjs:208-213, scripts/repo-exec.mjs:612-622
 - **ARCH-TRACKER-09** [decided] TRACKER-archive.md headings are machine-readable and tracker.mjs lookup {plan|slug} returns the parsed line — check: tracker.test.mjs lookup — cite: scripts/tracker.mjs:458-503
 - **ARCH-TRACKER-10** [decided] Each epic and story has a generated docs/plans/<slug>/TRACKER.md rollup rendered from the ledger through plan-index (a parent is COMPLETE only when every descendant row is COMPLETE); it is fenced, pre-guard-protected and never hand-edited; the root TRACKER.md block and renderBlock stay unchanged — check: tracker.test.mjs rollup snapshot, pre-guard.test.mjs — cite: scripts/tracker.mjs:265-272, scripts/lib/tracker-rollup.mjs:1-115
 - **ARCH-TRACKER-11** [decided] `tracker.mjs publish` is the only path that commits progress to base: under the base merge lock it renders the block, the rollups and docs/plans/TRACKER.jsonl into a detached temp worktree at origin/<base>, commits only those pathspecs, pushes HEAD:<base>, re-renders and retries once on rejection, and never parks a unit; it runs at feature prepare, on each unit landed (FEATURE_MERGED), parked or blocked, at feature landing and on /sync-docs --tracker, never per IN_PROGRESS — check: tracker-publish.test.mjs — cite: scripts/tracker-publish.mjs:72-134
