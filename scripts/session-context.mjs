@@ -202,15 +202,18 @@ if (handoff?.plan) {
 // Kick the test-green snapshot into the BACKGROUND for THIS session (detached).
 fs.mkdirSync(sessionDir(sid, context), { recursive: true });
 let anyStopCommandMarker = false;
-for (const m of Object.keys(cfg.stopGate?.commands || {})) {
-  if (await markerPresent(m, context)) { anyStopCommandMarker = true; break; }
+for (const [m, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
+  if (typeof cmd === "string" && cmd.trim() && await markerPresent(m, context)) { anyStopCommandMarker = true; break; }
 }
 if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false && anyStopCommandMarker) {
   try { fs.unlinkSync(path.join(sessionDir(sid, context), "session-start.json")); } catch {}
+  try { fs.unlinkSync(path.join(sessionDir(sid, context), "snapshot-started")); } catch {}
   const startingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${await git(["status", "--porcelain", "--untracked-files=all"], context)}`);
   try {
     spawn(process.execPath, [path.join(PLUGIN_ROOT, "scripts", "snapshot.mjs"), sid, context.id, startingTree],
       { detached: true, stdio: "ignore", windowsHide: true, cwd: context.root, env: process.env }).unref();
+    // The fact Stop reads when no session-start.json lands (ARCH-STATE-22): written only here, where a snapshot is spawned.
+    fs.writeFileSync(path.join(sessionDir(sid, context), "snapshot-started"), String(Date.now()));
   } catch { /* snapshot is best-effort */ }
 }
 
