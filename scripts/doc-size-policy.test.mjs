@@ -91,6 +91,13 @@ test("ratchetFindings refuses an unpaid trade: the lower cap fell by less than b
   assert.match(g[0], /short of the 10 its trades owe \(unpaid\)/);
 });
 
+test("ratchetFindings binds the paid trade when several cover one raise", () => {
+  const t = (lower) => ({ ...TRADE, raise: "agents/a.md", lower });
+  const base = { "agents/a.md": 1, "commands/c.md": 100, "commands/d.md": 100 };
+  assert.deepEqual(policy.ratchetFindings(base, { ...base, "agents/a.md": 3, "commands/d.md": 90 }, [t("commands/c.md"), t("commands/d.md")]), []);
+  assert.equal(policy.ratchetFindings(base, { ...base, "agents/a.md": 3 }, [t("commands/c.md"), t("commands/d.md")]).length, 1);
+});
+
 test("ratchetFindings refuses a trade whose lower file no invocation loads", () => {
   const f = policy.ratchetFindings(BASE, caps({ "agents/a.md": 105, "agents/b.md": 95 }), [{ ...TRADE, lower: "agents/b.md" }]);
   assert.ok(f.some((x) => /CAP_TRADES\[0\]: lower agents\/b\.md is not loaded by any invocation/.test(x)), f.join("\n"));
