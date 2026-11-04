@@ -177,7 +177,7 @@ if (cfg.security?.enabled && shouldScan) {
 //    multi-minute suite on every question-answering turn.
 const dirtyPath = path.join(sdir, "dirty");
 const isDirty = fs.existsSync(dirtyPath);
-const baselineDir = sessionDir(sid, baselineContext()); // the root's, while the scope is of the same repository: SessionStart and snapshot.mjs write the baseline there (ARCH-STATE-22)
+const baseline = baselineContext(), baselineDir = sessionDir(sid, baseline.context); // the root's, while the scope is of the same repository: SessionStart and snapshot.mjs write the baseline there (ARCH-STATE-22)
 let start = null;
 try { start = JSON.parse(fs.readFileSync(path.join(baselineDir, "session-start.json"), "utf8")); } catch {}
 let results = [];
@@ -195,6 +195,9 @@ function sayOnce(name, text, sig) {
   try { atomicWrite(marker, signature); } catch { /* no state dir: the notice still goes out */ }
   scopedNotices.push(text);
 }
+// A baseline that could not be looked up is said once and is never a failure: the gate below runs without it (ARCH-STATE-22, ARCH-SAFETY-04).
+if (baseline.error) sayOnce("baseline-notice-unavailable",
+  `craftsman: stop-gate skipped the session-start baseline lookup (the workspace manifest could not be read: ${baseline.error.message}), advisory only`, baseline.error.message);
 
 if (isDirty) {
   // A dirty Stop that queues no test says why, once (ARCH-STATE-22). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: present is snapshot-pending, absent is no-command; never config.
@@ -346,7 +349,7 @@ async function runTask(t) {
         ((e.stdout || "") + (e.stderr || "")).split("\n").slice(0, 15).join("\n")}`);
     } else if (t.kind === "test") {
       const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
-      problems.push(`REGRESSION: tests passed at session start but fail now (${t.cmd}):\n${out}`);
+      problems.push(`REGRESSION: tests passed at session start but fail now (${t.cmd})${baselineTreeNote()}:\n${out}`);
     } else if (t.kind === "scoped") {
       // Not baselined: nothing says these were green before, so this is a failure, not a regression.
       const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n")
@@ -506,9 +509,24 @@ process.stdout.write(JSON.stringify({
 // session-start.json and snapshot-started, and a scope of that same repository (a unit's worktree) reads them there. A workspace
 // sub-project scope is another repository, so its own session directory is read instead and holds neither: it has no baseline,
 // and the root's commands never run in it. `dirty`, the change list and the scoped-task state are the scope's in both cases.
+// Returns the context whose session directory holds the baseline, and `root` when that is the root's. The root's context loads the
+// workspace manifest, which a scope's own never does, so a manifest that cannot be loaded leaves the scope's context (no baseline) and
+// the error, for Stop to say once: an advisory lookup that cannot run never fails the gate (ARCH-SAFETY-04).
 function baselineContext() {
-  const root = projectContext(input.project || ".");
-  return sameRepository(root.root, context.root) ? root : context;
+  try {
+    const root = projectContext(input.project || ".");
+    return sameRepository(root.root, context.root) ? { context: root, root } : { context };
+  } catch (error) { return { context, error }; }
+}
+
+// The baseline's commands ran in the root's tree and are re-run in the scope's. A scope of that repository whose root is another
+// directory (a unit's worktree) is a tree the baseline never measured, one that may lack its dependencies or hold other commits, so a
+// REGRESSION there names both trees. Without a scope, or with the same directory, there is nothing to add.
+function baselineTreeNote() {
+  const rootDir = baseline.root?.root;
+  if (!active?.project_root || !rootDir) return "";
+  try { if (fs.realpathSync(rootDir) === fs.realpathSync(context.root)) return ""; } catch { /* a root that cannot be resolved is not the same tree */ }
+  return ` - the baseline was taken in ${rootDir}; this is ${context.root}, a different tree, and a worktree without its dependencies fails the same way`;
 }
 
 // Equal real paths are the same repository. Otherwise both roots must share one git common directory, each resolved against its

@@ -41,15 +41,17 @@ function runStop(cwd, sid) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [STOP_GATE_PATH], { cwd });
     let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
     child.on("error", reject);
-    child.on("close", () => {
+    child.on("close", (code) => {
       let events = [];
       try {
         events = fs.readFileSync(path.join(cwd, ".craftsman", "events.jsonl"), "utf8").split("\n").filter(Boolean)
           .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((e) => e && e.sid === sid);
       } catch { /* no event log */ }
-      resolve({ stdout, events });
+      resolve({ stdout, stderr, code, events });
     });
     child.stdin.end(JSON.stringify({ session_id: sid }));
   });
@@ -216,8 +218,8 @@ function addPlainDir(dir) {
 }
 
 // The root the session started in, and the scope root (made by `makeScopeRoot(root)`) a scope for `sid` points Stop at.
-async function withScope(sid, makeScopeRoot, run) {
-  const dir = makeFixture();
+async function withScope(sid, makeScopeRoot, run, stopGate = {}) {
+  const dir = makeFixture(stopGate);
   let scopeRoot;
   try {
     scopeRoot = makeScopeRoot(dir);
@@ -234,7 +236,7 @@ async function withScope(sid, makeScopeRoot, run) {
 }
 
 // A unit scope: the scope root is a real worktree of the root's repository.
-const underScope = (sid, run) => withScope(sid, addWorktree, run);
+const underScope = (sid, run, stopGate) => withScope(sid, addWorktree, run, stopGate);
 // A workspace sub-project scope: the scope root is a separate repository.
 const subProjectScope = (sid, run) => withScope(sid, () => makeFixture(), run);
 // A scope root that is not a git repository.
@@ -248,6 +250,33 @@ test("stop-gate: under a unit scope a green session-start.json in the root's dir
     assert.deepEqual(skipped(events), [], "no skip: the command was queued");
     assert.match(stdout, /REGRESSION: tests passed at session start but fail now/);
     assert.equal(events.find((e) => e.ev === "stop").result, "block");
+  });
+});
+
+// The command is re-run in the scope's tree, which the baseline never measured: the block and its text stay, and the line names both trees.
+test("stop-gate: under a unit worktree scope the REGRESSION keeps its text and names the tree the baseline was taken in (ARCH-STATE-22)", async () => {
+  await underScope("tree", async (dir, unitRoot) => {
+    seed(dir, "tree", { start: RED_NOW });
+    seed(unitRoot, "tree", { dirty: true });
+    const { stdout, events } = await runStop(dir, "tree");
+    assert.equal(events.find((e) => e.ev === "stop").result, "block");
+    const { reason } = JSON.parse(stdout);
+    assert.ok(reason.includes(`REGRESSION: tests passed at session start but fail now (${FAILS})`), reason);
+    assert.ok(
+      reason.includes(`REGRESSION: tests passed at session start but fail now (${FAILS}) - the baseline was taken in ${fs.realpathSync(dir)}; this is ${unitRoot}, a different tree, and a worktree without its dependencies fails the same way:`),
+      reason,
+    );
+  });
+});
+
+test("stop-gate: under a scope whose root is the root's own the REGRESSION line has no tree note (ARCH-STATE-22)", async () => {
+  await withScope("same", (dir) => dir, async (dir) => {
+    seed(dir, "same", { dirty: true, start: RED_NOW });
+    const { stdout, events } = await runStop(dir, "same");
+    assert.equal(events.find((e) => e.ev === "stop").result, "block");
+    const { reason } = JSON.parse(stdout);
+    assert.ok(reason.includes(`REGRESSION: tests passed at session start but fail now (${FAILS}):\n`), reason);
+    assert.doesNotMatch(reason, /the baseline was taken in/);
   });
 });
 
@@ -286,6 +315,9 @@ test("stop-gate: without a scope the baseline and the dirty marker are read from
     const { stdout, events } = await runStop(dir, "flat");
     assert.deepEqual(skipped(events), []);
     assert.match(stdout, /REGRESSION: tests passed at session start but fail now/);
+    const { reason } = JSON.parse(stdout);
+    assert.ok(reason.includes(`REGRESSION: tests passed at session start but fail now (${FAILS}):\n`), "the line is unchanged without a scope");
+    assert.doesNotMatch(reason, /the baseline was taken in/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -320,4 +352,53 @@ test("stop-gate: a scope root that is not a git repository counts as a different
     assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["no-command", "svc-a"]]);
     assert.doesNotMatch(stdout, /REGRESSION/);
   });
+});
+
+// The baseline lookup builds the ROOT's context, which loads the workspace manifest. A scope's own context never needs it, so a scoped
+// Stop must not die on a manifest it can do without: the lookup cannot run, the gate does (ARCH-SAFETY-04), and Stop says so once.
+const UNLOADABLE_MANIFEST = "{ not json\n";
+const NO_BASELINE_NOTICE = /craftsman: stop-gate skipped the session-start baseline lookup \(the workspace manifest could not be read: invalid workspace manifest .*craftsman\.workspace\.json: .*\), advisory only/;
+
+test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded exits 0, looks up no baseline and says so once (ARCH-STATE-22, ARCH-SAFETY-04)", async () => {
+  await underScope("nomanifest", async (dir, unitRoot) => {
+    fs.writeFileSync(path.join(dir, "craftsman.workspace.json"), UNLOADABLE_MANIFEST);
+    seed(dir, "nomanifest", { start: RED_NOW }); // a baseline exists at the root, but the lookup cannot reach it
+    seed(unitRoot, "nomanifest", { dirty: true });
+    const first = await runStop(dir, "nomanifest");
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(first.stderr, "", "no stack trace");
+    const document = JSON.parse(first.stdout); // one JSON document: a second one would not parse
+    assert.deepEqual(Object.keys(document), ["systemMessage"]);
+    assert.match(document.systemMessage, NO_BASELINE_NOTICE);
+    assert.equal(document.systemMessage.split("baseline lookup").length - 1, 1, "said once in the one document");
+    assert.doesNotMatch(first.stdout, /REGRESSION/, "the root's command is not run without a baseline");
+    assert.deepEqual(skipped(first.events).map((e) => [e.reason, e.project]), [["no-command", "svc-a"]]);
+    assert.equal(first.events.find((e) => e.ev === "stop").result, "pass");
+
+    const second = await runStop(dir, "nomanifest");
+    assert.equal(second.code, 0, second.stderr);
+    assert.doesNotMatch(second.stdout, /baseline lookup/, "said once per session"); // the fixture's own unpushed-work report may still ride along
+    if (second.stdout) assert.deepEqual(Object.keys(JSON.parse(second.stdout)), ["systemMessage"]);
+    assert.equal(second.events.filter((e) => e.ev === "stop" && e.result === "pass").length, 2);
+  });
+});
+
+test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded still runs its gate: a failing guard blocks, the notice rides in the same document, once (ARCH-STATE-22, ARCH-SAFETY-04)", async () => {
+  await underScope("nomanifest-gate", async (dir, unitRoot) => {
+    fs.writeFileSync(path.join(dir, "craftsman.workspace.json"), UNLOADABLE_MANIFEST);
+    seed(unitRoot, "nomanifest-gate", { dirty: true });
+    const first = await runStop(dir, "nomanifest-gate");
+    assert.equal(first.code, 0, first.stderr);
+    const blocked = JSON.parse(first.stdout);
+    assert.equal(blocked.decision, "block");
+    assert.match(blocked.reason, /GUARD FAILED/);
+    assert.match(blocked.systemMessage, NO_BASELINE_NOTICE);
+
+    const second = await runStop(dir, "nomanifest-gate");
+    assert.equal(second.code, 0, second.stderr);
+    const again = JSON.parse(second.stdout);
+    assert.equal(again.decision, "block");
+    assert.match(again.reason, /GUARD FAILED/);
+    assert.doesNotMatch(again.systemMessage ?? "", /baseline lookup/, "the notice is not repeated");
+  }, { extraChecks: [FAILS] });
 });
