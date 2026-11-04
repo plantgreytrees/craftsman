@@ -214,7 +214,10 @@ folder as `cwd` (root-relative) whenever it is not the root.
   the `dirty` marker, and its failure blocks as
   `SCOPED TESTS FAILED (not baselined): <cmd>`, never as a regression. If
   `stopGate.totalBudgetMs` kills it, that is said once per session instead of
-  passing silently.
+  passing silently. A scoped command whose program is not installed is skipped
+  without blocking and said once per session, and one that exceeds its own
+  `stopGate.testTimeoutMs` blocks as
+  `SCOPED TESTS INCOMPLETE: <cmd> did not finish within its own configured limit`.
 
 **Inherit the workspace root's config.** A sub-project (or a unit worktree) now
 inherits the workspace root's config. Later layers win, and the order is:
