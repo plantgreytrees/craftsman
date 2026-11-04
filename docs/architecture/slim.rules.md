@@ -3,7 +3,7 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: b910a921bb58278607bee23f614b7cb87eb6a342
+verified_at: db007cf4f06245644cb68fb2c2673e52be03c3bf
 updated: 2026-11-04
 ---
 # ARCH slim — enforced rules
@@ -16,8 +16,8 @@ updated: 2026-11-04
 - **ARCH-SLIM-06** [decided] A MUST sentence may leave a command or agent only when a hook or script enforces it or a test asserts its replacement; a trim keeps the suite, doc-size-policy and descriptions.test green and reports stats.mjs block rates before and after — check: PR evidence — cite: scripts/stats.mjs:63-81
 - **ARCH-SLIM-07** [decided] Scripts have no hard byte cap: CI warns when the scripts/ source total grows, and hook latency (quality gate, pre-guard, stop-gate p50/p95 in stats.mjs) is the hard budget under hooks.json timeouts — check: stats latency section — cite: scripts/stats.mjs:34-51
 - **ARCH-SLIM-08** [decided] CHANGELOG.md [Unreleased] stays under 8 KB; a release is cut before it grows past that — check: changelog size test — cite: CHANGELOG.md:7
-- **ARCH-SLIM-09** [decided] New behaviour is a role in an existing agent, not a new agent, unless its description fits the descriptions.test total without raising it — check: descriptions.test.mjs — cite: scripts/descriptions.test.mjs:13-16
-- **ARCH-SLIM-10** [decided] Always-loaded bytes are budgeted and measured: SessionStart additionalContext has a byte cap in a test beside the descriptions total (target 3 KB); telemetry records one context sample with phase "baseline" from the session's first assistant usage and stats.mjs reports baseline, peak and growth per session; prose cuts beyond ARCH-SLIM-12 wait for a week of baseline data — check: session-context.test.mjs cap, telemetry.test.mjs baseline, stats.test.mjs — cite: scripts/telemetry.mjs:63-71
+- **ARCH-SLIM-09** [decided] New behaviour is a role in an existing agent, not a new agent, unless its description fits the descriptions.test total without raising it — check: descriptions.test.mjs — cite: scripts/descriptions.test.mjs:13-17
+- **ARCH-SLIM-10** [decided] Always-loaded bytes are budgeted and measured: SessionStart additionalContext has a byte cap in a test beside the descriptions total (target 3 KB); telemetry records one context sample with phase "baseline" from the session's first assistant usage and stats.mjs reports baseline, peak and growth per session; prose cuts beyond ARCH-SLIM-12 wait for a week of baseline data — check: session-context.test.mjs cap, telemetry.test.mjs baseline, stats.test.mjs — cite: scripts/telemetry.mjs:63-71,106-107
 - **ARCH-SLIM-11** [superseded by ARCH-SLIM-13]
 - **ARCH-SLIM-12** [superseded by ARCH-SLIM-14]
 - **ARCH-SLIM-13** [superseded by ARCH-SLIM-15]
