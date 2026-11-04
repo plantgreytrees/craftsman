@@ -9,6 +9,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { gateUsable } from "./lib/gate-command.mjs";
+import { hasChangePlaceholder } from "./lib/changed.mjs";
 import { loadConfig, enabled, sessionDir, markerPresent, splitCmd, projectContext, git, sha1 } from "./lib/core.mjs";
 
 const pexec = promisify(execFile);
@@ -26,6 +27,9 @@ if (!entries.length) process.exit(0);
 
 const results = [];
 for (const cmd of entries) {
+  // A `{changed}` / `{changedDirs}` command has no whole-tree baseline: Stop derives it from config and runs it against
+  // the session change list, so it is neither run here nor listed (ARCH-STATE-21).
+  if (hasChangePlaceholder(cmd)) continue;
   const [bin, ...args] = splitCmd(cmd);
   let green = false;
   try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: context.root }); green = true; } catch {}
