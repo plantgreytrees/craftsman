@@ -11,6 +11,7 @@ import { currentState, transition } from "./tracker.mjs";
 import { autoArchive } from "./lib/archive.mjs";
 import { afterLand, afterUnitLand, assertMergeAllowed, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
+import { embeddedChangePlaceholder, expandChangePlaceholders, hasChangePlaceholder } from "./lib/changed.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
 function run(root, args, options = {}) {
@@ -321,20 +322,45 @@ function sync(context, input, info) {
 
 export { findGateCommand };
 
+const gateOutput = (error) => ((error.stdout || "") + (error.stderr || "")).toString().split("\n").slice(-30).join("\n");
+
+// The gate command as argv, or why it must not run (ARCH-LAND-37). `{changed}` / `{changedDirs}` (ARCH-STATE-21) expand from
+// the files the worktree's branch changed against `ref`, the branch it lands onto: `-z` keeps every path whole and deleted
+// files are left out, so a linter is never handed a path that is gone. A diff that cannot be computed fails the gate like any
+// red gate (ARCH-LAND-06). A command with no placeholder is only split: no diff is taken and nothing else changes.
+function gateArgv(command, worktree, ref) {
+  const embedded = embeddedChangePlaceholder(command);
+  if (!embedded && !hasChangePlaceholder(command)) return { argv: splitCmd(command) };
+  let files = [];
+  if (!embedded) { // an embedded placeholder is never expanded, so the diff would go unused
+    try {
+      files = execFileSync("git", ["-C", worktree, "diff", "--name-only", "-z", "--diff-filter=d", "--end-of-options", `${ref}...HEAD`], { encoding: "utf8", timeout: 60000, env: { ...process.env, LC_ALL: "C" }, stdio: ["ignore", "pipe", "pipe"] }).split("\0").filter(Boolean);
+    } catch (error) {
+      throw new Error(`pre-merge gate failed — could not list the files changed against ${ref} ("git diff --name-only ${ref}...HEAD") in ${worktree}:\n${gateOutput(error) || error.message}`);
+    }
+  }
+  return expandChangePlaceholders(command, files, { cwd: worktree, root: worktree });
+}
+
 // Re-runs the tests in the worktree before merging; only config
-// (`repoExec.verifyTestsBeforeMerge` / `stopGate.enabled` false) skips it.
-function verifyGateBeforeMerge(context, worktree) {
+// (`repoExec.verifyTestsBeforeMerge` / `stopGate.enabled` false) skips it. `ref` is the branch the worktree lands onto.
+function verifyGateBeforeMerge(context, worktree, ref) {
   const cfg = loadConfig(context);
   if (cfg.stopGate?.enabled === false || cfg.repoExec?.verifyTestsBeforeMerge === false) return;
   const command = findGateCommand(worktree, cfg);
   if (!command) return; // no detected test command for this stack — nothing to verify
-  const [bin, ...args] = splitCmd(command);
+  const expanded = gateArgv(command, worktree, ref);
+  const reason = expanded.skip || expanded.warn;
+  if (reason) {
+    logEvent({ ev: "pre_merge_gate", skipped: true, reason, ref, worktree }, context);
+    return;
+  }
+  const [bin, ...args] = expanded.argv;
   const timeoutMs = cfg.stopGate?.testTimeoutMs ?? 250000;
   try {
     execFileSync(bin, args, { cwd: worktree, timeout: timeoutMs, stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
-    const output = ((error.stdout || "") + (error.stderr || "")).toString().split("\n").slice(-30).join("\n");
-    throw new Error(`pre-merge gate failed — "${command}" did not pass in ${worktree}:\n${output}`);
+    throw new Error(`pre-merge gate failed — "${command}" did not pass in ${worktree}:\n${gateOutput(error)}`);
   }
 }
 
@@ -365,10 +391,11 @@ function mergeOnly(context, input, info, deps = {}) {
   const branch = run(worktree, ["branch", "--show-current"]);
   if (input.branch && input.branch !== branch) throw new Error(`requested branch ${input.branch} is not checked out in ${worktree}`);
   if (run(worktree, ["status", "--porcelain"])) throw new Error("worktree is not clean before merge");
-  verifyGateBeforeMerge(context, worktree);
+  // ARCH-LAND-12: a unit PR targets its feature branch; every other merge lands on base. The gate diffs against that target.
+  const target = land === "pr" && input.feature_branch ? input.feature_branch : info.base_branch;
+  verifyGateBeforeMerge(context, worktree, target);
   pin();
-  // ARCH-LAND-12: a unit PR targets its feature branch.
-  if (land === "pr") return landPullRequest(context, input, input.feature_branch ? { ...info, base_branch: input.feature_branch } : info, { worktree, branch, cfg, runner: deps.runner, pin });
+  if (land === "pr") return landPullRequest(context, input, { ...info, base_branch: target }, { worktree, branch, cfg, runner: deps.runner, pin });
   const holder = baseHeldElsewhere(context.root, info.base_branch);
   if (holder && info.has_remote && input.push !== false) return landDetached(context, input, info, { worktree, branch, pin });
   // Else merge where base is checked out (this root or another worktree), never dirty.
@@ -505,7 +532,7 @@ function landUnit(context, input, info) {
   if (run(worktree, ["status", "--porcelain"])) throw new Error("feature worktree is not clean before land-unit");
   if (run(worktree, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) throw new Error("feature worktree has a merge in progress");
   const gateDir = input.unit_worktree ? safeWorktree(anchored, input.unit_worktree, input.unit) : worktree;
-  verifyGateBeforeMerge(context, gateDir);
+  verifyGateBeforeMerge(context, gateDir, feature);
   const featureLock = acquireLock(featureLockInfo(info, feature), input);
   try {
     if (run(worktree, ["branch", "--show-current"]) !== feature) run(worktree, ["checkout", feature]);
@@ -620,7 +647,7 @@ function landFeature(context, input, info, deps = {}) {
     step = "conflict";
     run(temp, ["merge", "--no-edit", `origin/${info.base_branch}`]);
     step = "gate";
-    verifyGateBeforeMerge(context, temp);
+    verifyGateBeforeMerge(context, temp, `origin/${info.base_branch}`);
     step = null;
     const ready = run(temp, ["rev-parse", "HEAD"]);
     step = "ff-only";
