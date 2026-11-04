@@ -42,7 +42,8 @@ units:
     language: JavaScript (Node ESM, node:test)
     security: high
     scope:
-      read: [scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, hooks/hooks.json, scripts/orchestrate-scope-guard.test.mjs]
+      # read list trimmed (scripts/orchestrate-scope-guard.test.mjs dropped, still in write) to fit ARCH-ENGINE-08 after core.mjs grew (plan service-scoped-gates, unit tool-cwd); the unit had already shipped.
+      read: [scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, hooks/hooks.json]
       docs: [docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
       write: [scripts/lib/core.mjs, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
     arch: [ARCH-STATE-02, ARCH-STATE-06, ARCH-STATE-07, ARCH-AUTO-06]
@@ -123,7 +124,8 @@ units:
     # Split by 9.1's ARCH-ENGINE-08 check: as one step it loaded 135,142 bytes (> 122,880).
     # Both halves shipped together in 21ca2d6, executed root-only before the check existed.
     scope:
-      read: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/orchestrate-scope-guard.test.mjs]
+      # read list trimmed (scripts/orchestrate-scope-guard.test.mjs dropped, still in write) to fit ARCH-ENGINE-08 after core.mjs grew (plan service-scoped-gates, unit tool-cwd); the unit had already shipped.
+      read: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs]
       docs: [docs/architecture/state.rules.md, docs/architecture/auto.rules.md]
       write: [hooks/hooks.json, scripts/agent-mode-guard.mjs, scripts/orchestrate-scope-guard.mjs, scripts/lib/core.mjs, scripts/agent-mode-guard.test.mjs, scripts/orchestrate-scope-guard.test.mjs]
     arch: [ARCH-STATE-05, ARCH-STATE-07, ARCH-AUTO-06]
