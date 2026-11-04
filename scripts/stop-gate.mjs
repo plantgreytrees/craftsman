@@ -22,7 +22,7 @@ let input = {};
 try { input = JSON.parse(await readStdin() || "{}"); } catch { advisorySkipped("stop-gate", "bad input"); process.exit(0); }
 const active = readScope(input);
 const context = active?.project_root
-  ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
+  ? { id: active.project, root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) {
@@ -182,12 +182,12 @@ let results = [];
 if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
 if (isDirty) {
-  for (const { cmd, green } of results) {
-    if (!green) continue;
-    tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
-  }
+  // A dirty Stop that queues no test says why, once (ARCH-STATE-22).
+  const before = tasks.length;
+  for (const { cmd, green } of results) if (green) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
+  if (tasks.length === before) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: !start ? "snapshot-pending" : !results.length ? "no-command" : "red-at-start" });
 } else {
-  logEvent({ ev: "stop-tests-skipped", sid, reason: "clean" });
+  logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: "clean" });
 }
 
 // 2b. Project guards / extra checks (e.g. run-all-guards.py, contract-drift).
@@ -419,12 +419,12 @@ if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED 
 const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs, legacyNotice].filter(Boolean).join("\n");
 
 if (!problems.length) {
-  logEvent({ ev: "stop", sid, result: "pass", ms: Date.now() - T0 });
+  logEvent({ ev: "stop", sid, project: context.id ?? ".", result: "pass", ms: Date.now() - T0 });
   if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice }));
   process.exit(0);
 }
 
-logEvent({ ev: "stop", sid, result: "block", count: problems.length, ms: Date.now() - T0 });
+logEvent({ ev: "stop", sid, project: context.id ?? ".", result: "block", count: problems.length, ms: Date.now() - T0 });
 process.stdout.write(JSON.stringify({
   decision: "block",
   reason: `craftsman blocked completion:\n\n${problems.join("\n\n")}`,
