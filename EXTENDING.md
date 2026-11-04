@@ -136,8 +136,10 @@ project hasn't made in a month stops being narrated every session:
 
 ### Multi-service workspaces: tool folders, scoped tests, inherited config
 
-Four opt-in pieces make the gates work per service. A repository with no
-`cwd` key, no placeholder and no workspace root above it behaves exactly as before.
+Three opt-in pieces and one always-on event field make the gates work per
+service. A repository with no `cwd` key, no placeholder and no workspace root
+above it runs its gates exactly as before; only the events gain a `project` field
+(see the last piece below).
 
 **Run a language's tools in the service folder.** `languages.<lang>.cwd` takes
 `"nearest:<marker>[,<marker>]"`:
@@ -223,12 +225,13 @@ pre-merge gate) expands to the workspace root's absolute path:
 
 **Read what happened in `.craftsman/events.jsonl`.** The `gate`, `stop` and
 `stop-tests-skipped` events carry `project`: the unit scope's project id or the
-workspace project's id, and `"."` at the workspace root. A Stop that is dirty but
-queues no test logs one `stop-tests-skipped` with a `reason`:
+workspace project's id, and `"."` at the workspace root. A Stop that queues no
+test logs a `stop-tests-skipped` with a `reason` (one event per skipped
+placeholder command):
 
 | `reason` | Meaning |
 |---|---|
-| `clean` | nothing was edited this session |
+| `clean` | no test-relevant edit this session (the `dirty` marker is absent; a docs-only edit leaves it clean) |
 | `snapshot-pending` | dirty, but no `session-start.json` has been written yet |
 | `no-command` | dirty, but no test command matched the project |
 | `red-at-start` | dirty, but every test command was already red at session start |
