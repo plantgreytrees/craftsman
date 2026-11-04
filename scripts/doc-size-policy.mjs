@@ -36,7 +36,7 @@ export const FILE_CAPS = {
   "agents/plan-reviewer.md": 2187,
   "agents/plan-strategist.md": 1753,
   "agents/review-router.md": 1187,
-  "agents/scrutineer.md": 3700,
+  "agents/scrutineer.md": 3697,
   "agents/security-auditor.md": 2184,
   "agents/standards-keeper.md": 2608,
   "agents/ui-ux-reviewer.md": 886,
@@ -62,12 +62,12 @@ export const FILE_CAPS = {
   "commands/fix-tests.md": 5024,
   "commands/idea.md": 6958,
   "commands/init.md": 4890,
-  "commands/instruction.md": 8547,
+  "commands/instruction.md": 8503,
   "commands/investigate.md": 6119,
   "commands/merge.md": 6173,
   "commands/orchestrate.md": 9051,
   "commands/plan.md": 8988,
-  "commands/scrutinise.md": 8030,
+  "commands/scrutinise.md": 8025,
   "commands/stats.md": 348,
   "commands/sync-docs.md": 8604,
   "commands/toggle.md": 397,
@@ -128,7 +128,7 @@ export const INVOCATION_CAPS = {
   "fix-tests": 5024,
   "idea": 13272,
   "init": 4890,
-  "instruction": 8547,
+  "instruction": 8503,
   "investigate": 12433,
   "merge": 6173,
   "orchestrate": 28867,
@@ -201,7 +201,7 @@ export function raisedCaps(base, current) {
   return Object.keys(base).filter((k) => k in current && current[k] > base[k]).map((k) => `${k}: ${base[k]} -> ${current[k]}`);
 }
 
-// Recorded cap trades (ARCH-SLIM-16). A per-file cap may rise only when an entry names the file as `raise`, the
+// Recorded cap trades (ARCH-SLIM-17). A per-file cap may rise only when an entry names the file as `raise`, the
 // rise is at most `bytes`, and the `lower` file, one an invocation loads, had its cap fall by at least `bytes`
 // against the merge-base. Each entry cites the owner-approved rule and the date it was decided.
 export const CAP_TRADES = [
@@ -232,17 +232,19 @@ export function ratchetFindings(base, current, trades = CAP_TRADES) {
     else valid.push(t);
   });
   const owed = {};
+  const fallOf = (lower) => (lower in base && lower in current ? Math.max(0, base[lower] - current[lower]) : 0);
   for (const rel of Object.keys(base)) {
     if (!(rel in current) || current[rel] <= base[rel]) continue;
     const rise = current[rel] - base[rel];
     const named = valid.filter((t) => t.raise === rel);
-    const covering = named.find((t) => rise <= t.bytes);
-    if (!named.length) findings.push(`${rel}: cap ${base[rel]} -> ${current[rel]} has no CAP_TRADES entry (ARCH-SLIM-16)`);
+    const fits = named.filter((t) => rise <= t.bytes);
+    const covering = fits.find((t) => fallOf(t.lower) - (owed[t.lower] || 0) >= t.bytes) || fits[0];
+    if (!named.length) findings.push(`${rel}: cap ${base[rel]} -> ${current[rel]} has no CAP_TRADES entry (ARCH-SLIM-17)`);
     else if (!covering) findings.push(`${rel}: cap rose ${rise} bytes, more than its trade's ${Math.max(...named.map((t) => t.bytes))}`);
     else owed[covering.lower] = (owed[covering.lower] || 0) + covering.bytes;
   }
   for (const [lower, need] of Object.entries(owed)) {
-    const fall = lower in base && lower in current ? Math.max(0, base[lower] - current[lower]) : 0;
+    const fall = fallOf(lower);
     if (fall < need) findings.push(`${lower}: cap fell ${fall} bytes, short of the ${need} its trades owe (unpaid)`);
   }
   return findings;

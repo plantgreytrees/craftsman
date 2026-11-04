@@ -32,7 +32,8 @@ flowchart LR
 |---|---|---|---|
 | ARCH-SLIM-01 | Every loadable .md is capped | Unpoliced files (skill references) grow silently | Cap only some categories |
 | ARCH-SLIM-02 | Superseded by ARCH-SLIM-16 | The ratchet test refused every rise, so the trade the rule allowed could never land | — |
-| ARCH-SLIM-16 (replaces 02) | Ratchet with recorded trades: a cap may rise only by a CAP_TRADES entry paid by another file in the same invocation | A needed sentence (ARCH-SAFETY-17 in agents/scrutineer.md) could not fit its cap without cutting guidance (owner decision 2026-11-03) | Net-zero per invocation: lets trades happen without a recorded decision; cutting guidance to fit |
+| ARCH-SLIM-16 (replaces 02) | Superseded by ARCH-SLIM-17 | It said the paired file must load in the same invocation; the ratchet only checked that some invocation loads it | — |
+| ARCH-SLIM-17 (replaces 16) | Ratchet with recorded trades: a cap may rise only by a CAP_TRADES entry paid by a fall in another file some invocation loads; when several entries cover one raise, the paid one binds | A needed sentence (ARCH-SAFETY-17 in agents/scrutineer.md) could not fit its cap without cutting guidance (owner decisions 2026-11-03, 2026-11-04) | Same-invocation pairing (would need a load-graph check for little gain); net-zero per invocation without a recorded decision; cutting guidance to fit |
 | ARCH-SLIM-03 | Per-invocation cap | Context cost is per invocation, not per file | Per-file only; token-based (needs a tokenizer) |
 | ARCH-SLIM-04 | Conditional reference docs | An existing pattern (`_shared-execution`, `_architecture`) | Inline everything |
 | ARCH-SLIM-05 | Delete what's enforced; dedupe only into already-loaded docs | Moving text into a newly loaded doc raises load | Move all to shared docs |
