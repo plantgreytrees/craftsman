@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadConfig, enabled, detectLang, isIgnored, runChecks, filterBaseline,
-  filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure, resolveToolCwd,
+  filterAttributed, globToRe, cacheKey, cacheHit, cacheStore, logEvent, recordFailure, resolveToolCwd, tokenize,
   readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { acceptanceNotice, reconcileAcceptance } from "./tracker.mjs";
@@ -100,7 +100,10 @@ if (cacheHit(key, context)) { logEvent({ ev: "gate", project: context.id ?? ".",
 // A tool that crashed is unavailable, never a finding: say so once per session
 // and do not run it again (a marker in session state is the cache).
 const unavailableMarker = (bin) => path.join(sessionDir(sidOf(input), context), `tool-unavailable-${bin.replace(/[^A-Za-z0-9_.-]/g, "_")}`);
-const skipBins = (lang.check || []).map((c) => c.split(/\s+/)[0]).filter((bin) => fs.existsSync(unavailableMarker(bin)));
+// The bin is the expanded one runChecks compares and runOne reports as unavailable (so `{workspaceRoot}/bin/tool` matches its
+// marker), resolved against the same tool cwd.
+const checkCwd = lang.cwd == null ? null : tool.cwd;
+const skipBins = (lang.check || []).map((c) => tokenize(c, file, context, checkCwd)[0]).filter((bin) => typeof bin === "string" && fs.existsSync(unavailableMarker(bin)));
 
 const { failures, timedOut, skipped, unavailable = [], ms } = await runChecks(file, lang, cfg, context, { skipBins });
 

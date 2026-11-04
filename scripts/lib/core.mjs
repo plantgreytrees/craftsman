@@ -750,7 +750,9 @@ export function detectLang(file, cfg, context = null) {
   const base = path.basename(file);
   const root = context?.root || PROJECT_ROOT;
   const rel = path.relative(root, file).split(path.sep).join("/");
-  for (const [name, spec] of Object.entries(cfg.languages)) {
+  // A project `null` drops an inherited language (ARCH-STATE-19), so a `languages` entry (or the whole map) may be null.
+  for (const [name, spec] of Object.entries(cfg.languages || {})) {
+    if (!spec) continue;
     if ((spec.extensions || []).includes(ext)) return { name, ...spec };
     if ((spec.filenames || []).includes(base)) return { name, ...spec };
     if ((spec.paths || []).some((glob) => globToRe(glob).test(rel))) return { name, ...spec };
