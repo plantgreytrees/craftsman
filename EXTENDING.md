@@ -206,7 +206,8 @@ folder as `cwd` (root-relative) whenever it is not the root.
   the pre-merge gate looks for the marker at the top level of the worktree only
   and takes the first match. In a repo whose only `package.json` is under
   `services/api/`, the scoped check runs at Stop but the pre-merge gate finds no
-  command and lands without one (nothing is logged). Keep a marker for the
+  command and lands without one (it logs a `pre_merge_gate` skip with reason
+  `no-command`). Keep a marker for the
   command at the repository root if the merge gate should run it.
 - A placeholder command is never snapshotted: it is not run at session start,
   never appears in `session-start.json`, and does not need to be green first. It
@@ -259,7 +260,7 @@ placeholder command):
 |---|---|
 | `clean` | no test-relevant edit this session (the `dirty` marker is absent; a docs-only edit leaves it clean) |
 | `snapshot-pending` | dirty, and SessionStart started a snapshot (it wrote `snapshot-started`) that has landed no `session-start.json`: still running, or dropped because files changed while it ran |
-| `no-command` | dirty, and nothing was left to run: no snapshot was started (no usable test command matched the project when the session began, a command's program is not installed, or snapshots are off), or the snapshot ran and listed no command |
+| `no-command` | dirty, and nothing was left to run: no snapshot was started (no usable test command matched the project when the session began, a command's program is not installed, or snapshots are off), or the snapshot ran and listed no command; a workspace sub-project scope is another repository and has no baseline of its own |
 | `red-at-start` | dirty, but every test command in `session-start.json` was already red at session start |
 | `no-changes` | a placeholder command, and the session change list is empty (or every file in it has since been deleted) |
 | `changes-unknown` | a placeholder command, and the change list is missing or unreadable |
