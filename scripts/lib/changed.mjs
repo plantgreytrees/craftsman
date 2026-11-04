@@ -39,8 +39,16 @@ export function embeddedChangePlaceholder(cmd) {
   return typeof cmd === "string" && splitCmd(cmd).some(isEmbedded);
 }
 
+/** True when the command names the session change list, whole (`{changed}`) or embedded (`--files={changed}`). Such a command
+ * is scoped: Stop derives it from config and runs it against the change list, so it is never snapshotted at session start,
+ * never run from session-start.json, and never run with a placeholder left in it (ARCH-STATE-21). */
+export function isScoped(cmd) {
+  return hasChangePlaceholder(cmd) || embeddedChangePlaceholder(cmd);
+}
+
 /** Expand the command into argv for `files` (root-relative POSIX paths from readChanged): a whole `{changed}` token becomes
- * one entry per file and `{changedDirs}` the sorted unique directories, both POSIX and relative to `cwd` (default: `root`).
+ * one entry per file and `{changedDirs}` the sorted unique directories, both POSIX and relative to `cwd` (default: `root`);
+ * a relative path that starts with `-` is written `./-...` so a tool never reads it as an option.
  * `{ skip }` is an empty ("no-changes") or unknown ("changes-unknown", files is not an array) set; `{ warn }` is an
  * embedded placeholder, which stays literal and means the command must not run. A command with no placeholder is only split. */
 export function expandChangePlaceholders(cmd, files, { cwd, root } = {}) {
@@ -51,7 +59,8 @@ export function expandChangePlaceholders(cmd, files, { cwd, root } = {}) {
   if (!files.length) return { skip: "no-changes" };
   const base = root || PROJECT_ROOT;
   const from = cwd || base;
-  const rels = files.map((f) => path.relative(from, path.resolve(base, f)).split(path.sep).join("/") || ".");
+  // A relative path that starts with `-` would be read by the tool as an option, so it gets `./` (`.` and every other path stay as they are).
+  const rels = files.map((f) => path.relative(from, path.resolve(base, f)).split(path.sep).join("/") || ".").map((r) => (r.startsWith("-") ? "./" + r : r));
   const dirs = [...new Set(rels.map((r) => path.posix.dirname(r)))].sort();
   return { argv: tokens.flatMap((tok) => (tok === "{changed}" ? rels : tok === "{changedDirs}" ? dirs : [tok])) };
 }

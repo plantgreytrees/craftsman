@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped, markerPresent } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
@@ -15,7 +15,7 @@ import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
 import { isCraftsmanStateLine } from "./lib/craftsman-state.mjs";
 import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
-import { embeddedChangePlaceholder, expandChangePlaceholders, hasChangePlaceholder, readChanged } from "./lib/changed.mjs";
+import { expandChangePlaceholders, isScoped, readChanged } from "./lib/changed.mjs";
 import { gateUsable } from "./lib/gate-command.mjs";
 
 const T0 = Date.now();
@@ -183,9 +183,7 @@ try { start = JSON.parse(fs.readFileSync(path.join(sdir, "session-start.json"), 
 let results = [];
 if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
-// A command that names the session change list, whole (`{changed}`) or embedded (`--files={changed}`). It is scoped:
-// derived from config at Stop, never from session-start.json, and never run with a placeholder still in it (ARCH-STATE-21).
-const isScoped = (cmd) => hasChangePlaceholder(cmd) || embeddedChangePlaceholder(cmd);
+// A scoped command (isScoped, lib/changed.mjs) is derived from config at Stop, never from session-start.json (ARCH-STATE-21).
 
 // Things Stop says once per session (ARCH-SAFETY-04). A marker in session state holds a signature of what was said, so the
 // same condition is never repeated while a different one (another command) still is.
@@ -203,16 +201,18 @@ if (isDirty) {
   const before = tasks.length;
   for (const { cmd, green } of results) if (green && !isScoped(cmd)) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
 
-  // 2a. Scoped commands: every placeholder entry of stopGate.commands whose marker is present and every placeholder entry of
-  //     stopGate.extraChecks, expanded from the session change list. No snapshot and no green-at-start: they run whenever
-  //     the session is dirty, and a failure is scoped, not a regression (ARCH-STATE-21).
-  const scoped = [...new Set([
-    ...Object.entries(cfg.stopGate?.commands || {}).filter(([marker, cmd]) => isScoped(cmd) && gateUsable(context.root, marker, cmd)).map(([, cmd]) => cmd),
-    ...(cfg.stopGate?.extraChecks || []).filter(isScoped),
-  ])];
+  // 2a. Scoped commands: every placeholder entry of stopGate.commands whose marker is present anywhere in the tree (as at snapshot
+  //     time) and every placeholder entry of stopGate.extraChecks, expanded from the session change list. No snapshot and no
+  //     green-at-start: they run whenever the session is dirty, and a failure is scoped, not a regression (ARCH-STATE-21).
+  const fromCommands = [];
+  for (const [marker, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
+    if (isScoped(cmd) && await markerPresent(marker, context) && gateUsable(context.root, marker, cmd, { markerOk: true })) fromCommands.push(cmd);
+  }
+  const scoped = [...new Set([...fromCommands, ...(cfg.stopGate?.extraChecks || []).filter(isScoped)])];
   let scopedSkipLogged = false;
   if (scoped.length) {
-    const changed = readChanged(sdir);
+    // A path that no longer exists is dropped first, so no check is handed it; a missing or unreadable list stays unknown (null).
+    const changed = readChanged(sdir)?.filter((f) => fs.existsSync(path.resolve(context.root, f))) ?? null;
     const unknown = [];
     const embedded = [];
     for (const cmd of scoped) {
