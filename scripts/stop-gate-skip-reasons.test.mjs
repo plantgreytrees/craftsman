@@ -80,22 +80,53 @@ for (const [reason, state, why] of REASONS) {
   });
 }
 
-// No session-start.json: the Stop decides from config whether the snapshot is still to come (ARCH-STATE-22). SessionStart
-// starts it only when a non-scoped stopGate.commands marker is present and usable, so in a repo with none the file never
-// lands and the reason is no-command; with one it is genuinely still to come.
+// No session-start.json: Stop reads whether SessionStart started a snapshot (the snapshot-started marker session-context.mjs
+// writes where it spawns snapshot.mjs), never config (ARCH-STATE-22). Marker present: the snapshot has not produced a result
+// (still running, or dropped because files changed while it ran) -> snapshot-pending. Marker absent: none was started -> no-command.
 const PKG = { "package.json": "{}\n" };
+const SESSION_CONTEXT_PATH = fileURLToPath(new URL("./session-context.mjs", import.meta.url));
+
+// SessionStart for real. Every case that uses it spawns no snapshot, so no detached process races the Stop that follows.
+function sessionStart(dir, sid) {
+  const r = spawnSync(process.execPath, [SESSION_CONTEXT_PATH], {
+    cwd: dir, input: JSON.stringify({ session_id: sid }), encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+  });
+  assert.equal(r.status, 0, r.stderr);
+}
+
+// The marker file as session-context.mjs writes it where it spawns the snapshot.
+function markStarted(dir, sid) {
+  const sessions = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, "snapshot-started"), String(Date.now()));
+}
+
+const addPackageJson = (dir) => {
+  fs.writeFileSync(path.join(dir, "package.json"), "{}\n");
+  spawnSync("git", ["add", "-A"], { cwd: dir });
+  spawnSync("git", ["commit", "-q", "-m", "package.json"], { cwd: dir });
+};
+
+const NODE_0 = { "package.json": "node -e 0" };
+// A `just` command no machine can run, whether or not `just` is installed (not on PATH, or the target is not in its summary).
+const UNUSABLE_JUST = `just nosuchtarget-${process.pid}-${Date.now()}`;
 const UNSEEDED = [
-  ["no-command", {}, {}, "a markerless repo: no snapshot was ever started"],
-  ["snapshot-pending", { commands: { "package.json": "node -e 0" } }, PKG, "a package.json marker with a configured command: the snapshot is still to come"],
-  ["snapshot-pending", {}, PKG, "a package.json marker and the default command: the snapshot is still to come"],
-  ["snapshot-pending", { commands: { "package.json": "node -e 0" } }, { "services/api/package.json": "{}\n" }, "the marker lives under a sub-directory"],
-  ["no-command", { commands: { "package.json": null } }, PKG, "the marker is present but its command is dropped (null): no snapshot can come"],
+  ["no-command", {}, {}, sessionStart, "a markerless repo: SessionStart started no snapshot"],
+  ["no-command", { snapshotAtStart: false, commands: NODE_0 }, PKG, sessionStart, "snapshotAtStart is false with a marker and a command: SessionStart started no snapshot"],
+  ["no-command", { commands: NODE_0 }, {}, (dir, sid) => { sessionStart(dir, sid); addPackageJson(dir); }, "a package.json created after SessionStart: no snapshot was started"],
+  ["no-command", { commands: { "package.json": null } }, PKG, sessionStart, "the marker is present but its command is dropped (null): SessionStart started no snapshot"],
+  ["no-command", { commands: { justfile: UNUSABLE_JUST } }, { justfile: "default:\n\t@echo hi\n" }, sessionStart, "the only present marker maps to an unusable command (a justfile whose `just` target does not exist): SessionStart started no snapshot"],
+  ["snapshot-pending", { commands: NODE_0 }, PKG, markStarted, "a snapshot was started and left no result file (still running, or dropped because files changed)"],
+  ["snapshot-pending", {}, PKG, markStarted, "a snapshot was started with the default command and left no result file"],
+  ["snapshot-pending", { commands: NODE_0 }, { "services/api/package.json": "{}\n" }, markStarted, "a snapshot was started for a marker under a sub-directory and left no result file"],
+  ["snapshot-pending", {}, {}, markStarted, "a snapshot was started and the marker file is gone from today's tree: the fact is recorded, not recomputed"],
 ];
 
-for (const [reason, stopGate, files, why] of UNSEEDED) {
+for (const [reason, stopGate, files, before, why] of UNSEEDED) {
   test(`stop-gate: no session-start.json and ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-22)`, async () => {
     const dir = makeFixture(stopGate, files);
     try {
+      before(dir, "unseeded");
       seed(dir, "unseeded", { dirty: true });
       assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", "unseeded", "session-start.json")), false, "no snapshot seeded");
       const { events } = await runStop(dir, "unseeded");

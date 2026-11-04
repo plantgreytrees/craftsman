@@ -121,3 +121,75 @@ test("quality-gate: inside a unit scope the gate event carries the scope's proje
     fs.rmSync(unitRoot, { recursive: true, force: true });
   }
 });
+
+// ARCH-STATE-20: the hook resolves file_path once against the context root and uses that one path throughout, so a relative
+// spelling run from another working directory is the same file, the same tool cwd and the same {file} as the absolute one.
+const SHOW_FILE = 'node -e "console.log(\'seen\', process.argv[1], require(\'path\').basename(process.cwd()));process.exit(1)" {file}';
+
+function makeServiceRoot() {
+  const dir = makeRoot(PASS);
+  fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({
+    security: { enabled: false },
+    stopGate: { requireAcceptanceCriteria: false },
+    languages: { fixture: { extensions: [".fx"], cwd: "nearest:pkg.marker", check: [SHOW_FILE] } },
+  }));
+  fs.mkdirSync(path.join(dir, "svc"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "svc", "pkg.marker"), "");
+  fs.writeFileSync(path.join(dir, "svc", "a.fx"), "x\n");
+  return dir;
+}
+
+// Runs the hook for the project at `dir` from the working directory `cwd`, with the file named exactly as given.
+function runHook(dir, sid, filePath, cwd) {
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  return spawnSync(process.execPath, [QUALITY_GATE_PATH], {
+    cwd, env, encoding: "utf8",
+    input: JSON.stringify({ session_id: sid, tool_name: "Edit", tool_input: { file_path: filePath } }),
+  });
+}
+
+const withoutTiming = ({ ts, ms, ...rest }) => rest;
+
+test("quality-gate: a relative file_path run from another working directory gives the same gate event, tool cwd and {file} as the absolute spelling (ARCH-STATE-20)", () => {
+  const dir = makeServiceRoot();
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "quality-gate-elsewhere-"));
+  try {
+    const absolute = runHook(dir, "qg-abs", path.join(dir, "svc", "a.fx"), dir);
+    assert.equal(absolute.status, 2, absolute.stderr);
+    assert.match(absolute.stderr, /seen a\.fx svc/, "{file} is relative to the tool cwd, which is the service directory");
+    const [reference] = events(dir);
+    assert.equal(reference.cwd, "svc", "the gate event names the tool cwd");
+
+    for (const [spelling, cwd, why] of [
+      ["svc/a.fx", elsewhere, "a relative path from a directory outside the project"],
+      ["svc/a.fx", path.join(dir, "svc"), "a relative path from inside the service directory"],
+      ["./svc/../svc/a.fx", elsewhere, "a relative path with dot segments"],
+    ]) {
+      const before = events(dir).length;
+      const relative = runHook(dir, "qg-rel", spelling, cwd);
+      assert.equal(relative.status, absolute.status, `${why}: same exit status\n${relative.stderr}`);
+      assert.equal(relative.stderr, absolute.stderr, `${why}: same feedback`);
+      const logged = events(dir).slice(before);
+      assert.equal(logged.length, 1, `${why}: one gate event`);
+      assert.deepEqual(withoutTiming(logged[0]), withoutTiming(reference), `${why}: same gate event`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+test("quality-gate: a relative file_path that is not under the root is judged against the root, not the working directory (ARCH-STATE-20)", () => {
+  const dir = makeServiceRoot();
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "quality-gate-elsewhere-"));
+  try {
+    fs.writeFileSync(path.join(elsewhere, "only-here.fx"), "x\n"); // exists beside the hook, not under the root
+    const r = runHook(dir, "qg-missing", "only-here.fx", elsewhere);
+    assert.equal(r.status, 0, "no such file under the root: nothing to gate");
+    assert.deepEqual(events(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
+});

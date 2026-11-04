@@ -26,7 +26,7 @@ const context = active?.project_root
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context)) process.exit(0);
-const file = input?.tool_input?.file_path;
+const file = typeof input?.tool_input?.file_path === "string" && input.tool_input.file_path ? path.resolve(context.root, input.tool_input.file_path) : undefined; // resolved once against the root, never the hook's cwd (ARCH-STATE-20)
 if (!file || !fs.existsSync(file)) process.exit(0);
 
 // Record per-session acceptance-criteria ownership (see stop-gate). The

@@ -343,3 +343,90 @@ test("session-context and account-switch both arm through handoffArmsScope, with
     assert.doesNotMatch(source, /remaining_units\??\.length/, `${file} keeps no inline copy of the rule`);
   }
 });
+
+// ARCH-STATE-22: SessionStart records whether it started a snapshot, so Stop never guesses that from config. The
+// snapshot-started marker sits in the session directory and exists exactly when snapshot.mjs is spawned.
+// The result is JSON written in one call: wait until it parses, so a half-written file is never read.
+function waitFor(file, ms = 20000) {
+  const landed = () => { try { JSON.parse(fs.readFileSync(file, "utf8")); return true; } catch { return false; } };
+  const end = Date.now() + ms;
+  while (!landed() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  return landed();
+}
+
+function sessionStartAt(dir, { stopGate = {}, files = {}, sid = "snap", before } = {}) {
+  const git = (...args) => spawnSync("git", args, { cwd: dir });
+  git("init", "-q");
+  git("config", "user.email", "t@e.com");
+  git("config", "user.name", "t");
+  git("config", "commit.gpgsign", "false");
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".craftsman/\n"); // as init sets it up, so state files never change the tree
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  }
+  fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false, ...stopGate } }));
+  git("add", "-A");
+  git("commit", "-q", "-m", "init");
+  const sessions = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(sessions, { recursive: true });
+  before?.(sessions);
+  const childEnv = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+  for (const key of ["CRAFTSMAN", "CRAFTSMAN_SAFETY", "CLAUDE_CODE_SESSION_ID"]) delete childEnv[key];
+  const r = spawnSync(process.execPath, [SESSION_CONTEXT], { cwd: dir, input: JSON.stringify({ session_id: sid }), encoding: "utf8", env: childEnv });
+  assert.equal(r.status, 0, r.stderr);
+  return { marker: path.join(sessions, "snapshot-started"), result: path.join(sessions, "session-start.json") };
+}
+
+const NODE_0 = { "package.json": "node -e 0" };
+// A `just` command no machine can run, whether or not `just` is installed (not on PATH, or the target is not in its summary).
+const UNUSABLE_JUST = `just nosuchtarget-${process.pid}-${Date.now()}`;
+
+test("session-context: the snapshot-started marker is written where the snapshot is spawned, and the snapshot lands beside it (ARCH-STATE-22)", () => {
+  withProject((dir) => {
+    const { marker, result } = sessionStartAt(dir, { stopGate: { commands: NODE_0 }, files: { "package.json": "{}\n" } });
+    assert.equal(fs.existsSync(marker), true, "a snapshot was spawned, so the marker exists");
+    assert.ok(waitFor(result), "the spawned snapshot wrote its result");
+    assert.equal(fs.existsSync(marker), true, "the snapshot leaves the marker in place");
+  });
+});
+
+test("session-context: a marker under a sub-directory also starts the snapshot and writes the marker (ARCH-STATE-22)", () => {
+  withProject((dir) => {
+    const { marker, result } = sessionStartAt(dir, { stopGate: { commands: NODE_0 }, files: { "services/api/package.json": "{}\n" } });
+    assert.equal(fs.existsSync(marker), true);
+    assert.ok(waitFor(result), "the spawned snapshot wrote its result");
+  });
+});
+
+test("session-context: a stale snapshot-started marker and result from an earlier start are cleared when the snapshot is spawned again (ARCH-STATE-22)", () => {
+  withProject((dir) => {
+    const { marker, result } = sessionStartAt(dir, {
+      stopGate: { commands: NODE_0 }, files: { "package.json": "{}\n" },
+      before: (sessions) => {
+        fs.writeFileSync(path.join(sessions, "snapshot-started"), "stale");
+        fs.writeFileSync(path.join(sessions, "session-start.json"), JSON.stringify({ results: [{ cmd: "stale", green: true }], stale: true }));
+      },
+    });
+    assert.match(fs.readFileSync(marker, "utf8"), /^\d+$/, "the stale marker was replaced by the new one");
+    assert.ok(waitFor(result), "the new snapshot wrote its result");
+    assert.equal(JSON.parse(fs.readFileSync(result, "utf8")).stale, undefined, "the stale result did not survive");
+  });
+});
+
+for (const [why, options] of [
+  ["a markerless repo", { stopGate: {}, files: {} }],
+  ["stopGate.snapshotAtStart is false, with a marker and a command", { stopGate: { snapshotAtStart: false, commands: NODE_0 }, files: { "package.json": "{}\n" } }],
+  ["stopGate.enabled is false, with a marker and a command", { stopGate: { enabled: false, commands: NODE_0 }, files: { "package.json": "{}\n" } }],
+  ["the marker is present but its command is dropped (null)", { stopGate: { commands: { "package.json": null } }, files: { "package.json": "{}\n" } }],
+  // snapshot.mjs applies gateUsable and exits with no result when no entry is usable, so SessionStart must not record a start it cannot make.
+  ["the only present marker maps to an unusable command (a justfile whose `just` target does not exist)", { stopGate: { commands: { justfile: UNUSABLE_JUST } }, files: { justfile: "default:\n\t@echo hi\n" } }],
+]) {
+  test(`session-context: no snapshot is spawned and no snapshot-started marker is written when ${why} (ARCH-STATE-22)`, () => {
+    withProject((dir) => {
+      const { marker, result } = sessionStartAt(dir, options);
+      assert.equal(fs.existsSync(marker), false, "nothing was spawned, so no marker");
+      assert.equal(fs.existsSync(result), false);
+    });
+  });
+}

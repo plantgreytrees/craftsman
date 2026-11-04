@@ -18,6 +18,7 @@ import { loadIndex } from "./lib/plan-index.mjs";
 import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 import { sandboxEnabledAnywhere, sandboxGapLine, sandboxGaps } from "./lib/settings-merge.mjs";
 import { snapshotDocs } from "./lib/doc-snapshot.mjs";
+import { gateUsable } from "./lib/gate-command.mjs";
 import { pending as pendingApprovals } from "./approval.mjs";
 
 let input = {};
@@ -202,15 +203,19 @@ if (handoff?.plan) {
 // Kick the test-green snapshot into the BACKGROUND for THIS session (detached).
 fs.mkdirSync(sessionDir(sid, context), { recursive: true });
 let anyStopCommandMarker = false;
-for (const m of Object.keys(cfg.stopGate?.commands || {})) {
-  if (await markerPresent(m, context)) { anyStopCommandMarker = true; break; }
+for (const [m, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
+  // Same usability test snapshot.mjs applies, so the marker is written only when it has an entry to run or skip.
+  if (await markerPresent(m, context) && gateUsable(context.root, m, cmd, { markerOk: true })) { anyStopCommandMarker = true; break; }
 }
 if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false && anyStopCommandMarker) {
   try { fs.unlinkSync(path.join(sessionDir(sid, context), "session-start.json")); } catch {}
+  try { fs.unlinkSync(path.join(sessionDir(sid, context), "snapshot-started")); } catch {}
   const startingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${await git(["status", "--porcelain", "--untracked-files=all"], context)}`);
   try {
     spawn(process.execPath, [path.join(PLUGIN_ROOT, "scripts", "snapshot.mjs"), sid, context.id, startingTree],
       { detached: true, stdio: "ignore", windowsHide: true, cwd: context.root, env: process.env }).unref();
+    // The fact Stop reads when no session-start.json lands (ARCH-STATE-22): written only here, where a snapshot is spawned.
+    fs.writeFileSync(path.join(sessionDir(sid, context), "snapshot-started"), String(Date.now()));
   } catch { /* snapshot is best-effort */ }
 }
 
