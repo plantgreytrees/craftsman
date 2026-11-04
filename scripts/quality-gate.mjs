@@ -10,6 +10,7 @@ import {
   readStdin, sidOf, sessionDir, atomicWrite, PROJECT_ROOT, projectContext, recordAcceptanceOwnership, advisorySkipped } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { acceptanceNotice, reconcileAcceptance } from "./tracker.mjs";
+import { recordChanged } from "./lib/changed.mjs";
 
 const t0 = Date.now();
 
@@ -58,7 +59,13 @@ const named = (p) => globToRe(p).test(rel0) || globToRe(p).test("./" + rel0);
 const testsRead = (Array.isArray(cfg.stopGate?.markdownTests) ? cfg.stopGate.markdownTests : []).some(named);
 const isDocOrState = rel0.startsWith(".craftsman/") || (!testsRead && (rel0.endsWith(".md") || docPaths.some(named)));
 if (!isDocOrState && !isIgnored(file, cfg, lang, context)) {
-  try { atomicWrite(path.join(sessionDir(sidOf(input), context), "dirty"), String(Date.now())); } catch {}
+  const sdir = sessionDir(sidOf(input), context);
+  try { atomicWrite(path.join(sdir, "dirty"), String(Date.now())); } catch {}
+  // The same edit joins the session change list that `{changed}` / `{changedDirs}` expand from (ARCH-STATE-21). A file
+  // outside the root has no root-relative path, so it stays out of the list.
+  if (rel0 && rel0 !== ".." && !rel0.startsWith("../") && !path.isAbsolute(rel0)) {
+    try { recordChanged(sdir, rel0); } catch {}
+  }
 }
 
 if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
