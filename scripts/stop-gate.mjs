@@ -15,6 +15,8 @@ import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
 import { isCraftsmanStateLine } from "./lib/craftsman-state.mjs";
 import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
+import { embeddedChangePlaceholder, expandChangePlaceholders, hasChangePlaceholder, readChanged } from "./lib/changed.mjs";
+import { gateUsable } from "./lib/gate-command.mjs";
 
 const T0 = Date.now();
 const pexec = promisify(execFile);
@@ -181,27 +183,80 @@ try { start = JSON.parse(fs.readFileSync(path.join(sdir, "session-start.json"), 
 let results = [];
 if (Array.isArray(start?.results)) results = start.results;
 else if (start?.testsGreenAtStart !== undefined && start.cmd) results = [{ cmd: start.cmd, green: start.testsGreenAtStart }];
+// A command that names the session change list, whole (`{changed}`) or embedded (`--files={changed}`). It is scoped:
+// derived from config at Stop, never from session-start.json, and never run with a placeholder still in it (ARCH-STATE-21).
+const isScoped = (cmd) => hasChangePlaceholder(cmd) || embeddedChangePlaceholder(cmd);
+
+// Things Stop says once per session (ARCH-SAFETY-04). A marker in session state holds a signature of what was said, so the
+// same condition is never repeated while a different one (another command) still is.
+const scopedNotices = [];
+function sayOnce(name, text, sig) {
+  const marker = path.join(sdir, name);
+  const signature = sha1(JSON.stringify(sig));
+  try { if (fs.readFileSync(marker, "utf8") === signature) return; } catch {}
+  try { atomicWrite(marker, signature); } catch { /* no state dir: the notice still goes out */ }
+  scopedNotices.push(text);
+}
+
 if (isDirty) {
   // A dirty Stop that queues no test says why, once (ARCH-STATE-22).
   const before = tasks.length;
-  for (const { cmd, green } of results) if (green) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
-  if (tasks.length === before) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: !start ? "snapshot-pending" : !results.length ? "no-command" : "red-at-start" });
+  for (const { cmd, green } of results) if (green && !isScoped(cmd)) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
+
+  // 2a. Scoped commands: every placeholder entry of stopGate.commands whose marker is present and every placeholder entry of
+  //     stopGate.extraChecks, expanded from the session change list. No snapshot and no green-at-start: they run whenever
+  //     the session is dirty, and a failure is scoped, not a regression (ARCH-STATE-21).
+  const scoped = [...new Set([
+    ...Object.entries(cfg.stopGate?.commands || {}).filter(([marker, cmd]) => isScoped(cmd) && gateUsable(context.root, marker, cmd)).map(([, cmd]) => cmd),
+    ...(cfg.stopGate?.extraChecks || []).filter(isScoped),
+  ])];
+  let scopedSkipLogged = false;
+  if (scoped.length) {
+    const changed = readChanged(sdir);
+    const unknown = [];
+    const embedded = [];
+    for (const cmd of scoped) {
+      const expanded = expandChangePlaceholders(cmd, changed, { cwd: context.root, root: context.root });
+      if (expanded.warn) { embedded.push(cmd); continue; }
+      if (expanded.skip) {
+        scopedSkipLogged = true;
+        logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: expanded.skip, cmd });
+        if (expanded.skip === "changes-unknown") unknown.push(cmd);
+        continue;
+      }
+      tasks.push({ kind: "scoped", cmd, argv: expanded.argv, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
+    }
+    if (unknown.length) {
+      sayOnce("scoped-notice-changes-unknown",
+        `craftsman: stop-gate skipped ${unknown.join(", ")} (changes-unknown: the session change list is missing or unreadable), advisory only`, unknown);
+    }
+    if (embedded.length) {
+      sayOnce("scoped-notice-embedded",
+        `craftsman: stop-gate skipped ${embedded.join(", ")} ({changed} and {changedDirs} must be a whole argument, never part of one), advisory only`, embedded);
+    }
+  }
+  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: !start ? "snapshot-pending" : !results.length ? "no-command" : "red-at-start" });
 } else {
   logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: "clean" });
 }
 
-// 2b. Project guards / extra checks (e.g. run-all-guards.py, contract-drift).
+// 2b. Project guards / extra checks (e.g. run-all-guards.py, contract-drift). A placeholder entry is a scoped command
+//     (2a): it runs expanded, or not at all.
 for (const cmd of cfg.stopGate?.extraChecks || []) {
+  if (isScoped(cmd)) continue;
   tasks.push({ kind: "extra", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
 }
 
 // Shared wall-clock budget across the batch; since tasks dispatch
 // concurrently, `cap` is effectively each task's own full timeoutMs unless
-// several are genuinely slow. Unlike "test"/"extra" (silent skip on a
+// several are genuinely slow. Unlike "test"/"extra" (no block on a
 // budget kill, see `isDirty` above), any kill of a "secret" task — before
 // or during the run — is an incomplete scan that "always a hard block,
-// never baselined" forbids treating as clean, so it blocks instead.
+// never baselined" forbids treating as clean, so it blocks instead. A
+// "scoped" task cut by the budget does not block but is announced, once per
+// session (ARCH-STATE-21, ARCH-SAFETY-04).
 const budgetDeadline = Date.now() + (cfg.stopGate?.totalBudgetMs ?? 280000);
+const scopedBudgetKilled = [];
 
 let allSecretsCompleted = true; // batch-wide: marker only written if every "secret" task actually finished
 
@@ -218,9 +273,10 @@ async function runTask(t) {
       return;
     }
     logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
+    if (t.kind === "scoped") scopedBudgetKilled.push(t.cmd);
     return;
   }
-  const [bin, ...args] = splitCmd(t.cmd);
+  const [bin, ...args] = t.argv || splitCmd(t.cmd);
   try {
     await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: context.root });
     // this task completed; allSecretsCompleted only flips false elsewhere —
@@ -249,6 +305,7 @@ async function runTask(t) {
         }
         // A clean fallback is complete; findings remain incomplete until resolved.
       }
+      if (t.kind === "scoped") sayOnce("scoped-notice-unavailable", `craftsman: stop-gate skipped ${t.cmd} (${bin} was not found), advisory only`, [t.cmd]);
       return;
     }
     if (t.kind === "secret" && e.killed) {
@@ -272,9 +329,10 @@ async function runTask(t) {
     if (e.killed) {
       if (cap < t.timeoutMs) {
         logEvent({ ev: "stop-budget-exceeded", sid, cmd: t.cmd });
+        if (t.kind === "scoped") scopedBudgetKilled.push(t.cmd);
         return;
       }
-      const label = t.kind === "test" ? "TESTS" : "GUARD";
+      const label = t.kind === "scoped" ? "SCOPED TESTS" : t.kind === "test" ? "TESTS" : "GUARD";
       problems.push(
         `${label} INCOMPLETE: ${t.cmd} did not finish within its own configured limit ` +
         `(${t.timeoutMs}ms) — increase stopGate.testTimeoutMs or make the command faster, then retry.`
@@ -289,6 +347,11 @@ async function runTask(t) {
     } else if (t.kind === "test") {
       const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n");
       problems.push(`REGRESSION: tests passed at session start but fail now (${t.cmd}):\n${out}`);
+    } else if (t.kind === "scoped") {
+      // Not baselined: nothing says these were green before, so this is a failure, not a regression.
+      const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-30).join("\n")
+        || (typeof e.code === "string" ? `${e.code}: ${e.message}` : "");
+      problems.push(`SCOPED TESTS FAILED (not baselined): ${t.cmd}\n${out}`);
     } else {
       const out = ((e.stdout || "") + (e.stderr || "")).split("\n").slice(-20).join("\n");
       problems.push(`GUARD FAILED (${t.cmd}):\n${out}`);
@@ -297,6 +360,13 @@ async function runTask(t) {
 }
 
 await Promise.all(tasks.map(runTask));
+
+// A scoped task the budget cut short never finished and nothing blocks on it, so it is said once per session.
+if (scopedBudgetKilled.length) {
+  sayOnce("scoped-notice-budget",
+    `craftsman: stop-gate scoped tests ${scopedBudgetKilled.join(", ")} were cut short by the Stop-gate time budget (stopGate.totalBudgetMs) and did not finish, advisory only`,
+    scopedBudgetKilled);
+}
 
 // Mark scanned only once EVERY secret task in the batch actually ran to
 // completion; a partial batch (killed/ENOENT'd/never dispatched) stays
@@ -309,7 +379,8 @@ if (tasks.some((t) => t.kind === "secret") && allSecretsCompleted) {
 // background snapshot may still be running (`results` stays [] until it
 // lands). Clearing unconditionally would let a later Stop skip a check
 // that never ran.
-if (isDirty && results.length) { try { fs.unlinkSync(dirtyPath); } catch {} }
+// A scoped task is a test run in its own right, snapshot or not (ARCH-STATE-21).
+if (isDirty && (results.length || tasks.some((t) => t.kind === "scoped"))) { try { fs.unlinkSync(dirtyPath); } catch {} }
 
 // 3. Acceptance criteria — enforce ONLY if THIS session owns the current
 //    criteria (ownsAcceptance: written here, or adopted when /orchestrate was
@@ -416,7 +487,7 @@ if (!inFlight.length) {
 //    stopGate.blockOnUnpushed is true; doc drift is informational.
 const { unpushed, unseenDocs } = stopReports();
 if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
-const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs, legacyNotice].filter(Boolean).join("\n");
+const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs, legacyNotice, ...scopedNotices].filter(Boolean).join("\n");
 
 if (!problems.length) {
   logEvent({ ev: "stop", sid, project: context.id ?? ".", result: "pass", ms: Date.now() - T0 });
