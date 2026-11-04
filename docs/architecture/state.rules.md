@@ -3,7 +3,7 @@ area: state
 governs: ["scripts/lib/core.mjs", "scripts/state-write.mjs", "scripts/scope.mjs", "scripts/pre-guard.mjs", "scripts/stop-gate.mjs", "scripts/orchestrate-scope-guard.mjs", "scripts/agent-mode-guard.mjs", "scripts/session-context.mjs", "scripts/doc-write.mjs", "scripts/quality-gate.mjs", "scripts/snapshot.mjs", "scripts/lib/changed.mjs"]
 human: docs/architecture/state.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: db007cf4f06245644cb68fb2c2673e52be03c3bf
+verified_at: eb6c31bdcb94660df165dab8863148d6a72e3aa6
 updated: 2026-11-04
 ---
 # ARCH state — enforced rules
@@ -18,7 +18,7 @@ updated: 2026-11-04
 - **ARCH-STATE-08** [decided] stop-gate blocks while an owned feature is all FEATURE_MERGED, unlanded (STATE-04 skip applies) — check: stop-gate.test — cite: scripts/stop-gate.mjs:456-484
 - **ARCH-STATE-09** [decided] In a shared feature worktree scope stays keyed by worktree (ARCH-STATE-03): activating the next unit replaces the previous unit's scope file, and land, park and block each release the worktree scope before the next unit's smoke gate; wave units each hold their own worktree and scope — check: scope.test.mjs two units in one worktree, two wave worktrees — cite: scripts/scope.mjs:144-158
 - **ARCH-STATE-10** [superseded by ARCH-STATE-17]
-- **ARCH-STATE-11** [decided] loadWorkspaceManifest lists a registered project whose directory is an empty uninitialised submodule as initialized:false and fails only when that project is selected, naming `git submodule update --init`; `project:`/`bumps:` accept a manifest id or the project's declared root path (projectIdOf); run state a background session cannot Write (acceptance.md, instructions/*.goal.txt) is written by state-write.mjs into the main checkout — check: followups.test.mjs manifest, path-form and state-write cases — cite: scripts/lib/core.mjs:129-151
+- **ARCH-STATE-11** [decided] loadWorkspaceManifest lists a registered project whose directory is an empty uninitialised submodule as initialized:false and fails only when that project is selected, naming `git submodule update --init`; `project:`/`bumps:` accept a manifest id or the project's declared root path (projectIdOf); run state a background session cannot Write (acceptance.md, instructions/*.goal.txt) is written by state-write.mjs into the main checkout — check: followups.test.mjs manifest, path-form and state-write cases — cite: scripts/lib/core.mjs:129-163
 - **ARCH-STATE-12** [superseded by ARCH-STATE-14]
 - **ARCH-STATE-13** [superseded by ARCH-STATE-15]
 - **ARCH-STATE-14** [superseded by ARCH-STATE-16]
