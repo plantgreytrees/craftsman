@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import * as core from "./core.mjs";
 
 const CORE_URL = new URL("./core.mjs", import.meta.url).href;
@@ -252,4 +253,63 @@ test("a project that turns enabled back on is not reported as disabled", () => {
     out({ enabled: cfg.enabled, quality: core.guardState({ cfg, context, env: {}, tmp: ${JSON.stringify(ws)}, sid: "cl" }).quality });`);
   assert.equal(value.enabled, true);
   assert.deepEqual(value.quality, []);
+});
+
+test("a project null language drops the inherited one: detectLang skips it and the other languages still detect", () => {
+  const cfg = core.deepMerge(core.loadConfig(), { languages: { python: null } });
+  const at = (name) => path.join(core.PROJECT_ROOT, name);
+  assert.equal(cfg.languages.python, null, "the null survives the merge: it is the documented way to drop an entry");
+  assert.equal(core.detectLang(at("a.py"), cfg), null, "the dropped language no longer claims its files, and nothing throws");
+  assert.equal(core.detectLang(at("a.js"), cfg)?.name, "javascript", "another language still detects");
+  assert.equal(core.detectLang(at("k8s/a.yaml"), cfg)?.name, "kubernetes", "so does one listed after the dropped entry, by path");
+  const none = core.deepMerge(core.loadConfig(), { languages: null });
+  assert.equal(core.detectLang(at("a.js"), none), null, "a null `languages` map holds no language");
+});
+
+const QUALITY_GATE = fileURLToPath(new URL("../quality-gate.mjs", import.meta.url));
+
+// A git repo whose `fixture` language checks .fx files with a tool named through {workspaceRoot}: a stub that records
+// each attempt and then kills itself, which the gate reads as a crash.
+function crashRepo() {
+  const root = scratch("config-robustness-gate-");
+  for (const a of [["init", "-q"], ["config", "user.email", "t@e.com"], ["config", "user.name", "t"], ["config", "commit.gpgsign", "false"]]) {
+    spawnSync("git", a, { cwd: root });
+  }
+  put(root, "README.md", "fixture\n");
+  put(root, "crash-tool.cjs", '#!/usr/bin/env node\nrequire("node:fs").appendFileSync(__dirname + "/attempts.log", "run\\n");\nprocess.kill(process.pid, "SIGKILL");\n');
+  fs.chmodSync(path.join(root, "crash-tool.cjs"), 0o755);
+  put(root, "craftsman.config.json", {
+    security: { enabled: false },
+    stopGate: { requireAcceptanceCriteria: false },
+    languages: { fixture: { extensions: [".fx"], check: ["{workspaceRoot}/crash-tool.cjs {file}"] } },
+  });
+  spawnSync("git", ["add", "-A"], { cwd: root });
+  spawnSync("git", ["commit", "-q", "-m", "init"], { cwd: root });
+  return root;
+}
+function editFixture(root, sid, content) {
+  const file = path.join(root, "a.fx");
+  fs.writeFileSync(file, content);
+  return spawnSync(process.execPath, [QUALITY_GATE], {
+    cwd: root, encoding: "utf8", env: childEnv(),
+    input: JSON.stringify({ session_id: sid, tool_name: "Edit", tool_input: { file_path: file } }),
+  });
+}
+
+test("quality-gate: a crashed {workspaceRoot} tool is attempted once and skipped on the next edit of the session", (t) => {
+  const root = crashRepo();
+  const attempts = () => {
+    try { return fs.readFileSync(path.join(root, "attempts.log"), "utf8").split("\n").filter(Boolean).length; } catch { return 0; }
+  };
+  const first = editFixture(root, "cr-one", "one\n");
+  assert.equal(first.status, 0, first.stderr);
+  if (attempts() === 0) { t.skip("the scratch directory does not allow executing a file"); return; }
+  assert.equal(attempts(), 1, "the first edit runs the tool, which crashes");
+  assert.match(first.stdout, /crashed and is unavailable/, "and the crash is said once");
+  const second = editFixture(root, "cr-one", "two\n");
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(attempts(), 1, "the second edit of the session does not run the crashed tool again");
+  assert.doesNotMatch(second.stdout, /crashed/, "and says nothing more about it");
+  editFixture(root, "cr-two", "three\n");
+  assert.equal(attempts(), 2, "the skip is the session's: a new session tries the tool afresh");
 });
