@@ -354,13 +354,14 @@ function waitFor(file, ms = 20000) {
   return landed();
 }
 
-function sessionStartAt(dir, { stopGate = {}, files = {}, sid = "snap", before } = {}) {
+function sessionStartAt(dir, { stopGate = {}, files = {}, sid = "snap", before, ignoreState = true, env = {} } = {}) {
   const git = (...args) => spawnSync("git", args, { cwd: dir });
   git("init", "-q");
   git("config", "user.email", "t@e.com");
   git("config", "user.name", "t");
   git("config", "commit.gpgsign", "false");
-  fs.writeFileSync(path.join(dir, ".gitignore"), ".craftsman/\n"); // as init sets it up, so state files never change the tree
+  // as init sets it up, so state files never change the tree; `ignoreState: false` is a repo that does not gitignore .craftsman/ (ARCH-STATE-04)
+  if (ignoreState) fs.writeFileSync(path.join(dir, ".gitignore"), ".craftsman/\n");
   for (const [rel, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), text);
@@ -371,11 +372,24 @@ function sessionStartAt(dir, { stopGate = {}, files = {}, sid = "snap", before }
   const sessions = path.join(dir, ".craftsman", "sessions", sid);
   fs.mkdirSync(sessions, { recursive: true });
   before?.(sessions);
-  const childEnv = { ...process.env, CLAUDE_PROJECT_DIR: dir };
+  const childEnv = { ...process.env, CLAUDE_PROJECT_DIR: dir, ...env };
   for (const key of ["CRAFTSMAN", "CRAFTSMAN_SAFETY", "CLAUDE_CODE_SESSION_ID"]) delete childEnv[key];
   const r = spawnSync(process.execPath, [SESSION_CONTEXT], { cwd: dir, input: JSON.stringify({ session_id: sid }), encoding: "utf8", env: childEnv });
   assert.equal(r.status, 0, r.stderr);
   return { marker: path.join(sessions, "snapshot-started"), result: path.join(sessions, "session-start.json") };
+}
+
+// Polls without spinning the event loop (these tests are synchronous), for a condition another process makes true.
+function waitUntil(condition, ms = 20000) {
+  const end = Date.now() + ms;
+  while (!condition() && Date.now() < end) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  return condition();
+}
+
+// Whether the process has finished: gone, or a zombie nobody has reaped yet.
+function finished(pid) {
+  try { process.kill(pid, 0); } catch { return true; }
+  try { return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] === "Z"; } catch { return false; }
 }
 
 const NODE_0 = { "package.json": "node -e 0" };
@@ -414,14 +428,16 @@ test("session-context: a stale snapshot-started marker and result from an earlie
   });
 });
 
-for (const [why, options] of [
+const NO_SPAWN = [
   ["a markerless repo", { stopGate: {}, files: {} }],
   ["stopGate.snapshotAtStart is false, with a marker and a command", { stopGate: { snapshotAtStart: false, commands: NODE_0 }, files: { "package.json": "{}\n" } }],
   ["stopGate.enabled is false, with a marker and a command", { stopGate: { enabled: false, commands: NODE_0 }, files: { "package.json": "{}\n" } }],
   ["the marker is present but its command is dropped (null)", { stopGate: { commands: { "package.json": null } }, files: { "package.json": "{}\n" } }],
   // snapshot.mjs applies gateUsable and exits with no result when no entry is usable, so SessionStart must not record a start it cannot make.
   ["the only present marker maps to an unusable command (a justfile whose `just` target does not exist)", { stopGate: { commands: { justfile: UNUSABLE_JUST } }, files: { justfile: "default:\n\t@echo hi\n" } }],
-]) {
+];
+
+for (const [why, options] of NO_SPAWN) {
   test(`session-context: no snapshot is spawned and no snapshot-started marker is written when ${why} (ARCH-STATE-22)`, () => {
     withProject((dir) => {
       const { marker, result } = sessionStartAt(dir, options);
@@ -430,3 +446,79 @@ for (const [why, options] of [
     });
   });
 }
+
+// A resume (the same session id started again) that spawns nothing must not keep the earlier start's marker: Stop would read
+// it as snapshot-pending for a snapshot that is not coming.
+for (const [why, options] of NO_SPAWN) {
+  test(`session-context: a resume that spawns no snapshot leaves no stale snapshot-started marker when ${why} (ARCH-STATE-22)`, () => {
+    withProject((dir) => {
+      const { marker } = sessionStartAt(dir, { ...options, before: (sessions) => fs.writeFileSync(path.join(sessions, "snapshot-started"), "stale") });
+      assert.equal(fs.existsSync(marker), false, "the earlier start's marker was cleared");
+    });
+  });
+}
+
+// SessionStart must not probe `just --summary` (a subprocess) when no snapshot can follow from it. The control proves the stub
+// is what `just` resolves to: with snapshots on, the same repo does probe it.
+for (const [why, stopGate, probed] of [
+  ["stopGate.snapshotAtStart is false", { snapshotAtStart: false }, false],
+  ["stopGate.enabled is false", { enabled: false }, false],
+  ["snapshots are on (the control)", {}, true],
+]) {
+  test(`session-context: ${probed ? "probes" : "never runs"} just --summary when ${why} (ARCH-STATE-22, ARCH-SAFETY-04)`, () => {
+    withProject((dir) => {
+      const bin = `${dir}-bin`;
+      const log = `${dir}-just.log`;
+      fs.mkdirSync(bin);
+      fs.writeFileSync(path.join(bin, "just"), `#!/bin/sh\necho "$@" >> "${log}"\necho default\n`, { mode: 0o755 });
+      try {
+        const { result } = sessionStartAt(dir, {
+          stopGate: { ...stopGate, commands: { justfile: "just default" } }, files: { justfile: "default:\n\t@echo hi\n" },
+          env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+        });
+        if (probed) {
+          assert.ok(waitFor(result), "the spawned snapshot wrote its result, so it is done with the stub");
+          assert.match(fs.readFileSync(log, "utf8"), /--summary/, "the stub stood in for just");
+        } else {
+          assert.equal(fs.existsSync(log), false, "just was never run");
+        }
+      } finally {
+        fs.rmSync(bin, { recursive: true, force: true });
+        fs.rmSync(log, { force: true });
+      }
+    });
+  });
+}
+
+// ARCH-STATE-04: in a repo that does not gitignore `.craftsman/`, the state SessionStart writes after it takes the starting hash
+// (snapshot-started above all) is in `git status`. The real SessionStart must still land the snapshot, and a real edit to a
+// tracked file while the snapshot runs must still drop it.
+const porcelain = (dir) => spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: dir, encoding: "utf8" }).stdout;
+
+test("session-context: where .craftsman/ is not gitignored the snapshot still lands session-start.json (ARCH-STATE-04)", () => {
+  withProject((dir) => {
+    const { marker, result } = sessionStartAt(dir, { ignoreState: false, stopGate: { commands: NODE_0 }, files: { "package.json": "{}\n" } });
+    assert.equal(fs.existsSync(marker), true, "a snapshot was spawned");
+    assert.ok(waitFor(result), "the snapshot landed its result: craftsman's own state did not read as a change");
+    assert.match(porcelain(dir), /^\?\? \.craftsman\/sessions\/snap\/snapshot-started$/m, "the state is in git status, not ignored");
+  });
+});
+
+test("session-context: where .craftsman/ is not gitignored an edit to a tracked file while the snapshot runs still drops it (ARCH-STATE-04)", () => {
+  withProject((dir) => {
+    const pidFile = `${dir}-snapshot.pid`;
+    // Edits a tracked file, then tells the test which process is running it: the snapshot, whose end is when the drop is decided.
+    const edit = `const fs = require("node:fs");\nfs.appendFileSync("tracked.txt", "edited while the snapshot runs\\n");\nfs.writeFileSync(process.argv[2], String(process.ppid));\n`;
+    try {
+      const { marker, result } = sessionStartAt(dir, {
+        ignoreState: false, stopGate: { commands: { "package.json": `node edit.cjs ${pidFile}` } },
+        files: { "package.json": "{}\n", "tracked.txt": "tracked\n", "edit.cjs": edit },
+      });
+      assert.equal(fs.existsSync(marker), true, "a snapshot was spawned");
+      assert.ok(waitUntil(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8") !== ""), "the snapshot ran the command");
+      assert.ok(waitUntil(() => finished(Number(fs.readFileSync(pidFile, "utf8")))), "the snapshot finished");
+      assert.match(porcelain(dir), /^ M tracked\.txt$/m, "the tracked file was edited");
+      assert.equal(fs.existsSync(result), false, "the tree moved while it ran, so no baseline is recorded");
+    } finally { fs.rmSync(pidFile, { force: true }); }
+  });
+});

@@ -19,6 +19,7 @@ import { listWorktrees, sweep } from "./worktree-sweep.mjs";
 import { sandboxEnabledAnywhere, sandboxGapLine, sandboxGaps } from "./lib/settings-merge.mjs";
 import { snapshotDocs } from "./lib/doc-snapshot.mjs";
 import { gateUsable } from "./lib/gate-command.mjs";
+import { withoutCraftsmanState } from "./lib/craftsman-state.mjs";
 import { pending as pendingApprovals } from "./approval.mjs";
 
 let input = {};
@@ -202,15 +203,21 @@ if (handoff?.plan) {
 
 // Kick the test-green snapshot into the BACKGROUND for THIS session (detached).
 fs.mkdirSync(sessionDir(sid, context), { recursive: true });
+// The marker belongs to the start that spawned a snapshot (ARCH-STATE-22): a resume that spawns none must not keep the earlier start's.
+try { fs.unlinkSync(path.join(sessionDir(sid, context), "snapshot-started")); } catch {}
 let anyStopCommandMarker = false;
-for (const [m, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
-  // Same usability test snapshot.mjs applies, so the marker is written only when it has an entry to run or skip.
-  if (await markerPresent(m, context) && gateUsable(context.root, m, cmd, { markerOk: true })) { anyStopCommandMarker = true; break; }
+// With snapshots off nothing is spawned, so nothing is looked up either: gateUsable can run `just --summary` (ARCH-SAFETY-04).
+if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false) {
+  for (const [m, cmd] of Object.entries(cfg.stopGate?.commands || {})) {
+    // Same usability test snapshot.mjs applies, so the marker is written only when it has an entry to run or skip.
+    if (await markerPresent(m, context) && gateUsable(context.root, m, cmd, { markerOk: true })) { anyStopCommandMarker = true; break; }
+  }
 }
-if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false && anyStopCommandMarker) {
+if (anyStopCommandMarker) {
   try { fs.unlinkSync(path.join(sessionDir(sid, context), "session-start.json")); } catch {}
-  try { fs.unlinkSync(path.join(sessionDir(sid, context), "snapshot-started")); } catch {}
-  const startingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${await git(["status", "--porcelain", "--untracked-files=all"], context)}`);
+  // Craftsman's own state is not the user's work (ARCH-STATE-04): the hash ignores it, as snapshot.mjs's ending hash does, because
+  // snapshot-started below is written after this one and a repo that does not gitignore `.craftsman/` would count it as a change.
+  const startingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${withoutCraftsmanState(await git(["status", "--porcelain", "--untracked-files=all"], context))}`);
   try {
     spawn(process.execPath, [path.join(PLUGIN_ROOT, "scripts", "snapshot.mjs"), sid, context.id, startingTree],
       { detached: true, stdio: "ignore", windowsHide: true, cwd: context.root, env: process.env }).unref();
