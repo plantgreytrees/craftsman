@@ -10,11 +10,15 @@ import { fileURLToPath } from "node:url";
 
 const STOP_GATE_PATH = fileURLToPath(new URL("./stop-gate.mjs", import.meta.url));
 
-function makeFixture(stopGate = {}) {
+function makeFixture(stopGate = {}, files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "stop-gate-skip-"));
   for (const a of [["init", "-q"], ["config", "user.email", "t@e.com"], ["config", "user.name", "t"], ["config", "commit.gpgsign", "false"]])
     spawnSync("git", a, { cwd: dir });
   fs.writeFileSync(path.join(dir, "README.md"), "fixture\n");
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  }
   spawnSync("git", ["add", "-A"], { cwd: dir });
   spawnSync("git", ["commit", "-q", "-m", "init"], { cwd: dir });
   fs.writeFileSync(path.join(dir, "craftsman.config.json"), JSON.stringify({
@@ -55,7 +59,6 @@ const skipped = (events) => events.filter((e) => e.ev === "stop-tests-skipped");
 
 // The reason table: what the session's state is -> the one reason the Stop logs.
 const REASONS = [
-  ["snapshot-pending", { dirty: true }, "no session-start.json yet: the background snapshot has not landed"],
   ["no-command", { dirty: true, start: { results: [] } }, "the snapshot ran and found no test command"],
   ["red-at-start", { dirty: true, start: { results: [{ cmd: "node -e 0", green: false }, { cmd: "node -e 1", green: false }] } }, "every command was already red"],
   ["red-at-start", { dirty: true, start: { cmd: "node -e 0", testsGreenAtStart: false } }, "the legacy single-command snapshot was red"],
@@ -76,6 +79,43 @@ for (const [reason, state, why] of REASONS) {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+// No session-start.json: the Stop decides from config whether the snapshot is still to come (ARCH-STATE-22). SessionStart
+// starts it only when a non-scoped stopGate.commands marker is present and usable, so in a repo with none the file never
+// lands and the reason is no-command; with one it is genuinely still to come.
+const PKG = { "package.json": "{}\n" };
+const UNSEEDED = [
+  ["no-command", {}, {}, "a markerless repo: no snapshot was ever started"],
+  ["snapshot-pending", { commands: { "package.json": "node -e 0" } }, PKG, "a package.json marker with a configured command: the snapshot is still to come"],
+  ["snapshot-pending", {}, PKG, "a package.json marker and the default command: the snapshot is still to come"],
+  ["snapshot-pending", { commands: { "package.json": "node -e 0" } }, { "services/api/package.json": "{}\n" }, "the marker lives under a sub-directory"],
+  ["no-command", { commands: { "package.json": null } }, PKG, "the marker is present but its command is dropped (null): no snapshot can come"],
+];
+
+for (const [reason, stopGate, files, why] of UNSEEDED) {
+  test(`stop-gate: no session-start.json and ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-22)`, async () => {
+    const dir = makeFixture(stopGate, files);
+    try {
+      seed(dir, "unseeded", { dirty: true });
+      assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", "unseeded", "session-start.json")), false, "no snapshot seeded");
+      const { events } = await runStop(dir, "unseeded");
+      const logged = skipped(events);
+      assert.equal(logged.length, 1, "one skip event per Stop");
+      assert.equal(logged[0].reason, reason);
+      assert.equal(logged[0].project, ".");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+test("stop-gate: a markerless repo logs no-command on every dirty Stop of the session, never snapshot-pending (ARCH-STATE-22)", async () => {
+  const dir = makeFixture();
+  try {
+    seed(dir, "twice", { dirty: true });
+    await runStop(dir, "twice");
+    const { events } = await runStop(dir, "twice");
+    assert.deepEqual(skipped(events).map((e) => e.reason), ["no-command", "no-command"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 test("stop-gate: a dirty Stop that runs a test logs no stop-tests-skipped, even beside a red command (ARCH-STATE-22)", async () => {
   const dir = makeFixture();
