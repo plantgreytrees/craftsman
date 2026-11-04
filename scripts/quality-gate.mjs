@@ -21,7 +21,7 @@ if (active?.scope_ambiguous) {
   process.exit(2);
 }
 const context = active?.project_root
-  ? { root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
+  ? { id: active.project, root: active.project_root, stateDir: path.join(active.project_root, ".craftsman"), offFlag: path.join(active.project_root, ".craftsman", "off") }
   : projectContext(input.project || ".");
 const cfg = loadConfig(context);
 if (!enabled(cfg, context)) process.exit(0);
@@ -65,7 +65,7 @@ if (!lang || isIgnored(file, cfg, lang, context)) process.exit(0);
 
 // Content-hash cache: unchanged file + unchanged check set => skip entirely.
 const key = cacheKey(file, lang, cfg);
-if (cacheHit(key, context)) { logEvent({ ev: "gate", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
+if (cacheHit(key, context)) { logEvent({ ev: "gate", project: context.id ?? ".", file, result: "cached", ms: Date.now() - t0 }); process.exit(0); }
 
 // A tool that crashed is unavailable, never a finding: say so once per session
 // and do not run it again (a marker in session state is the cache).
@@ -79,7 +79,7 @@ for (const bin of newlyUnavailable) {
   try { atomicWrite(unavailableMarker(bin), String(Date.now())); } catch {}
 }
 if (newlyUnavailable.length) {
-  logEvent({ ev: "gate", file, lang: lang.name, result: "tool-unavailable", tools: newlyUnavailable });
+  logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: "tool-unavailable", tools: newlyUnavailable });
   process.stdout.write(JSON.stringify({
     systemMessage: `craftsman: ${newlyUnavailable.join(", ")} crashed and is unavailable, so its check is skipped for the rest of this session (not a finding in your code).`,
   }));
@@ -88,7 +88,7 @@ if (newlyUnavailable.length) {
 if (failures.length === 0) {
   if (unavailable.length || skipBins.length) process.exit(0); // an unchecked file is not a pass: never cached
   cacheStore(key, context);
-  logEvent({ ev: "gate", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
+  logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: timedOut.length ? "timeout" : "pass", ms, skipped, timedOut });
   process.exit(0); // a timeout is never a finding you wrote — never blocks, never shown
 }
 
@@ -108,7 +108,7 @@ const newLines = cfg.baselineNewOnly ? filterBaseline(file, rawLines, context) :
 
 if (newLines.length === 0) {
   cacheStore(key, context);
-  logEvent({ ev: "gate", file, lang: lang.name, result: "pass-baselined", ms, preexisting: rawLines.length });
+  logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: "pass-baselined", ms, preexisting: rawLines.length });
   process.exit(0);
 }
 
@@ -118,7 +118,7 @@ for (const f of failures) {
 
 const shown = newLines.slice(0, cfg.maxFeedbackLines ?? 40);
 const more = newLines.length - shown.length;
-logEvent({ ev: "gate", file, lang: lang.name, result: "fail", ms, findings: newLines.length,
+logEvent({ ev: "gate", project: context.id ?? ".", file, lang: lang.name, result: "fail", ms, findings: newLines.length,
            tools: failures.map((f) => f.bin) });
 
 process.stderr.write(
