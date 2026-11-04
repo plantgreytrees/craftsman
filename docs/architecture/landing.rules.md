@@ -3,7 +3,7 @@ area: landing
 governs: ["scripts/repo-exec.mjs", "scripts/lib/network.mjs", "scripts/lib/land.mjs", "scripts/workspace-init.mjs", "scripts/plan-graph.mjs", "scripts/lib/plan-submodules.mjs", "commands/merge.md", "commands/workspace-init.md", "scripts/worktree-sweep.mjs"]
 human: docs/architecture/landing.md
 source: docs/ideas/autonomous-e2e-loop.md
-verified_at: 79c76936857fa70847661747837fa3240c2f80f3
+verified_at: b910a921bb58278607bee23f614b7cb87eb6a342
 updated: 2026-11-04
 ---
 # ARCH landing — enforced rules
@@ -19,10 +19,10 @@ updated: 2026-11-04
 - **ARCH-LAND-09** [decided] A feature branch is pushed at creation, never inferred as base, never swept — check: repo-exec, sweep tests — cite: scripts/repo-exec.mjs:114-116,250-279
 - **ARCH-LAND-10** [decided] Feature landing ships only after a spike shows feature merge, sync, land-feature, a conflict park and a sparing sweep — check: spike evidence — cite: docs/architecture/engine.rules.md:12
 - **ARCH-LAND-11** [decided] A submodule bump shares its submodule steps' feature — check: plan-submodules.test — cite: scripts/lib/plan-submodules.mjs:89-92
-- **ARCH-LAND-12** [decided] pr mode: unit PRs → feature; one feature PR → base — check: repo-exec.test — cite: scripts/repo-exec.mjs:393-394,672-696
-- **ARCH-LAND-13** [decided] A feature session owns exactly one long-lived worktree: repo-exec prepare {slug "<plan>-<id>", branch feature/<plan>-<id>} under <main checkout>/.worktrees, anchored at the main checkout root and never at the session's linked .claude/worktrees directory; every unit of the feature reattaches to it, and .claude/worktrees/ is gitignored — check: repo-exec.test.mjs reattach and linked-worktree anchoring — cite: scripts/repo-exec.mjs:239-280,482-488
+- **ARCH-LAND-12** [decided] pr mode: unit PRs → feature; one feature PR → base — check: repo-exec.test — cite: scripts/repo-exec.mjs:400-401,712-735
+- **ARCH-LAND-13** [decided] A feature session owns exactly one long-lived worktree: repo-exec prepare {slug "<plan>-<id>", branch feature/<plan>-<id>} under <main checkout>/.worktrees, anchored at the main checkout root and never at the session's linked .claude/worktrees directory; every unit of the feature reattaches to it, and .claude/worktrees/ is gitignored — check: repo-exec.test.mjs reattach and linked-worktree anchoring — cite: scripts/repo-exec.mjs:239-280,524-528
 - **ARCH-LAND-14** [decided] A unit lands by repo-exec land-unit inside the feature worktree: gate re-run, feature branch checked out, merge --no-ff of the unit branch, feature branch pushed, unit branch deleted; a conflict PARKs (ARCH-LAND-06) and a PARKED or BLOCKED unit keeps its branch and leaves the feature branch checked out clean for the next smoke gate — check: repo-exec.test.mjs land-unit cases — cite: scripts/repo-exec.mjs:510-574
-- **ARCH-LAND-15** [decided] A wave unit (ARCH-ENGINE-16) runs in a short-lived worktree branched from the feature branch, lands back through land-unit and is removed at once; the feature keeps its single long-lived worktree — check: repo-exec.test.mjs wave worktree cleanup — cite: scripts/repo-exec.mjs:532-533,526-529
+- **ARCH-LAND-15** [decided] A wave unit (ARCH-ENGINE-16) runs in a short-lived worktree branched from the feature branch, lands back through land-unit and is removed at once; the feature keeps its single long-lived worktree — check: repo-exec.test.mjs wave worktree cleanup — cite: scripts/repo-exec.mjs:540,567-570
 - **ARCH-LAND-16** [decided] Feature prepare refuses while the plan doc or its parent chain differs from origin/<base>; generated rollups are excluded because every tracker transition rewrites them locally; /orchestrate Phase A lands the plan docs through /craftsman:merge first, and a mid-run plan amendment trips the gate again at the next prepare — check: repo-exec.test.mjs plan-gate refusal — cite: scripts/repo-exec.mjs:204-237,261
 - **ARCH-LAND-17** [superseded by ARCH-LAND-24]
 - **ARCH-LAND-18** [superseded by ARCH-LAND-25]

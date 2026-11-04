@@ -148,3 +148,11 @@ CONSUMERS:
 
 ## Out of scope
 The two follow-up rows above; any rule wording change; `CHANGELOG.md`; the Gleam repository.
+
+## Round 2 (2026-11-04, isolated scrutineer on main b910a92)
+Zero Critical and zero Warning. All of F1 to F7 and F10 are confirmed fixed, each new test failing on the old code, and both whole-plan criteria were run by the reviewer and are MET (suite 1838 of 1838, `arch-check lint` PASS). Four Suggestions, dispositions:
+- CHANGELOG did not mention the stricter merge gate and the Stop-set pruning: one clause added (sync-docs).
+- Stale second cites in ARCH-LAND-06, 12, 13 and 15 (wrong before this work; lint and `safety-cites` do not check cite content): re-pointed under `/architect --update` (sync-docs).
+- Stop selects a scoped command with a marker anywhere in the tree, the pre-merge gate only at the top level and silently returns when it finds none: the difference is now stated in EXTENDING.md; making the lookup consistent, or logging `pre_merge_gate skipped no-command`, is the flagged row `followup-premerge-marker-lookup` (an ARCH-LAND-37 scope decision, not driven).
+- Two untested cases (a `-x.js` file through the merge path; a directory or dangling symlink in the change list at Stop): flagged row `followup-scoped-gate-tests`.
+The `arch-check --root` row gained a sharper consequence from the review (a session `architecture.dir` that differs makes lint report 0 rules docs and PASS); the `land-unit` row was judged no worse than described. Both stay flagged, not driven.

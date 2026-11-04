@@ -201,6 +201,13 @@ folder as `cwd` (root-relative) whenever it is not the root.
   pass at Stop and fail at merge: a test runner handed `README.md` by the merge
   gate was never handed it at Stop. Write a scoped command so it tolerates, or
   filters out, files that are not source.
+- The two gates also find the command differently. Stop selects a scoped
+  `stopGate.commands` entry when its marker exists anywhere in the tracked tree;
+  the pre-merge gate looks for the marker at the top level of the worktree only
+  and takes the first match. In a repo whose only `package.json` is under
+  `services/api/`, the scoped check runs at Stop but the pre-merge gate finds no
+  command and lands without one (nothing is logged). Keep a marker for the
+  command at the repository root if the merge gate should run it.
 - A placeholder command is never snapshotted: it is not run at session start,
   never appears in `session-start.json`, and does not need to be green first. It
   runs at Stop whenever the session is dirty, counts as the test run that clears
