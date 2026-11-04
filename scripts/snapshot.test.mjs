@@ -192,9 +192,10 @@ test("snapshot: a command that is installed but exits non-zero is still recorded
   assert.deepEqual(readStart(root, "snap-red").results.map((x) => x.green), [false]);
 });
 
-test("snapshot: with only a missing program Stop finds an empty baseline and logs no-command, never red-at-start (ARCH-STATE-22)", () => {
+// ARCH-ENGINE-22: a missing program is no gate command at all (gateUsable), so no command is found to snapshot and no session-start.json is written.
+test("snapshot: with only a missing program no session-start.json is written and Stop logs no-command, never red-at-start (ARCH-STATE-22)", () => {
   const root = fixture({ "missing.fixture": `${MISSING} --run` });
   assert.equal(snapshot(root, "snap-gone").status, 0);
-  assert.deepEqual(readStart(root, "snap-gone").results, []);
+  assert.equal(fs.existsSync(startFile(root, "snap-gone")), false, "no usable command, so no baseline file");
   assert.deepEqual(dirtyStop(root, "snap-gone"), ["no-command"]);
 });
