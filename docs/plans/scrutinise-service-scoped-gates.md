@@ -6,7 +6,7 @@ parent: service-scoped-gates
 priority: P2
 idea: docs/ideas/service-scoped-gates.md
 classification: in-scope  # /scrutinise service-scoped-gates, main 7af0bd8: no Critical, 6 Warnings (all verified at file:line by root), 7 Suggestions; nothing disputed
-tracker_rows: [fix-stop-snapshot, fix-merge-gate, fix-config-robustness, fix-extending-docs, fix-skip-reason]
+tracker_rows: [fix-stop-snapshot, fix-merge-gate, fix-config-robustness, fix-extending-docs, fix-skip-reason, fix-snapshot-fact]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -16,7 +16,7 @@ coverage:
   data:          N/A(no persistence or migration; the change list file keeps its format)
   config:        3.1 (a null language entry from layering is skipped)
   security:      1.4 (a path starting with '-' is never read as an option) | 3.1 | 2.2 (a deletion-only branch no longer skips the gate)
-  tests:         1.1 | 1.2 | 1.3 | 1.4 | 2.1 | 2.2 | 3.1 | 3.2 | 5.1 | 5.2
+  tests:         1.1 | 1.2 | 1.3 | 1.4 | 2.1 | 2.2 | 3.1 | 3.2 | 5.1 | 5.2 | 6.1 | 6.2
   observability: 1.2 (the wrong snapshot-pending reason disappears) | 1.3 (all-gone logs no-changes) | 5.1 (a markerless dirty Stop logs no-command, not snapshot-pending)
   interface:     N/A(no UI; hook and CLI messages are in the tasks)
   docs:          4.1
@@ -87,6 +87,19 @@ units:
       write: [scripts/stop-gate.mjs, scripts/lib/core.mjs, scripts/stop-gate-skip-reasons.test.mjs, scripts/stop-gate-scoped.test.mjs, scripts/lib/tool-cwd.test.mjs]
     arch: [ARCH-STATE-22, ARCH-STATE-20]
     tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
+  - id: fix-snapshot-fact
+    scope_id: fix-snapshot-fact
+    project: .
+    depends_on: []
+    module: scripts/stop-gate.mjs, scripts/session-context.mjs, scripts/quality-gate.mjs
+    language: JavaScript (Node ESM)
+    security: normal
+    scope:
+      read: [scripts/stop-gate.mjs, scripts/session-context.mjs, scripts/quality-gate.mjs]
+      docs: [docs/architecture/state.rules.md, docs/architecture/safety.rules.md]
+      write: [scripts/stop-gate.mjs, scripts/session-context.mjs, scripts/quality-gate.mjs, scripts/stop-gate-skip-reasons.test.mjs, scripts/session-context.test.mjs, scripts/quality-gate-events.test.mjs]
+    arch: [ARCH-STATE-22, ARCH-STATE-20, ARCH-SAFETY-04]
+    tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
 ---
 
 # Plan: Fix round for the service-scoped gates review
@@ -139,8 +152,17 @@ Unattended-run rules: never run `rm`, `rmdir`, `find -delete` or any command tha
 - [ ] 5.2 [R3-S3] In `scripts/lib/core.mjs` `resolveToolCwd` (`:857`, `path.resolve(file)`), resolve a relative `file` against the context root (`path.resolve(root, file)`), not against `process.cwd()` → accept: a case in `scripts/lib/tool-cwd.test.mjs` that runs the check from a different working directory with a relative file path and gets the same resolved cwd as the absolute spelling; absolute paths behave exactly as before.
 - [ ] 5.3 Run `node --test scripts/stop-gate-skip-reasons.test.mjs scripts/stop-gate-scoped.test.mjs scripts/stop-gate.test.mjs scripts/lib/tool-cwd.test.mjs scripts/lib/core.test.mjs scripts/safety-cites.test.mjs` → accept: exits 0 (or the unit PARKS naming only moved cite ranges).
 
+### Step 6 - fix-snapshot-fact (., JavaScript, normal)
+Tooling: implementer implementer - gates none - skills test-driven-development - guards none
+Depends on: none (all earlier steps are MERGED)
+Rule: ARCH-STATE-22 (a dirty Stop that runs no test logs one skip reason of six), ARCH-STATE-20 (a path is never resolved from `process.cwd()`), ARCH-SAFETY-04 (`session-context.mjs` is a governed hook).
+Unattended-run rules: never run `rm`, `rmdir`, `find -delete` or any command that deletes files (use `mktemp -d` under the OS temp dir and leave it); finish with `node --test scripts/safety-cites.test.mjs`, and if it fails ONLY because a cited line range in `docs/architecture/**` moved, do not edit those docs: PARK naming each cite and its new range.
+- [ ] 6.1 [R4-W1, R4-W2, R4-S3] Record the fact instead of recomputing it. In `scripts/session-context.mjs`, in the branch that spawns the snapshot (`if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false && anyStopCommandMarker)`, ~`:208-213`), unlink any stale `snapshot-started` file next to the existing unlink of `session-start.json` and write a `snapshot-started` marker in `sessionDir(sid, context)` as the snapshot is spawned; write nothing when the branch is not taken. In `scripts/stop-gate.mjs` delete `snapshotComing()` (`~:505-514`) and decide a dirty Stop's reason when `session-start.json` is absent from the marker: present → `snapshot-pending` (a snapshot was started and has not produced a result: still running, or dropped by `snapshot.mjs:39-40` because files changed while it ran), absent → `no-command`. A present `session-start.json` keeps the existing `no-command` (empty results) and `red-at-start` logic; the six-reason set is unchanged → accept: unseeded cases in `scripts/stop-gate-skip-reasons.test.mjs` (a fixture where the marker is written by running `session-context.mjs`, or the marker file seeded to represent exactly what it writes): `snapshotAtStart: false` with a marker and a command logs `no-command`; a started snapshot with no result file logs `snapshot-pending`; a `package.json` created after SessionStart (no marker) logs `no-command`; a markerless repo still logs `no-command`; the seeded cases still pass; `scripts/session-context.test.mjs` asserts the marker exists exactly when the snapshot is spawned and is absent when it is not.
+- [ ] 6.2 [R4-S4] In `scripts/quality-gate.mjs` resolve the hook's `file_path` once against `context.root` (`path.resolve(context.root, input.tool_input.file_path)`) and use that single absolute path for the `existsSync` check (`:30`), the relative change-list entry (`:34`), `detectLang`, `tokenize` and `runChecks`, so `resolveToolCwd` (already root-relative) and `tokenize` agree → accept: a case in `scripts/quality-gate-events.test.mjs` that runs the hook from a different working directory with a relative `file_path` and gets the same `gate` event and tool cwd as with the absolute spelling; absolute inputs behave exactly as before.
+- [ ] 6.3 Run `node --test scripts/stop-gate-skip-reasons.test.mjs scripts/session-context.test.mjs scripts/quality-gate-events.test.mjs scripts/stop-gate.test.mjs scripts/stop-gate-scoped.test.mjs scripts/lib/tool-cwd.test.mjs scripts/safety-cites.test.mjs` → accept: exits 0 (or the unit PARKS naming only moved cite ranges).
+
 ## Sequencing
-`fix-skip-reason` (round 3) is independent of the four steps above, which are merged. Within the original round, `fix-stop-snapshot` first: it owns the shared `isScoped` and `expandChangePlaceholders` that `fix-merge-gate` calls, and edits `stop-gate.mjs`. `fix-merge-gate` next (`repo-exec.mjs`). `fix-config-robustness` after them (`core.mjs`, `quality-gate.mjs`; no overlap, run last among the code units so any cite drift in `core.mjs` is the final one). `fix-extending-docs` last, so it describes the final behaviour. Root then re-points drifted rule cites and repairs `slim.rules.md` under `/architect --update` (below) before re-running `/scrutinise`.
+`fix-snapshot-fact` (round 4) and `fix-skip-reason` (round 3) are independent of the four steps above, which are merged; `fix-snapshot-fact` replaces round 3's config recomputation with a recorded fact. `fix-skip-reason` (round 3) is independent of the four steps above, which are merged. Within the original round, `fix-stop-snapshot` first: it owns the shared `isScoped` and `expandChangePlaceholders` that `fix-merge-gate` calls, and edits `stop-gate.mjs`. `fix-merge-gate` next (`repo-exec.mjs`). `fix-config-robustness` after them (`core.mjs`, `quality-gate.mjs`; no overlap, run last among the code units so any cite drift in `core.mjs` is the final one). `fix-extending-docs` last, so it describes the final behaviour. Root then re-points drifted rule cites and repairs `slim.rules.md` under `/architect --update` (below) before re-running `/scrutinise`.
 
 ## Verification background   (citations - for the reviewer, not the executor)
 - F1: `scripts/stop-gate.mjs:210` uses `gateUsable(context.root, marker, cmd)`; `scripts/lib/gate-command.mjs:18-24` `present()` only checks the top level; `scripts/snapshot.mjs:22-24` uses `markerPresent` + `markerOk`.
@@ -187,3 +209,12 @@ None of ARCH-STATE-19, 20, 21, 22, ARCH-LAND-37 and ARCH-SLIM-08 is violated (al
 - **Architecture Suggestions (stale or incomplete `cite:` pointers), root, under `/architect --update` AFTER `fix-skip-reason` lands (the unit shifts `stop-gate.mjs` and `core.mjs` lines):** ARCH-LAND-06 `698-739` to `409-447,740-776`; LAND-09 `250-279` to `114-116,259-287`; LAND-13 `239-280` to `247-288`; LAND-14 `510-574` to `518-582`; LAND-16 `204-237,261` to `215-245,270`; LAND-25 `592-702` to `598-709`; STATE-02 `core.mjs:208-230` to `273-279`; STATE-16 adds `pre-guard.mjs:1702-1715`; STATE-07 `tracker.mjs:80-101` to `87-106`; STATE-19 adds `core.mjs:1260-1273` and `871-875`; STATE-20 adds `core.mjs:1092-1095` and `quality-gate.mjs:79-85`; STATE-22 adds the `stop` and `gate` event sites; TRACKER-14 `236-268` to `233-263`; TRACKER-16 `411-429` to `410-452`; SLIM-09 `13-16` to `13-17`; SLIM-10 adds `telemetry.mjs:106-107`; ARCH-AUTO-11 `core.mjs:1207-1210` to `1255-1258`; ARCH-VIEWS-10 `core.mjs:917` to `1129`. Every range is re-checked by an identifier check after the unit lands, not applied from the report.
 - **Doc Suggestions, root (sync-docs):** CHANGELOG line 11 "`gate` also `cwd` outside the root" becomes "`gate` also `cwd` when the tool folder is not the root"; EXTENDING.md gains one sentence each for a scoped command whose binary is missing (skipped without blocking, said once per session) and one that exceeds its own `testTimeoutMs` (blocks as `SCOPED TESTS INCOMPLETE`).
 - **Follow-up rows unchanged:** `followup-premerge-marker-lookup`, `followup-scoped-gate-tests`, `followup-arch-check-root-layering`, `followup-land-unit-empty-diff`.
+
+## Round 4 (2026-11-04, isolated scrutineer on main cf64bd1; range 4b28c66..cf64bd1 plus a sweep of every cite in eight rules docs and a real hook-by-hook reproduction)
+No Critical. ARCH-STATE-19, 20, 21, 22, ARCH-LAND-37 and ARCH-SLIM-08 all HOLD (the reviewer read the code), both whole-plan criteria are MET (suite 1845 of 1845, `arch-check lint` PASS), and every cite re-pointed in round 3 resolves. Two Warnings, both in one place, and a set of Suggestions:
+- **Warnings, fixed by `fix-snapshot-fact`:** round 3's `snapshotComing()` guessed from config at Stop whether a snapshot was still to come, and was wrong twice. With `stopGate.snapshotAtStart: false` no snapshot is ever started (`session-context.mjs:208`, `snapshot.mjs:20`), yet every dirty Stop logged `snapshot-pending`; and when `snapshot.mjs:39-40` drops its result because files changed while the suite ran (the normal case for a multi-minute suite), Stop logged `snapshot-pending` forever. Both verified by root at those lines and reproduced by the reviewer with the real hooks. The fix records the fact (a `snapshot-started` marker written where the snapshot is spawned) and Stop reads it, so no config is recomputed and the same change also removes a smaller error (the marker lookup read today's tree while SessionStart chose from the tree at start).
+- **Suggestion, fixed by `fix-snapshot-fact`:** `resolveToolCwd` resolved a relative file against the root but `tokenize` and `quality-gate.mjs` still used `process.cwd()`; the hook now resolves the path once.
+- **Flagged, not driven (new row `followup-unit-scope-session-start`):** under a unit scope Stop reads `session-start.json` from the scope's session directory while SessionStart and `snapshot.mjs` write to the root context's; if they differ a scoped dirty Stop may always lack the file. Predates this work; UNPROVEN, not reproduced.
+- **Architecture Suggestions (stale or thin `cite:` pointers), root, after the unit lands:** eight in `views.rules.md` and one each in `engine.rules.md` (ARCH-ENGINE-08, ARCH-ENGINE-10) and `state.rules.md` (ARCH-STATE-11), none of them in code this work changed except STATE-11's neighbour; the exact corrections come from the review and are applied only after an identifier check. ARCH-LAND-37's text says `<base>...HEAD` where the code diffs against the landing target; reworded.
+- **Doc Suggestion, root:** the EXTENDING.md reason table described `snapshot-pending` more broadly than the code emits it; it is reworded to the recorded-fact meaning.
+- **Scope note:** the sweep widened from the five rules docs this work touches to all eight in round 4. Pre-existing drift in `views` and `engine` is fixed here because the correction is small, exact and doc-only, not because this work caused it.
