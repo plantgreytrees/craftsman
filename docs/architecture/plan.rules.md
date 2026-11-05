@@ -3,8 +3,8 @@ area: plan
 governs: ["scripts/lib/plan-index.mjs", "commands/plan.md", "commands/orchestrate.md", "commands/instruction.md", "skills/language-aware-planning/references/plan-template.md", "scripts/init.mjs"]
 human: docs/architecture/plan.md
 source: docs/ideas/plan-hierarchy.md
-verified_at: ca1534f838e26eba29599a9c43f690c55dd93e11
-updated: 2026-10-25
+verified_at: 6489683342b42273e63fef84b3a411d3bf048151
+updated: 2026-11-05
 ---
 # ARCH plan — enforced rules
 
