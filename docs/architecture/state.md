@@ -104,7 +104,7 @@ flowchart LR
 
 | id | decision | why | rejected alternatives |
 |---|---|---|---|
-| ARCH-STATE-19 | A sub-project or unit worktree inherits the workspace root's config, with `{workspaceRoot}` for root-relative commands | Units were getting plugin defaults (csharp `dotnet format`, no `extraChecks`) because their root has no config; Gleam edits 3 lines | Opt-in `workspace.inheritConfig` (leaves the gap open); inherit non-command keys only (a root `stopGate` edit would not apply in units) |
+| ARCH-STATE-19 | A sub-project or unit worktree inherits the workspace root's config, with `{workspaceRoot}` for root-relative commands (the main checkout, also inside a unit worktree) | Units were getting plugin defaults (csharp `dotnet format`, no `extraChecks`) because their root has no config; Gleam edits 3 lines | Opt-in `workspace.inheritConfig` (leaves the gap open); inherit non-command keys only (a root `stopGate` edit would not apply in units) |
 | ARCH-STATE-20 | `languages.<lang>.cwd = "nearest:<marker,...>"`, resolved downward from the file, never above root | One block serves all 61 services; deletes Gleam's ESLint wrapper | Static path per service (a per-repo list again); tool flags only (does not put `eslint` on PATH) |
 | ARCH-STATE-21 | `{changed}` / `{changedDirs}` whole-token placeholders from the session change list; never snapshotted; failure blocks as scoped | A snapshot cannot know the touched set at session start; `git status` would test other sessions' dirt | `git status` source; advisory-only failure |
 | ARCH-STATE-22 | Events carry `project` and a fixed skip-reason set | The idea's own kill test needed a count of dirty stops that ran nothing | One event per skipped command |

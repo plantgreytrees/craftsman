@@ -239,7 +239,9 @@ into what is already there, so it does **not** clear the defaults or the
 inherited values. A malformed inherited file is ignored with a warning naming it,
 and `enabled: false` in the workspace root's file says which file turned the gate off.
 `protectedPaths` is an array, so a workspace root's list replaces the default
-list for a sub-project that sets none.
+list for a sub-project that sets none. In a unit worktree the main checkout's
+config is the workspace root's layer, so a key the branch deletes from its own
+file is still inherited from the main checkout until the branch sets it to `null`.
 
 An inherited command that names a workspace file relative to the root now runs
 from the sub-project's folder, so write it with `{workspaceRoot}`, which every
@@ -249,6 +251,12 @@ pre-merge gate) expands to the workspace root's absolute path:
 ```json
 { "stopGate": { "extraChecks": ["python3 {workspaceRoot}/scripts/check_arch.py"] } }
 ```
+
+`{workspaceRoot}` names the workspace root, which is the main checkout, also
+inside a unit worktree of that same repository: a command that must run the
+branch's own copy of a script uses a path relative to the worktree instead
+(commands run from the worktree root there); with `{workspaceRoot}` Stop and the
+pre-merge gate run the main checkout's copy.
 
 **Read what happened in `.craftsman/events.jsonl`.** The `gate`, `stop` and
 `stop-tests-skipped` events carry `project`: the unit scope's project id or the
