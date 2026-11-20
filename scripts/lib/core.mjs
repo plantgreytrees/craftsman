@@ -866,12 +866,35 @@ export function resolveToolCwd(file, lang, context = null) {
   }
 }
 
+// {workspaceRoot} names the checkout a command runs against (ARCH-STATE-19): PROJECT_ROOT, except that a context inside a
+// unit worktree of PROJECT_ROOT's own repository resolves to that worktree, so `node {workspaceRoot}/gate.mjs` runs the
+// branch's copy. No context, the root itself, a submodule or another repository, no git and an unresolvable path are
+// PROJECT_ROOT. configRoots is separate: the main checkout's config layer still sits under a worktree's.
+const workspaceRootCache = new Map();
+export function workspaceRootFor(context = null) {
+  const own = context?.root;
+  if (!own || sameDir(own, PROJECT_ROOT)) return PROJECT_ROOT;
+  const key = path.resolve(own);
+  if (workspaceRootCache.has(key)) return workspaceRootCache.get(key);
+  let found = PROJECT_ROOT;
+  const top = gitTop(PROJECT_ROOT);
+  if (top && sameDir(top, PROJECT_ROOT)) {
+    const ownTop = gitTop(own);
+    const common = gitCommonDir(PROJECT_ROOT);
+    const ownCommon = ownTop ? gitCommonDir(own) : null;
+    if (ownTop && common && ownCommon && sameDir(common, ownCommon) && !sameDir(ownTop, PROJECT_ROOT)) found = ownTop;
+  }
+  workspaceRootCache.set(key, found);
+  return found;
+}
+
 // Quote-aware token split shared by tokenize() (per-file {file}/{dir}
 // substitution) and splitCmd() (no per-file template — a plain configured
-// command like a secrets scan or an extraCheck). {workspaceRoot} is PROJECT_ROOT in both (ARCH-STATE-19).
-function splitTokens(str) {
+// command like a secrets scan or an extraCheck). {workspaceRoot} expands through workspaceRootFor(context) in both,
+// resolved only for a token that holds it, so a command without the placeholder runs no git.
+function splitTokens(str, context = null) {
   const raw = str.match(/"[^"]*"|'[^']*'|\S+/g) || [];
-  return raw.map((tok) => tok.replace(/^["']|["']$/g, "").replaceAll("{workspaceRoot}", () => PROJECT_ROOT));
+  return raw.map((tok) => tok.replace(/^["']|["']$/g, "").replaceAll("{workspaceRoot}", () => workspaceRootFor(context)));
 }
 
 // `cwd` is a resolved tool cwd (resolveToolCwd): {file} and {dir} become POSIX
@@ -883,7 +906,7 @@ export function tokenize(cmdTemplate, file, context = null, cwd = null) {
   const dir = path.dirname(rel);
   // Substitute per-token so a {file}/{dir} value containing a space still
   // becomes exactly one argument, instead of splitting the path in two.
-  return splitTokens(cmdTemplate).map((tok) =>
+  return splitTokens(cmdTemplate, context).map((tok) =>
     tok.replaceAll("{file}", rel).replaceAll("{dir}", dir)
   );
 }
@@ -891,9 +914,9 @@ export function tokenize(cmdTemplate, file, context = null, cwd = null) {
 /** Quote-aware split for a configured command with no per-file template
  * (stop-gate.mjs's secrets/test/extraChecks commands, snapshot.mjs's test
  * commands) — same quoting rules as tokenize(), minus the {file}/{dir}
- * substitution these call sites have no use for ({workspaceRoot} still expands). */
-export function splitCmd(str) {
-  return splitTokens(str);
+ * substitution these call sites have no use for ({workspaceRoot} still expands, for `context` when given). */
+export function splitCmd(str, context = null) {
+  return splitTokens(str, context);
 }
 
 // `toolCwd` is the resolved cwd of a language that names one (null otherwise:
