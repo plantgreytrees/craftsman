@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { sha1 } from "./lib/core.mjs";
 
 const STOP_GATE_PATH = fileURLToPath(new URL("./stop-gate.mjs", import.meta.url));
 
@@ -339,6 +340,54 @@ test("scoped: a sub-directory marker that exists nowhere still selects nothing, 
     const r = await runStop(dir, "s12c");
     assert.deepEqual(runs(dir), []);
     assert.doesNotMatch(msg(r), /stop-gate skipped/);
+  }));
+
+// {workspaceRoot} follows the scope the Stop runs in (ARCH-STATE-19) -----------------------------------------------
+
+// A unit worktree of the fixture, holding its own copy of check.mjs that logs "worktree-copy" (the root's logs "root-copy"), and a
+// unit scope for it written where scope.mjs keeps it, so Stop runs against the worktree.
+function worktreeScope(dir, sid, { withScope }) {
+  const wt = path.join(dir, ".worktrees", "u1");
+  spawnSync("git", ["worktree", "add", "-q", "-b", "unit", wt], { cwd: dir });
+  const logger = (who) => `import fs from "node:fs";\nfs.appendFileSync("argv.log", JSON.stringify([${JSON.stringify(who)}, ...process.argv.slice(2)]) + "\\n");\n`;
+  fs.writeFileSync(path.join(dir, "check.mjs"), logger("root-copy"));
+  fs.writeFileSync(path.join(wt, "check.mjs"), logger("worktree-copy"));
+  fs.copyFileSync(path.join(dir, "craftsman.config.json"), path.join(wt, "craftsman.config.json"));
+  if (withScope) {
+    const sessions = path.join(dir, ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessions, { recursive: true });
+    const real = fs.realpathSync(wt);
+    fs.writeFileSync(path.join(sessions, `scope-${sha1(real).slice(0, 16)}.json`), JSON.stringify({
+      plan: "p", unit: "u1", project: ".", project_root: real, worktree_path: real,
+      scope: { read: [], docs: [], write: [] }, arch: [], activated_at: new Date().toISOString(),
+    }));
+  }
+  return fs.realpathSync(wt);
+}
+
+test("scoped: a worktree-scope Stop runs the worktree's copy of a {workspaceRoot} script, a Stop without a scope the root's", () =>
+  withFixture({ extraChecks: ["node {workspaceRoot}/check.mjs"] }, async (dir) => {
+    const wt = worktreeScope(dir, "swr1", { withScope: true });
+    seed(wt, "swr1", {});
+    await runStop(dir, "swr1");
+    assert.deepEqual(runs(wt), [["worktree-copy"]], "the worktree's check.mjs ran, in the worktree");
+    assert.deepEqual(runs(dir), [], "the root's copy did not");
+  }));
+
+test("scoped: a Stop without a scope runs the root's copy of a {workspaceRoot} script", () =>
+  withFixture({ extraChecks: ["node {workspaceRoot}/check.mjs"] }, async (dir) => {
+    worktreeScope(dir, "swr2", { withScope: false });
+    await runStop(dir, "swr2");
+    assert.deepEqual(runs(dir), [["root-copy"]]);
+  }));
+
+test("scoped: a {workspaceRoot} command with {changed} runs the worktree's copy against the worktree's change list", () =>
+  withFixture({ extraChecks: ["node {workspaceRoot}/check.mjs {changed}"] }, async (dir) => {
+    const wt = worktreeScope(dir, "swr3", { withScope: true });
+    seed(wt, "swr3", { changed: ["src/a.js"] });
+    await runStop(dir, "swr3");
+    assert.deepEqual(runs(wt), [["worktree-copy", "src/a.js"]]);
+    assert.deepEqual(runs(dir), []);
   }));
 
 // 1.3 - a path that no longer exists is dropped before the list is expanded --------------------------------------

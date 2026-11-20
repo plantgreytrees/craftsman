@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { inspectRepo, landFeature, landUnit, merge, prepare } from "./repo-exec.mjs";
 import { ledgerPath } from "./tracker.mjs";
 import { projectContext } from "./lib/core.mjs";
@@ -284,6 +285,70 @@ test("merge: a project whose only gate marker is dropped lands and logs the no-c
     assert.equal(events.length, 1);
     assert.equal(events[0].reason, "no-command");
   } finally { cleanup(t); }
+});
+
+// {workspaceRoot} in the pre-merge gate follows the unit worktree (ARCH-STATE-19, ARCH-LAND-37). core's PROJECT_ROOT is fixed when it
+// loads, so these run repo-exec as the CLI does, in a child node whose cwd is the scratch repository.
+const REPO_EXEC = fileURLToPath(new URL("./repo-exec.mjs", import.meta.url));
+function cli(root, input) {
+  const env = { ...process.env, ...ENV };
+  for (const k of Object.keys(env)) if (k.startsWith("CLAUDE_PLUGIN_OPTION_") || ["CLAUDE_PLUGIN_ROOT", "CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID", "CRAFTSMAN_WORKSPACE_MANIFEST", "CRAFTSMAN", "CRAFTSMAN_SAFETY"].includes(k)) delete env[k];
+  const r = spawnSync(process.execPath, [REPO_EXEC], { cwd: root, env, input: JSON.stringify({ project: ".", ...input }), encoding: "utf8" });
+  return { status: r.status, stderr: r.stderr, out: r.stdout.trim() ? JSON.parse(r.stdout.trim().split("\n").pop()) : null };
+}
+
+// A repository whose gate is `command`, with a gate.mjs at its root that exits 0 (main's copy).
+function rootFixture(command) {
+  const root = real(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-wsroot-")));
+  git(root, "init", "-q", "-b", "main");
+  write(root, "package.json", "{}\n");
+  write(root, "gate.mjs", "process.exit(0);\n");
+  write(root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": command } } }));
+  commit(root, "init");
+  return root;
+}
+const prepared = (root) => cli(root, { action: "prepare", unit: "u1", slug: "u1" }).out.worktree_path;
+const landed = (root, wt) => cli(root, { action: "merge", unit: "u1", slug: "u1", worktree_path: wt, push: false });
+
+test("merge: a gate `node {workspaceRoot}/gate.mjs` runs the branch's own gate.mjs, so a branch that breaks it does not merge", () => {
+  const root = rootFixture("node {workspaceRoot}/gate.mjs");
+  const wt = prepared(root);
+  write(wt, "gate.mjs", "process.exit(1);\n");
+  commit(wt, "break the gate");
+  const before = git(root, "rev-parse", "main");
+  const r = landed(root, wt);
+  assert.equal(r.status, 2, `the gate in the worktree failed (main's copy would have passed): ${r.stderr}`);
+  assert.match(r.stderr, /pre-merge gate failed/);
+  assert.equal(git(root, "rev-parse", "main"), before, "nothing landed");
+});
+
+test("merge: a branch that fixes its gate.mjs passes a {workspaceRoot} gate and lands", () => {
+  const root = rootFixture("node {workspaceRoot}/gate.mjs");
+  write(root, "gate.mjs", "process.exit(1);\n"); // main's copy is red, the branch's is green
+  commit(root, "red gate on main");
+  const wt = prepared(root);
+  write(wt, "gate.mjs", "process.exit(0);\n");
+  commit(wt, "fix the gate");
+  const before = git(root, "rev-parse", "main");
+  const r = landed(root, wt);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.merged, true);
+  assert.notEqual(git(root, "rev-parse", "main"), before);
+});
+
+test("merge: a gate with no {workspaceRoot} runs as before, in the worktree", () => {
+  const root = rootFixture("node gate.mjs");
+  const wt = prepared(root);
+  write(wt, "gate.mjs", "process.exit(1);\n");
+  commit(wt, "break the gate");
+  assert.equal(landed(root, wt).status, 2, "cwd is the worktree, so its gate.mjs ran");
+  const ok = rootFixture("node gate.mjs");
+  const owt = prepared(ok);
+  write(owt, "src/a.js");
+  commit(owt, "unit");
+  const r = landed(ok, owt);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.merged, true);
 });
 
 test("merge: a gate whose relative program exists is still run, and logs no skip", () => {

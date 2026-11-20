@@ -331,7 +331,7 @@ const gateOutput = (error) => ((error.stdout || "") + (error.stderr || "")).toSt
 // placeholder is only split: no diff is taken and nothing else changes.
 function gateArgv(command, worktree, ref) {
   const embedded = embeddedChangePlaceholder(command);
-  if (!embedded && !hasChangePlaceholder(command)) return { argv: splitCmd(command) };
+  if (!embedded && !hasChangePlaceholder(command)) return { argv: splitCmd(command, { root: worktree }) };
   let files = [];
   if (!embedded) { // an embedded placeholder is never expanded, so the diff would go unused
     const diff = (...filter) => {
