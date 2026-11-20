@@ -279,7 +279,7 @@ async function runTask(t) {
     if (t.kind === "scoped") scopedBudgetKilled.push(t.cmd);
     return;
   }
-  const [bin, ...args] = t.argv || splitCmd(t.cmd);
+  const [bin, ...args] = t.argv || splitCmd(t.cmd, context);
   try {
     await pexec(bin, args, { timeout: cap, maxBuffer: 8e6, cwd: context.root });
     // this task completed; allSecretsCompleted only flips false elsewhere —
