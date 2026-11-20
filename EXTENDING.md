@@ -252,11 +252,11 @@ pre-merge gate) expands to the workspace root's absolute path:
 { "stopGate": { "extraChecks": ["python3 {workspaceRoot}/scripts/check_arch.py"] } }
 ```
 
-`{workspaceRoot}` names the workspace root, which is the main checkout, also
-inside a unit worktree of that same repository: a command that must run the
-branch's own copy of a script uses a path relative to the worktree instead
-(commands run from the worktree root there); with `{workspaceRoot}` Stop and the
-pre-merge gate run the main checkout's copy.
+`{workspaceRoot}` names the workspace root: the main checkout, or, inside a unit
+worktree of that same repository, that worktree, so Stop and the pre-merge gate
+run the branch's own copy of a script a command names (`node
+{workspaceRoot}/gate.mjs`). A sub-project that is another repository (a
+submodule) always gets the workspace root.
 
 **Read what happened in `.craftsman/events.jsonl`.** The `gate`, `stop` and
 `stop-tests-skipped` events carry `project`: the unit scope's project id or the

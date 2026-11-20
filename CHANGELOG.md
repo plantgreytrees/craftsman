@@ -13,7 +13,7 @@ All notable changes to craftsman are documented here. Format loosely follows
 ### Changed
 
 - The ui gate is routed through `scripts/ui-gate.mjs` to the optional Artist plugin (ARCH-SLIM-15, ARCH-GATES-01..07); `ui-ux-reviewer` is reduced to an accessibility floor and the `design-review` skill is removed.
-- **Sub-projects and unit worktrees inherit the workspace root's config** (ARCH-STATE-19): `loadConfig` layers the defaults, user config, the workspace root's `craftsman.config.json` and `craftsman.project.json`, then the project's own; a project `null` drops an inherited entry and `{}` changes nothing. A command in the workspace root's config that names a root-relative file (`python3 scripts/check_arch.py`) now runs from the sub-project's folder, so write it with `{workspaceRoot}` (`python3 {workspaceRoot}/scripts/check_arch.py`).
+- **Sub-projects and unit worktrees inherit the workspace root's config** (ARCH-STATE-19): `loadConfig` layers the defaults, user config, the workspace root's `craftsman.config.json` and `craftsman.project.json`, then the project's own; a project `null` drops an inherited entry and `{}` changes nothing. A command in the workspace root's config that names a root-relative file (`python3 scripts/check_arch.py`) now runs from the sub-project's folder, so write it with `{workspaceRoot}` (`python3 {workspaceRoot}/scripts/check_arch.py`). Inside a unit worktree of the workspace root's own repository `{workspaceRoot}` is that worktree, so the pre-merge gate and Stop run the branch's own copy of a gate file.
 
 ### Fixed
 
