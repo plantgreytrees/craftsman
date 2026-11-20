@@ -1,7 +1,7 @@
 // ARCH-STATE-19: loadConfig layers PROJECT_ROOT's project config files (the workspace root's) under a differing context
 // root's own, in the order defaults, user config, workspace root, project. A project `null` drops an inherited entry,
 // `{}` changes nothing, equal roots add no layer, a malformed inherited file is ignored with the warning, and
-// `{workspaceRoot}` is PROJECT_ROOT in every configured command. PROJECT_ROOT is fixed when core.mjs loads, so each
+// `{workspaceRoot}` is PROJECT_ROOT in every configured command, except in a unit worktree of its own repository, where it is the worktree. PROJECT_ROOT is fixed when core.mjs loads, so each
 // layering case runs core in a child node whose cwd is a scratch workspace root.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -203,6 +203,101 @@ test("{workspaceRoot} is PROJECT_ROOT in tokenize and splitCmd", () => {
   assert.deepEqual(core.splitCmd(cmd), ["python3", `${root}/scripts/x.py`, "{file}"], "a plain command: {file} stays, {workspaceRoot} expands");
   assert.deepEqual(core.splitCmd("tool {workspaceRoot} {workspaceRoot}/b"), ["tool", root, `${root}/b`], "every occurrence");
   assert.deepEqual(core.splitCmd("tool {workspace} {workspaceRoots}"), ["tool", "{workspace}", "{workspaceRoots}"], "only the exact placeholder");
+});
+
+// A real repository under the temp dir with one commit, plus helpers to add a worktree. `git` runs with a fixed identity.
+function gitIn(dir, ...args) {
+  const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8", env: childEnv() });
+  assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+function repo(prefix = "config-layering-repo-") {
+  const dir = scratch(prefix);
+  gitIn(dir, "init", "-q");
+  gitIn(dir, "commit", "-q", "--allow-empty", "-m", "init");
+  return dir;
+}
+function worktreeOf(dir) {
+  const wt = path.join(scratch("config-layering-wt-"), "wt");
+  gitIn(dir, "worktree", "add", "-q", "-b", "unit", wt);
+  return fs.realpathSync(wt);
+}
+
+test("workspaceRootFor: the worktree of the workspace root's own repository, and a subdirectory of it, resolve to the worktree", () => {
+  const ws = repo();
+  const wt = worktreeOf(ws);
+  fs.mkdirSync(path.join(wt, "svc"));
+  const sub = path.join(wt, "svc");
+  const { value } = inWorkspace(ws, `out({
+    wt: core.workspaceRootFor({ root: ${JSON.stringify(wt)} }),
+    sub: core.workspaceRootFor({ root: ${JSON.stringify(sub)} }),
+    split: core.splitCmd("sh {workspaceRoot}/x.sh", { root: ${JSON.stringify(wt)} }),
+    tok: core.tokenize("sh {workspaceRoot}/x.sh {file}", ${JSON.stringify(path.join(wt, "a.py"))}, { root: ${JSON.stringify(wt)} }),
+  });`);
+  assert.equal(value.wt, wt);
+  assert.equal(value.sub, wt, "a subdirectory of a worktree resolves to the worktree's toplevel");
+  assert.deepEqual(value.split, ["sh", `${wt}/x.sh`]);
+  assert.deepEqual(value.tok, ["sh", `${wt}/x.sh`, "a.py"]);
+});
+
+test("workspaceRootFor: no context, the root itself, a subdirectory of the main checkout, another repository and a non-git directory give PROJECT_ROOT", () => {
+  const ws = repo();
+  fs.mkdirSync(path.join(ws, "svc"));
+  const other = repo("config-layering-other-");
+  const plain = scratch("config-layering-plain-");
+  const { value } = inWorkspace(ws, `
+    const f = (root) => core.workspaceRootFor({ root });
+    out({
+      none: core.workspaceRootFor(),
+      nul: core.workspaceRootFor(null),
+      noRoot: core.workspaceRootFor({}),
+      self: f(${JSON.stringify(ws)}),
+      respelled: f(${JSON.stringify(ws + "/./")}),
+      sub: f(${JSON.stringify(path.join(ws, "svc"))}),
+      other: f(${JSON.stringify(other)}),
+      plain: f(${JSON.stringify(plain)}),
+      missing: f(${JSON.stringify(path.join(plain, "no", "such"))}),
+      root: core.PROJECT_ROOT,
+      split: core.splitCmd("sh {workspaceRoot}/x.sh", { root: ${JSON.stringify(other)} }),
+    });`);
+  for (const key of ["none", "nul", "noRoot", "self", "respelled", "sub", "other", "plain", "missing"]) assert.equal(value[key], ws, key);
+  assert.equal(value.root, ws);
+  assert.deepEqual(value.split, ["sh", `${ws}/x.sh`], "another repository's context expands to PROJECT_ROOT");
+});
+
+test("workspaceRootFor: a command without the placeholder runs no git, and the resolution runs git once per context root", () => {
+  const ws = repo();
+  const wt = worktreeOf(ws);
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  const bin = scratch("config-layering-bin-");
+  const log = path.join(bin, "calls.log");
+  fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\necho call >> "${log}"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  const { value } = inWorkspace(ws, `
+    import fs from "node:fs";
+    const calls = () => (fs.existsSync(${JSON.stringify(log)}) ? fs.readFileSync(${JSON.stringify(log)}, "utf8").split("\\n").filter(Boolean).length : 0);
+    const ctx = { root: ${JSON.stringify(wt)} };
+    const before = calls();
+    core.splitCmd("node a.mjs {file}", ctx);
+    core.tokenize("node a.mjs {file}", ${JSON.stringify(path.join(wt, "a.py"))}, ctx);
+    const plain = calls() - before;
+    core.splitCmd("node {workspaceRoot}/a.mjs", ctx);
+    const first = calls() - before - plain;
+    core.splitCmd("node {workspaceRoot}/b.mjs", ctx);
+    const second = calls() - before - plain - first;
+    out({ plain, first, second });`, { PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  assert.equal(value.plain, 0, "no placeholder, no git");
+  assert.ok(value.first > 0, "the placeholder resolves through git");
+  assert.equal(value.second, 0, "memoised per context root");
+});
+
+test("configRoots is unchanged: a worktree still inherits the main checkout's gitignored config under its own", () => {
+  const ws = repo();
+  const wt = worktreeOf(ws);
+  put(ws, "craftsman.config.json", { timeoutMs: 53, maxFeedbackLines: 59 });
+  put(wt, "craftsman.config.json", { maxFeedbackLines: 61 });
+  const cfg = cfgIn(ws, wt);
+  assert.equal(cfg.timeoutMs, 53, "the main checkout's file is the inherited layer");
+  assert.equal(cfg.maxFeedbackLines, 61, "the worktree's own file wins");
 });
 
 test("{workspaceRoot} stays one argument for a root with spaces or replacement patterns in its name", () => {

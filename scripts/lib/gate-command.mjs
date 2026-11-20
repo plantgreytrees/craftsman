@@ -28,7 +28,7 @@ function present(worktree, marker) {
 // A command's program is present when it is on PATH or, when it names a path (a slash), an existing file relative to the
 // worktree (an absolute path resolves to itself). The program is the first token as the runner splits it, quotes honoured.
 function programPresent(worktree, command, onPath) {
-  const [bin] = splitCmd(command);
+  const [bin] = splitCmd(command, { root: worktree });
   if (!bin) return false;
   return bin.includes("/") || bin.includes(path.sep) ? fs.existsSync(path.resolve(worktree, bin)) : onPath(bin);
 }

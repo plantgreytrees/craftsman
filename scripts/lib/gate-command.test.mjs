@@ -105,3 +105,49 @@ test("gate-command: just behaves as before, its program being just and its targe
   fs.writeFileSync(path.join(dir, "just"), "#!/bin/sh\n", { mode: 0o755 });
   assert.equal(gateUsable(dir, "justfile", "just check", { onPath: (b) => b !== "just", justTargets: () => ["check"] }), false);
 });
+
+// {workspaceRoot} follows the worktree (ARCH-STATE-19). PROJECT_ROOT is fixed when core loads, so these run gate-command
+// in a child node whose cwd is a scratch repository standing in for the workspace root.
+import { spawnSync } from "node:child_process";
+const GATE_URL = new URL("./gate-command.mjs", import.meta.url).href;
+function gitIn(dir, ...args) {
+  const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+}
+function wsAndWorktree() {
+  const ws = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gate-cmd-ws-")));
+  gitIn(ws, "init", "-q");
+  gitIn(ws, "commit", "-q", "--allow-empty", "-m", "init");
+  const wt = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gate-cmd-wt-"))), "wt");
+  gitIn(ws, "worktree", "add", "-q", "-b", "unit", wt);
+  return { ws, wt: fs.realpathSync(wt) };
+}
+function usableIn(ws, worktree, command) {
+  const src = `import { gateUsable } from ${JSON.stringify(GATE_URL)};
+process.stdout.write(JSON.stringify(gateUsable(${JSON.stringify(worktree)}, "justfile", ${JSON.stringify(command)}, { markerOk: true, onPath: () => false })));`;
+  const env = { ...process.env };
+  for (const k of ["CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID", "CRAFTSMAN_WORKSPACE_MANIFEST"]) delete env[k];
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src], { cwd: ws, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test("gate-command: {workspaceRoot}/bin/x is probed in the worktree, not the main checkout", () => {
+  const { ws, wt } = wsAndWorktree();
+  const cmd = "{workspaceRoot}/bin/x --check";
+  fs.mkdirSync(path.join(ws, "bin"));
+  fs.writeFileSync(path.join(ws, "bin", "x"), "#!/bin/sh\n", { mode: 0o755 });
+  assert.equal(usableIn(ws, wt, cmd), false, "only the main checkout has it");
+  fs.mkdirSync(path.join(wt, "bin"));
+  fs.writeFileSync(path.join(wt, "bin", "x"), "#!/bin/sh\n", { mode: 0o755 });
+  assert.equal(usableIn(ws, wt, cmd), true, "the worktree has its own");
+});
+
+test("gate-command: for a root that is PROJECT_ROOT, {workspaceRoot}/bin/x is probed there as before", () => {
+  const { ws } = wsAndWorktree();
+  const cmd = "{workspaceRoot}/bin/x";
+  assert.equal(usableIn(ws, ws, cmd), false, "absent");
+  fs.mkdirSync(path.join(ws, "bin"));
+  fs.writeFileSync(path.join(ws, "bin", "x"), "#!/bin/sh\n", { mode: 0o755 });
+  assert.equal(usableIn(ws, ws, cmd), true, "present");
+});

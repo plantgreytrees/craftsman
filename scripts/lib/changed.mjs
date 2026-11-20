@@ -52,7 +52,7 @@ export function isScoped(cmd) {
  * `{ skip }` is an empty ("no-changes") or unknown ("changes-unknown", files is not an array) set; `{ warn }` is an
  * embedded placeholder, which stays literal and means the command must not run. A command with no placeholder is only split. */
 export function expandChangePlaceholders(cmd, files, { cwd, root } = {}) {
-  const tokens = splitCmd(String(cmd));
+  const tokens = splitCmd(String(cmd), { root });
   if (tokens.some(isEmbedded)) return { warn: "embedded-placeholder" };
   if (!tokens.some(isWhole)) return { argv: tokens };
   if (!Array.isArray(files)) return { skip: "changes-unknown" };

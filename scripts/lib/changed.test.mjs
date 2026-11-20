@@ -280,3 +280,38 @@ test("quality-gate: a source edit after a docs edit records only the source path
   edit(root, "chg-mix", "svc/a.fx");
   assert.deepEqual(readChanged(sdirOf(root, "chg-mix")), ["svc/a.fx"]);
 });
+
+// ------------------------------------------------------- {workspaceRoot} follows the worktree (ARCH-STATE-19) ---
+
+// PROJECT_ROOT is fixed when core loads, so each case runs changed.mjs in a child node whose cwd is a scratch repository
+// standing in for the workspace root.
+const CHANGED_URL = new URL("./changed.mjs", import.meta.url).href;
+function gitIn(dir, ...args) {
+  const r = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" });
+  assert.equal(r.status, 0, `git ${args.join(" ")} failed: ${r.stderr}`);
+}
+function expandIn(ws, root) {
+  const src = `import { expandChangePlaceholders } from ${JSON.stringify(CHANGED_URL)};
+const opts = ${root === undefined ? "{}" : `{ root: ${JSON.stringify(root)} }`};
+process.stdout.write(JSON.stringify(expandChangePlaceholders("node {workspaceRoot}/lint.mjs {changed}", ["a.fx"], opts)));`;
+  const env = { ...process.env };
+  for (const k of ["CLAUDE_PROJECT_DIR", "CLAUDE_CODE_SESSION_ID", "CRAFTSMAN_WORKSPACE_MANIFEST"]) delete env[k];
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", src], { cwd: ws, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test("expandChangePlaceholders: a worktree root expands {workspaceRoot} to the worktree; no root, the root itself and another repository to PROJECT_ROOT", () => {
+  const ws = scratch("changed-ws-");
+  gitIn(ws, "init", "-q");
+  gitIn(ws, "commit", "-q", "--allow-empty", "-m", "init");
+  const wt = path.join(scratch("changed-wt-"), "wt");
+  gitIn(ws, "worktree", "add", "-q", "-b", "unit", wt);
+  const other = scratch("changed-other-");
+  gitIn(other, "init", "-q");
+  const argv = (root) => ["node", `${root}/lint.mjs`, "a.fx"];
+  assert.deepEqual(expandIn(ws, fs.realpathSync(wt)).argv, argv(fs.realpathSync(wt)), "a worktree");
+  assert.deepEqual(expandIn(ws).argv, argv(ws), "no root");
+  assert.deepEqual(expandIn(ws, ws).argv, argv(ws), "the root itself");
+  assert.deepEqual(expandIn(ws, other).argv, argv(ws), "another repository");
+});

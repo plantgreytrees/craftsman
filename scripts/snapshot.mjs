@@ -31,7 +31,7 @@ for (const cmd of entries) {
   // A scoped command (`{changed}` / `{changedDirs}`, whole or embedded) has no whole-tree baseline: Stop derives it from
   // config and runs it against the session change list, so it is neither run here nor listed (ARCH-STATE-21).
   if (isScoped(cmd)) continue;
-  const [bin, ...args] = splitCmd(cmd);
+  const [bin, ...args] = splitCmd(cmd, context);
   let green = false;
   try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: context.root }); green = true; } catch (error) {
     // A program that is not installed was never a red test: skipped like a scoped command, so Stop has no baseline entry to call red-at-start (ARCH-STATE-22).
