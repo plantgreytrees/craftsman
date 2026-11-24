@@ -51,8 +51,8 @@ function architectureAudit(root) {
   const unmanaged = unmanagedDocs(root, docs, dir);
   const hasPlans = fs.existsSync(path.join(root, "docs", "plans"));
   const next = docs.length
-    ? (unmanaged.length ? "/architect --backfill <area> — pair the remaining legacy docs" : null)
-    : (unmanaged.length || hasPlans ? "/architect --backfill — create rules from legacy docs, plans and code" : null);
+    ? (unmanaged.length ? "/craftsman:architect --backfill <area> — pair the remaining legacy docs" : null)
+    : (unmanaged.length || hasPlans ? "/craftsman:architect --backfill — create rules from legacy docs, plans and code" : null);
   return { dir, rulesDocs: docs.length, unmanagedDocs: unmanaged.length, next };
 }
 

@@ -172,7 +172,7 @@ if (isMain(import.meta.url)) {
     // session, so the model cannot grant itself the exemption by activating its own scope.
     const selfScoped = namesSelfScoped([...scope.scope.write, ...realEntries(scope.scope.write, scope.project_root)]);
     if (selfScoped.length && !commandInvoked(sidOf(input), ["orchestrate", "auto"], { context: { stateDir: STATE_DIR } })) {
-      throw new Error(`scope.write names ${selfScoped.join(", ")}, which only a unit run by /orchestrate or /auto may rewrite`);
+      throw new Error(`scope.write names ${selfScoped.join(", ")}, which only a unit run by /craftsman:orchestrate or /craftsman:auto may rewrite`);
     }
     if (scope.worktree_path) {
       if (!fs.existsSync(scope.worktree_path) || !isGitRoot(scope.worktree_path) || !sameRepository(scope.worktree_path, selectedContext.root)) {
@@ -199,7 +199,7 @@ if (isMain(import.meta.url)) {
       if (violations.length) {
         throw new Error(`architecture rules not honoured by ${scope.unit}:\n  - ${violations.join("\n  - ")}\n` +
           `Read the governing .rules.md, add it to scope.docs, cite the ARCH ids this unit must obey in "arch" ` +
-          `(and in the plan unit), then re-activate. A change that must break a decided rule needs /architect first.`);
+          `(and in the plan unit), then re-activate. A change that must break a decided rule needs /craftsman:architect first.`);
       }
     }
     if (scope.project !== "." && !isGitRoot(scope.project_root)) {

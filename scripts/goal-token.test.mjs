@@ -57,7 +57,7 @@ test("goal-token: /auto also mints; with neither command run in the session it r
     fs.writeFileSync(goal, "/goal x\n");
     const refused = mint(dir, goal, "gt-2");
     assert.equal(refused.status, 2);
-    assert.match(refused.stderr, /only inside \/instruction or \/auto/);
+    assert.match(refused.stderr, /only inside \/craftsman:instruction or \/craftsman:auto/);
     assert.equal(fs.existsSync(path.join(dir, ".craftsman", "sessions", "gt-2", "goal-tokens.json")), false);
     assert.equal(typed(dir, "gt-2", "/craftsman:auto some-slug").status, 0);
     assert.equal(mint(dir, goal, "gt-2").status, 0);

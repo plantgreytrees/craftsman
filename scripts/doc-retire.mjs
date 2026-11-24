@@ -115,7 +115,7 @@ export function retire(input, context = projectContext("."), capability = undefi
   if (!landing && !hasGrant(input.sid, context)) {
     return refuse(safetyEnabled()
       ? "retire refused: no doc-write grant (run doc-write.mjs first)"
-      : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /sync-docs --archive needs a session with safety on");
+      : "retire refused: no doc-write grant; with CRAFTSMAN_SAFETY=off no guard runs and doc-write.mjs grants nothing, so /craftsman:sync-docs --archive needs a session with safety on");
   }
   // ARCH-ARCHIVE-03: an automatic archive has nowhere to copy to without an archive project; refuse before anything is touched.
   // The archive resolved here is the one copied into below: resolving again could answer differently and leave nothing to verify.

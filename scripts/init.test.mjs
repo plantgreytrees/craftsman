@@ -161,7 +161,7 @@ test("init update audits the shipped plugin and refreshes project surfaces", () 
   assert.ok(plan.update.pluginFiles > 10);
   assert.ok(plan.update.pluginFileList.includes(".claude-plugin/marketplace.json"));
   assert.ok(plan.update.pluginVersion);
-  assert.deepEqual(plan.update.architecture, { dir: "docs/architecture", rulesDocs: 0, unmanagedDocs: 0, next: "/architect --backfill — create rules from legacy docs, plans and code" });
+  assert.deepEqual(plan.update.architecture, { dir: "docs/architecture", rulesDocs: 0, unmanagedDocs: 0, next: "/craftsman:architect --backfill — create rules from legacy docs, plans and code" });
   assert.ok(plan.update.projectChanges.includes(path.join(root, ".claudeignore")));
   assert.deepEqual(plan.update.planOrder, ["docs/plans/active.md", "docs/plans/done.md"]);
   assert.deepEqual(plan.update.planChanges, [path.join(root, "docs/plans/active.md"), path.join(root, "docs/plans/done.md")]);

@@ -1532,7 +1532,7 @@ if (tool === "Bash" && autoForceBlock(sidOf(input))) {
   if (destructive) {
     logEvent({ ms: Date.now() - T0, ev: "auto_force_blocked", sid: sidOf(input), command });
     process.stderr.write(
-      `craftsman: ${destructive} is BLOCKED while /auto is active (ARCH-LAND-05). Land with a plain ` +
+      `craftsman: ${destructive} is BLOCKED while /craftsman:auto is active (ARCH-LAND-05). Land with a plain ` +
       `push or repo-exec merge; a rejected push or conflict PARKs the unit with a decision for Phase C.\n`
     );
     process.exit(2);
@@ -1964,10 +1964,10 @@ if (tool === "Bash" && command) {
     denySelfDisable("a command that sets CLAUDE_CODE_SESSION_ID, CLAUDE_PROJECT_DIR or CRAFTSMAN_SAFETY, which the authority scripts and the state paths trust");
   }
   if (invocations("goal-token").length && !commandInvoked(sidOf(input), ["instruction", "auto"], { context: { stateDir: STATE_DIR } })) {
-    denySelfDisable("goal-token.mjs outside /instruction or /auto");
+    denySelfDisable("goal-token.mjs outside /craftsman:instruction or /craftsman:auto");
   }
   if (invocations("doc-write").some((arg) => arg !== "off") && !commandInvoked(sidOf(input), DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } })) {
-    denySelfDisable("doc-write.mjs on outside /plan, /orchestrate, /sync-docs, /idea, /architect or /builtin-check");
+    denySelfDisable("doc-write.mjs on outside /craftsman:plan, /craftsman:orchestrate, /craftsman:sync-docs, /craftsman:idea, /craftsman:architect or /craftsman:builtin-check");
   }
   if (invocations("toggle").some((arg) => arg !== "on") && !commandInvoked(sidOf(input), ["toggle"], { context: { stateDir: STATE_DIR }, via: "prompt" })) {
     denySelfDisable("toggle.mjs off unless the user typed /craftsman:toggle");

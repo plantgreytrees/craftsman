@@ -151,7 +151,7 @@ test("agent-mode-guard: one /idea invocation grants exactly one idea-critic, and
     assert.equal(dispatch("craftsman:idea-critic").status, 0);
     const second = dispatch("idea-critic");
     assert.equal(second.status, 2);
-    assert.match(second.stderr, /Each \/idea invocation grants exactly ONE isolated idea-critic/);
+    assert.match(second.stderr, /Each \/craftsman:idea invocation grants exactly ONE isolated idea-critic/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
