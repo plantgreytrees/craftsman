@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Edit, ExitWorktree, AskUserQuestion
 # Merge — land a branch end to end
 
 "Merge" from the user is the go-ahead to land on base and push it.
-Finish the whole job in this session; never end with "run this to merge". Ask the user with `AskUserQuestion` (`_shared-machinery.md`), never in prose.
+Finish the job in this session; never end with "run this to merge". Ask the user with `AskUserQuestion` (`_shared-machinery.md`), never in prose.
 Landing goes through `repo-exec.mjs merge`, as `/orchestrate` does for units. It
 re-runs the tests in the worktree, takes the merge lock, merges with `--no-ff`,
 pushes base, then removes the worktree and deletes the branch locally and on `origin`. With `repoExec.land: "pr"` it opens an
@@ -15,7 +15,7 @@ auto-merging PR/MR instead.
 
 **It is also the loop's closing step:** PLAN → ORCHESTRATE → SCRUTINISE →
 SYNC-DOCS → MERGE. `/orchestrate` lands each unit's branch itself; this step
-lands what's left: the session's own branch or worktree (plan doc, tracker and `/scrutinise`/`/sync-docs` edits) and any unlanded branch for the slug. A `/goal` from `/instruction` that lists this step is the user's go-ahead, like saying "merge".
+lands what's left: the session's branch or worktree (plan doc, tracker and `/craftsman:scrutinise`/`/craftsman:sync-docs` edits) and any unlanded branch for the slug. A `/goal` from `/craftsman:instruction` that lists this step is the user's go-ahead, like saying "merge".
 
 ## 1. Pick the target
 

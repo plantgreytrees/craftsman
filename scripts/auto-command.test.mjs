@@ -82,7 +82,7 @@ test("instruction.md: the goal template keeps the evidence clause, BLOCKED ON US
   const goal = template();
   assert.match(goal, /Done when the final turn prints COMPLETION EVIDENCE/);
   assert.match(goal, /BLOCKED ON USER: /);
-  assert.match(goal, /Parked rows whose decisions \/auto's Phase C asked = met stop\./);
+  assert.match(goal, /Parked rows whose decisions \/craftsman:auto's Phase C asked = met stop\./);
 });
 
 test("instruction.md: the goal template states the met-stop rule within its first 3 lines (ARCH-AUTO-04)", () => {

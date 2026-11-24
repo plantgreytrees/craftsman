@@ -31,7 +31,7 @@ test("scrutineer.md: an (owner: ...) criterion is MET on doc file:line evidence,
 });
 
 test("instruction.md step 4 ticks the owner-tagged criteria it satisfies", () => {
-  const step4 = read("commands/instruction.md").split("\n").find((l) => l.startsWith("4. /sync-docs"));
+  const step4 = read("commands/instruction.md").split("\n").find((l) => l.startsWith("4. /craftsman:sync-docs"));
   assert.ok(step4, "step 4 present");
   assert.match(step4, /ticks the `\(owner: …\)` criteria it satisfies/);
 });
