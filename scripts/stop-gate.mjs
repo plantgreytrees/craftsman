@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
-import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped, markerPresent } from "./lib/core.mjs";
+import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readLiveWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped, markerPresent } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
 import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
@@ -94,7 +94,7 @@ const problems = [];
 // A session cannot finish while it still owns an implementation worktree.
 // This is session-local: another concurrent session's active binding is not
 // a reason to block this Stop hook.
-for (const binding of readWorktreeBindings(input, {
+for (const binding of readLiveWorktreeBindings(input, {
   root: context.root,
   stateDir: context.stateDir,
   worktreePath: active?.worktree_path || context.root,

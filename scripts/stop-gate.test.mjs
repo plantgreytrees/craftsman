@@ -110,6 +110,7 @@ test("stop-gate: blocks completion while this session owns an active worktree bi
     const sid = "active-worktree-session";
     const bindingDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
     fs.mkdirSync(bindingDir, { recursive: true });
+    fs.mkdirSync(path.join(dir, ".worktrees", "unit-1"), { recursive: true }); // a binding to a vanished worktree is cleared, not blocked on
     fs.writeFileSync(path.join(bindingDir, "worktree-hash-worktree-binding.json"), JSON.stringify({
       session_id: sid,
       unit: "unit-1",
@@ -119,6 +120,54 @@ test("stop-gate: blocks completion while this session owns an active worktree bi
     const result = await runStopGate(dir, sid);
     assert.match(result.stdout, /"decision":"block"/);
     assert.match(result.stdout, /WORKTREE BINDING ACTIVE/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// A binding is keyed by the sha1 of its worktree path (core.mjs worktreeBindingPath), the key clearWorktreeBinding uses.
+function writeBinding(dir, sid, worktree, unit) {
+  const bindingDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+  fs.mkdirSync(bindingDir, { recursive: true });
+  const file = path.join(bindingDir, `${crypto.createHash("sha1").update(path.resolve(worktree)).digest("hex").slice(0, 16)}-worktree-binding.json`);
+  fs.writeFileSync(file, JSON.stringify({ session_id: sid, unit, worktree_path: worktree, branch: `feat/${unit}` }));
+  return file;
+}
+
+test("stop-gate: a binding whose worktree_path no longer exists is cleared and logged, never blocked on", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "stale-binding-session";
+    const worktree = path.join(dir, ".worktrees", "gone-unit");
+    const file = writeBinding(dir, sid, worktree, "gone-unit");
+    const result = await runStopGate(dir, sid);
+    assert.equal(result.code, 0);
+    assert.doesNotMatch(result.stdout, /WORKTREE BINDING ACTIVE/);
+    assert.doesNotMatch(result.stdout, /"decision":"block"/);
+    assert.equal(fs.existsSync(file), false);
+    const cleared = result.events.find((e) => e.ev === "stop-binding-cleared");
+    assert.equal(cleared?.unit, "gone-unit");
+    assert.equal(cleared?.worktree_path, worktree);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a binding to an existing, unmerged worktree still blocks and keeps its file", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "live-binding-session";
+    const { worktree } = addMergedWorktree(dir, "live-unit");
+    fs.writeFileSync(path.join(worktree, "work.txt"), "wip\n");
+    for (const args of [["add", "-A"], ["commit", "-q", "-m", "wip"]]) {
+      const r = spawnSync("git", args, { cwd: worktree, encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    }
+    const file = writeBinding(dir, sid, worktree, "live-unit");
+    const result = await runStopGate(dir, sid);
+    assert.match(result.stdout, /WORKTREE BINDING ACTIVE/);
+    assert.equal(fs.existsSync(file), true);
+    assert.equal(result.events.some((e) => e.ev === "stop-binding-cleared"), false);
   } finally {
     cleanup(dir);
   }
@@ -729,6 +778,7 @@ test("stop-gate: terminal pass and block events carry numeric ms", async () => {
     const sid = "ms-block";
     const bindingDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
     fs.mkdirSync(bindingDir, { recursive: true });
+    fs.mkdirSync(path.join(dir, ".worktrees", "unit-1"), { recursive: true }); // a binding to a vanished worktree is cleared, not blocked on
     fs.writeFileSync(path.join(bindingDir, "worktree-hash-worktree-binding.json"), JSON.stringify({
       session_id: sid, unit: "unit-1", worktree_path: path.join(dir, ".worktrees", "unit-1"), branch: "feat/unit-1",
     }));
