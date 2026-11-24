@@ -58,3 +58,68 @@ for (const command of [
 ]) {
   test(`allowed: ${command}`, () => assert.equal(run(command), 0));
 }
+
+// The doc-guard refusal names the fix that applies: a session that already ran a doc-writing command is told to re-grant,
+// not to hand the change to /plan (ARCH-STATE-16: the exit code and the decision are unchanged).
+function runDocWrite(tool, toolInput, { recorded = null } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-docguard-"));
+  try {
+    spawnSync("git", ["init", "-q"], { cwd: dir });
+    fs.writeFileSync(
+      path.join(dir, "craftsman.config.json"),
+      JSON.stringify({ docWriteGuard: { enabled: true, docPaths: ["docs/**"] } }),
+    );
+    fs.mkdirSync(path.join(dir, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "docs", "notes.md"), "# notes\n");
+    if (recorded) {
+      const sdir = path.join(dir, ".craftsman", "sessions", "docguardtest");
+      fs.mkdirSync(sdir, { recursive: true });
+      fs.writeFileSync(
+        path.join(sdir, "commands.json"),
+        JSON.stringify({ [recorded]: { via: "skill", at: new Date().toISOString() } }) + "\n",
+      );
+    }
+    const r = spawnSync(process.execPath, [GUARD], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      input: JSON.stringify({
+        session_id: "docguardtest",
+        tool_name: tool,
+        tool_input: toolInput,
+      }),
+    });
+    return { status: r.status, stderr: r.stderr };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const docWrite = (opts) =>
+  runDocWrite("Write", { file_path: "docs/notes.md", content: "x" }, opts);
+
+test("doc-guard deny after a recorded doc writer names the re-grant, not /plan", () => {
+  const r = docWrite({ recorded: "orchestrate" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /doc-write\.mjs" on/);
+  assert.doesNotMatch(r.stderr, /Hand the change to/);
+});
+
+test("doc-guard deny with no recorded doc writer keeps the /craftsman:plan redirect", () => {
+  const r = docWrite();
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /Hand the change to \/craftsman:plan/);
+});
+
+test("Bash doc-guard ask after a recorded doc writer names the re-grant, not /plan", () => {
+  const r = runDocWrite("Bash", { command: "rm docs/notes.md" }, { recorded: "plan" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /doc-write\.mjs" on/);
+  assert.doesNotMatch(r.stderr, /Hand the change to/);
+});
+
+test("Bash doc-guard ask with no recorded doc writer keeps the /craftsman:plan redirect", () => {
+  const r = runDocWrite("Bash", { command: "rm docs/notes.md" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /Hand the change to \/craftsman:plan/);
+});

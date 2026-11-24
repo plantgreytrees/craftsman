@@ -1978,13 +1978,25 @@ if (tool === "Bash" && command) {
   if (invocations("toggle").some((arg) => arg !== "on")) pendingNonces.push("toggle");
 }
 
+// What a doc-guard refusal tells the model to do. A session that already ran a doc-writing command only lacks the grant
+// (it lapsed or was never taken), so the redirect to /craftsman:plan would send it round in a circle: lead with the re-grant.
+// Text only: the allow/deny decision and the exit code are not read from here (ARCH-STATE-16).
+function docGuardAdvice(sid, kind) {
+  const grant = `node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on`;
+  if (commandInvoked(sid, DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } }))
+    return `this session already ran a doc-writing command; re-grant with: ${grant}`;
+  return kind === "write"
+    ? `Do NOT write it directly. Hand the change to /craftsman:plan (plan docs + tracker rows) — or whichever command this repo's config designates for this path. If you ARE that command, first run: ${grant}`
+    : `Hand the change to /craftsman:plan, or if you ARE that command, first run: ${grant}`;
+}
+
 // Deleting a guarded doc is a write: `rm` / `git rm` (also chained) needs the grant.
 if (tool === "Bash" && command && docSide && cfg.docWriteGuard?.enabled !== false) {
   const docPaths = cfg.docWriteGuard?.docPaths || ["docs/**"];
   const hit = removedDocs(command, docPaths);
   if (hit.length && !hasDocWriteGrant({ sid: sidOf(input), claim: true }, { ...activeContext, grantStateDir: STATE_DIR })) {
     logEvent({ ms: Date.now() - T0, ev: "docguard", file: hit[0], sid: sidOf(input), result: "blocked" });
-    const first = hit[0], ask = `Hand the change to /plan, or if you ARE that command, first run: node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`;
+    const first = hit[0], ask = docGuardAdvice(sidOf(input), "ask") + "\n";
     process.stderr.write(
       first.startsWith("(redirect target the parser cannot resolve")
         ? `craftsman: this command holds a removal word and redirects to a target the guard cannot resolve ${first}; ` +
@@ -2101,9 +2113,7 @@ if (g.enabled !== false && writeTool && docSide) {
       logEvent({ ms: Date.now() - T0, ev: "docguard", file: rel, sid, result: "blocked" });
       process.stderr.write(
         `craftsman: "${rel}" matches this repo's guarded doc path(s) (docWriteGuard.docPaths). ` +
-        `Do NOT write it directly. Hand the change to /plan (plan docs + tracker rows) — or whichever ` +
-        `command this repo's config designates for this path. If you ARE that command, first run: ` +
-        `node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on\n`
+        `${docGuardAdvice(sid, "write")}\n`
       );
       process.exit(2);
     }
