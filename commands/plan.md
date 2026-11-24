@@ -38,4 +38,4 @@ Every plan declares a one-sentence user-visible `goal` plus `level`, `parent`, `
 
 ## Phase 2 — Hand off
 
-Do **not** implement. Print: the plan doc path, the feature→unit list, the `coverage:` map, any parked scope conflicts, and the next step — **`/orchestrate <feature-slug>`**. Surface any genuine product/scope ambiguity first; otherwise the plan executes autonomously.
+Do **not** implement. Print: the plan doc path, the feature→unit list, the `coverage:` map, any parked scope conflicts, and the next step — **`/craftsman:orchestrate <feature-slug>`**. Surface any genuine product/scope ambiguity first; otherwise the plan executes autonomously.

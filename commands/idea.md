@@ -64,4 +64,4 @@ The session that heard the pitch is the worst-placed to judge it. Dispatch **one
 
 Write `docs/ideas/<slug>.md` from `${CLAUDE_PLUGIN_ROOT}/skills/language-aware-planning/references/idea-template.md` (status = verdict; `isolation`, `depth`, `touches` filled). Rejected and deferred ideas are written too. Record memory (plan-memory, `decision` category, tags `idea`,`<slug>`): the verdict and its deciding fact, ≤220 chars.
 
-Print: verdict + confidence + the deciding fact; the top 3 risks; the top 3 recommendations; isolation status; the Disputed list; open questions; the doc path; and the next step — **`/architect <slug>`** (add `--deep` for a high-risk or cross-cutting idea) for PURSUE / PURSUE-WITH-CHANGES, otherwise what evidence would reopen it. Do **not** design or plan.
+Print: verdict + confidence + the deciding fact; the top 3 risks and recommendations; isolation status; the Disputed list; open questions; the doc path; and the next step — **`/craftsman:architect <slug>`** (`--deep` if high-risk or cross-cutting) for PURSUE / PURSUE-WITH-CHANGES, otherwise what evidence would reopen it. Do **not** design or plan.
