@@ -3,8 +3,8 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: 6489683342b42273e63fef84b3a411d3bf048151
-updated: 2026-11-05
+verified_at: 8501abe3a33ae187c35fd501f3739efca8c1f738
+updated: 2026-11-20
 ---
 # ARCH slim — enforced rules
 
@@ -13,7 +13,7 @@ updated: 2026-11-05
 - **ARCH-SLIM-03** [decided] Load is also capped per invocation: a command's bytes plus every shared doc it reads unconditionally; doc-size-policy reports and caps the total per command — check: doc-size-policy per-invocation table — cite: scripts/doc-size-policy.mjs:106-143,167-196
 - **ARCH-SLIM-04** [decided] Detail that applies only under a config or plan condition lives in a reference doc read at the point of need, never in the always-read body — check: Read placement review — cite: commands/_shared-execution.md:6
 - **ARCH-SLIM-05** [decided] Duplicate prose is removed in this order: delete what a hook or script enforces; else move it into a doc the command already reads; never into a newly loaded doc. Call-site directives kept on purpose are asserted in a test — check: wiring.test.mjs prose assertions — cite: scripts/wiring.test.mjs:152-160
-- **ARCH-SLIM-06** [decided] A MUST sentence may leave a command or agent only when a hook or script enforces it or a test asserts its replacement; a trim keeps the suite, doc-size-policy and descriptions.test green and reports stats.mjs block rates before and after — check: PR evidence — cite: scripts/stats.mjs:63-81
+- **ARCH-SLIM-06** [superseded by ARCH-SLIM-18]
 - **ARCH-SLIM-07** [decided] Scripts have no hard byte cap: CI warns when the scripts/ source total grows, and hook latency (quality gate, pre-guard, stop-gate p50/p95 in stats.mjs) is the hard budget under hooks.json timeouts — check: stats latency section — cite: scripts/stats.mjs:34-51
 - **ARCH-SLIM-08** [decided] CHANGELOG.md [Unreleased] stays under 8 KB; a release is cut before it grows past that — check: changelog size test — cite: CHANGELOG.md:7
 - **ARCH-SLIM-09** [decided] New behaviour is a role in an existing agent, not a new agent, unless its description fits the descriptions.test total without raising it — check: descriptions.test.mjs — cite: scripts/descriptions.test.mjs:13-17
@@ -25,3 +25,4 @@ updated: 2026-11-05
 - **ARCH-SLIM-15** [decided] No third-party plugin is a dependency or co-install assumption: plugin.json declares no `dependencies`, and borrowed patterns (test-driven development, systematic debugging, verification before completion) are vendored as craftsman skills with MIT attribution inside the descriptions budget and load only when their step runs. The one named optional integration is Artist (`artist@artist-marketplace`), used only by the ui gate after scripts/ui-gate.mjs detects it (ARCH-GATES-02); its absence is never an error — check: skills-vendored.test.mjs, plugin.json has no dependencies key, ui-gate.test.mjs absent case — cite: skills/test-driven-development/SKILL.md:1-6, docs/architecture/gates.rules.md:12
 - **ARCH-SLIM-16** [superseded by ARCH-SLIM-17]
 - **ARCH-SLIM-17** [decided] Caps ratchet: each cap is the file's size when set and may only be lowered, except through a trade recorded in CAP_TRADES in scripts/doc-size-policy.mjs ({raise, lower, bytes, rule, decided}): the ratchet accepts a rise in a file's cap only when an entry names that file as `raise`, the rise is at most `bytes`, the `lower` file is one some invocation loads (a command, commands/*.md, or a doc in its INVOCATION_DOCS; not necessarily the invocation that loads the raised file) and its cap fell by at least `bytes` against the merge-base, and the entry cites the owner-approved rule; one fall pays one trade, and when several entries cover one raise the ratchet binds the one whose lower file is paid; trades decided under ARCH-SLIM-16 keep their rule id (owner decision 2026-11-04, followup-ratchet-lower-pairing) — check: doc-size-policy.test.mjs ratchet refuses an unrecorded rise, an over-sized rise, an unpaid trade and a lower file no invocation loads, and binds the paid trade when several cover one raise — cite: scripts/doc-size-policy.mjs:204-250
+- **ARCH-SLIM-18** [decided] A MUST sentence may leave a command or agent only when a hook or script enforces it or a test asserts its replacement; a trim keeps the suite, doc-size-policy and descriptions.test green and reports stats.mjs block rates before and after; a trim that touches a skill or command `description:` or a SKILL.md body also reruns the skill-fires-* eval cases (ARCH-EVALS-03) and reports their scores before and after (owner decision 2026-11-20, plugin-behaviour-evals) — check: PR evidence carries both the block rates and the eval scores — cite: scripts/stats.mjs:63-81, docs/architecture/evals.rules.md:13

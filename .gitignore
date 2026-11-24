@@ -16,3 +16,6 @@ Thumbs.db
 # Node (the plugin has no npm deps, but just in case)
 node_modules/
 npm-debug.log*
+
+# claude plugin eval results and reports (local only, ARCH-EVALS-05)
+evals/results/

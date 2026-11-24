@@ -37,7 +37,8 @@ flowchart LR
 | ARCH-SLIM-03 | Per-invocation cap | Context cost is per invocation, not per file | Per-file only; token-based (needs a tokenizer) |
 | ARCH-SLIM-04 | Conditional reference docs | An existing pattern (`_shared-execution`, `_architecture`) | Inline everything |
 | ARCH-SLIM-05 | Delete what's enforced; dedupe only into already-loaded docs | Moving text into a newly loaded doc raises load | Move all to shared docs |
-| ARCH-SLIM-06 | MUST sentences leave only with mechanical backing | Keeps gate strength | Trim freely |
+| ARCH-SLIM-06 | Superseded by ARCH-SLIM-18 | It checked a trim only by tests and block rates, which cannot see whether a skill still fires | — |
+| ARCH-SLIM-18 (replaces 06) | MUST sentences leave only with mechanical backing; a description or skill-body trim also reruns the skill-firing evals and reports scores before and after | Keeps gate strength and shows triggering survives the trim | Trim freely; rely on the next release run only |
 | ARCH-SLIM-07 | Scripts: soft size warning, hard latency budget | Scripts cost no tokens; latency is what users feel | Hard per-file caps; latency only |
 | ARCH-SLIM-08 | CHANGELOG `[Unreleased]` ≤ 8 KB, cut 2.2.0 | `/idea` reads it every run (31.5 KB today) | `/idea` reads bullet heads only |
 | ARCH-SLIM-09 | New behaviour is a role, not a new agent | The descriptions budget is shared | New agents freely |
@@ -63,3 +64,7 @@ ARCH-SLIM-10 measures always-loaded bytes: a 3 KB SessionStart target and a per-
 ## Amendment (2026-10-25, owner-approved): Artist as an optional integration
 
 - **ARCH-SLIM-15** replaces 13. Craftsman still declares no plugin dependency and assumes no co-install. The one exception is narrow: the separate Artist plugin owns UI design, so the `ui` gate uses it when `scripts/ui-gate.mjs` finds it installed, enabled and usable. When it isn't, the gate runs craftsman's own reduced accessibility check. Rejected: a hard `dependencies` entry in `plugin.json`, which would make every craftsman install require Artist and its marketplace. Routing lives in [gates](./gates.md). Source: [artist-ui-gate](../ideas/artist-ui-gate.md).
+
+## Amendment (2026-11-20, owner-approved): trims rerun the skill-firing evals
+
+- **ARCH-SLIM-18** replaces 06. Everything 06 required stays. A trim that touches a skill or command `description:` or a SKILL.md body also reruns the `skill-fires-*` cases of the behaviour-eval suite ([evals](./evals.md), ARCH-EVALS-03) and reports their scores before and after. Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md).
