@@ -64,7 +64,7 @@ the plugin version, and audits every shipped asset (syntax, JSON, sizes). It als
 in activity order. Canonical plan frontmatter receives the current release as
 `craftsman_version`; task prose and tracker statuses are preserved. The
 `architecture` section counts rules docs and unmanaged legacy docs; when its
-`next` is set, report it (usually `/architect --backfill`). To pull a newer
+`next` is set, report it (usually `/craftsman:architect --backfill`). To pull a newer
 plugin first, run `/craftsman:upgrade`.
 It does not overwrite application source, custom project context, or arbitrary
 files. A missing or invalid shipped asset is an internal plugin problem: it blocks
