@@ -7,7 +7,7 @@ allowed-tools: Task, Bash, Read, Write, Edit, Glob, Grep, TaskCreate, TaskUpdate
 
 # Orchestrate — the executor
 
-> Doc authority: /orchestrate is a doc writer (tracker rows only — plans are `/plan`'s). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
+> Doc authority: /orchestrate is a doc writer (tracker rows only; plans are `/plan`'s). **First action:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on` to authorise doc writes this turn.
 
 You **execute a documented plan** — a plan doc already decided what to build (planning is `/plan`/`/investigate`). Plan nothing, delegate implementation, gate, review, and merge — one unit at a time.
 
@@ -16,7 +16,7 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 ## Phase A — Resolve the plan (no decomposition here)
 
 1. **`--step <tracker-id>`** — single-row, user-gated. Grep the main checkout's `docs/plans/TRACKER.md` for the row, resolve its plan doc, run Phases B–E for that one row **with a plan-approval stop**. Build the summary from the TRACKER.md row + plan doc only — don't `Read` either shared-machinery file yet. Present it and ask for approval with `AskUserQuestion` (`_shared-machinery.md`) before any edit; already-done row → say so and stop. After approval, `Read` `_shared-machinery.md`, then run Phases B–E (which reads `_shared-execution.md` itself, per Phase C).
-2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → its `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously
+2. **Plan-doc path** (`docs/plans/<slug>.md`, incl. `investigate-*`/`scrutinise-*`) → its `[ ] N.N.N` tasks + execution rows ARE the work. Run autonomously. Units never take `(owner: …)` lines: `/architect` or `/sync-docs` ticks them.
 3. **Tracker slug** with a linked plan doc → as (2). Unknown slug → `tracker.mjs lookup` before treating it as new.
 4. **Free-form request, no doc** → nothing to execute yet. Pick the right planner via Skill first, then continue at (2): bug/symptom → `/investigate`; anything else → `/plan`. A doc always exists before code.
 
@@ -27,9 +27,9 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 1. Confirm execution rows exist and are current (slug, area, language, security level, status, branch); register any the planner missed.
 2. **Blast-radius confirmation.** `/plan` already ran `consumer-tracer` per changed contract and persisted its `CONSUMERS:` block into the plan's Verification background — read that first. Re-run `consumer-tracer` only when no persisted manifest covers a contract this run touches, or the plan predates a merge that could've added a consumer. Anything found (persisted or fresh) the plan lacks → add the unit or record why out of scope.
 3. Validate and topologically order the `scope_id`/`depends_on` graph: `{"steps":[...]}` (id, scope_id, project, depends_on, bumps, feature) on stdin to `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-graph.mjs"` — exits non-zero on a missing dependency, cycle, unknown `project`, or missing/early submodule bump; fix the plan and re-run, never hand-order by eye. Write the order to TaskCreate.
-4. Treat each scope step as one execution packet — read its `project`, task text, `scope`, `### Tooling` manifest once, keep active until all its tasks complete; don't reload per task. Each project runs through its own worktree, base branch, merge lock, remote, cleanup lifecycle.
+4. Treat each scope step as one execution packet — read its `project`, task text, `scope`, `### Tooling` manifest once, keep active until all its tasks complete. Each project runs through its own worktree, base branch, merge lock, remote, cleanup lifecycle.
 5. **Read each step's `scope` manifest** as a hard allow-list — load only `scope.read`+`scope.docs` (plus tracker row + task text) before delegating; `scope.write` is the only writable set. No broad `Glob`/`Grep`, no unselected workspace projects. **Architecture:** pass the unit's `arch` ids into `scope.mjs` with the manifest (`${CLAUDE_PLUGIN_ROOT}/commands/_architecture.md`). A unit that cannot honour a `decided` rule → PARK with the rule id and recommend `/architect`; never work around it.
-6. **Activate the scope before Phase C** — exact step manifest as JSON on stdin to `scripts/scope.mjs`, creating the session-owned allow-list. A blocked tool call = mandatory re-scope: re-analyse the dependency boundary, update the plan's scope, reactivate, retry. Never widen to a repo-wide search.
+6. **Activate the scope before Phase C** — exact step manifest as JSON on stdin to `scripts/scope.mjs`, creating the session-owned allow-list. A blocked tool call = mandatory re-scope: re-analyse the dependency boundary, update the plan's scope, reactivate, retry.
 7. Before each step: claim via `scripts/claim.mjs`, mark scope-required via `printf '%s' '{"action":"require","session_id":"<real session id>"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/scope.mjs"`, activate the packet. `orchestrate-scope-guard.mjs` arms the flag on `/orchestrate` and `pre-guard.mjs` blocks tool calls until a scope is active. Implementer repeats activation in its worktree.
 
 ## Phase C — Per-unit loop
@@ -40,7 +40,7 @@ Input `$ARGUMENTS`, resolved in Phase A. With `--level` (default feature) or `--
 
 ## Phase D — Cross-cutting review & smoke (after a feature's units are MERGED/parked)
 
-1. **Skip entirely for a single-unit feature** — no cross-unit surface to check; that unit's merge-time panel (`_shared-execution.md` step 8) already reviewed it. For 2+ units: `code-reviewer` (integration mode) — API-contract compatibility across units, logic that belongs in a shared library, naming/error/auth consistency.
+1. **Skip entirely for a single-unit feature** — no cross-unit surface to check; its merge-time panel already reviewed it. For 2+ units: `code-reviewer` (integration mode) — API-contract compatibility across units, logic that belongs in a shared library, naming/error/auth consistency.
 2. **Integration smoke** (if defined): run over the merged set. Failure → BLOCKED follow-up row (merged code stays). Unavailable → note it.
 3. **Deterministic drift:** any exported contract/API/route changed → re-run `consumer-tracer` (or the project's contract check) over the merged set; breaking change + un-updated consumer → BLOCKED follow-up.
 4. Actionable findings → NEW PENDING follow-up rows; never silently patch merged code here.
