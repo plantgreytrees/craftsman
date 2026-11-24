@@ -418,6 +418,21 @@ this README's version line equal to the newest released CHANGELOG heading
 Every install then picks the change up through step 2 above. See
 [CONTRIBUTING.md](CONTRIBUTING.md) and [PUBLISH.md](PUBLISH.md).
 
+**Behaviour evals.** `evals/` holds a small suite that checks, in real Claude
+Code sessions, that craftsman's skills fire on natural requests and that its
+SessionStart hook reaches the session. Run it by hand before moving `stable`
+and after any trim of a skill or command description or a SKILL.md body, then
+record each case's score (or `Evals: unavailable` with the error) in the
+release's CHANGELOG entry. It never runs in CI. It needs Claude Code 2.1.269 or
+newer, and costs about $0.07 per run (15 runs):
+
+```bash
+claude plugin eval . --ablation none --max-cost-usd 5 --no-publish
+```
+
+Reports go to `evals/results/`, which is git-ignored. Rules:
+[docs/architecture/evals.rules.md](docs/architecture/evals.rules.md).
+
 ---
 
 ## Good to know
@@ -548,6 +563,7 @@ skills/language-aware-planning/                  per-language idiom checklists +
 skills/deep-research/                            forked read-only repo research
 skills/{systematic-debugging, test-driven-development, verification-before-completion}/   loop disciplines
 output-styles/craftsman-terse.md                 an optional terse response style
+evals/                                           behaviour evals for `claude plugin eval` (run by hand, never in CI)
 docs/architecture/                               craftsman's own decisions: <area>.md + <area>.rules.md
 docs/plans/, docs/ideas/                         craftsman's own plans, tracker and idea verdicts
 .github/workflows/ci.yml                         syntax/test/JSON checks on every push and PR
