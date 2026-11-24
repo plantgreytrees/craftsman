@@ -17,3 +17,4 @@ Human index (the loop never reads this file). Each area is a pair:
 - [views](./views.md): the local visual dashboard (`/digest --html`), the generated notes folder for Obsidian, Foam and Quartz, the idea inbox and the `NEXT.md` session queue
 - [archive](./archive.md): the workspace-level archive repo for finished plans, link rewriting and automatic archiving at landing
 - [gates](./gates.md): routing of the advisory specialist gates, the Artist-backed `ui` gate and its accessibility fallback
+- [evals](./evals.md): the behaviour-eval suite on `claude plugin eval`: skill-firing and hook smoke cases, deterministic graders, run before moving `stable` and after trims
