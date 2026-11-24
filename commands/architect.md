@@ -47,4 +47,4 @@ Then run `arch-check.mjs lint` — it must PASS; a failing doc is not done. Upda
 
 ## Phase 5 — Hand off
 
-Record memory (plan-memory, `decision`, tags `architecture`,`<area>`): one line per decision area, ≤220 chars. Print: decisions made (inherited / forced / decided-with-user / amended), the docs written, validation results (`WRONG`/`UNPROVEN` claims and how they were resolved), the Disputed list (if `--deep`), residual risks, and the next step — **`/instruction <slug>`** to generate the loop prompt (or `/plan <request>` directly). Do **not** plan or implement.
+Record memory (plan-memory, `decision`, tags `architecture`,`<area>`): one line per decision area, ≤220 chars. Print: decisions made (inherited / forced / decided-with-user / amended), the docs written, validation results (`WRONG`/`UNPROVEN` claims, resolved), the Disputed list (if `--deep`), residual risks, and the next step — **`/craftsman:instruction <slug>`** for the loop prompt (or `/craftsman:plan <request>` directly). Do **not** plan or implement.

@@ -55,7 +55,7 @@ Run `_shared-execution.md`'s **Finalization** block (worktree sweep — zero sur
 0. **Mechanical pre-filter:** run the project's full check suite on the merged base.
 1. Re-read the plan's user-visible outcomes. Per feature, delegate a completeness investigation (`general-purpose`, or `code-reviewer` integration-mode with a completeness mandate): the whole path exists end-to-end — every contract consumer updated, every endpoint guarded, every UI call site rendering, tests on the new path, no dangling half-implementation. Hunt for **what the plan didn't mention**.
 2. In-scope gap → loop back to Phase C and close it; out-of-scope adjacent → PENDING row. No COMPLETE while an in-scope gap remains.
-3. **Recommend the closing steps:** `/scrutinise <slug>` (isolated logic/security/architecture/cross-unit review; its fixes run as `/orchestrate scrutinise-<slug>`), then `/sync-docs --all <slug>` (docs, tracker and architecture reconciled to shipped reality), then `/craftsman:merge` (lands the session's branch with its plan/tracker/doc edits and anything still unlanded) — closes PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE.
+3. **Recommend the closing steps:** `/craftsman:scrutinise <slug>` (isolated logic/security/architecture/cross-unit review; its fixes run as `/craftsman:orchestrate scrutinise-<slug>`), then `/craftsman:sync-docs --all <slug>` (docs, tracker, architecture reconciled to reality), then `/craftsman:merge` (lands the session's branch with its plan/tracker/doc edits and anything unlanded) — closes PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE.
 
 ## Summary
 

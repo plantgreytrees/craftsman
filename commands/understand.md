@@ -8,7 +8,7 @@ allowed-tools: Task, Bash, Read, Glob, Grep, TaskCreate, TaskUpdate, Skill
 
 > Doc-write policy: this command writes NOTHING under docs/. It produces analysis and hands off to /plan.
 
-You build a **complete, verified understanding** of a specified feature or piece of code, so the plan that follows is informed by how the system *actually* works — not a guess. You **write no code and no plan** (comprehension only; the plan is `/plan`, fix-diagnosis is `/investigate`). Output is a brief the next step consumes. Entry point for existing code: **UNDERSTAND → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS** (a new idea enters at `/idea` → `/architect` instead).
+You build a **complete, verified understanding** of a specified feature or piece of code, so the plan that follows reflects how the system *actually* works — not a guess. You **write no code and no plan** (comprehension only; plans are `/craftsman:plan`, fix-diagnosis `/craftsman:investigate`). Output is a brief the next step consumes. Entry point for existing code: **UNDERSTAND → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS** (a new idea enters at `/craftsman:idea` → `/craftsman:architect`).
 
 Target: `$ARGUMENTS`. Prefer the [deep-research](../skills/deep-research/SKILL.md) skill for the isolated-research discipline. Read `${CLAUDE_PLUGIN_ROOT}/commands/_shared-analysis.md` for the optional-MCP conventions, the bounded fan-out cap, and the completeness-dimension checklist referenced below.
 
@@ -47,4 +47,4 @@ Reconcile the traces into one coherent model (skip the ceremony for a small sing
 
 ## Phase 3 — Hand off
 
-Do **not** plan or fix. **Persistence auto-delegates to `/plan`:** invoke `/plan` (Skill tool) with a concise request plus your full understanding brief (the model, the blast-radius list, the coverage checklist) — `/plan` owns writing the plan doc and tracker rows; this command writes nothing under `docs/`. Then print a 3–5 bullet executive summary, the blast-radius list, and the next step — **`/plan`** (now invoked) to persist and plan the feature, or **`/investigate`** if what you surfaced is actually a bug. If the owning doc was stale, also recommend **`/sync-docs`**.
+Do **not** plan or fix. **Persistence auto-delegates to `/craftsman:plan`:** invoke it (Skill tool) with a concise request plus your full brief (the model, the blast-radius list, the coverage checklist) — it owns writing the plan doc and tracker rows; this command writes nothing under `docs/`. Then print a 3–5 bullet summary, the blast-radius list, and the next step — **`/craftsman:plan`** (now invoked), or **`/craftsman:investigate`** if what you surfaced is actually a bug. If the owning doc was stale, also recommend **`/craftsman:sync-docs`**.
