@@ -424,7 +424,7 @@ SessionStart hook reaches the session. Run it by hand before moving `stable`
 and after any trim of a skill or command description or a SKILL.md body, then
 record each case's score (or `Evals: unavailable` with the error) in the
 release's CHANGELOG entry. It never runs in CI. It needs Claude Code 2.1.269 or
-newer, and costs about $0.07 per run (15 runs):
+newer, and costs about $1.60 per suite run (15 runs):
 
 ```bash
 claude plugin eval . --ablation none --max-cost-usd 5 --no-publish

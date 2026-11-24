@@ -3,7 +3,7 @@
 > and `/architect --update evals` should be run.
 
 # Behaviour evals architecture
-_Last verified: 2026-11-24 at `8501abe` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
+_Last verified: 2026-11-24 at `1d35408` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
 
 ## In plain English
 Craftsman's behaviour lives mostly in prose that the model reads. The unit tests
@@ -54,8 +54,14 @@ case depends on the OS sandbox (bubblewrap is installed here if one ever does).
 - Three runs per case is noisy; a single failing run is not a regression.
 - Long commands (`/orchestrate`, `/auto`) are out of scope: they need `.craftsman`
   state and exceed the default 10 turns / 300 s.
-- Whether the SessionStart hook's context reaches an eval session is unproven;
-  the first plan unit spikes it before writing the hook case.
+- The SessionStart hook's context does reach an eval session: the spike probe
+  scored 1.00 at $0.07 (2026-11-24, `hook-guards-line`, one run).
+- First full run (2026-11-24, 15 runs, $1.56): the hook case and
+  `skill-fires-deep-research` scored 1.00; the three loop-discipline skills
+  (`systematic-debugging`, `test-driven-development`,
+  `verification-before-completion`) scored 0.00. ARCH-EVALS-07's two description
+  rewrites have not started; the cases' Skill-only grant, 4 turns and empty
+  workspace may also depress those scores.
 - `claude plugin eval` can be switched off server-side; releases then record
   "Evals: unavailable" rather than wait.
 
@@ -79,7 +85,8 @@ edited in place because no plan or commit cited them yet:
 - Considered and kept: ARCH-SLIM-18 also triggers on command `description:` trims,
   since command and skill descriptions share one listing and similar names cause
   wrong-skill calls (https://blog.langchain.com/evaluating-skills).
-- Cost per run is unmeasured; the $5 ceiling is revisited after the first run.
+- Cost was unmeasured at decision time; the first full run cost $1.56, well inside
+  the $5 ceiling, so the ceiling stands.
 
 ## Glossary
 - **Arm:** the set of runs with the plugin (with-arm) or without it (without-arm).
