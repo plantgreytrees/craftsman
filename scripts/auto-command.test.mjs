@@ -85,6 +85,14 @@ test("instruction.md: the goal template keeps the evidence clause, BLOCKED ON US
   assert.match(goal, /Parked rows whose decisions \/auto's Phase C asked = met stop\./);
 });
 
+test("instruction.md: the goal template states the met-stop rule within its first 3 lines (ARCH-AUTO-04)", () => {
+  const head = template().split("\n").slice(0, 3).join("\n");
+  assert.match(head, /BLOCKED ON USER/);
+  assert.match(head, /COMPLETION EVIDENCE/);
+  assert.match(head, /BLOCKED rows[^.\n]*met/);
+  assert.match(head, /PARKED rows[^.\n]*blocker[^.\n]*met/);
+});
+
 test("instruction.md: a composed sample goal measures ≤ 4000 characters", () => {
   const ids = "ARCH-STATE-01..07, ENGINE-01..11, AUTO-01..07, MOD-01..05, TRACKER-01..05, LAND-01..06";
   const goal = template()
