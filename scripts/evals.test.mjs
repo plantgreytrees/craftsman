@@ -19,11 +19,18 @@ const EXEMPT_SKILLS = new Set(["language-aware-planning"]);
 const HOOK_TOOLS = new Set(["Read", "Glob", "Grep"]);
 const RUN_FLAGS = [/--ablation none(?=[\s`]|$)/, /--max-cost-usd 5(?=[\s`]|$)/, /--no-publish(?=[\s`]|$)/];
 
-const unquote = (v) => (/^(['"]).*\1$/.test(v) ? v.slice(1, -1) : v);
+const DQ_ESCAPES = { n: "\n", t: "\t" };
+// YAML quoting: '' is a quote inside single quotes; backslash escapes apply only inside double quotes.
+function unquote(v) {
+  if (/^'.*'$/.test(v)) return v.slice(1, -1).replace(/''/g, "'");
+  if (/^".*"$/.test(v)) return v.slice(1, -1).replace(/\\(.)/g, (_, c) => DQ_ESCAPES[c] ?? c);
+  return v;
+}
 
 // Flat YAML frontmatter only (key: scalar or key: [a, b]); the plugin has no YAML dependency.
+// The block ends at a line that is exactly `---`, so a value containing `---` stays whole.
 export function frontmatter(text) {
-  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n?---/);
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
   if (!m) return null;
   const out = {};
   for (const line of m[1].split(/\r?\n/)) {
@@ -38,6 +45,33 @@ export function frontmatter(text) {
 }
 
 const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
+
+// Top-level case-dir entries a case.yaml's context fields point at (add_dirs, history_file,
+// scaffold_script), as a scalar, a flow list or a block list.
+const CONTEXT_FIELDS = /^(\s+)(add_dirs|history_file|scaffold_script):\s*(.*)$/;
+function contextEntries(caseYaml) {
+  const named = new Set();
+  const lines = (caseYaml || "").split(/\r?\n/);
+  lines.forEach((line, i) => {
+    const m = line.match(CONTEXT_FIELDS);
+    if (!m) return;
+    let values = m[3].trim();
+    values = /^\[.*\]$/.test(values) ? values.slice(1, -1).split(",") : values ? [values] : [];
+    if (!values.length) {
+      // Block form: the more-indented lines that follow, with or without a `- ` marker.
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j].match(/^(\s+)(?:-\s*)?(\S.*)$/);
+        if (!next || next[1].length <= m[1].length) break;
+        values.push(next[2]);
+      }
+    }
+    for (const v of values) {
+      const first = unquote(v.trim()).replace(/^\.\//, "").split("/")[0];
+      if (first) named.add(first);
+    }
+  });
+  return named;
+}
 const dirs = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []);
 
 export function checkEvals(root) {
@@ -51,8 +85,11 @@ export function checkEvals(root) {
     if (!entry.isDirectory()) { problems.push(`evals/${entry.name}: unexpected file outside a case directory (ARCH-EVALS-01)`); continue; }
     const caseDir = path.join(evalsDir, entry.name);
     const graders = [];
+    const caseYaml = read(path.join(caseDir, "case.yaml"));
+    const named = contextEntries(caseYaml);
     for (const item of fs.readdirSync(caseDir, { withFileTypes: true })) {
       if (item.isFile() && (item.name === "prompt.md" || item.name === "case.yaml")) continue;
+      if (named.has(item.name) && item.name !== "graders") continue;
       if (item.isDirectory() && item.name === "graders") {
         for (const g of fs.readdirSync(path.join(caseDir, "graders"), { withFileTypes: true })) {
           if (g.isFile() && g.name.endsWith(".md")) graders.push({ file: `graders/${g.name}`, fm: frontmatter(fs.readFileSync(path.join(caseDir, "graders", g.name), "utf8")) || {} });
@@ -62,7 +99,6 @@ export function checkEvals(root) {
       }
       problems.push(`evals/${entry.name}/${item.name}: unexpected file; a case holds prompt.md, case.yaml and graders/*.md only (ARCH-EVALS-01)`);
     }
-    const caseYaml = read(path.join(caseDir, "case.yaml"));
     if (caseYaml && /^graders\s*:/m.test(caseYaml)) problems.push(`evals/${entry.name}/case.yaml: carries a graders: key; graders live in graders/*.md (ARCH-EVALS-01)`);
     const prompt = read(path.join(caseDir, "prompt.md"));
     if (!prompt) problems.push(`evals/${entry.name}: missing prompt.md (ARCH-EVALS-01)`);
@@ -91,7 +127,12 @@ export function checkEvals(root) {
     if (!c) { problems.push(`evals/${name}: missing firing case for skill ${skill} (ARCH-EVALS-03)`); continue; }
     const fires = c.graders.some(({ fm }) => {
       if (fm.type !== "tool_used" || fm.tool !== "Skill" || !fm.input_match) return false;
-      try { return new RegExp(fm.input_match).test(`{"skill":"craftsman:${skill}"}`); } catch { return false; }
+      // It must match this skill's call and no other required skill's, or a wrong skill would score.
+      try {
+        const re = new RegExp(fm.input_match);
+        const call = (s) => `{"skill":"craftsman:${s}"}`;
+        return re.test(call(skill)) && [...required].every((other) => other === skill || !re.test(call(other)));
+      } catch { return false; }
     });
     if (!fires) problems.push(`evals/${name}: no tool_used grader on Skill whose input_match matches ${skill} (ARCH-EVALS-03)`);
   }
@@ -187,6 +228,33 @@ test("ARCH-EVALS-01: case.yaml may carry context but not graders", () => {
   assertCaught((r) => write(r, "evals/hook-guards-line/case.yaml", "name: hook-guards-line\ngraders:\n  - type: regex\n"), /case\.yaml: carries a graders: key/);
 });
 
+test("ARCH-EVALS-01: files a case.yaml context field names may sit in the case dir; unnamed ones may not", () => {
+  const yaml = 'schema_version: "1.1"\nname: hook-guards-line\ncontext:\n  add_dirs: [fixtures]\n  history_file: history.jsonl\n  scaffold_script:\n    setup.sh\n';
+  assert.deepEqual(problemsAfter((r) => {
+    write(r, "evals/hook-guards-line/case.yaml", yaml);
+    write(r, "evals/hook-guards-line/fixtures/data.txt", "x");
+    write(r, "evals/hook-guards-line/history.jsonl", "{}");
+    write(r, "evals/hook-guards-line/setup.sh", "true");
+  }), []);
+  assert.deepEqual(problemsAfter((r) => {
+    write(r, "evals/hook-guards-line/case.yaml", 'name: x\ncontext:\n  add_dirs:\n    - fixtures/a\n    - more\n');
+    write(r, "evals/hook-guards-line/fixtures/a/data.txt", "x");
+    write(r, "evals/hook-guards-line/more/data.txt", "x");
+  }), []);
+  assertCaught((r) => {
+    write(r, "evals/hook-guards-line/case.yaml", yaml);
+    write(r, "evals/hook-guards-line/other/data.txt", "x");
+  }, /hook-guards-line\/other: unexpected file/);
+});
+
+test("frontmatter: the block ends only at a whole --- line, and double quotes unescape", () => {
+  assert.deepEqual(frontmatter("---\nname: a---b\nruns: 3\n---\nbody ---\n"), { name: "a---b", runs: "3" });
+  assert.deepEqual(frontmatter('---\nm: "a\\\\sb\\"c"\n---\n'), { m: 'a\\sb"c' });
+  assert.deepEqual(problemsAfter((r) => write(r, "evals/skill-fires-deep-research/prompt.md", "---\nname: a---b\nruns: 3\nallowed_tools: [Skill]\n---\n")), []);
+  assert.deepEqual(problemsAfter((r) => write(r, "evals/skill-fires-deep-research/graders/skill-fired.md",
+    '---\ntype: tool_used\ntool: Skill\ninput_match: "\\"skill\\"\\\\s*:\\\\s*\\"(?:[\\\\w-]+:)?deep-research\\""\n---\n')), []);
+});
+
 test("ARCH-EVALS-01: a case needs prompt.md and a grader", () => {
   assertCaught((r) => fs.rmSync(path.join(r, "evals/hook-guards-line/prompt.md")), /hook-guards-line: missing prompt\.md/);
   assertCaught((r) => fs.rmSync(path.join(r, "evals/hook-guards-line/graders"), { recursive: true }), /hook-guards-line: no graders/);
@@ -229,6 +297,9 @@ test("ARCH-EVALS-03: the firing grader must be tool_used on Skill matching the s
   assertCaught((r) => write(r, grader, "---\ntype: tool_used\ntool: Bash\ninput_match: deep-research\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
   assertCaught((r) => write(r, grader, "---\ntype: tool_used\ntool: Skill\ninput_match: systematic-debugging\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
   assertCaught((r) => write(r, grader, "---\ntype: regex\npattern: deep-research\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
+  for (const loose of [".*", '"skill"', "research|debugging"]) {
+    assertCaught((r) => write(r, grader, `---\ntype: tool_used\ntool: Skill\ninput_match: '${loose}'\n---\n`), /skill-fires-deep-research: no tool_used grader on Skill/);
+  }
 });
 
 test("ARCH-EVALS-03/04: evals/ holds only the cases the rules name", () => {
