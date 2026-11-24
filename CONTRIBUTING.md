@@ -29,6 +29,9 @@ which is what makes the plugin language-agnostic.
   scoping so concurrent sessions stay isolated.
 - **Commands/agents:** keep descriptions to one routing sentence (they're always-on
   context) and keep bodies lean. Don't reintroduce stack-specific assumptions.
+  A trim that changes a skill or command `description:` or a SKILL.md body also
+  reruns the behaviour evals (README → **Behaviour evals**) and reports each
+  `skill-fires-*` score before and after (ARCH-SLIM-18).
 
 ## Testing before a PR
 

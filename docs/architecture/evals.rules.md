@@ -3,7 +3,7 @@ area: evals
 governs: ["evals/**", "scripts/evals.test.mjs"]
 human: docs/architecture/evals.md
 source: docs/ideas/plugin-behaviour-evals.md
-verified_at: 8501abe3a33ae187c35fd501f3739efca8c1f738
+verified_at: 1d354084927c910ef863f1e1d1c94bafc140a231
 updated: 2026-11-24
 ---
 # ARCH evals — enforced rules
