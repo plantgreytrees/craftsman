@@ -225,7 +225,7 @@ test("scope.mjs: a manifest that names hooks.json or craftsman.config.json needs
       [".claude/settings.json"], [".claude/settings.local.json"], [".claude/**"], [".claude/*"], ["*.json"], [".claude"], ["./.claude/settings.json"]]) {
       const refused = activate(write);
       assert.equal(refused.status, 2, JSON.stringify(write));
-      assert.match(refused.stderr, /only a unit run by \/orchestrate or \/auto/);
+      assert.match(refused.stderr, /only a unit run by \/craftsman:orchestrate or \/craftsman:auto/);
     }
     spawnSync(process.execPath, [guardScript], { cwd: dir, input: JSON.stringify({ session_id: "scope-self", prompt: "/craftsman:orchestrate docs/plans/p.md" }), encoding: "utf8", env });
     assert.match(activate(["hooks/hooks.json"]).stdout, /scope active/);
@@ -252,7 +252,7 @@ test("scope.mjs: a write entry that reaches a self-scoped file through a symlink
     for (const write of [["c/**"], ["c/settings.json"], ["c/*"], ["c"]]) {
       const refused = activate(write);
       assert.equal(refused.status, 2, JSON.stringify(write));
-      assert.match(refused.stderr, /only a unit run by \/orchestrate or \/auto/);
+      assert.match(refused.stderr, /only a unit run by \/craftsman:orchestrate or \/craftsman:auto/);
     }
     assert.match(activate(["s/**"]).stdout, /scope active/, "a link to an ordinary directory needs nothing");
     spawnSync(process.execPath, [guardScript], { cwd: dir, input: JSON.stringify({ session_id: "scope-link", prompt: "/craftsman:orchestrate docs/plans/p.md" }), encoding: "utf8", env });

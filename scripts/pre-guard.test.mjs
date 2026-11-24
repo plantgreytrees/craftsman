@@ -1532,7 +1532,7 @@ test("pre-guard: while /auto is active, force pushes, hard resets and forced wor
     for (const command of DESTRUCTIVE) {
       const r = run(GUARD, dir, bash(sid, command));
       assert.equal(r.status, 2, command);
-      assert.match(r.stderr, /BLOCKED while \/auto is active \(ARCH-LAND-05\)/, command);
+      assert.match(r.stderr, /BLOCKED while \/craftsman:auto is active \(ARCH-LAND-05\)/, command);
     }
     for (const command of ALLOWED) assert.equal(run(GUARD, dir, bash(sid, command)).status, 0, command);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
