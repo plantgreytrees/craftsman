@@ -394,6 +394,7 @@ if (isDirty && (results.length || tasks.some((t) => t.kind === "scoped"))) { try
 //    accountable for its own unit, not for the rest of the plan.
 const acPath = acceptancePath(context);
 let legacyNotice = "";
+let heldNotice = "";
 // Same trigger as the PostToolUse one, for ticks made where no Edit/Write hook
 // fired (sed, a script): criteria that are all met move the tracker now.
 try {
@@ -430,7 +431,21 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
         }
       }
     } catch { /* no tracker ledger — both sets stay empty, untagged criteria bind */ }
-    const { binding, legacy } = bindingAcceptance(ac, { units: [...touchedUnits], plans: [...touchedPlans] });
+    // A unit whose current tracker row is BLOCKED/PARKED waits on the user: its lines are held, not blocking.
+    const heldUnits = new Set();
+    try {
+      for (const row of currentState(context)) {
+        if (row.status !== "PARKED" && row.status !== "BLOCKED") continue;
+        for (const id of [row.unit, row.scope_id]) if (id) heldUnits.add(id);
+      }
+    } catch { /* unreadable ledger — nothing is held, fail closed */ }
+    const { binding, legacy, held } = bindingAcceptance(ac, { units: [...touchedUnits], plans: [...touchedPlans], held: [...heldUnits] });
+    const heldOpen = held.filter((c) => !c.done);
+    if (heldOpen.length) {
+      const ids = [...new Set(heldOpen.map((c) => c.unit))];
+      heldNotice = `craftsman: ${heldOpen.length} acceptance line(s) held by BLOCKED/PARKED units ${ids.join(", ")} — answered in /craftsman:auto Phase C`;
+      logEvent({ ev: "stop-acceptance-held", sid, units: ids });
+    }
     const unchecked = binding.filter((c) => !c.done);
     const legacyOpen = legacy.filter((c) => !c.done);
     if (unchecked.length) {
@@ -446,7 +461,7 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
       problems.push(
         `ACCEPTANCE CRITERIA not yet satisfied (from the approved plan${names.length ? ` ${names.join(", ")}` : ""}). Verify each ` +
         `against the code you wrote; tick it in .craftsman/acceptance.md only if the ` +
-        `code genuinely satisfies it, otherwise implement it:\n${body}`
+        `code genuinely satisfies it, otherwise implement it; or, if the unit is blocked on the user, record it BLOCKED/PARKED via tracker.mjs with a decision and print BLOCKED ON USER:\n${body}`
       );
     }
     if (legacyOpen.length) {
@@ -490,7 +505,7 @@ if (!inFlight.length) {
 //    stopGate.blockOnUnpushed is true; doc drift is informational.
 const { unpushed, unseenDocs } = stopReports();
 if (unpushed && cfg.stopGate?.blockOnUnpushed === true) problems.push(`UNPUSHED WORK (stopGate.blockOnUnpushed is on):\n${unpushed}`);
-const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs, legacyNotice, ...scopedNotices].filter(Boolean).join("\n");
+const notice = [cfg.stopGate?.blockOnUnpushed === true ? "" : unpushed, unseenDocs, legacyNotice, heldNotice, ...scopedNotices].filter(Boolean).join("\n");
 
 if (!problems.length) {
   logEvent({ ev: "stop", sid, project: context.id ?? ".", result: "pass", ms: Date.now() - T0 });
