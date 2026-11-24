@@ -88,3 +88,46 @@ test("command-prefix: the literal scanner skips comments and paths, and finds a 
   assert.deepEqual(found("const re = /\\/plan/; const t = `${x} then /plan`;"), ["plan"]);
   assert.deepEqual(found('const a = "run /auto now";'), ["auto"]);
 });
+
+// Part 2 (r3c): the command docs. Every commands/*.md line that tells the reader a next step, a Print line, a
+// recommendation or a /goal, and the whole /goal template block in instruction.md, names craftsman commands as
+// /craftsman:<name> (the template is pasted into a Claude Code session, where a bare /plan is not a command).
+const docLines = () => {
+  const out = [];
+  for (const f of fs.readdirSync(path.join(ROOT, "commands")).filter((x) => x.endsWith(".md"))) {
+    const rel = path.join("commands", f);
+    fs.readFileSync(path.join(ROOT, rel), "utf8").split("\n").forEach((text, i) => out.push({ rel, line: i + 1, text }));
+  }
+  return out;
+};
+const NEXT_STEP_LINE = /next step|Print|Recommend|\/goal/;
+const templateBlock = (md) => {
+  const lines = md.split("\n");
+  const start = lines.findIndex((l) => l.startsWith("/goal Deliver "));
+  if (start < 1 || !lines[start - 1].startsWith("```")) return null;
+  const end = lines.findIndex((l, i) => i > start && l.startsWith("```"));
+  return end < 0 ? null : { from: start + 1, lines: lines.slice(start, end) };
+};
+const bare = (text) => [...text.matchAll(BARE)].map((m) => `/${m[2]}`);
+
+test("command-prefix part 2: next-step, Print, Recommend and /goal lines in commands/*.md print /craftsman:<name>", () => {
+  const hits = [];
+  for (const { rel, line, text } of docLines()) {
+    if (NEXT_STEP_LINE.test(text)) for (const b of bare(text)) hits.push(`${rel}:${line} — ${b}`);
+  }
+  assert.deepEqual(hits, []);
+});
+
+test("command-prefix part 2: the whole instruction.md /goal template block prints /craftsman:<name>", () => {
+  const block = templateBlock(fs.readFileSync(path.join(ROOT, "commands/instruction.md"), "utf8"));
+  assert.ok(block, "instruction.md must keep its /goal template in a fenced block starting `/goal Deliver `");
+  const hits = [];
+  block.lines.forEach((text, i) => { for (const b of bare(text)) hits.push(`commands/instruction.md:${block.from + i} — ${b}`); });
+  assert.deepEqual(hits, []);
+});
+
+test("command-prefix part 2: the doc scanner flags a bare command and passes a prefixed one", () => {
+  assert.deepEqual(bare("Print: run /plan <slug> then /craftsman:orchestrate and `/goal`; docs/plans/x.md"), ["/plan"]);
+  assert.equal(NEXT_STEP_LINE.test("the next step — x"), true);
+  assert.equal(NEXT_STEP_LINE.test("plain prose"), false);
+});

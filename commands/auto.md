@@ -13,22 +13,22 @@ Target: `$ARGUMENTS`; for `--level`/`--feature` read `commands/_features.md` § 
 
 ## Phase A — Ask
 
-Run each stage not yet run, in order, to completion. Unknown slug → `tracker.mjs lookup` before treating it as new. `/idea <request>` (no `docs/ideas/<slug>.md`) → `/architect <slug>` (idea not `architected` while it touches a governed area) → `/plan <slug>` (no `docs/plans/<slug>.md`). Collect every open decision they surface and ask them all now with `AskUserQuestion`, before Phase B.
+Run each stage not yet run, in order. Unknown slug → `tracker.mjs lookup` before treating it as new. `/idea <request>` (no `docs/ideas/<slug>.md`) → `/architect <slug>` (idea not `architected` while it touches a governed area) → `/plan <slug>` (no `docs/plans/<slug>.md`). Collect every open decision they surface and ask them all now with `AskUserQuestion`, before Phase B.
 
 **Never default an open decision** (ARCH-AUTO-02). A default is allowed only for a conventional choice the repo already settles (naming, file layout, test placement); say which. Record each answer where its stage keeps it.
 
 ## Phase B — Run
 
-1. Compose the `/goal` exactly as `commands/instruction.md` Phase 2 does for this slug (plan exists → it starts at `/orchestrate`), keeping its evidence, BLOCKED ON USER and parked-rows clauses and its ≤ 4,000-character limit by `wc -c` (ARCH-AUTO-04).
+1. Compose the `/goal` exactly as `commands/instruction.md` Phase 2 does for this slug (plan exists → it starts at `/craftsman:orchestrate`), keeping its evidence, BLOCKED ON USER and parked-rows clauses and its ≤ 4,000-character limit by `wc -c` (ARCH-AUTO-04).
    **Engine** (`execution.engine`, ARCH-ENGINE-12): `workflow` (default) → `craftsman:run` (`workflows/run.js`), args via `run-args.mjs`; Workflow unavailable → `subagent`, one `unit-runner` per unit via Agent, granted by this invocation (ARCH-AUTO-06), never silently `root`; `root` only when the config says so. Both follow `agents/unit-runner.md` (ARCH-ENGINE-04). Runners hold no credentials: network steps run in root, outside the sandbox (`commands/_network.md`, ARCH-LAND-19).
 2. **Turn cap per pass:** size it from the rows still open for the slug with instruction.md's bands — ≤ 1 row QUICK 20 · 2–3 MEDIUM 50 · 4–7 LONG 100 · ≥ 8 EXTRA LONG 180 — fresh on every pass (ARCH-AUTO-05).
 3. Save it to `.craftsman/instructions/<slug>.goal.txt`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/goal-token.mjs" <path>`, end the turn. The mod (`hooks/register.js`) launches a goal file so recorded at turn end: `/goal` via `command.run`, else the directive via `prompt.submit`, else its band asks the user to type `/craftsman:auto-go` (ARCH-MOD-02).
-4. **Fallback:** where the mod cannot launch (`-p`, `disableAllHooks`, no mod support), print the paste-ready goal in one fenced block with its path and character count, as `/instruction` does, and stop for the user to paste (ARCH-AUTO-07).
+4. **Fallback:** where the mod cannot launch (`-p`, `disableAllHooks`, no mod support), print the paste-ready goal in one fenced block with its path and character count, as `/craftsman:instruction` does, and stop for the user to paste (ARCH-AUTO-07).
 5. Phase B ends at the verification point; see `commands/_approval.md`.
 
 ## Phase C — Ask again
 
-When the goal ends, build the round from the ledger, not from memory: `tracker.mjs` `status` for the slug (its derived view is `.craftsman/runs/<slug>.json`, ARCH-TRACKER-01). Every PARKED row of an autonomous run carries `decision {question, options[], recommended?}` (ARCH-TRACKER-03) — a unit's open question or a landing park (conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06). Gather, in one consolidated `AskUserQuestion` round: each PARKED row's decision, asked with its own question and options and its `recommended` marked; each `/scrutinise` finding that needs a judgement call; and the rows still open. A PARKED row without a decision → ask what it needs; never guess. Apply the answers (plan amendment, unpark via `tracker.mjs` with the answer as evidence, re-scope) before the next pass. Never default an open decision.
+When the goal ends, build the round from the ledger, not from memory: `tracker.mjs` `status` for the slug (its derived view is `.craftsman/runs/<slug>.json`, ARCH-TRACKER-01). Every PARKED row of an autonomous run carries `decision {question, options[], recommended?}` (ARCH-TRACKER-03) — a unit's open question or a landing park (conflict, ff-only, rejected push, auto-merge; ARCH-LAND-06). Gather, in one consolidated `AskUserQuestion` round: each PARKED row's decision, asked with its own question and options and its `recommended` marked; each `/craftsman:scrutinise` finding needing a judgement call; and the rows still open. A PARKED row without a decision → ask what it needs; never guess. Apply the answers (plan amendment, unpark via `tracker.mjs` with the answer as evidence, re-scope) before the next pass.
 
 ## Finish
 
