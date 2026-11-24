@@ -15,7 +15,7 @@ test("digest.md names --html, --publish and the never-automatic clause", () => {
   const t = read("commands/digest.md");
   assert.match(t, /--html/);
   assert.match(t, /Only on `--publish`/);
-  assert.match(t, /Never from a hook, `\/auto` or `\/goal`/);
+  assert.match(t, /Never from a hook, `\/craftsman:auto` or `\/goal`/);
   assert.match(t, /dashboard\.url/);
 });
 
