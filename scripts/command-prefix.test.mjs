@@ -131,3 +131,26 @@ test("command-prefix part 2: the doc scanner flags a bare command and passes a p
   assert.equal(NEXT_STEP_LINE.test("the next step — x"), true);
   assert.equal(NEXT_STEP_LINE.test("plain prose"), false);
 });
+
+// Part 3 (r3d): the user docs. The Commands table, the loop diagram, the install/upgrade next steps and every other
+// prose or code-block mention of a craftsman command in README.md, EXTENDING.md and INSTALL.md is /craftsman:<name>
+// (a reader types it into a Claude Code session, where a bare /plan is not a command). Paths such as docs/plans/ or
+// commands/plan.md never count (BARE skips them).
+const USER_DOCS = ["README.md", "EXTENDING.md", "INSTALL.md"];
+
+test("command-prefix part 3: README.md, EXTENDING.md and INSTALL.md name every craftsman command as /craftsman:<name>", () => {
+  const hits = [];
+  for (const rel of USER_DOCS) {
+    fs.readFileSync(path.join(ROOT, rel), "utf8").split("\n").forEach((text, i) => {
+      for (const b of bare(text)) hits.push(`${rel}:${i + 1} — ${b}`);
+    });
+  }
+  assert.deepEqual(hits, []);
+});
+
+test("command-prefix part 3: the README Commands table keeps a /craftsman:<name> row for every command it lists", () => {
+  const md = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
+  const rows = md.split("\n").filter((l) => /^\| `\//.test(l));
+  assert.ok(rows.length >= 15, "README.md must keep its Commands table");
+  assert.deepEqual(rows.filter((l) => !/^\| `\/craftsman:[a-z-]+` \|/.test(l)), []);
+});

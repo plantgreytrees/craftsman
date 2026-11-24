@@ -110,7 +110,7 @@ skipped and logged (`stop-budget-exceeded`), never blocked:
 { "stopGate": { "totalBudgetMs": 280000 } }
 ```
 
-`/plan`'s blind-rederivation double-check (an independent second agent
+`/craftsman:plan`'s blind-rederivation double-check (an independent second agent
 re-deriving scope from scratch, diffed against the plan) can be tuned in
 config:
 
@@ -289,12 +289,12 @@ placeholder command):
   engines follow `agents/unit-runner.md`. A Workflow call is allowed only for a
   plugin workflow while the engine is `"workflow"`.
 - `unitContextBytes` — the most a single unit may load: the bytes of its
-  `scope.read` and `scope.docs` files plus its task text. `/plan`'s scope
+  `scope.read` and `scope.docs` files plus its task text. `/craftsman:plan`'s scope
   dry-run (`arch-check.mjs scope`) refuses a larger unit, so split it.
 
 ### Landing units through pull requests
 
-By default `/orchestrate` lands each finished unit by merging it into the base
+By default `/craftsman:orchestrate` lands each finished unit by merging it into the base
 branch locally and pushing that branch (`repoExec.land: "direct"`). A host that
 protects the base branch rejects that push. Switch to `"pr"` and each unit's
 branch is pushed instead, then lands through a pull/merge request that the
@@ -322,7 +322,7 @@ host merges once its checks and approvals pass:
 
 ### Remotes that need credentials (sandboxed runners)
 
-`/craftsman:auto` and `/orchestrate` with `execution.engine: "workflow"` run each
+`/craftsman:auto` and `/craftsman:orchestrate` with `execution.engine: "workflow"` run each
 unit in a sandboxed agent that holds no credentials, and the sandbox should keep
 denying credential directories such as `~/.config/gh`. So `repo-exec` splits the
 network from the work: the root session runs `{"action":"network","step":"fetch"}`
@@ -345,7 +345,7 @@ Plans form a tree: an epic has stories, a story has features, a feature has
 units. A plan doc sets `level: epic|story|feature` (absent means feature),
 `parent:`, `children:` and `priority:` (inherited from the parent, default P2)
 in its frontmatter. A plan without a `features:` list is one implicit feature.
-`/orchestrate` and `/auto` take `--level epic|story|feature|unit` (default
+`/craftsman:orchestrate` and `/craftsman:auto` take `--level epic|story|feature|unit` (default
 feature) and `--feature <id>` to pick one feature.
 
 Rollups: every epic and story gets a generated `docs/plans/<slug>/TRACKER.md`
@@ -416,8 +416,8 @@ values before release.
 The shipped routing is deliberately conservative: `review-router` and
 `phase-tracker` use `haiku`; implementation, review, security, contract, and
 documentation roles use `sonnet`; `plan-strategist`, `scrutineer`, `idea-critic`,
-`/idea` and `/architect` use `opus`; `/architect --deep`'s `architect-analyst`
-uses `fable`, and `/idea --deep` runs its critic on `fable` via the dispatch's
+`/craftsman:idea` and `/craftsman:architect` use `opus`; `/craftsman:architect --deep`'s `architect-analyst`
+uses `fable`, and `/craftsman:idea --deep` runs its critic on `fable` via the dispatch's
 model override. Project-specific agents
 should follow the same rubric and should not use undocumented model names.
 
@@ -454,17 +454,17 @@ descriptions to one routing sentence (they're always-on context).
 
 By default three doc paths are guarded (`docWriteGuard.docPaths: ["docs/plans/**",
 "docs/ideas/**", "docs/architecture/**"]`). Writes there are blocked until a
-writer command runs `doc-write.mjs on` for the session. `/plan` writes plans,
-`/orchestrate`, `/scrutinise` and `/sync-docs --tracker` update tracker rows,
-`/idea` writes idea docs (`/architect` sets their `architected` status), and
-`/architect` writes paired architecture areas. Unpaired prose under the
-architecture dir (`arch-check.mjs unmanaged`) is ordinary prose for `/sync-docs`
-until `/architect --backfill` pairs it. The grant opens every guarded path for
+writer command runs `doc-write.mjs on` for the session. `/craftsman:plan` writes plans,
+`/craftsman:orchestrate`, `/craftsman:scrutinise` and `/craftsman:sync-docs --tracker` update tracker rows,
+`/craftsman:idea` writes idea docs (`/craftsman:architect` sets their `architected` status), and
+`/craftsman:architect` writes paired architecture areas. Unpaired prose under the
+architecture dir (`arch-check.mjs unmanaged`) is ordinary prose for `/craftsman:sync-docs`
+until `/craftsman:architect --backfill` pairs it. The grant opens every guarded path for
 that session, so the per-command split is a contract the commands keep, not a
 per-path hook. Those are the surfaces with real
 stakes: two sessions racing on one tracker row, or a decision quietly rewritten
 to match code that broke it. The rest of `docs/` (README, standards, feature
-docs) is ordinary prose: freely editable, and `/sync-docs` is just the command
+docs) is ordinary prose: freely editable, and `/craftsman:sync-docs` is just the command
 that specializes in reconciling it against code, not a gatekeeper for it. Widen
 the guard back to all of `docs/`, add other single-owner directories, or turn it
 off, in config. `docPaths` is an array, so a project value **replaces** the
@@ -474,17 +474,17 @@ default — keep the entries you still want:
 { "docWriteGuard": { "docPaths": ["docs/plans/**", "docs/ideas/**", "docs/architecture/**", "adr/**"], "enabled": true } }
 ```
 
-## 8. Architecture rules (`/architect`)
+## 8. Architecture rules (`/craftsman:architect`)
 
-`/idea` → `/architect` → `/instruction` is the front of the loop: vet the idea,
+`/craftsman:idea` → `/craftsman:architect` → `/craftsman:instruction` is the front of the loop: vet the idea,
 decide the architecture with the user, then generate one `/goal` prompt that
-runs `/plan` → `/orchestrate` → `/scrutinise` → `/sync-docs --all` →
+runs `/craftsman:plan` → `/craftsman:orchestrate` → `/craftsman:scrutinise` → `/craftsman:sync-docs --all` →
 `/craftsman:merge` to completion. The idea's slug is reused by the plan, the
-`scrutinise-<slug>` fix round, and `/sync-docs --all <slug>`, which ends in
-`/architect --update`. `/craftsman:merge` then lands the session's branch with
+`scrutinise-<slug>` fix round, and `/craftsman:sync-docs --all <slug>`, which ends in
+`/craftsman:architect --update`. `/craftsman:merge` then lands the session's branch with
 its plan, tracker and doc edits; pasting the prompt is the go-ahead to push.
 
-`/architect` writes each area as two files under `architecture.dir` (default
+`/craftsman:architect` writes each area as two files under `architecture.dir` (default
 `docs/architecture`). `<area>.md` is for people and is never loaded by the
 loop. `<area>.rules.md` holds the enforced contract: frontmatter `governs:`
 globs, then one `- **ARCH-<AREA>-NN** [decided|observed|superseded by …]` line
@@ -492,7 +492,7 @@ per rule. The format is in
 `skills/language-aware-planning/references/architecture-template.md`, and the
 loop's obligations are in `commands/_architecture.md`.
 
-A project that predates `/architect` gets its rules from `/architect --backfill`.
+A project that predates `/craftsman:architect` gets its rules from `/craftsman:architect --backfill`.
 It mines the legacy architecture prose, the plans and the code for candidate
 rules, verifies each against the code, and writes only the ones the user
 confirms, with `source: backfill` and provenance. It then lists in-flight plan
@@ -533,7 +533,7 @@ tokens. That discipline is the whole point of the reliability-per-token design.
 are only for that project. For that case `craftsman.project.json`, also in the project root, is merged after
 `craftsman.config.json`. It is optional: absent changes nothing, and a malformed one is ignored with a warning. It
 holds the same keys, and it is protected exactly like `craftsman.config.json` (a tool call cannot change its safety
-keys; only a unit scope from `/orchestrate` that names it can). This repository uses it for `stopGate.markdownTests`,
+keys; only a unit scope from `/craftsman:orchestrate` that names it can). This repository uses it for `stopGate.markdownTests`,
 the markdown its own tests read:
 
 ```json
