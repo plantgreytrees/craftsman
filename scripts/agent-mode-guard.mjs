@@ -48,9 +48,9 @@ function pluginWorkflow(toolInput) {
 }
 
 const GRANTING_COMMAND = {
-  scrutineer: "/scrutinise",
-  "idea-critic": "/idea",
-  "architect-analyst": "/architect --deep",
+  scrutineer: "/craftsman:scrutinise",
+  "idea-critic": "/craftsman:idea",
+  "architect-analyst": "/craftsman:architect --deep",
 };
 
 // ARCH-SAFETY-02/03: a safety hook that cannot decide denies. An uncaught error or a rejected
@@ -128,9 +128,9 @@ process.stderr.write(
   `craftsman: Task/Agent delegation BLOCKED — execution.agentMode is "${agentMode}". ` +
   `Perform this work yourself, in this session, sequentially — do not delegate implementer, ` +
   `specialist, or reviewer roles via Task/Agent, and never run them in parallel. The only standing ` +
-  `exceptions are /plan's decomposition step (subagent_type: "craftsman:plan-strategist") and the ` +
-  `one isolated agent each of /scrutinise ("craftsman:scrutineer"), /idea ("craftsman:idea-critic") ` +
-  `and /architect --deep ("craftsman:architect-analyst") is granted, plus the read-only built-in ` +
+  `exceptions are /craftsman:plan's decomposition step (subagent_type: "craftsman:plan-strategist") and the ` +
+  `one isolated agent each of /craftsman:scrutinise ("craftsman:scrutineer"), /craftsman:idea ("craftsman:idea-critic") ` +
+  `and /craftsman:architect --deep ("craftsman:architect-analyst") is granted, plus the read-only built-in ` +
   `agents in execution.builtinAgents (${(builtinAgents.join(", ") || "none")}). If you genuinely need ` +
   `parallel subagent delegation, set execution.agentMode to "subagents" in craftsman.config.json first.\n`
 );

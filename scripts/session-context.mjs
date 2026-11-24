@@ -241,14 +241,14 @@ const rules = topRules(cfg, context);
 const verbose = cfg.sessionContext?.verbose === true;
 const standingRules = verbose
   ? [
-      `LOOP: work the doc-first loop — IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE (/instruction packs it into one /goal; existing code enters at /understand or /investigate → PLAN). Nothing changes code without a plan doc (docs/plans/) describing it first; one slug names the work throughout; the loop obeys docs/architecture/*.rules.md.`,
-      `SCOPE: that requirement narrows for a genuinely small change — one file, no shared-contract/exported-type change, no migration, no security-sensitive surface (/plan calls this "trivial" and skips its own decomposition ceremony for it) — edit directly; the deterministic gates below still apply regardless.`,
+      `LOOP: work the doc-first loop — IDEA → ARCHITECT → PLAN → ORCHESTRATE → SCRUTINISE → SYNC-DOCS → MERGE (/craftsman:instruction packs it into one /goal; existing code enters at /craftsman:understand or /craftsman:investigate → PLAN). Nothing changes code without a plan doc (docs/plans/) describing it first; one slug names the work throughout; the loop obeys docs/architecture/*.rules.md.`,
+      `SCOPE: that requirement narrows for a genuinely small change — one file, no shared-contract/exported-type change, no migration, no security-sensitive surface (/craftsman:plan calls this "trivial" and skips its own decomposition ceremony for it) — edit directly; the deterministic gates below still apply regardless.`,
       `PLANNING: plan every non-trivial change in the idioms of the TARGET LANGUAGE from the outset — error model, data modeling, abstraction mechanism and concurrency model are language decisions, not neutral ones. Do not design in pseudocode and translate.`,
       `ABSTRACTION BUDGET: an interface/base class/layer needs a second concrete implementor or a stated extension requirement. Otherwise omit it.`,
       `ENFORCEMENT: files you write are auto-formatted, linted and type-checked. Only NEW issues you introduce are reported — never fix pre-existing findings in unrelated code unless asked.`,
     ]
   : [
-      `LOOP: non-trivial change → /plan → /orchestrate → /scrutinise → /sync-docs → /craftsman:merge. One-file, no-contract, no-security change → edit directly (gates below still apply). New idea → /idea → /architect → /instruction.`,
+      `LOOP: non-trivial change → /craftsman:plan → /craftsman:orchestrate → /craftsman:scrutinise → /craftsman:sync-docs → /craftsman:merge. One-file, no-contract, no-security change → edit directly (gates below still apply). New idea → /craftsman:idea → /craftsman:architect → /craftsman:instruction.`,
     ];
 
 const rootOnly = (cfg.execution?.agentMode || "root-only") !== "subagents";
@@ -303,7 +303,7 @@ const parts = [
   state.safety.length ? guardsOffLine : "craftsman guards: on.",
   sandboxLine,
   rootOnly
-    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /plan's plan-strategist, the one isolated agent each of /scrutinise, /idea and /architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
+    ? `AGENT MODE: root-only — never use Task/Agent for implementer/specialist/reviewer work; do every "delegate"/"dispatch"/"fan out" step yourself, sequentially, one at a time, never in parallel. Only exceptions: /craftsman:plan's plan-strategist, the one isolated agent each of /craftsman:scrutinise, /craftsman:idea and /craftsman:architect --deep, and read-only built-in agents in execution.builtinAgents (default Explore).`
     : "",
   ...standingRules,
   `MERGE: when the user says "merge", run /craftsman:merge and finish it yourself (land, push, clean up) — never hand back git commands.`,
@@ -314,7 +314,7 @@ const parts = [
   swept.length ? `WORKTREES SWEPT (merged, clean): ${summarizeUnits(swept.map((e) => path.relative(context.root, e.path)))}.` : "",
   lingering.length ? `LINGERING WORKTREES: ${summarizeUnits(lingering.map((e) => path.relative(context.root, e.path)))} — merged, clean, unowned. Remove: printf '%s' '{"action":"sweep","all_merged":true}' | node "${path.join(PLUGIN_ROOT, "scripts", "worktree-sweep.mjs")}"` : "",
   approved.length ? `APPROVED, NOT LANDED: ${summarizeUnits(approved.map((r) => r.run))} — land with repo-exec land-feature (commands/_approval.md).` : "",
-  trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /sync-docs --tracker to archive shipped rows (never automatic; every /orchestrate iteration re-reads it in full).` : "",
+  trackerBloated ? `TRACKER.md is ${trackerLineCount} lines — run /craftsman:sync-docs --tracker to archive shipped rows (never automatic; every /craftsman:orchestrate iteration re-reads it in full).` : "",
   restoredMemory.length ? `PLAN MEMORY (verify cited files):\n` + restoredMemory.map((entry, i) => `  ${i + 1}. [${entry.category}/${entry.status}] ${entry.summary}`).join("\n") : "",
   rules.length
     ? `RECURRING MISTAKES (avoid):\n` + rules.map((r, i) => `  ${i + 1}. [${r.lang}/${r.tool}] ${r.sample}`).join("\n")

@@ -18,7 +18,7 @@ export function mintGoalToken({ file, sid, root = PROJECT_ROOT, stateDir = STATE
   if (nonce && !safetyEnabled()) throw new Error("CRAFTSMAN_SAFETY=off: no guard is running, so a goal token needs a session with safety on");
   if (!sid) throw new Error("no session id (CLAUDE_CODE_SESSION_ID is not set), so no token can be tied to this session");
   if (!commandInvoked(sid, ["instruction", "auto"], { context: { stateDir } })) {
-    throw new Error("goal tokens are minted only inside /instruction or /auto, and neither ran in this session");
+    throw new Error("goal tokens are minted only inside /craftsman:instruction or /craftsman:auto, and neither ran in this session");
   }
   // The command line asks for pre-guard's one-shot nonce (ARCH-SAFETY-05); a library caller has already passed its own checks.
   if (nonce && !consumeNonce(sidOf({ session_id: sid }), "goal-token", { context: { stateDir } })) {

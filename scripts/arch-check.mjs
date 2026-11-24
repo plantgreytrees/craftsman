@@ -147,7 +147,7 @@ export function checkScope(scope, docs) {
   // closed rather than silently waiving every rule it holds.
   for (const doc of docs) {
     if (doc.errors.some((e) => /governs|frontmatter/.test(e))) {
-      violations.push(`${doc.file} is malformed (${doc.errors[0]}) — fix it with /architect --update`);
+      violations.push(`${doc.file} is malformed (${doc.errors[0]}) — fix it with /craftsman:architect --update`);
     }
   }
   return violations;
@@ -228,7 +228,7 @@ export function lintRules(root, docs, dir = DEFAULT_DIR) {
     let text = "";
     try { text = fs.readFileSync(path.join(root, file), "utf8"); } catch {}
     if (text.includes(HUMAN_BANNER)) {
-      errors.push(`${file}: human doc whose ${path.basename(file).replace(/\.md$/, ".rules.md")} is missing — restore it or run /architect --update`);
+      errors.push(`${file}: human doc whose ${path.basename(file).replace(/\.md$/, ".rules.md")} is missing — restore it or run /craftsman:architect --update`);
     }
   }
   return errors;
@@ -349,7 +349,7 @@ if (isMain(import.meta.url)) {
       for (const p of lintNext({ root, rows })) console.log(`arch-check: warning: NEXT.md ${p.slug}: ${p.problem}`);
     } catch { /* a lint warning must never fail lint */ }
     const unmanaged = unmanagedDocs(root, docs, dir).length;
-    if (unmanaged) console.log(`arch-check: ${unmanaged} unmanaged doc(s) under ${dir} (no rules pair; /sync-docs maintains them, /architect --backfill pairs them)`);
+    if (unmanaged) console.log(`arch-check: ${unmanaged} unmanaged doc(s) under ${dir} (no rules pair; /craftsman:sync-docs maintains them, /craftsman:architect --backfill pairs them)`);
   } else if (mode === "unmanaged") {
     const unmanaged = unmanagedDocs(root, docs, dir);
     console.log(unmanaged.length ? unmanaged.join("\n") : `arch-check: no unmanaged docs under ${dir}`);

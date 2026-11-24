@@ -55,7 +55,7 @@ function fmtRow(row) {
 function render(digest) {
   const lines = [];
   if (!digest.plans.length) {
-    lines.push("No tracker rows yet. Nothing has gone through /plan or /orchestrate in this repo.");
+    lines.push("No tracker rows yet. Nothing has gone through /craftsman:plan or /craftsman:orchestrate in this repo.");
     return lines.join("\n");
   }
 
