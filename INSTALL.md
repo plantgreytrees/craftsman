@@ -167,8 +167,8 @@ To update without asking, turn on auto-update for `craftsman-marketplace` under
 `/plugin` → **Marketplaces**. It refreshes at startup; if a project-scope
 install still shows an older commit in `/plugin`, run `/craftsman:upgrade`.
 
-A project that predates `/architect` (plans but no `*.rules.md`) should run
-`/architect --backfill` once; `/craftsman:init` says so in its architecture
+A project that predates `/craftsman:architect` (plans but no `*.rules.md`) should run
+`/craftsman:architect --backfill` once; `/craftsman:init` says so in its architecture
 report.
 
 ---

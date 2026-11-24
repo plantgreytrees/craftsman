@@ -46,7 +46,7 @@ The full list is in [CHANGELOG.md](CHANGELOG.md#231---2026-10-25).
   and the model cannot switch them off.
 - **Evidence-based worktree sweep.** A branch counts as merged only into a
   remote-tracking ref, and every deleted branch is logged and recoverable.
-- **Dashboard, notes export and archive.** `/digest --html`, an
+- **Dashboard, notes export and archive.** `/craftsman:digest --html`, an
   Obsidian/Foam/Quartz notes folder, and automatic archiving of closed plans
   through an in-process landing capability.
 - **Ledger guard, measurement and tool slots.** Tracker publishing never drops
@@ -81,7 +81,7 @@ A first piece of work then looks like this:
 /craftsman:auto add rate limiting to the public API
 ```
 
-`/auto` asks its open questions up front, plans the work, builds each unit in
+`/craftsman:auto` asks its open questions up front, plans the work, builds each unit in
 its own worktree with gates and reviews, asks once more about anything that
 came back, and lands the result.
 
@@ -107,7 +107,7 @@ which fails closed for the safety hooks.
 | Before Skill | `builtin-skill-context` | hands the built-in `simplify` / `code-review` skills the governing rules and open criteria |
 | After Write/Edit | `quality-gate` | format → lint → type-check the edited file; feeds new issues back to Claude mid-turn |
 | After Bash/Write/Edit | `tracker-sync` | re-renders `TRACKER.md` from the ledger |
-| Prompt submit, after Skill | `orchestrate-scope-guard` | binds a running `/orchestrate` to its plan unit |
+| Prompt submit, after Skill | `orchestrate-scope-guard` | binds a running `/craftsman:orchestrate` to its plan unit |
 | Stop | `stop-gate`, `tracker-sync`, `telemetry` | secrets scan, test-regression check, `extraChecks`, open acceptance criteria, unpushed-work report, gate telemetry |
 | Session end | `session-end` | unpushed-work report and hand-off |
 
@@ -130,13 +130,13 @@ language is a one-block config edit, never a code change.
 
 ```mermaid
 flowchart LR
-  idea["/idea<br/>vet it"] --> arch["/architect<br/>decide + rules"]
-  arch --> plan["/plan<br/>plan doc + tracker rows"]
-  und["/understand<br/>/investigate"] --> plan
-  plan --> orch["/orchestrate<br/>unit by unit"]
-  orch --> scr["/scrutinise<br/>isolated review"]
+  idea["/craftsman:idea<br/>vet it"] --> arch["/craftsman:architect<br/>decide + rules"]
+  arch --> plan["/craftsman:plan<br/>plan doc + tracker rows"]
+  und["/craftsman:understand<br/>/craftsman:investigate"] --> plan
+  plan --> orch["/craftsman:orchestrate<br/>unit by unit"]
+  orch --> scr["/craftsman:scrutinise<br/>isolated review"]
   scr -->|findings| plan
-  scr --> sync["/sync-docs<br/>docs = code"]
+  scr --> sync["/craftsman:sync-docs<br/>docs = code"]
   sync --> merge["/craftsman:merge<br/>land + clean up"]
   auto(["/craftsman:auto"]) -.drives.-> plan
   auto -.-> orch
@@ -144,30 +144,30 @@ flowchart LR
 ```
 
 - **One slug** names the work from idea doc to plan, fix round and sync.
-- **`/idea`** checks a new idea for overlap and whole-system fit, then has it
+- **`/craftsman:idea`** checks a new idea for overlap and whole-system fit, then has it
   judged by one isolated critic. The result is a scored verdict in
   `docs/ideas/`.
-- **`/architect`** turns a vetted idea into decisions you confirm. Each area is
+- **`/craftsman:architect`** turns a vetted idea into decisions you confirm. Each area is
   written as a pair: `<area>.md` for people and `<area>.rules.md`, a list of
   numbered `ARCH-…` rules the loop enforces.
-- **`/plan`** writes the only plan docs (`docs/plans/<slug>.md`). Each unit
+- **`/craftsman:plan`** writes the only plan docs (`docs/plans/<slug>.md`). Each unit
   gets scope, acceptance criteria, cited rules and a tooling manifest.
-- **`/orchestrate`** executes a plan one unit at a time, each in its own git
+- **`/craftsman:orchestrate`** executes a plan one unit at a time, each in its own git
   worktree. `gate-select.mjs` reads the unit's *actual diff* and routes it to
   the specialists that apply: `security-auditor`, the ui gate (`ui-gate.mjs`:
   Artist when present, else the `ui-ux-reviewer` accessibility floor),
   `migration-reviewer`, `api-reviewer`, `dependency-auditor`,
   `performance-reviewer`, `observability-reviewer`. It doesn't rely on anyone
   remembering a file-pattern rule.
-- **`/scrutinise`** sends one fresh-context reviewer to audit the merged work
+- **`/craftsman:scrutinise`** sends one fresh-context reviewer to audit the merged work
   against every open criterion. Its findings become the next plan round.
-- **`/sync-docs`** reconciles docs and tracker chips with shipped code.
+- **`/craftsman:sync-docs`** reconciles docs and tracker chips with shipped code.
   **`/craftsman:merge`** lands the branch and cleans up.
 - **`/craftsman:auto`** is the single entry for the whole loop. It asks every
   open decision first, runs the units unattended in fresh agent contexts, asks
   about parked rows, and lands the result. It repeats until every row is
   COMPLETE.
-- **`/instruction`** packs the same loop into one paste-ready `/goal` prompt
+- **`/craftsman:instruction`** packs the same loop into one paste-ready `/goal` prompt
   with a size estimate.
 
 ### 4. State on disk
@@ -198,16 +198,16 @@ scan, a test regression or an unticked acceptance criterion of a plan the
 session worked. Criteria are written at plan time and enforced before a task
 can finish.
 
-**Architecture is enforced, not just written down.** `/plan` cites the rules
+**Architecture is enforced, not just written down.** `/craftsman:plan` cites the rules
 for each unit, and `plan-reviewer` and the scrutineer check them. `scope.mjs`
 refuses to activate a unit that writes a governed path until it has loaded and
-cited the rules for that path. Breaking a decided rule takes `/architect`,
+cited the rules for that path. Breaking a decided rule takes `/craftsman:architect`,
 never a workaround.
 
 **Unattended runs that stay light.** `/craftsman:auto` runs each unit in a
 fresh agent context (`execution.engine`: `workflow` by default, else
 `subagent` or `root`). Every unit ends in a hand-off on disk, so auto-compact
-never loses the thread. `/plan` refuses a unit too large for one fresh agent
+never loses the thread. `/craftsman:plan` refuses a unit too large for one fresh agent
 (`execution.unitContextBytes`).
 
 **One approval page.** With `planning.featureBranches` on, a run stops at a
@@ -221,12 +221,12 @@ its own worktree, and the tracker lives in the main checkout so every session
 sees one board. Stale claims from crashed sessions are recoverable.
 
 **Progress you can read.** `/craftsman:digest` gives done / decisions needed /
-next / % complete per plan. `/digest --html` renders a local dashboard, and
+next / % complete per plan. `/craftsman:digest --html` renders a local dashboard, and
 the notes export produces an Obsidian/Foam/Quartz folder. `/craftsman:stats`
 shows which gates actually fire, so you can delete the ones that don't earn
 their keep.
 
-**Built-in skills, craftsman's rules.** `/orchestrate` runs Claude Code's own
+**Built-in skills, craftsman's rules.** `/craftsman:orchestrate` runs Claude Code's own
 `simplify` and `code-review` skills inside the loop. Their output is only a
 candidate list: `code-reviewer` owns the verdict.
 
@@ -241,19 +241,19 @@ candidate list: `code-reviewer` owns the verdict.
 | `/craftsman:init` | audit or upgrade the setup, detect the stack, and repair the required project structure (`--check`, `--diff`, `--write`, `--update`, `--settings-diff`, `--user-settings-diff`) |
 | `/craftsman:upgrade` | update every Craftsman install (user and per-project) to the latest commit, then tell you what to reload and re-init (`--dry-run`) |
 | `/craftsman:workspace-init` | explicitly register selected existing Git projects without scanning the workspace |
-| `/idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
-| `/architect` | turn a vetted idea into confirmed engineering, data and systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`; `--backfill` derives them for a project with existing plans and legacy docs) |
+| `/craftsman:idea` | scrutinise an idea before building it: overlap scan, whole-system fit, research, one isolated critic, scored verdict (`--deep` for a stronger critic) |
+| `/craftsman:architect` | turn a vetted idea into confirmed engineering, data and systems decisions, written as enforced architecture docs (`--deep`, `--init`, `--update`; `--backfill` derives them for a project with existing plans and legacy docs) |
 | `/craftsman:auto` | one entry for the whole loop: ask every open decision first, run the units unattended in fresh agent contexts, ask about parked rows, land; repeat until every row is COMPLETE |
 | `/craftsman:auto-go` | one key to launch the newest `/craftsman:auto` goal |
-| `/instruction` | generate one paste-ready `/goal` prompt that drives the whole loop to verified completion, plus an effort estimate |
-| `/understand` | build a cited understanding of a feature or area before touching it |
-| `/plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
-| `/orchestrate` | implement a plan doc across the repo, with per-unit routed review |
-| `/investigate` | root-cause a bug into a fix-ready analysis |
-| `/scrutinise` | review what was built (routed, so trivial diffs stay cheap; `--deep` for a deeper round) |
-| `/sync-docs` | reconcile docs and tracker with shipped code (`--arch`, `--tracker`, `--all`, `--archive`, `--prune`) |
+| `/craftsman:instruction` | generate one paste-ready `/goal` prompt that drives the whole loop to verified completion, plus an effort estimate |
+| `/craftsman:understand` | build a cited understanding of a feature or area before touching it |
+| `/craftsman:plan` | turn a request into a build-ready plan doc (the only command that writes plans) |
+| `/craftsman:orchestrate` | implement a plan doc across the repo, with per-unit routed review |
+| `/craftsman:investigate` | root-cause a bug into a fix-ready analysis |
+| `/craftsman:scrutinise` | review what was built (routed, so trivial diffs stay cheap; `--deep` for a deeper round) |
+| `/craftsman:sync-docs` | reconcile docs and tracker with shipped code (`--arch`, `--tracker`, `--all`, `--archive`, `--prune`) |
 | `/craftsman:merge` | land a finished branch or worktree when you say "merge": tests, merge, push, then remove the worktree and the local and remote branch |
-| `/fix-tests` | get a red test suite green |
+| `/craftsman:fix-tests` | get a red test suite green |
 | `/craftsman:digest` | progress digest: done, decisions needed, next, % complete per plan |
 | `/craftsman:baseline` | snapshot pre-existing lint issues (run once per repo, again after a tooling change) |
 | `/craftsman:stats` | see which gates actually fire, so you can delete the ones that don't earn their keep |
@@ -285,7 +285,7 @@ write what you're changing. Common tweaks (full guide in
 | Key | Default | Meaning |
 |---|---|---|
 | `execution.agentMode` | `root-only` | `subagents` restores real fan-out |
-| `execution.engine` | `workflow` | how `/auto` runs units: `workflow`, `subagent` or `root` |
+| `execution.engine` | `workflow` | how `/craftsman:auto` runs units: `workflow`, `subagent` or `root` |
 | `repoExec.land` | `direct` | `pr` lands each unit through an auto-merging PR (`gh`, `glab`, `az`) |
 | `planning.featureBranches` | `false` | units land on a feature branch and stop at the approval page |
 | `stopGate.totalBudgetMs` | `280000` | one shared wall-clock budget for every Stop check |
@@ -372,18 +372,18 @@ as "yours":
 **7. Bring the architecture rules up to date:**
 
 ```text
-/architect --backfill          # only if init's architecture report says so (plans, no *.rules.md)
-/architect --update            # re-verify every rule whose governed code moved since verified_at
+/craftsman:architect --backfill          # only if init's architecture report says so (plans, no *.rules.md)
+/craftsman:architect --update            # re-verify every rule whose governed code moved since verified_at
 ```
 
 `--update` refreshes stale cites and wording itself. A rule the code now
-contradicts is reported, never rewritten, and routed to `/investigate` or
-`/plan`.
+contradicts is reported, never rewritten, and routed to `/craftsman:investigate` or
+`/craftsman:plan`.
 
 **8. Reconcile docs and tracker with the code:**
 
 ```text
-/craftsman:sync-docs --all     # docs drift + tracker chips + archive shipped plans, then /architect --update
+/craftsman:sync-docs --all     # docs drift + tracker chips + archive shipped plans, then /craftsman:architect --update
 ```
 
 **9. Verify.** Run the real checks and read their output:
@@ -438,7 +438,7 @@ Reports go to `evals/results/`, which is git-ignored. Rules:
 ## Good to know
 
 - **Plan levels.** `level: epic|story|feature` in a plan's frontmatter, with
-  `parent:`/`children:`, builds a tree. `/orchestrate` and `/auto` take
+  `parent:`/`children:`, builds a tree. `/craftsman:orchestrate` and `/craftsman:auto` take
   `--level` and `--feature`. Epics and stories get generated rollup
   `TRACKER.md` files, and `tracker.publish` pushes progress to the base
   branch. `planning.featureBranches`, `planning.featureUnitCap`,
@@ -452,12 +452,12 @@ Reports go to `evals/results/`, which is git-ignored. Rules:
   [EXTENDING.md](EXTENDING.md#landing-units-through-pull-requests).
 - **Doc-write authority.** The guarded paths (`docs/plans/**`, `docs/ideas/**`,
   `docs/architecture/**`) are blocked until a writer command grants the
-  session. `/plan` writes plans. `/orchestrate`, `/scrutinise` and
-  `/sync-docs --tracker` update tracker rows. `/idea` writes idea docs, and
-  `/architect` marks them `architected`. `/architect` writes paired
+  session. `/craftsman:plan` writes plans. `/craftsman:orchestrate`, `/craftsman:scrutinise` and
+  `/craftsman:sync-docs --tracker` update tracker rows. `/craftsman:idea` writes idea docs, and
+  `/craftsman:architect` marks them `architected`. `/craftsman:architect` writes paired
   architecture areas; unpaired legacy prose under `docs/architecture/` belongs
-  to `/sync-docs` until `/architect --backfill` pairs it. `/understand` and
-  `/investigate` write nothing and hand off to `/plan`. The rest of `docs/` is
+  to `/craftsman:sync-docs` until `/craftsman:architect --backfill` pairs it. `/craftsman:understand` and
+  `/craftsman:investigate` write nothing and hand off to `/craftsman:plan`. The rest of `docs/` is
   ordinary prose.
 - **Structured tracker state.** The readable [tracker](docs/plans/TRACKER.md)
   stays concise and link-first, while `scripts/tracker.mjs` records validated
@@ -471,9 +471,9 @@ Reports go to `evals/results/`, which is git-ignored. Rules:
   one line per unit with its criteria.
 - **Root-only by default, mechanically enforced.** `execution.agentMode`
   (default `root-only`) is enforced by a `PreToolUse` hook that hard-blocks
-  `Task` calls. The standing exceptions are `/plan`'s one decomposition step
-  and one isolated fresh-context agent per run of `/scrutinise`
-  (`scrutineer`), `/idea` (`idea-critic`) and `/architect --deep`
+  `Task` calls. The standing exceptions are `/craftsman:plan`'s one decomposition step
+  and one isolated fresh-context agent per run of `/craftsman:scrutinise`
+  (`scrutineer`), `/craftsman:idea` (`idea-critic`) and `/craftsman:architect --deep`
   (`architect-analyst`). Each run is granted exactly one such agent. The
   read-only built-ins in `execution.builtinAgents` (default `["Explore"]`; add the optional `artist:design-critic`)
   also pass. `/craftsman:auto` is the other exception: it runs units in fresh
@@ -516,7 +516,7 @@ The Claude Code **sandbox** owns writes and deletes outside the project and read
 **Off switches.**
 - `CRAFTSMAN_SAFETY=off` in **your own environment** is the only switch that turns the safety guards off; SessionStart says so when it is set.
 - `CRAFTSMAN=off`, `.craftsman/off`, `enabled: false` and `/craftsman:toggle off` switch off the quality, doc and tracker machinery only; the safety guards stay on. Outside a git repository the same machinery is off and the safety guards stay on, and nothing is written to disk.
-- A tool call cannot create `.craftsman/off`, a grant, marker, goal token or scope file (by write, `mkdir`, `ln`, or through a symlinked directory), edit `hooks/hooks.json`, the keys of `craftsman.config.json` that switch a guard off (`enabled`, `protectedPaths`, `docWriteGuard`, `execution.agentMode`, `execution.engine`, `stopGate`, `worktrees`, `repoExec.approval.required`, `planning.featureBranches`), `.craftsman/approvals/**` (the approval records), `.git/config`, `.git/hooks/**`, or the keys of `.claude/settings.json` and `.claude/settings.local.json` that stop the hooks from running (`disableAllHooks`, `hooks`, `sandbox`, `permissions.defaultMode`, craftsman's `enabledPlugins` entry, and the `CRAFTSMAN*`, `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `CLAUDE_PROJECT_DIR`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_ROOT` env keys; paths compare case-folded), or run `toggle.mjs off` or `doc-write.mjs on` (any invocation in a command, with or without node options) outside the command that owns it. A unit scope from `/orchestrate` may name the config and settings files. This reads command text; what it cannot read (an interpreter writing a file) stays with the sandbox. This is token matching: what it cannot read stays with the sandbox.
+- A tool call cannot create `.craftsman/off`, a grant, marker, goal token or scope file (by write, `mkdir`, `ln`, or through a symlinked directory), edit `hooks/hooks.json`, the keys of `craftsman.config.json` that switch a guard off (`enabled`, `protectedPaths`, `docWriteGuard`, `execution.agentMode`, `execution.engine`, `stopGate`, `worktrees`, `repoExec.approval.required`, `planning.featureBranches`), `.craftsman/approvals/**` (the approval records), `.git/config`, `.git/hooks/**`, or the keys of `.claude/settings.json` and `.claude/settings.local.json` that stop the hooks from running (`disableAllHooks`, `hooks`, `sandbox`, `permissions.defaultMode`, craftsman's `enabledPlugins` entry, and the `CRAFTSMAN*`, `NODE_OPTIONS`, `NODE_PATH`, `PATH`, `LD_PRELOAD`, `LD_LIBRARY_PATH`, `DYLD_*`, `CLAUDE_PROJECT_DIR`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_ROOT` env keys; paths compare case-folded), or run `toggle.mjs off` or `doc-write.mjs on` (any invocation in a command, with or without node options) outside the command that owns it. A unit scope from `/craftsman:orchestrate` may name the config and settings files. This reads command text; what it cannot read (an interpreter writing a file) stays with the sandbox. This is token matching: what it cannot read stays with the sandbox.
 
 **Fails closed, and loudly.**
 - Every hook runs through `hooks/run.sh`. If node is missing, a safety hook (`pre-guard`, `agent-mode-guard`, `orchestrate-scope-guard`) blocks the call with "node not found, guards cannot run", and the other hooks warn once per session that craftsman is off.
@@ -527,7 +527,7 @@ The Claude Code **sandbox** owns writes and deletes outside the project and read
 
 **The worktree sweep** counts a branch as merged only into a remote-tracking ref such as `origin/main`, never a local `main`; with no remote nothing is swept. A worktree holding ignored files outside `worktrees.disposable` (build dirs and caches by default) is kept, and so is anything under `.claude/worktrees/` unless `worktrees.sweepClaudeWorktrees` is true. Every deleted branch is logged first in `.craftsman/sweep-log.jsonl` (`branch`, `sha`, `reason`, `time`); recover it with `git branch <name> <sha>`.
 
-**Goals the mod launches.** The mod submits a `.craftsman/instructions/*.goal.txt` as you only if `/instruction` or `/auto` recorded it this session (`scripts/goal-token.mjs`). Any other goal file is named in the band and left for you to launch with `/craftsman:auto-go`.
+**Goals the mod launches.** The mod submits a `.craftsman/instructions/*.goal.txt` as you only if `/craftsman:instruction` or `/craftsman:auto` recorded it this session (`scripts/goal-token.mjs`). Any other goal file is named in the band and left for you to launch with `/craftsman:auto-go`.
 
 | Key | Default | Meaning |
 |---|---|---|
