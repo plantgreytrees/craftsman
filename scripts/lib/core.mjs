@@ -1263,16 +1263,18 @@ export function isMain(metaUrl, argv1 = process.argv[1]) {
 }
 // Split criteria into those a session binds to and legacy untagged ones.
 // `[unit:]` decides alone; `[plan:]` binds iff touched; untagged binds only
-// when the session touched no plan, else it is listed in `legacy`.
-export function bindingAcceptance(text, { units = [], plans = [] } = {}) {
-  const u = new Set(units), p = new Set(plans.map((x) => planSlugOf(x)));
-  const binding = [], legacy = [];
+// when the session touched no plan, else it is listed in `legacy`. A `[unit:]`
+// line whose unit is in `held` (BLOCKED/PARKED, waiting on the user) goes to
+// `held` instead of `binding`.
+export function bindingAcceptance(text, { units = [], plans = [], held = [] } = {}) {
+  const u = new Set(units), p = new Set(plans.map((x) => planSlugOf(x))), h = new Set(held);
+  const binding = [], legacy = [], heldLines = [];
   for (const c of acceptanceCriteria(text)) {
-    if (c.unit) { if (u.has(c.unit)) binding.push(c); }
+    if (c.unit) { if (u.has(c.unit)) (h.has(c.unit) ? heldLines : binding).push(c); }
     else if (c.plan) { if (p.has(c.plan)) binding.push(c); }
     else (p.size === 0 ? binding : legacy).push(c);
   }
-  return { binding, legacy };
+  return { binding, legacy, held: heldLines };
 }
 
 // ARCH-AUTO-11: a restored hand-off re-arms scope-required only while it still lists units to run. SessionStart and

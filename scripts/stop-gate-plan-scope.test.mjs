@@ -97,3 +97,39 @@ test("E: ledger with no plan events for this session still blocks on untagged li
   const r = await run(dir, sid);
   assert.match(r.stdout, /"decision":"block"/);
 }));
+
+const heldRows = (status) => [
+  { key: ".::docs/plans/b.md::u1", project: ".", plan: "docs/plans/b.md", unit: "u1", status: "IN_PROGRESS", evidence: "x", session_id: sid },
+  ...(status === "IN_PROGRESS" ? [] : [{ key: ".::docs/plans/b.md::u1", project: ".", plan: "docs/plans/b.md", unit: "u1", status, evidence: "needs a user decision", session_id: sid }]),
+];
+
+test("F: an unticked [unit:] line of a BLOCKED unit does not block, is named in the notice and logs stop-acceptance-held", () => withFixture(async (dir) => {
+  seed(dir, sid, "- [ ] [plan:b] [unit:u1] u1 criterion\n", heldRows("BLOCKED"));
+  const r = await run(dir, sid);
+  assert.doesNotMatch(r.stdout, /"decision":"block"/);
+  assert.match(r.stdout, /systemMessage/);
+  assert.match(r.stdout, /1 acceptance line\(s\) held by BLOCKED\/PARKED units u1/);
+  assert.match(r.stdout, /\/craftsman:auto Phase C/);
+  const ev = r.events.find((e) => e.ev === "stop-acceptance-held");
+  assert.ok(ev);
+  assert.deepEqual(ev.units, ["u1"]);
+}));
+
+test("G: the same line for an IN_PROGRESS unit still blocks and the reason offers the BLOCKED ON USER exit", () => withFixture(async (dir) => {
+  seed(dir, sid, "- [ ] [plan:b] [unit:u1] u1 criterion\n", heldRows("IN_PROGRESS"));
+  const r = await run(dir, sid);
+  assert.match(r.stdout, /"decision":"block"/);
+  assert.match(r.stdout, /u1 criterion/);
+  assert.match(r.stdout, /BLOCKED\/PARKED via tracker\.mjs with a decision and print BLOCKED ON USER/);
+  assert.ok(!r.events.some((e) => e.ev === "stop-acceptance-held"));
+}));
+
+test("H: a PARKED unit's line is held too, while an IN_PROGRESS sibling still blocks", () => withFixture(async (dir) => {
+  const rows = [...heldRows("PARKED"), { key: ".::docs/plans/b.md::u2", project: ".", plan: "docs/plans/b.md", unit: "u2", status: "IN_PROGRESS", evidence: "x", session_id: sid }];
+  seed(dir, sid, "- [ ] [plan:b] [unit:u1] u1 criterion\n- [ ] [plan:b] [unit:u2] u2 criterion\n", rows);
+  const r = await run(dir, sid);
+  assert.match(r.stdout, /"decision":"block"/);
+  assert.match(r.stdout, /u2 criterion/);
+  assert.doesNotMatch(r.stdout, /u1 criterion/);
+  assert.match(r.stdout, /held by BLOCKED\/PARKED units u1/);
+}));
