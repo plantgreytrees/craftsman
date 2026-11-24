@@ -1294,3 +1294,15 @@ function sameDir(a, b) {
   if (path.resolve(a) === path.resolve(b)) return true;
   try { return fs.realpathSync(a) === fs.realpathSync(b); } catch { return false; }
 }
+
+// This session's worktree bindings that still guard something. A binding whose worktree_path is gone from disk (the
+// Stop sweep removed it, a cleanup or a hand `git worktree remove`) is cleared by its worktree_path and logged, never
+// returned, so Stop cannot block on a worktree no one can release.
+export function readLiveWorktreeBindings(input, context = null) {
+  return readWorktreeBindings(input, context).filter((binding) => {
+    if (!binding.worktree_path || fs.existsSync(binding.worktree_path)) return true;
+    clearWorktreeBinding({ ...input, worktree_path: binding.worktree_path }, context);
+    logEvent({ ev: "stop-binding-cleared", sid: sidOf(input), unit: binding.unit, worktree_path: binding.worktree_path }, context);
+    return false;
+  });
+}
