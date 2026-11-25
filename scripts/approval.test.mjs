@@ -314,3 +314,51 @@ test("prepare keeps landed_sha, landed_mode and published_at in history when sup
   assert.equal(h.landed_mode, "open-pr");
   assert.ok(h.published_at);
 });
+// ARCH-STATE-19 (approval follows the detached tree): `{workspaceRoot}` in a configured security.check or docs check is the
+// detached tree at head_sha, not the main checkout. The child's PROJECT_ROOT is the scratch repository (fixed at load).
+test("prepare's security.check and docs checks expand {workspaceRoot} to the detached tree at head_sha", () => {
+  const s = setup();
+  const script = (who) =>
+    `require("node:fs").appendFileSync(process.env.WHO_LOG, ${JSON.stringify(who)} + " " + __dirname + "\\n");\n`;
+  fs.writeFileSync(path.join(s.root, "gate.cjs"), script("main"));
+  fs.writeFileSync(
+    path.join(s.root, "craftsman.config.json"),
+    JSON.stringify({
+      security: { check: ["node {workspaceRoot}/gate.cjs sec"] },
+      docs: { checks: ["node {workspaceRoot}/gate.cjs docs"] },
+    }),
+  );
+  git(s.root, "add", ".");
+  git(s.root, "commit", "-qm", "base");
+  git(s.root, "checkout", "-qb", "feat");
+  fs.writeFileSync(path.join(s.root, "gate.cjs"), script("tree"));
+  git(s.root, "commit", "-qam", "feature gate");
+  const head = git(s.root, "rev-parse", "HEAD");
+  git(s.root, "checkout", "-q", "main");
+  const log = path.join(s.root, "..", `who-${path.basename(s.root)}.log`);
+  const code = `import { prepare } from ${JSON.stringify(fileURLToPath(new URL("./approval.mjs", import.meta.url)))};
+const out = prepare(${JSON.stringify({ ...s.input, head_sha: head })}, { root: ${JSON.stringify(s.root)} });
+process.stdout.write(JSON.stringify(out));`;
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: s.root, WHO_LOG: log };
+  delete env.CLAUDE_CODE_SESSION_ID;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+    cwd: s.root,
+    encoding: "utf8",
+    env,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const ran = fs.readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(
+    ran.length,
+    2,
+    "the security check and the docs check each ran once",
+  );
+  for (const line of ran) {
+    assert.match(
+      line,
+      /^tree /,
+      "the detached tree's script ran, not the main checkout's",
+    );
+    assert.ok(!line.includes(s.root), "nothing ran from the main checkout");
+  }
+});
