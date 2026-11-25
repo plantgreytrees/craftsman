@@ -54,3 +54,29 @@ test("Gleam-shaped two-plan fixture", () => {
   assert.equal(forA.legacy.length, 1);
   assert.equal(bindingAcceptance(t, { units: [], plans: [] }).binding.length, 1);
 });
+
+test("bindingAcceptance held: a held id with no lines is in neither list", () => {
+  const t = "- [ ] [unit:x] ux\n- [ ] legacy";
+  const r = bindingAcceptance(t, { units: ["x"], plans: [], held: ["ghost"] });
+  assert.deepEqual(r.held, []);
+  assert.deepEqual(r.binding.map((c) => c.line.split("] ").pop()), ["ux", "legacy"]);
+  assert.deepEqual(r.legacy, []);
+});
+
+test("bindingAcceptance held: a held id on a [plan:]-only line still binds", () => {
+  const t = "- [ ] [plan:b] pb\n- [ ] [unit:x] [plan:b] ux";
+  const r = bindingAcceptance(t, { units: ["x"], plans: ["b"], held: ["x", "b"] });
+  assert.deepEqual(r.binding.map((c) => c.line.split("] ").pop()), ["pb"]);
+  assert.deepEqual(r.held.map((c) => c.line.split("] ").pop()), ["ux"]);
+});
+
+test("bindingAcceptance held omitted is the old shape plus held: []", () => {
+  const t = "- [ ] [unit:x] [plan:b] ux\n- [ ] [unit:y] uy\n- [ ] [plan:b] pb\n- [ ] legacy";
+  const opts = { units: ["x", "y"], plans: ["b"] };
+  const r = bindingAcceptance(t, opts);
+  assert.deepEqual(r, { ...bindingAcceptance(t, { ...opts, held: [] }), held: [] });
+  assert.deepEqual(r.held, []);
+  assert.deepEqual(Object.keys(r).sort(), ["binding", "held", "legacy"]);
+  assert.equal(r.binding.length, 3);
+  assert.equal(r.legacy.length, 1);
+});
