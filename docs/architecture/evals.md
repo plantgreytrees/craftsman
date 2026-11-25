@@ -3,7 +3,7 @@
 > and `/architect --update evals` should be run.
 
 # Behaviour evals architecture
-_Last verified: 2026-11-24 at `1d35408` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
+_Last verified: 2026-11-25 at `f3e0d29` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
 
 ## In plain English
 Craftsman's behaviour lives mostly in prose that the model reads. The unit tests
@@ -36,11 +36,14 @@ flowchart LR
 |---|---|---|---|
 | ARCH-EVALS-01 | First-party `claude plugin eval`, cases in `evals/` | Exists locally (Claude Code 2.1.328, needs ≥ 2.1.269); ARCH-SLIM-15 forbids third-party dependencies | Port Superpowers' harness; custom `claude -p` scripts; relocate via the `experimental.evals` manifest key (experimental, and the default works) |
 | ARCH-EVALS-02 | Deterministic graders only (`tool_used`, `tool_order`, `file_exists`, `regex`), defined only in `graders/*.md`, never inline in `case.yaml` | LLM judges agree with humans ~80% and carry verbosity/position bias; every judge is another model call; the plugin has no npm dependencies, so the structure test reads Markdown frontmatter, not YAML lists | Allow `llm` judges on short output; inline `case.yaml` graders |
-| ARCH-EVALS-03 | One firing case per unreferenced skill, and per future skill | No command or agent names these skills, so description-based triggering is their only path | Test only one skill; static removal without measuring |
+| ARCH-EVALS-03 | Superseded by ARCH-EVALS-08 (one firing case per unreferenced skill, and per future skill) | No command or agent names these skills, so description-based triggering is their only path | Test only one skill; static removal without measuring |
 | ARCH-EVALS-04 | Exactly one hook smoke case: Claude quotes the `craftsman guards:` line its SessionStart hook injects, regex on the final message, no tool grants | 12 `pre-guard*.test.mjs` files already cover guard logic deterministically; only live wiring is untested; this shape needs no Bash grant or sandbox | Re-test guard decisions in evals; a PreToolUse block on Bash (needs a Bash grant, and firing on that path is unproven) |
 | ARCH-EVALS-05 | `--ablation none`, `--max-cost-usd 5`, `--no-publish`, minimal tool grants, results git-ignored | `tool_used: Skill` and the hook case can only pass with the plugin, so a no-plugin arm is pure cost; cost is real and unmeasured; reports contain transcripts; the plugin cache is a git checkout, so committed results would ship to every user | Two-arm runs; $2 or $10 ceilings; publishing reports to claude.ai |
 | ARCH-EVALS-06 | Run before moving `stable` and after trims; record "unavailable" and proceed if the tool is switched off; no CI gate | Every merge to `main` ships, but `stable` is the tested channel (ARCH-MOD-06); Anthropic can switch `plugin eval` off server-side, which must not freeze releases; a CI gate needs model credentials and is flaky at ~70% invocation rates | Block `stable` until evals run; CI gate on every PR; release-only runs |
-| ARCH-EVALS-07 | Wire or delete a skill that no command or agent names and that never fires | A description-only skill that never fires costs description budget for nothing; a skill already linked (`deep-research` from `commands/understand.md:13`) is in use whatever its firing score | Keep and record only; apply to every skill |
+| ARCH-EVALS-07 | Superseded by ARCH-EVALS-09/10 (wire or delete a skill that never fires, after two rewrites) | A description-only skill that never fires costs description budget for nothing; a skill already linked (`deep-research` from `commands/understand.md:13`) is in use whatever its firing score | Keep and record only; apply to every skill |
+| ARCH-EVALS-08 (replaces 03) | One firing case for every skill under `skills/` except `language-aware-planning`; a removed skill takes its case with it | Naming the four skills in the rule forced an amendment whenever one was removed; a per-directory rule needs none | Keep the named list and amend it on every removal |
+| ARCH-EVALS-09 (replaces 07) | One rewrite, gated by a ceiling run and a held-out check: copy the prompt's words first (0/3 → fix the case design once), then one "Use when…" rewrite inside the existing caps, then two fresh paraphrases and one near-miss run locally; keep only at ≥2/3, ≥2/3 each and ≤1/3 | A single test prompt invites overfitting (the deep-research prompt echoes its description); an empty workspace may suppress firing; the owner accepts removal after one honest try | Two rewrites (07); committed should-not-fire cases (+cost every release); `when_to_use` or a raised total cap (owner: no) |
+| ARCH-EVALS-10 | A skill not kept is removed with every trace (dir, case, cap, test entries, README line), never wired in | The loop already enforces test-first (`agents/implementer.md:24`), root cause (`/investigate`) and verification (Stop gate); preloading via an agent's `skills:` field would load into every unit-runner role | Wire into `agents/unit-runner.md` via `skills:`; keep and record only |
 
 ## Data & flows
 Cases are committed and ship with the plugin (the cache is a git checkout:
@@ -92,3 +95,6 @@ edited in place because no plan or commit cited them yet:
 - **Arm:** the set of runs with the plugin (with-arm) or without it (without-arm).
 - **Firing case:** a case whose grader checks that a named skill was invoked.
 - **Deterministic grader:** a check computed from the transcript or files, with no model call.
+
+## Amendment (2026-11-25, owner-approved): one rewrite, then remove
+Source: [skill-description-rewrites](../ideas/skill-description-rewrites.md). The first suite run scored the three loop-discipline skills 0/3. ARCH-EVALS-07 (two rewrites, then wire in or remove) becomes ARCH-EVALS-09 (a ceiling run, one rewrite, a local held-out check) and ARCH-EVALS-10 (remove, never wire in). ARCH-EVALS-03's named skill list becomes ARCH-EVALS-08's per-directory rule so a removal needs no amendment. ARCH-SLIM-15 becomes ARCH-SLIM-19, which no longer names the borrowed patterns or cites a skill that may be removed.
