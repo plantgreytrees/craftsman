@@ -588,6 +588,32 @@ test("stop-gate: a genuinely failing (non-killed, non-zero exit) command still b
   }
 });
 
+// A unit branch with unlanded commits is a legitimate state: with a base ref present it is simply "not merged", and
+// the HEAD fallback must never call it merged just because the scope's root IS that worktree (HEAD == the branch).
+test("stop-gate: an unmerged ledger worktree is never NOT SWEPT or branch -D advice, even when the scope root is that worktree", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
+  try {
+    const sid = "unmerged-scope-session";
+    const mine = addMergedWorktree(dir, "unmerged-unit");
+    fs.writeFileSync(path.join(mine.worktree, "unit.txt"), "unlanded\n");
+    spawnSync("git", ["add", "unit.txt"], { cwd: mine.worktree });
+    spawnSync("git", ["commit", "-q", "-m", "feat: unlanded"], { cwd: mine.worktree });
+    const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
+    const rootSessions = path.join(dir, ".craftsman", "sessions", sid);
+    fs.mkdirSync(rootSessions, { recursive: true });
+    fs.writeFileSync(path.join(rootSessions, "scope.json"), JSON.stringify({ plan: "docs/plans/p.md", unit: "unmerged-unit", project: ".", project_root: mine.worktree, worktree_path: mine.worktree, scope: { read: [], docs: [], write: [] }, arch: [] }));
+    const result = await runStopGate(dir, sid);
+    assert.doesNotMatch(result.stdout, /WORKTREE NOT SWEPT/);
+    assert.doesNotMatch(result.stdout, /branch -D/);
+    assert.equal(fs.existsSync(mine.worktree), true, "unmerged worktree is never removed");
+  } finally {
+    cleanup(dir);
+  }
+});
+
 // merge() restores whatever branch the primary checkout was on, so "merged"
 // judged against HEAD missed every unit merged while the checkout sat on
 // another branch — the sweep went silent on exactly the leftovers it exists for.
