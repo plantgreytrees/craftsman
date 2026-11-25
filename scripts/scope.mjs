@@ -9,6 +9,7 @@ import {
   isMain, sessionDir, sidOf, sha1, worktreeBindingPath, commandInvoked, STATE_DIR } from "./lib/core.mjs";
 import { checkScope, loadRules, DEFAULT_DIR } from "./arch-check.mjs";
 import { namesSelfScoped, realEntries } from "./lib/self-protect.mjs";
+import { sameRepository } from "./lib/same-repository.mjs";
 
 export function normalizeScope(value) {
   if (!value || typeof value !== "object") throw new Error("scope must be a JSON object");
@@ -119,13 +120,6 @@ export function readScope(input) {
   const session = scopes.filter((scope) => !scope.worktree_path);
   if (session.length === 1) return session[0];
   return { ...scopes[0], scope_ambiguous: true };
-}
-
-function sameRepository(first, second) {
-  try {
-    const common = (root) => path.resolve(root, execFileSync("git", ["-C", root, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim());
-    return common(first) === common(second);
-  } catch { return false; }
 }
 
 if (isMain(import.meta.url)) {

@@ -17,6 +17,7 @@ import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
 import { expandChangePlaceholders, isScoped, MAX_ARGV_BYTES, readChanged } from "./lib/changed.mjs";
 import { gateUsable } from "./lib/gate-command.mjs";
+import { sameRepository } from "./lib/same-repository.mjs";
 
 const T0 = Date.now();
 const pexec = promisify(execFile);
@@ -579,17 +580,4 @@ function baselineTreeNote() {
   if (!active?.project_root || !rootDir) return "";
   try { if (fs.realpathSync(rootDir) === fs.realpathSync(context.root)) return ""; } catch { /* a root that cannot be resolved is not the same tree */ }
   return ` - the baseline was taken in ${rootDir}; this is ${context.root}, a different tree, and a worktree without its dependencies fails the same way`;
-}
-
-// Equal real paths are the same repository. Otherwise both roots must share one git common directory, each resolved against its
-// own directory (git prints it relative to the cwd) and compared by real path. A git failure, a missing directory or a directory
-// that is not a repository is NOT the same repository. Git is asked only when the two roots differ.
-function sameRepository(rootDir, scopeDir) {
-  try {
-    if (fs.realpathSync(rootDir) === fs.realpathSync(scopeDir)) return true;
-    const commonDir = (dir) => fs.realpathSync(path.resolve(dir, execFileSync(
-      "git", ["rev-parse", "--git-common-dir"], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10000 }
-    ).trim()));
-    return commonDir(rootDir) === commonDir(scopeDir);
-  } catch { return false; }
 }
