@@ -152,6 +152,45 @@ test("gate-command: a scoped command with a nested marker is still skipped when 
   assert.equal(findGateCommand(dir, cfgOf("craftsman-no-such-program {changed}"), only("node")), null);
 });
 
+// ARCH-LAND-38: in a git checkout the marker lookup matches tracked files only, as Stop's markerPresent does.
+function gitTree(tracked, ...others) {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gate-cmd-git-")));
+  gitIn(dir, "init", "-q");
+  nested(dir, tracked);
+  for (const [file, text] of others) nested(dir, file, text);
+  gitIn(dir, "add", tracked);
+  return dir;
+}
+const scoped = "node check.mjs {changed}";
+
+test("gate-command: a marker only in an untracked folder selects no scoped command", () => {
+  const dir = gitTree("src/app.js");
+  nested(dir, "scratch/package.json");
+  assert.equal(findGateCommand(dir, cfgOf(scoped), only("node")), null);
+  assert.equal(findGateCommand(dir, cfgOf(scoped, "*.sln"), only("node")), null);
+});
+
+test("gate-command: a marker only in a gitignored folder selects no scoped command", () => {
+  const dir = gitTree("src/app.js");
+  nested(dir, ".gitignore", "vendor/\n");
+  nested(dir, "vendor/pkg/package.json");
+  assert.equal(findGateCommand(dir, cfgOf(scoped), only("node")), null);
+});
+
+test("gate-command: a tracked nested marker selects the scoped command in a git checkout, by name and by glob", () => {
+  const dir = gitTree("services/api/package.json");
+  assert.equal(findGateCommand(dir, cfgOf(scoped), only("node")), scoped);
+  const sln = gitTree("src/App/App.sln");
+  assert.equal(findGateCommand(sln, cfgOf(scoped, "*.sln"), only("node")), scoped);
+  assert.equal(findGateCommand(sln, cfgOf(scoped, "go.mod"), only("node")), null);
+});
+
+test("gate-command: a directory that is not a git checkout still finds a nested marker through the walk", () => {
+  const dir = tree();
+  nested(dir, "services/api/package.json");
+  assert.equal(findGateCommand(dir, cfgOf(scoped), only("node")), scoped);
+});
+
 // {workspaceRoot} follows the worktree (ARCH-STATE-19). PROJECT_ROOT is fixed when core loads, so these run gate-command
 // in a child node whose cwd is a scratch repository standing in for the workspace root.
 import { spawnSync } from "node:child_process";

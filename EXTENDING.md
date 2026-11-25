@@ -201,13 +201,11 @@ folder as `cwd` (root-relative) whenever it is not the root.
   pass at Stop and fail at merge: a test runner handed `README.md` by the merge
   gate was never handed it at Stop. Write a scoped command so it tolerates, or
   filters out, files that are not source.
-- Both gates select a scoped `stopGate.commands` entry when its marker exists
-  anywhere in the tree, not only at the top level, and the first usable match
-  wins. They look in different places: Stop matches the repository's git-tracked
-  files, while the pre-merge gate walks the worktree (`.git` and `node_modules`
-  are not entered and a symlink is not followed). A marker that exists only in an
-  untracked or ignored folder therefore selects the command at merge but not at
-  Stop. In a repo whose only
+- Both gates select a scoped `stopGate.commands` entry when its marker is a git-tracked
+  file anywhere in the tree, not only at the top level, and the first usable match
+  wins. A marker that exists only in an untracked or ignored folder selects the
+  command at neither gate, and a tree that is not a git checkout is walked instead
+  (`.git` and `node_modules` are not entered and a symlink is not followed). In a repo whose only
   `package.json` is under `services/api/`, the scoped check runs at both. A
   command with no placeholder still needs its marker at the top level of the
   worktree, and when no command is usable the pre-merge gate lands without one (it
