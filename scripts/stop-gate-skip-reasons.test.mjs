@@ -29,9 +29,11 @@ function makeFixture(stopGate = {}, files = {}) {
 }
 
 // A session's state at `root`: an optional dirty marker and an optional seeded session-start.json.
-function seed(root, sid, { dirty = false, start } = {}) {
+function seed(root, sid, { dirty = false, start, started = false, dropped = false } = {}) {
   const sessions = path.join(root, ".craftsman", "sessions", sid);
   fs.mkdirSync(sessions, { recursive: true });
+  if (started) fs.writeFileSync(path.join(sessions, "snapshot-started"), String(Date.now()));
+  if (dropped) fs.writeFileSync(path.join(sessions, "snapshot-dropped"), String(Date.now()));
   if (dirty) fs.writeFileSync(path.join(sessions, "dirty"), String(Date.now()));
   if (start !== undefined) fs.writeFileSync(path.join(sessions, "session-start.json"), JSON.stringify(start));
 }
@@ -66,7 +68,11 @@ const REASONS = [
   ["red-at-start", { dirty: true, start: { cmd: "node -e 0", testsGreenAtStart: false } }, "the legacy single-command snapshot was red"],
   ["clean", { start: { results: [{ cmd: "node -e 0", green: true }] } }, "nothing was edited since the snapshot"],
   ["clean", {}, "nothing was edited and there is no snapshot"],
+  ["snapshot-pending", { dirty: true, started: true }, "a snapshot was started and has recorded nothing"],
+  ["snapshot-dropped", { dirty: true, started: true, dropped: true }, "snapshot.mjs recorded that it dropped its result because the tree changed while it ran"],
 ];
+
+test("stop-gate: the reason table has seven entries (ARCH-STATE-24)", () => assert.equal(REASONS.length, 7));
 
 for (const [reason, state, why] of REASONS) {
   test(`stop-gate: ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-22)`, async () => {
@@ -103,6 +109,13 @@ function markStarted(dir, sid) {
   fs.writeFileSync(path.join(sessions, "snapshot-started"), String(Date.now()));
 }
 
+// The marker snapshot.mjs writes where it drops its result because the tree changed while it ran.
+function markDropped(dir, sid) {
+  const sessions = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, "snapshot-dropped"), String(Date.now()));
+}
+
 const addPackageJson = (dir) => {
   fs.writeFileSync(path.join(dir, "package.json"), "{}\n");
   spawnSync("git", ["add", "-A"], { cwd: dir });
@@ -122,6 +135,7 @@ const UNSEEDED = [
   ["snapshot-pending", {}, PKG, markStarted, "a snapshot was started with the default command and left no result file"],
   ["snapshot-pending", { commands: NODE_0 }, { "services/api/package.json": "{}\n" }, markStarted, "a snapshot was started for a marker under a sub-directory and left no result file"],
   ["snapshot-pending", {}, {}, markStarted, "a snapshot was started and the marker file is gone from today's tree: the fact is recorded, not recomputed"],
+  ["snapshot-dropped", { commands: NODE_0 }, PKG, (dir, sid) => { markStarted(dir, sid); markDropped(dir, sid); }, "a snapshot was started and snapshot.mjs recorded that it dropped its result: the dropped marker wins over the started one"],
 ];
 
 for (const [reason, stopGate, files, before, why] of UNSEEDED) {
@@ -287,6 +301,24 @@ test("stop-gate: under a unit scope a snapshot-started marker in the root's dire
     const { events } = await runStop(dir, "pend");
     assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["snapshot-pending", "svc-a"]]);
   });
+});
+
+test("stop-gate: under a unit scope a snapshot-dropped marker in the root's directory makes a baseline-less dirty Stop snapshot-dropped (ARCH-STATE-24)", async () => {
+  await underScope("drop", async (dir, unitRoot) => {
+    markStarted(dir, "drop");
+    markDropped(dir, "drop");
+    seed(unitRoot, "drop", { dirty: true });
+    const { events } = await runStop(dir, "drop");
+    assert.deepEqual(skipped(events).map((e) => [e.reason, e.project]), [["snapshot-dropped", "svc-a"]]);
+  });
+});
+
+test("stop-gate: a snapshot-dropped marker beside a session-start.json is not a skip: the baseline wins (ARCH-STATE-24)", async () => {
+  const dir = makeFixture();
+  try {
+    seed(dir, "both", { dirty: true, dropped: true, start: { results: [] } });
+    assert.deepEqual(skipped((await runStop(dir, "both")).events).map((e) => e.reason), ["no-command"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("stop-gate: under a unit scope the baseline is the root's alone: one in the scope's own directory is not read (ARCH-STATE-22)", async () => {

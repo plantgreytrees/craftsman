@@ -222,7 +222,7 @@ if (baseline.error) sayOnce("baseline-notice-unavailable",
   `craftsman: stop-gate skipped the session-start baseline lookup (the workspace manifest could not be read: ${baseline.error.message}), advisory only`, baseline.error.message);
 
 if (isDirty) {
-  // A dirty Stop that queues no test says why, once (ARCH-STATE-22). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: present is snapshot-pending, absent is no-command; never config.
+  // A dirty Stop that queues no test says why, once (ARCH-STATE-22). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: snapshot.mjs's snapshot-dropped marker (it dropped its result because the tree changed) is snapshot-dropped, snapshot-started alone is snapshot-pending, neither is no-command; never config (ARCH-STATE-24).
   const before = tasks.length;
   for (const { cmd, green } of results) if (green && !isScoped(cmd)) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
 
@@ -266,7 +266,7 @@ if (isDirty) {
         `craftsman: stop-gate skipped ${embedded.join(", ")} ({changed} and {changedDirs} must be a whole argument, never part of one), advisory only`, embedded);
     }
   }
-  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (fs.existsSync(path.join(baselineDir, "snapshot-started")) ? "snapshot-pending" : "no-command") });
+  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (fs.existsSync(path.join(baselineDir, "snapshot-dropped")) ? "snapshot-dropped" : fs.existsSync(path.join(baselineDir, "snapshot-started")) ? "snapshot-pending" : "no-command") });
 } else {
   logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: "clean" });
 }

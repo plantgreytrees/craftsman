@@ -83,6 +83,7 @@ function dirtyStop(root, sid) {
 }
 
 const startFile = (root, sid) => path.join(root, ".craftsman", "sessions", sid, "session-start.json");
+const droppedFile = (root, sid) => path.join(root, ".craftsman", "sessions", sid, "snapshot-dropped");
 const readStart = (root, sid) => JSON.parse(fs.readFileSync(startFile(root, sid), "utf8"));
 const ranLog = (root) => path.join(root, "ran.log");
 
@@ -153,6 +154,7 @@ test("snapshot: craftsman state written after the starting hash does not drop th
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fs.readFileSync(quietLog(root), "utf8"), "plain\n", "the command ran");
   assert.deepEqual(readStart(root, "snap-state").results.map((x) => x.green), [true], "the snapshot landed session-start.json");
+  assert.equal(fs.existsSync(droppedFile(root, "snap-state")), false, "a landed snapshot leaves no dropped marker (ARCH-STATE-24)");
 });
 
 test("snapshot: an edit to a tracked file while the snapshot runs still drops it, with the state lines in the tree (ARCH-STATE-24)", () => {
@@ -164,6 +166,7 @@ test("snapshot: an edit to a tracked file while the snapshot runs still drops it
   assert.equal(fs.readFileSync(quietLog(root), "utf8"), "edit\n", "the command ran and edited a tracked file");
   assert.match(porcelain(root), /^ M tracked\.txt$/m);
   assert.equal(fs.existsSync(startFile(root, "snap-edit")), false, "the tree moved, so no baseline is recorded");
+  assert.equal(fs.existsSync(droppedFile(root, "snap-edit")), true, "the drop is recorded in the same session directory (ARCH-STATE-24)");
 });
 
 test("snapshot: a changed tree drops the snapshot just as before when nothing of craftsman's own is in it", () => {
@@ -171,6 +174,24 @@ test("snapshot: a changed tree drops the snapshot just as before when nothing of
   const r = snapshot(root, "snap-plain-edit", startingTree(root));
   assert.equal(r.status, 0, r.stderr);
   assert.equal(fs.existsSync(startFile(root, "snap-plain-edit")), false);
+  assert.equal(fs.existsSync(droppedFile(root, "snap-plain-edit")), true);
+});
+
+test("snapshot: the dropped marker is written only on a changed tree: an unchanged tree and a run with no starting tree write none (ARCH-STATE-24)", () => {
+  const root = fixture({ "plain.fixture": "node QUIET plain" });
+  assert.equal(snapshot(root, "snap-same", startingTree(root)).status, 0);
+  assert.equal(fs.existsSync(droppedFile(root, "snap-same")), false, "the tree did not change");
+  assert.equal(snapshot(root, "snap-notree").status, 0);
+  assert.equal(fs.existsSync(droppedFile(root, "snap-notree")), false, "no starting tree, no comparison");
+  assert.equal(fs.existsSync(startFile(root, "snap-notree")), true);
+});
+
+test("snapshot: a dropped snapshot makes the next dirty Stop log snapshot-dropped, not snapshot-pending (ARCH-STATE-24)", () => {
+  const root = fixture({ "edit.fixture": "node QUIET edit" });
+  const tree = startingTree(root);
+  writeStarted(root, "snap-drop-stop");
+  assert.equal(snapshot(root, "snap-drop-stop", tree).status, 0);
+  assert.deepEqual(dirtyStop(root, "snap-drop-stop"), ["snapshot-dropped"]);
 });
 
 // ARCH-STATE-22: a command whose program is not installed was never a red test, so it is skipped like a scoped command: no

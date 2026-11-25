@@ -42,7 +42,15 @@ for (const cmd of entries) {
 
 // Craftsman's own state is not the user's work: a repo that does not gitignore `.craftsman/` must not drop its baseline for it (ARCH-STATE-24).
 const endingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${withoutCraftsmanState(await git(["status", "--porcelain", "--untracked-files=all"], context))}`);
-if (startingTree && startingTree !== endingTree) process.exit(0);
+if (startingTree && startingTree !== endingTree) {
+  // The result is dropped, and Stop is told so: snapshot-started alone would read as a snapshot still running (ARCH-STATE-24).
+  try {
+    const dir = sessionDir(sid, context);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "snapshot-dropped"), String(Date.now()));
+  } catch {}
+  process.exit(0);
+}
 
 try {
   const dir = sessionDir(sid, context);
