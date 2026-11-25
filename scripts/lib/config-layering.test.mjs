@@ -240,6 +240,61 @@ test("workspaceRootFor: the worktree of the workspace root's own repository, and
   assert.deepEqual(value.tok, ["sh", `${wt}/x.sh`, "a.py"]);
 });
 
+// A repository `ws` carrying a committed `git submodule add` checkout at svc/, and a linked worktree of it with the submodule
+// initialised. file:// submodules need protocol.file.allow, set for those commands only.
+function withSubmodule() {
+  const ws = repo();
+  const lib = repo("config-layering-lib-");
+  gitIn(ws, "-c", "protocol.file.allow=always", "submodule", "add", "-q", lib, "svc");
+  gitIn(ws, "commit", "-q", "-m", "add the submodule");
+  const wt = worktreeOf(ws);
+  gitIn(wt, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "-q");
+  fs.mkdirSync(path.join(ws, "svc", "pkg"));
+  fs.mkdirSync(path.join(wt, "svc", "pkg"));
+  return { ws, wt };
+}
+
+test("workspaceRootFor: a git submodule checkout inside the root, and one inside a unit worktree, give PROJECT_ROOT", () => {
+  const { ws, wt } = withSubmodule();
+  assert.ok(fs.existsSync(path.join(wt, "svc", ".git")), "the worktree's submodule is checked out");
+  const { value } = inWorkspace(ws, `
+    const f = (root) => core.workspaceRootFor({ root });
+    out({
+      inRoot: f(${JSON.stringify(path.join(ws, "svc"))}),
+      inRootSub: f(${JSON.stringify(path.join(ws, "svc", "pkg"))}),
+      inWorktree: f(${JSON.stringify(path.join(wt, "svc"))}),
+      inWorktreeSub: f(${JSON.stringify(path.join(wt, "svc", "pkg"))}),
+      worktree: f(${JSON.stringify(wt)}),
+      split: core.splitCmd("sh {workspaceRoot}/x.sh", { root: ${JSON.stringify(path.join(wt, "svc"))} }),
+    });`);
+  for (const key of ["inRoot", "inRootSub", "inWorktree", "inWorktreeSub"]) assert.equal(value[key], ws, key);
+  assert.equal(value.worktree, wt, "the worktree itself still resolves to the worktree");
+  assert.deepEqual(value.split, ["sh", `${ws}/x.sh`], "a submodule is another repository: its command expands to PROJECT_ROOT, not the worktree");
+});
+
+test("workspaceRootFor: a nested repository inside the root, and one inside a unit worktree, give PROJECT_ROOT", () => {
+  const ws = repo();
+  const wt = worktreeOf(ws);
+  const nestedIn = (dir) => {
+    const nested = path.join(dir, "vendor", "tool");
+    fs.mkdirSync(nested, { recursive: true });
+    gitIn(nested, "init", "-q");
+    fs.mkdirSync(path.join(nested, "src"));
+    return nested;
+  };
+  const inRoot = nestedIn(ws);
+  const inWorktree = nestedIn(wt);
+  const { value } = inWorkspace(ws, `
+    const f = (root) => core.workspaceRootFor({ root });
+    out({
+      inRoot: f(${JSON.stringify(inRoot)}),
+      inRootSub: f(${JSON.stringify(path.join(inRoot, "src"))}),
+      inWorktree: f(${JSON.stringify(inWorktree)}),
+      inWorktreeSub: f(${JSON.stringify(path.join(inWorktree, "src"))}),
+    });`);
+  for (const key of Object.keys(value)) assert.equal(value[key], ws, key);
+});
+
 test("workspaceRootFor: no context, the root itself, a subdirectory of the main checkout, another repository and a non-git directory give PROJECT_ROOT", () => {
   const ws = repo();
   fs.mkdirSync(path.join(ws, "svc"));
