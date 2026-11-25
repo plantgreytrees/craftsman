@@ -17,7 +17,7 @@ Target: `$ARGUMENTS`. With `--level`/`--feature`, read `commands/_features.md` �
 
 1. **Resolve the source.** Unknown slug → `tracker.mjs lookup` before treating it as new. `docs/ideas/<slug>.md` → read verdict, `touches`, recommendations, answered questions. Verdict `reject`/`defer` → stop and say so. Status not `architected` while `touches` hits a governed area or the idea makes design decisions → recommend `/architect <slug>` first and ask with `AskUserQuestion` (`_shared-machinery.md`) whether to proceed. A plan slug (`docs/plans/<slug>.md` exists) → the prompt starts at `/orchestrate`, not `/plan`. A bare request → note `/idea`/`/architect` were skipped.
 2. **Governing rules.** `node "${CLAUDE_PLUGIN_ROOT}/scripts/arch-check.mjs" governs <touches…>` → the `.rules.md` paths and the relevant `decided` ids. **Never** read or reference the human `<area>.md` files. No rules doc governs the touched paths → the prompt drops its rules clauses, and **Before you paste** says the loop runs unguarded and recommends `/architect --init` (or `--backfill`) first.
-3. **Proof commands.** The project's real test command (`craftsman.config.json` `stopGate.commands`, else repo markers), the tracker/acceptance locations, and the base branch + land mode (`repoExec.land`: `direct` merges and pushes base, `pr` opens an auto-merge PR) — the evaluator's evidence.
+3. **Proof commands.** The project's real test command (`craftsman.config.json` `stopGate.commands`, else repo markers; a `{changed}`/`{changedDirs}` command → its unscoped form), the tracker/acceptance locations, and the base branch + land mode (`repoExec.land`: `direct` merges and pushes base, `pr` opens an auto-merge PR).
 4. **Acceptance criteria.** Plan exists → read each unit's `accept:` and `arch:` lines and its `[unit:<id>]` lines in `.craftsman/acceptance.md`. Collect the idea's "done" outcomes no criterion covers: the prompt makes `/plan` (or a plan amendment) add them as acceptance lines, so the Stop gate and `tracker.mjs` enforce them.
 
 ## Phase 1 — Implementation weight (shown to the user, never in the prompt)
@@ -61,6 +61,6 @@ Drop inapplicable steps — never step 5, the (A)/(P) contracts, or their eviden
 ## Phase 3 — Output
 
 Print:
-1. **Implementation weight** line + drivers + main schedule risk (outside the prompt).
-2. The prompt in one fenced block, ready to paste, with its saved path + character count.
+1. **Implementation weight** line + drivers + main schedule risk.
+2. The prompt in one fenced block with its saved path + character count.
 3. **Before you paste** (≤ 4 bullets): run it in auto mode (unattended turns); the goal survives `/compact` but not `/clear`; `/goal` with no argument shows progress, `/goal clear` stops it; pasting it approves the final `/craftsman:merge` (merge + push to base, or a PR in `pr` mode) — drop step 5 first if you want to land by hand; any skipped prerequisite (`/craftsman:idea`, `/craftsman:architect`, or no rules doc: (A) unenforced) and its risk.

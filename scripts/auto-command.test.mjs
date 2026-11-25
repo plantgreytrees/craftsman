@@ -101,6 +101,13 @@ test("instruction.md: /goal step 2 agrees with the met-stop rule: no \"left unre
   assert.match(step2[0], /none left without a printed blocker/);
 });
 
+test("instruction.md: step 3 never pastes a scoped {changed}/{changedDirs} stopGate command as the proof (scoped-gates followup)", () => {
+  const step = instruction.split("\n").find((l) => l.startsWith("3. **Proof commands.**"));
+  assert.ok(step, "Phase 0 has a proof-commands step");
+  assert.match(step, /`\{changed\}`\/`\{changedDirs\}`/);
+  assert.match(step, /unscoped/);
+});
+
 test("instruction.md: a composed sample goal measures ≤ 4000 characters", () => {
   const ids = "ARCH-STATE-01..07, ENGINE-01..11, AUTO-01..07, MOD-01..05, TRACKER-01..05, LAND-01..06";
   const goal = template()
