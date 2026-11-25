@@ -3,7 +3,7 @@
 > and `/architect --update slim` should be run.
 
 # Slimness architecture
-_Last verified: 2026-11-25 at `f3e0d29` · Source idea: [feature-branch-plans](../ideas/feature-branch-plans.md)_
+_Last verified: 2026-11-25 at `865345b` · Source idea: [feature-branch-plans](../ideas/feature-branch-plans.md)_
 
 ## In plain English
 Every craftsman file must be as small as it can be without losing capability.
@@ -70,5 +70,5 @@ ARCH-SLIM-10 measures always-loaded bytes: a 3 KB SessionStart target and a per-
 - **ARCH-SLIM-18** replaces 06. Everything 06 required stays. A trim that touches a skill or command `description:` or a SKILL.md body also reruns the `skill-fires-*` cases of the behaviour-eval suite ([evals](./evals.md), ARCH-EVALS-03) and reports their scores before and after. Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md).
 
 ## Amendment (2026-11-25, owner-approved): vendored skills that never fire are removed
-- **ARCH-SLIM-19** replaces 15. Same no-dependency and Artist terms; a vendored skill is described generically, and one that fails ARCH-EVALS-09 is removed under ARCH-EVALS-10 rather than kept or wired in. Its cite moves from `skills/test-driven-development/SKILL.md` (which may be removed) to `scripts/skills-vendored.test.mjs`.
+- **ARCH-SLIM-19** replaces 15. Same no-dependency and Artist terms; a vendored skill is described generically, and one that fails ARCH-EVALS-09 is removed under ARCH-EVALS-10 rather than kept or wired in. Its cite moves from `skills/test-driven-development/SKILL.md` (which may be removed) to `scripts/skills-vendored.test.mjs`. On 2026-11-25 all three vendored skills failed and were removed; `scripts/skills-vendored.test.mjs` now finds vendored skills by their MIT attribution and always checks that plugin.json has no dependencies, so the check never runs empty.
 - ARCH-SLIM-18 now points at ARCH-EVALS-08 (the per-directory firing cases) instead of the superseded ARCH-EVALS-03.

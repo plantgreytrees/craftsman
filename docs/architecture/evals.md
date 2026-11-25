@@ -3,7 +3,7 @@
 > and `/architect --update evals` should be run.
 
 # Behaviour evals architecture
-_Last verified: 2026-11-25 at `f3e0d29` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
+_Last verified: 2026-11-25 at `865345b` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
 
 ## In plain English
 Craftsman's behaviour lives mostly in prose that the model reads. The unit tests
@@ -13,10 +13,12 @@ sessions run by the first-party `claude plugin eval` command. Each case sends a
 prompt with craftsman loaded (and again without it), then checks what happened
 with deterministic graders only.
 
-The first suite answers two questions nothing else can: do the four shipped
-skills that no command names (`test-driven-development`, `systematic-debugging`,
-`verification-before-completion`, `deep-research`) ever fire, and does a
-craftsman hook fire in a live session. The maintainer runs it by hand before
+The suite answers two questions nothing else can: does each shipped skill that
+relies on its description to fire (today only `deep-research`) ever fire, and
+does a craftsman hook fire in a live session. Three vendored skills
+(`test-driven-development`, `systematic-debugging`,
+`verification-before-completion`) failed that test after one rewrite and were
+removed on 2026-11-25 (ARCH-EVALS-09/10). The maintainer runs it by hand before
 moving the `stable` branch and after any description or skill trim, never in CI.
 
 ## How it fits
@@ -62,9 +64,13 @@ case depends on the OS sandbox (bubblewrap is installed here if one ever does).
 - First full run (2026-11-24, 15 runs, $1.56): the hook case and
   `skill-fires-deep-research` scored 1.00; the three loop-discipline skills
   (`systematic-debugging`, `test-driven-development`,
-  `verification-before-completion`) scored 0.00. ARCH-EVALS-07's two description
-  rewrites have not started; the cases' Skill-only grant, 4 turns and empty
-  workspace may also depress those scores.
+  `verification-before-completion`) scored 0.00.
+- Rewrites (2026-11-25, $4.19): a ceiling run that copied the case prompt into
+  `systematic-debugging`'s description scored 3/3, so the case design was kept.
+  One "Use when…" rewrite each then passed its own case (2/3, 3/3, 2/3) but not
+  fresh paraphrases (best 3/3 and 0/3), so all three were removed with every
+  trace. Only `systematic-debugging` had a ceiling run; n=3 makes each verdict
+  noisy, but the ARCH-EVALS-09 thresholds are fixed.
 - `claude plugin eval` can be switched off server-side; releases then record
   "Evals: unavailable" rather than wait.
 
