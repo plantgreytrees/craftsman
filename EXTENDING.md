@@ -201,14 +201,19 @@ folder as `cwd` (root-relative) whenever it is not the root.
   pass at Stop and fail at merge: a test runner handed `README.md` by the merge
   gate was never handed it at Stop. Write a scoped command so it tolerates, or
   filters out, files that are not source.
-- The two gates also find the command differently. Stop selects a scoped
-  `stopGate.commands` entry when its marker exists anywhere in the tracked tree;
-  the pre-merge gate looks for the marker at the top level of the worktree only
-  and takes the first match. In a repo whose only `package.json` is under
-  `services/api/`, the scoped check runs at Stop but the pre-merge gate finds no
-  command and lands without one (it logs a `pre_merge_gate` skip with reason
-  `no-command`). Keep a marker for the
-  command at the repository root if the merge gate should run it.
+- Both gates find a scoped command the same way. Stop and the pre-merge gate select
+  a scoped `stopGate.commands` entry when its marker exists anywhere in the tree
+  (`.git` and `node_modules` are not entered and a symlink is not followed), not
+  only at the top level, and the first usable match wins. In a repo whose only
+  `package.json` is under `services/api/`, the scoped check runs at both. A
+  command with no placeholder still needs its marker at the top level of the
+  worktree, and when no command is usable the pre-merge gate lands without one (it
+  logs a `pre_merge_gate` skip with reason `no-command`).
+- A scoped command whose expanded arguments pass the 131072-byte (128 KiB) cap is
+  never spawned, and fails clearly: at Stop as
+  `SCOPED TESTS FAILED (not baselined): <cmd>` followed by the file count, the byte
+  count and "run the suite unscoped instead"; at the pre-merge gate as a failed
+  gate that names the command and says the same. Neither skips it silently.
 - A placeholder command is never snapshotted: it is not run at session start,
   never appears in `session-start.json`, and does not need to be green first. It
   runs at Stop whenever the session is dirty, counts as the test run that clears
@@ -258,6 +263,13 @@ run the branch's own copy of a script a command names (`node
 {workspaceRoot}/gate.mjs`). A sub-project that is another repository (a
 submodule) always gets the workspace root.
 
+A literal absolute path is not expanded: `node /home/me/repo/gate.mjs` pins the
+main checkout's copy of the script, whichever worktree runs the gate. That copy is
+the one the branch cannot change, so it is the choice when the gate must not be
+rewritten by the work it judges. A script a branch can edit (the
+`{workspaceRoot}` form, or any relative path) is only as trustworthy as the
+branch: a branch that edits the script can make its own gate pass.
+
 **Read what happened in `.craftsman/events.jsonl`.** The `gate`, `stop` and
 `stop-tests-skipped` events carry `project`: the unit scope's project id or the
 workspace project's id, and `"."` at the workspace root. A Stop that queues no
@@ -267,7 +279,8 @@ placeholder command):
 | `reason` | Meaning |
 |---|---|
 | `clean` | no test-relevant edit this session (the `dirty` marker is absent; a docs-only edit leaves it clean) |
-| `snapshot-pending` | dirty, and SessionStart started a snapshot (it wrote `snapshot-started`) that has landed no `session-start.json`: still running, or dropped because files changed while it ran |
+| `snapshot-pending` | dirty, and SessionStart started a snapshot (it wrote `snapshot-started`) that has landed no `session-start.json` and did not drop its result: still running |
+| `snapshot-dropped` | dirty, and the snapshot SessionStart started dropped its result because files changed while it ran (it wrote `snapshot-dropped`, no older than `snapshot-started`), so no `session-start.json` landed |
 | `no-command` | dirty, and nothing was left to run: no snapshot was started (no usable test command matched the project when the session began, a command's program is not installed, or snapshots are off), or the snapshot ran and listed no command; a workspace sub-project scope is another repository and has no baseline of its own |
 | `red-at-start` | dirty, but every test command in `session-start.json` was already red at session start |
 | `no-changes` | a placeholder command, and the session change list is empty (or every file in it has since been deleted) |
