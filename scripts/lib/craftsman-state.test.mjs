@@ -1,5 +1,5 @@
 // One definition of "this porcelain line is craftsman's own gitignored state", shared by Stop's secrets
-// re-scan and the unpushed-work report (ARCH-STATE-04).
+// re-scan and the unpushed-work report (ARCH-STATE-24).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -25,7 +25,7 @@ test("the filter has one definition: no other script or library keeps its own co
 });
 
 // The tree hash SessionStart and snapshot.mjs compare must not move when only craftsman's own state does, in a repo that does
-// not gitignore `.craftsman/` (ARCH-STATE-04).
+// not gitignore `.craftsman/` (ARCH-STATE-24).
 test("withoutCraftsmanState: drops exactly the lines isCraftsmanStateLine recognises and keeps every other line as it was", () => {
   const user = [" M a.txt", "?? .craftsmanship/x", "A  docs/.craftsman/x", "R  old.txt -> new.txt"];
   const state = ["?? .craftsman/", "?? .craftsman", " M .craftsman/events.jsonl", "!! .craftsman/sessions/s1/dirty", "A  .craftsman/x"];

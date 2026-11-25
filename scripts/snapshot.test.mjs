@@ -139,12 +139,12 @@ test("snapshot: whole, embedded and plain commands side by side - only the plain
   assert.equal(fs.readFileSync(ranLog(root), "utf8"), "plain\n", "nothing but the plain command was started");
 });
 
-// ARCH-STATE-04: the repo does NOT gitignore `.craftsman/` here (this fixture has no .gitignore), so craftsman's own state shows
+// ARCH-STATE-24: the repo does NOT gitignore `.craftsman/` here (this fixture has no .gitignore), so craftsman's own state shows
 // in `git status`. SessionStart writes snapshot-started after it takes the starting hash; the snapshot must compare trees
 // without those lines, or it drops its own baseline.
 const quietLog = (root) => path.join(path.dirname(root), "quiet.log");
 
-test("snapshot: craftsman state written after the starting hash does not drop the snapshot when .craftsman/ is not gitignored (ARCH-STATE-04)", () => {
+test("snapshot: craftsman state written after the starting hash does not drop the snapshot when .craftsman/ is not gitignored (ARCH-STATE-24)", () => {
   const root = fixture({ "plain.fixture": "node QUIET plain" });
   const tree = startingTree(root);
   writeStarted(root, "snap-state");
@@ -155,7 +155,7 @@ test("snapshot: craftsman state written after the starting hash does not drop th
   assert.deepEqual(readStart(root, "snap-state").results.map((x) => x.green), [true], "the snapshot landed session-start.json");
 });
 
-test("snapshot: an edit to a tracked file while the snapshot runs still drops it, with the state lines in the tree (ARCH-STATE-04)", () => {
+test("snapshot: an edit to a tracked file while the snapshot runs still drops it, with the state lines in the tree (ARCH-STATE-24)", () => {
   const root = fixture({ "edit.fixture": "node QUIET edit" });
   const tree = startingTree(root);
   writeStarted(root, "snap-edit");
