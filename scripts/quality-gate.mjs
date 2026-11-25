@@ -63,8 +63,14 @@ if (!isDocOrState && !isIgnored(file, cfg, lang, context)) {
   try { atomicWrite(path.join(sdir, "dirty"), String(Date.now())); } catch {}
   // The same edit joins the session change list that `{changed}` / `{changedDirs}` expand from (ARCH-STATE-21). A file
   // outside the root has no root-relative path, so it stays out of the list.
-  if (rel0 && rel0 !== ".." && !rel0.startsWith("../") && !path.isAbsolute(rel0)) {
-    try { recordChanged(sdir, rel0); } catch {}
+  // A path spelled through a symlinked alias of the root gives `../`, so it is retried on the real paths of both.
+  const inRoot = (r) => r && r !== ".." && !r.startsWith("../") && !path.isAbsolute(r);
+  let relChanged = rel0;
+  if (!inRoot(relChanged)) {
+    try { relChanged = path.relative(fs.realpathSync(context.root), fs.realpathSync(file)).split(path.sep).join("/"); } catch { relChanged = ""; }
+  }
+  if (inRoot(relChanged)) {
+    try { recordChanged(sdir, relChanged); } catch {}
   }
 }
 
