@@ -346,12 +346,12 @@ function cli(root, input) {
 }
 
 // A repository whose gate is `command`, with a gate.mjs at its root that exits 0 (main's copy).
-function rootFixture(command) {
+function rootFixture(command, config = {}) {
   const root = real(fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-wsroot-")));
   git(root, "init", "-q", "-b", "main");
   write(root, "package.json", "{}\n");
   write(root, "gate.mjs", "process.exit(0);\n");
-  write(root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": command } } }));
+  write(root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": command } }, ...config }));
   commit(root, "init");
   return root;
 }
@@ -489,4 +489,47 @@ test("merge: an unscoped gate whose marker is only nested is still not selected,
     assert.equal(t.gateEvents().length, 1);
     assert.equal(t.gateEvents()[0].reason, "no-command");
   } finally { cleanup(t); }
+});
+
+// land-unit and land-feature gate the same way: `{workspaceRoot}` is the worktree being gated, so a branch whose gate.mjs fails is
+// refused although main's copy would pass (ARCH-LAND-37, ARCH-STATE-19).
+test("land-unit: a {workspaceRoot} gate in the unit worktree runs the branch's own gate.mjs, so a branch that breaks it is refused", () => {
+  const root = rootFixture("node {workspaceRoot}/gate.mjs", { planning: { featureBranches: true } });
+  const fw = path.join(root, ".worktrees", "p-1");
+  git(root, "worktree", "add", "-b", "feature/p-1", fw, "main");
+  const uw = path.join(root, ".worktrees", "u2");
+  git(root, "worktree", "add", "-b", "feat/u2", uw, "feature/p-1");
+  write(uw, "gate.mjs", "process.exit(1);\n");
+  commit(uw, "break the gate");
+  const before = git(fw, "rev-parse", "HEAD");
+  const r = cli(root, { action: "land-unit", unit: "u2", feature_branch: "feature/p-1", worktree_path: fw, unit_worktree: uw, push: false });
+  assert.equal(r.status, 2, `the gate in the unit worktree failed (main's copy would have passed): ${r.stderr}`);
+  assert.match(r.stderr, /pre-merge gate failed/);
+  assert.ok(r.stderr.includes(`did not pass in ${uw}`), `the gate ran in the unit worktree: ${r.stderr}`);
+  assert.equal(git(fw, "rev-parse", "HEAD"), before, "nothing landed on the feature branch");
+  assert.ok(git(root, "branch", "--list", "feat/u2"), "the unit branch is kept");
+});
+
+test("land-feature: a {workspaceRoot} gate in the temp worktree runs the feature's own gate.mjs, so a feature that breaks it is refused", () => {
+  const root = rootFixture("node {workspaceRoot}/gate.mjs", { planning: { featureBranches: true }, repoExec: { land: "direct", approval: { required: false } } });
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-wsroot-origin-"));
+  const origin = path.join(other, "origin.git");
+  git(other, "init", "-q", "--bare", "-b", "main", origin);
+  git(root, "remote", "add", "origin", origin);
+  git(root, "push", "-q", "origin", "main");
+  git(root, "fetch", "-q", "origin");
+  const fw = path.join(root, ".worktrees", "p-1");
+  git(root, "worktree", "add", "-b", "feature/p-1", fw, "main");
+  write(fw, "gate.mjs", "process.exit(1);\n");
+  commit(fw, "break the gate");
+  const ledger = path.join(root, ".craftsman", "tracker", "events.jsonl");
+  fs.mkdirSync(path.dirname(ledger), { recursive: true });
+  fs.writeFileSync(ledger, JSON.stringify({ project: ".", plan: "docs/plans/p.md", unit: "u1", feature: "1", feature_branch: "feature/p-1", status: "FEATURE_MERGED", session_id: "s", evidence: "x", updated_at: "2026-01-01T00:00:00Z", key: ".::docs/plans/p.md::u1" }) + "\n");
+  const before = git(root, "rev-parse", "origin/main");
+  const r = cli(root, { action: "land-feature", plan: "docs/plans/p.md", feature: "1", feature_branch: "feature/p-1", network: "online" });
+  const said = `${r.stderr}${JSON.stringify(r.out)}`;
+  assert.notEqual(r.out?.merged, true, `the gate in the temp worktree failed (main's copy would have passed): ${said}`);
+  assert.match(said, /pre-merge gate failed/);
+  assert.match(said, /did not pass in [^"]*\.git\/\.craftsman\/land\/feature-/, `the gate ran in the temp worktree: ${said}`);
+  assert.equal(git(origin, "rev-parse", "main"), before, "nothing was pushed to base");
 });
