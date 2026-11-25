@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { recordChanged, readChanged, hasChangePlaceholder, embeddedChangePlaceholder, isScoped, expandChangePlaceholders } from "./changed.mjs";
+import { recordChanged, readChanged, hasChangePlaceholder, embeddedChangePlaceholder, isScoped, expandChangePlaceholders, MAX_ARGV_BYTES } from "./changed.mjs";
 
 const QUALITY_GATE = fileURLToPath(new URL("../quality-gate.mjs", import.meta.url));
 
@@ -116,6 +116,26 @@ test("expand: a whole {changed} token becomes one argv entry per file, spaces ke
   assert.deepEqual(expandChangePlaceholders("tool {changed}", ["svc/src/a.js", "other/x.js", "r.js"], { cwd: svc, root }), {
     argv: ["tool", "src/a.js", "../other/x.js", "../r.js"],
   }, "a file above the cwd is still a correct relative path");
+});
+
+test("expand: an expansion past the byte cap returns overCap with the byte and file counts, never an argv (ARCH-STATE-25)", () => {
+  assert.equal(MAX_ARGV_BYTES, 128 * 1024);
+  const long = "d".repeat(200);
+  const files = Array.from({ length: 700 }, (_, i) => `${long}/f${i}.js`); // ~145 KB of argv
+  const r = expandChangePlaceholders("tool {changed}", files, { cwd: root, root });
+  assert.deepEqual(Object.keys(r), ["overCap"], "no argv, skip or warn beside it");
+  assert.equal(r.overCap.files, 700);
+  assert.ok(r.overCap.bytes > MAX_ARGV_BYTES);
+  assert.equal(r.overCap.bytes, ["tool", ...files].reduce((n, t) => n + Buffer.byteLength(t) + 1, 0), "bytes is the joined argv, one separator per token");
+  assert.equal(expandChangePlaceholders("tool {changedDirs}", files, { cwd: root, root }).argv?.length, 2, "{changedDirs} collapses to one directory, so it stays under the cap");
+  assert.ok(expandChangePlaceholders("tool {changed}", files, { cwd: root, root, maxBytes: 1e6 }).argv, "maxBytes overrides the cap");
+  assert.deepEqual(Object.keys(expandChangePlaceholders("tool {changed}", ["a.js"], { cwd: root, root, maxBytes: 5 })), ["overCap"]);
+});
+
+test("expand: an expansion exactly at the cap is unchanged; one byte past it is over (ARCH-STATE-25)", () => {
+  const files = ["a.js", "b.js"]; // "t" + "a.js" + "b.js" = 2 + 5 + 5 = 12 bytes
+  assert.deepEqual(expandChangePlaceholders("t {changed}", files, { cwd: root, root, maxBytes: 12 }), { argv: ["t", "a.js", "b.js"] });
+  assert.deepEqual(expandChangePlaceholders("t {changed}", files, { cwd: root, root, maxBytes: 11 }), { overCap: { bytes: 12, files: 2 } });
 });
 
 test("expand: with cwd at the root the paths stay root-relative; cwd defaults to the root", () => {

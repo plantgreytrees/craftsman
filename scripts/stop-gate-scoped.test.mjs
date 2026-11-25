@@ -225,6 +225,21 @@ test("scoped: a command past its own limit blocks as SCOPED TESTS INCOMPLETE (4.
     assert.match(r.out.reason, /testTimeoutMs/);
   }));
 
+test("scoped: a change list past the argv byte cap blocks as SCOPED TESTS FAILED naming the cap and the file count, and spawns nothing (ARCH-STATE-25)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    const long = "d".repeat(200);
+    const files = Array.from({ length: 700 }, (_, i) => `${long}/f${i}.js`);
+    seed(dir, "s43f", { changed: files });
+    const r = await runStop(dir, "s43f");
+    assert.equal(r.out.decision, "block");
+    assert.match(r.out.reason, /SCOPED TESTS FAILED \(not baselined\): node check\.mjs \{changed\}\n/);
+    assert.match(r.out.reason, /700 files/);
+    assert.match(r.out.reason, /131072/);
+    assert.match(r.out.reason, /unscoped/);
+    assert.deepEqual(runs(dir), [], "the command never ran");
+    assert.ok(fs.existsSync(dirtyMarker(dir, "s43f")), "nothing was tested, so the session stays dirty");
+  }));
+
 test("scoped: a task killed by totalBudgetMs is announced once per session, across two Stops (4.3)", () =>
   withFixture({ extraChecks: ["node slow.mjs {changed}"], totalBudgetMs: 400, testTimeoutMs: 60000 }, async (dir) => {
     seed(dir, "s43d", { changed: ["src/a.js"] });
