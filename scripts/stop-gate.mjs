@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { loadConfig, enabled, PROJECT_ROOT, projectContext, sidOf, sessionDir, sha1, logEvent, readStdin, splitCmd, atomicWrite, readLiveWorktreeBindings, readSessionWorktrees, forgetSessionWorktree, safetyEnabled, acceptancePath, ownsAcceptance, bindingAcceptance, planSlugOf, advisorySkipped, markerPresent } from "./lib/core.mjs";
 import { readScope } from "./scope.mjs";
 import { scanTree } from "./secrets-scan.mjs";
-import { listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
+import { baseRefs, listWorktrees, mergedInto, sweep } from "./worktree-sweep.mjs";
 import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
 import { isCraftsmanStateLine } from "./lib/craftsman-state.mjs";
 import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
@@ -113,6 +113,12 @@ for (const binding of readLiveWorktreeBindings(input, {
 // other sessions' leftovers are swept when safe, never blocked on. An
 // unmerged/parked worktree is a legitimate state the run records as
 // BLOCKED/PARKED, so it never blocks.
+const mainCheckout = (root) => {
+  try {
+    const first = execFileSync("git", ["-C", root, "worktree", "list", "--porcelain"], { encoding: "utf8" }).split("\n")[0];
+    return first.startsWith("worktree ") ? first.slice("worktree ".length) : root;
+  } catch { return root; }
+};
 const ownedWorktrees = new Set(
   readSessionWorktrees(input, context).map((entry) => path.resolve(entry))
 );
@@ -122,8 +128,11 @@ if (ownedWorktrees.size > 0) {
       if (!ownedWorktrees.has(path.resolve(entry.path))) continue;
       if (entry.missing) { forgetSessionWorktree(input, entry.path, context); continue; }
       if (!entry.branch) continue; // detached — not this plugin's worktree shape, skip rather than guess
-      // HEAD is a fallback for repos with no main/master/origin HEAD.
-      const mergedRef = entry.merged_into || mergedInto(context.root, entry.branch, ["HEAD"]);
+      // HEAD is a fallback for repos with no remote-tracking base only (ARCH-SAFETY-07): a branch that a base ref
+      // exists for and is not in is simply unmerged, never "merged" because a unit worktree's own HEAD is it. The
+      // fallback reads the main checkout's HEAD, never a unit worktree's.
+      const unmergedAgainstBase = entry.keep_reason === "not merged into the base branch" && baseRefs(context.root).length > 0;
+      const mergedRef = entry.merged_into || (unmergedAgainstBase ? null : mergedInto(mainCheckout(context.root), entry.branch, ["HEAD"]));
       if (!mergedRef) continue;
       problems.push(
         `WORKTREE NOT SWEPT: ${entry.path} (branch ${entry.branch}) was prepared by this session and is ` +
@@ -432,14 +441,24 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
       }
     } catch { /* no tracker ledger — both sets stay empty, untagged criteria bind */ }
     // A unit whose current tracker row is BLOCKED/PARKED waits on the user: its lines are held, not blocking.
-    const heldUnits = new Set();
+    // Only the row's own plan holds its lines: a same-named unit in another plan holds nothing.
+    const heldByPlan = new Map();
     try {
       for (const row of currentState(context)) {
         if (row.status !== "PARKED" && row.status !== "BLOCKED") continue;
-        for (const id of [row.unit, row.scope_id]) if (id) heldUnits.add(id);
+        const rowPlan = row.plan ? planSlugOf(row.plan) : null;
+        for (const id of [row.unit, row.scope_id]) {
+          if (!id) continue;
+          if (!heldByPlan.has(id)) heldByPlan.set(id, new Set());
+          heldByPlan.get(id).add(rowPlan);
+        }
       }
     } catch { /* unreadable ledger — nothing is held, fail closed */ }
-    const { binding, legacy, held } = bindingAcceptance(ac, { units: [...touchedUnits], plans: [...touchedPlans], held: [...heldUnits] });
+    const heldFor = (c) => c.unit && heldByPlan.get(c.unit)?.has(c.plan || unitPlan.get(c.unit) || null);
+    const all = bindingAcceptance(ac, { units: [...touchedUnits], plans: [...touchedPlans] });
+    const binding = [], held = [];
+    for (const c of all.binding) (c.unit && heldFor(c) ? held : binding).push(c);
+    const { legacy } = all;
     const heldOpen = held.filter((c) => !c.done);
     if (heldOpen.length) {
       const ids = [...new Set(heldOpen.map((c) => c.unit))];
@@ -461,7 +480,7 @@ if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync
       problems.push(
         `ACCEPTANCE CRITERIA not yet satisfied (from the approved plan${names.length ? ` ${names.join(", ")}` : ""}). Verify each ` +
         `against the code you wrote; tick it in .craftsman/acceptance.md only if the ` +
-        `code genuinely satisfies it, otherwise implement it; or, if the unit is blocked on the user, record it BLOCKED/PARKED via tracker.mjs with a decision and print BLOCKED ON USER:\n${body}`
+        `code genuinely satisfies it, otherwise implement it; or, if the unit is blocked on the user, record it PARKED via tracker.mjs with decision {question, options[]} (or BLOCKED with evidence only) and print BLOCKED ON USER:\n${body}`
       );
     }
     if (legacyOpen.length) {

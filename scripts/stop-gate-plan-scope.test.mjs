@@ -120,7 +120,8 @@ test("G: the same line for an IN_PROGRESS unit still blocks and the reason offer
   const r = await run(dir, sid);
   assert.match(r.stdout, /"decision":"block"/);
   assert.match(r.stdout, /u1 criterion/);
-  assert.match(r.stdout, /BLOCKED\/PARKED via tracker\.mjs with a decision and print BLOCKED ON USER/);
+  assert.match(r.stdout, /record it PARKED via tracker\.mjs with decision \{question, options\[\]\} \(or BLOCKED with evidence only\) and print BLOCKED ON USER/);
+  assert.doesNotMatch(r.stdout, /BLOCKED\/PARKED via tracker\.mjs with a decision/);
   assert.ok(!r.events.some((e) => e.ev === "stop-acceptance-held"));
 }));
 
@@ -132,4 +133,16 @@ test("H: a PARKED unit's line is held too, while an IN_PROGRESS sibling still bl
   assert.match(r.stdout, /u2 criterion/);
   assert.doesNotMatch(r.stdout, /u1 criterion/);
   assert.match(r.stdout, /held by BLOCKED\/PARKED units u1/);
+}));
+
+test("I: a BLOCKED row of the same id in another plan holds nothing; the IN_PROGRESS unit of the ledger's plan still blocks", () => withFixture(async (dir) => {
+  const rows = [
+    { key: ".::docs/plans/a.md::u1", project: ".", plan: "docs/plans/a.md", unit: "u1", status: "BLOCKED", evidence: "x", session_id: sid },
+    { key: ".::docs/plans/b.md::u1", project: ".", plan: "docs/plans/b.md", unit: "u1", status: "IN_PROGRESS", evidence: "x", session_id: sid },
+  ];
+  seed(dir, sid, "- [ ] [plan:b] [unit:u1] u1 criterion\n", rows);
+  const r = await run(dir, sid);
+  assert.match(r.stdout, /"decision":"block"/);
+  assert.match(r.stdout, /u1 criterion/);
+  assert.ok(!r.events.some((e) => e.ev === "stop-acceptance-held"));
 }));
