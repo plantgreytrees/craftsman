@@ -424,7 +424,7 @@ SessionStart hook reaches the session. Run it by hand before moving `stable`
 and after any trim of a skill or command description or a SKILL.md body, then
 record each case's score (or `Evals: unavailable` with the error) in the
 release's CHANGELOG entry. It never runs in CI. It needs Claude Code 2.1.269 or
-newer, and costs about $1.60 per suite run (15 runs):
+newer, and costs about $0.60 per suite run (6 runs):
 
 ```bash
 claude plugin eval . --ablation none --max-cost-usd 5 --no-publish
@@ -561,7 +561,6 @@ agents/                                          the specialist review / impleme
 workflows/run.js                                 the plugin workflow that runs plan units in fresh contexts
 skills/language-aware-planning/                  per-language idiom checklists + plan, idea and architecture templates
 skills/deep-research/                            forked read-only repo research
-skills/{systematic-debugging, test-driven-development, verification-before-completion}/   loop disciplines
 output-styles/craftsman-terse.md                 an optional terse response style
 evals/                                           behaviour evals for `claude plugin eval` (run by hand, never in CI)
 docs/architecture/                               craftsman's own decisions: <area>.md + <area>.rules.md

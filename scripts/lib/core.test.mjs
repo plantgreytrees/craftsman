@@ -16,6 +16,7 @@ import {
   renderKnownIssuesDoc, gitTrackedFiles, pruneSessions, recordFailure, topRules,
   writeRootPin, rootPinPath, resolveProjectRoot, agentGrantFile, grantRunnerDispatches, spendRunnerDispatch,
   acceptanceCriteria, featureCriteria, runnerDispatchCount, hasDocWriteGrant,
+  writeWorktreeBinding, readLiveWorktreeBindings, worktreeBindingPath,
 } from "./core.mjs";
 import * as coreNs from "./core.mjs";
 import { writeBaseline, filterBaseline } from "./core.mjs";
@@ -1122,5 +1123,27 @@ test("isMain: matches a plain path, a path with a space, a %, and a symlink; fal
     assert.equal(coreNs.isMain(pathToFileURL(real).href, path.join(dir, "missing.mjs")), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("readLiveWorktreeBindings: a relative worktree_path binding whose worktree is gone is removed after one read, from another cwd", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-bind-"));
+  const context = { root, stateDir: path.join(root, ".craftsman") };
+  const writeDir = path.join(root, "a"), readDir = path.join(root, "b");
+  fs.mkdirSync(writeDir); fs.mkdirSync(readDir);
+  const input = { session_id: "bind-rel", worktree_path: "gone-worktree" };
+  const origCwd = process.cwd();
+  try {
+    process.chdir(writeDir);
+    writeWorktreeBinding(input, { session_id: "bind-rel", unit: "u", worktree_path: "gone-worktree" }, context);
+    const file = worktreeBindingPath(input, context);
+    const dir = path.dirname(file);
+    assert.equal(fs.readdirSync(dir).length, 1);
+    process.chdir(readDir);
+    assert.deepEqual(readLiveWorktreeBindings({ session_id: "bind-rel" }, context), []);
+    assert.deepEqual(fs.readdirSync(dir), [], "the binding file that was read is removed");
+  } finally {
+    process.chdir(origCwd);
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

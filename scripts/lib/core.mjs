@@ -429,17 +429,23 @@ export function readWorktreeBinding(input, context = null) {
   try { return JSON.parse(fs.readFileSync(worktreeBindingPath(input, context), "utf8")); }
   catch { return null; }
 }
-export function readWorktreeBindings(input, context = null) {
+// Each of this session's bindings with the file it was read from, so a caller clears that file, not a key recomputed
+// from a worktree_path that may be relative to another cwd.
+function readWorktreeBindingEntries(input, context = null) {
   const dir = path.dirname(worktreeBindingPath(input, context));
   try {
     return fs.readdirSync(dir)
       .filter((name) => name.endsWith("-worktree-binding.json"))
       .map((name) => {
-        try { return JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); }
+        const file = path.join(dir, name);
+        try { return { file, binding: JSON.parse(fs.readFileSync(file, "utf8")) }; }
         catch { return null; }
       })
-      .filter((binding) => binding?.session_id === sidOf(input));
+      .filter((entry) => entry?.binding?.session_id === sidOf(input));
   } catch { return []; }
+}
+export function readWorktreeBindings(input, context = null) {
+  return readWorktreeBindingEntries(input, context).map((entry) => entry.binding);
 }
 export function writeWorktreeBinding(input, binding, context = null) {
   atomicWrite(worktreeBindingPath(input, context), JSON.stringify(binding, null, 2) + "\n");
@@ -1298,13 +1304,13 @@ function sameDir(a, b) {
 }
 
 // This session's worktree bindings that still guard something. A binding whose worktree_path is gone from disk (the
-// Stop sweep removed it, a cleanup or a hand `git worktree remove`) is cleared by its worktree_path and logged, never
-// returned, so Stop cannot block on a worktree no one can release.
+// Stop sweep removed it, a cleanup or a hand `git worktree remove`) has the file it was read from removed and is
+// logged, never returned, so Stop cannot block on a worktree no one can release.
 export function readLiveWorktreeBindings(input, context = null) {
-  return readWorktreeBindings(input, context).filter((binding) => {
+  return readWorktreeBindingEntries(input, context).filter(({ file, binding }) => {
     if (!binding.worktree_path || fs.existsSync(binding.worktree_path)) return true;
-    clearWorktreeBinding({ ...input, worktree_path: binding.worktree_path }, context);
+    try { fs.unlinkSync(file); } catch {}
     logEvent({ ev: "stop-binding-cleared", sid: sidOf(input), unit: binding.unit, worktree_path: binding.worktree_path }, context);
     return false;
-  });
+  }).map((entry) => entry.binding);
 }
