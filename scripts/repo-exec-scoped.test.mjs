@@ -213,6 +213,54 @@ test("land-unit: the gate in the unit worktree diffs against the feature branch 
   } finally { cleanup(t); }
 });
 
+// ARCH-LAND-37: without unit_worktree the feature worktree (on the feature branch) does not hold the unit, so the gate
+// runs in a detached temp worktree at the unit branch, diffed against the feature branch, and that worktree is removed.
+function featureAndUnit(t, content) {
+  write(t.root, "gate.mjs", [
+    'import fs from "node:fs";',
+    "const [out, ...argv] = process.argv.slice(2);",
+    'fs.appendFileSync(out, JSON.stringify({ argv, cwd: process.cwd() }) + "\\n");',
+    'if (argv.some((f) => fs.readFileSync(f, "utf8").includes("RED"))) process.exit(1);',
+    "",
+  ].join("\n"));
+  commit(t.root, "red-aware gate");
+  const fw = path.join(t.root, ".worktrees", "p-1");
+  git(t.root, "worktree", "add", "-b", "feature/p-1", fw, "main");
+  const uw = path.join(t.root, ".worktrees", "u2");
+  git(t.root, "worktree", "add", "-b", "feat/u2", uw, "feature/p-1");
+  write(uw, "src/a.js", content);
+  commit(uw, "unit");
+  git(t.root, "worktree", "remove", uw); // the unit branch is all that is left, as when the runner has finished
+  return { fw, input: { unit: "u2", feature_branch: "feature/p-1", worktree_path: fw, push: false } };
+}
+const worktrees = (t) => git(t.root, "worktree", "list", "--porcelain").split("\n").filter((l) => l.startsWith("worktree ")).map((l) => real(l.slice(9)));
+
+test("land-unit without unit_worktree: a red unit is refused, a green one lands, and no temp worktree is left", () => {
+  const red = fixture("{changed}", { planning: { featureBranches: true } });
+  try {
+    const { fw, input } = featureAndUnit(red, "RED\n");
+    const before = git(fw, "rev-parse", "HEAD");
+    assert.throws(() => landUnit(red.context, input, red.info), /pre-merge gate failed/);
+    assert.equal(git(fw, "rev-parse", "HEAD"), before);
+    assert.deepEqual(worktrees(red).sort(), [real(red.root), real(fw)].sort());
+    const runs = red.runs();
+    assert.equal(runs.length, 1);
+    assert.deepEqual(runs[0].argv, ["src/a.js"]); // the unit's diff against the feature branch, not an empty one
+    assert.match(runs[0].cwd, /\.git\/\.craftsman\/land\/unit-feat-u2-/); // the temp worktree, not the feature worktree
+  } finally { cleanup(red); }
+  const green = fixture("{changed}", { planning: { featureBranches: true } });
+  try {
+    const { fw, input } = featureAndUnit(green, "green\n");
+    const r = landUnit(green.context, input, green.info);
+    assert.equal(r.merged, true);
+    assert.equal(green.runs().length, 1);
+    assert.deepEqual(green.runs()[0].argv, ["src/a.js"]);
+    assert.equal(git(fw, "show", "HEAD:src/a.js"), "green");
+    assert.deepEqual(worktrees(green).sort(), [real(green.root), real(fw)].sort());
+    assert.equal(green.gateEvents().filter((e) => e.skipped).length, 0);
+  } finally { cleanup(green); }
+});
+
 test("land-feature: the gate in the temp worktree diffs against origin/<base> after it was merged in", () => {
   const t = fixture("{changed}", { planning: { featureBranches: true }, repoExec: { land: "direct", approval: { required: false } } });
   const other = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-scoped-other-"));

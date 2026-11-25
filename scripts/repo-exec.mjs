@@ -519,6 +519,22 @@ function landDetached(context, input, info, { worktree, branch, pin }) {
   return cleanupAfterLanding(context, input, info, { ...result, merged: true, ...(pushed ? {} : { pushed: false, network_pending: true }) });
 }
 
+// ARCH-LAND-37: with no unit worktree the feature worktree is on the feature branch and does not hold the unit, so the
+// gate runs in a detached temp worktree at the unit branch, diffed against the feature branch, removed on every path.
+function gateUnitBranch(context, info, unitBranch, feature) {
+  const temp = path.join(info.common_git_dir, ".craftsman", "land", `unit-${unitBranch.replace(/[^A-Za-z0-9_-]/g, "-")}-${process.pid}`);
+  let added = false;
+  try {
+    fs.mkdirSync(path.dirname(temp), { recursive: true });
+    run(context.root, ["worktree", "add", "--detach", temp, unitBranch]);
+    added = true;
+    verifyGateBeforeMerge(context, temp, feature);
+  } finally {
+    if (added) run(context.root, ["worktree", "remove", "--force", temp], { allowFailure: true });
+    run(context.root, ["worktree", "prune"], { allowFailure: true });
+  }
+}
+
 // ARCH-LAND-14: a unit lands inside its feature's worktree (input.worktree_path):
 // gate re-run, feature branch checked out, unit branch merged --no-ff, feature
 // branch pushed, unit branch deleted. A conflict or refused push PARKs
@@ -542,7 +558,8 @@ function landUnit(context, input, info) {
   if (run(worktree, ["status", "--porcelain"])) throw new Error("feature worktree is not clean before land-unit");
   if (run(worktree, ["rev-parse", "--verify", "MERGE_HEAD"], { allowFailure: true })) throw new Error("feature worktree has a merge in progress");
   const gateDir = input.unit_worktree ? safeWorktree(anchored, input.unit_worktree, input.unit) : worktree;
-  verifyGateBeforeMerge(context, gateDir, feature);
+  if (input.unit_worktree) verifyGateBeforeMerge(context, gateDir, feature);
+  else gateUnitBranch(context, info, unitBranch, feature);
   const featureLock = acquireLock(featureLockInfo(info, feature), input);
   try {
     if (run(worktree, ["branch", "--show-current"]) !== feature) run(worktree, ["checkout", feature]);
