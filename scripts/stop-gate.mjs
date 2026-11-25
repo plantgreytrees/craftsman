@@ -221,8 +221,12 @@ function sayOnce(name, text, sig) {
 if (baseline.error) sayOnce("baseline-notice-unavailable",
   `craftsman: stop-gate skipped the session-start baseline lookup (the workspace manifest could not be read: ${baseline.error.message}), advisory only`, baseline.error.message);
 
+// A dropped marker counts only for the start that is current: snapshot-started must exist and the marker be no older than it, because a resume clears snapshot-started but not an earlier start's marker (ARCH-STATE-24).
+const markerTime = (file) => { try { const n = Number(fs.readFileSync(file, "utf8")); return Number.isFinite(n) && n > 0 ? n : fs.statSync(file).mtimeMs; } catch { return null; } };
+const snapshotDropped = (dir) => { const started = markerTime(path.join(dir, "snapshot-started")), dropped = markerTime(path.join(dir, "snapshot-dropped")); return started !== null && dropped !== null && dropped >= started; };
+
 if (isDirty) {
-  // A dirty Stop that queues no test says why, once (ARCH-STATE-22). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: present is snapshot-pending, absent is no-command; never config.
+  // A dirty Stop that queues no test says why, once (ARCH-STATE-22). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: snapshot.mjs's snapshot-dropped marker (it dropped its result because the tree changed), when snapshot-started exists and the marker is no older than it, is snapshot-dropped, snapshot-started alone is snapshot-pending, neither is no-command; never config (ARCH-STATE-24).
   const before = tasks.length;
   for (const { cmd, green } of results) if (green && !isScoped(cmd)) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
 
@@ -266,7 +270,7 @@ if (isDirty) {
         `craftsman: stop-gate skipped ${embedded.join(", ")} ({changed} and {changedDirs} must be a whole argument, never part of one), advisory only`, embedded);
     }
   }
-  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (fs.existsSync(path.join(baselineDir, "snapshot-started")) ? "snapshot-pending" : "no-command") });
+  if (tasks.length === before && !scopedSkipLogged) logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: start ? (!results.length ? "no-command" : "red-at-start") : (snapshotDropped(baselineDir) ? "snapshot-dropped" : fs.existsSync(path.join(baselineDir, "snapshot-started")) ? "snapshot-pending" : "no-command") });
 } else {
   logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: "clean" });
 }
