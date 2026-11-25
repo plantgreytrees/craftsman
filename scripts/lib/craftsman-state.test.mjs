@@ -1,5 +1,5 @@
 // One definition of "this porcelain line is craftsman's own gitignored state", shared by Stop's secrets
-// re-scan and the unpushed-work report (ARCH-STATE-24).
+// re-scan and the unpushed-work report (ARCH-STATE-15, ARCH-SAFETY-06).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

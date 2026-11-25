@@ -198,8 +198,8 @@ scan, a test regression or an unticked acceptance criterion of a plan the
 session worked. Criteria are written at plan time and enforced before a task
 can finish. A criterion of a BLOCKED or PARKED unit is held, named in the Stop
 notice and asked in `/craftsman:auto` Phase C instead of looping, and while the
-session's own background work runs the acceptance, worktree-binding and
-leftover-worktree checks wait for it to settle (secrets and regressions never
+session's own background work runs the acceptance, worktree-binding,
+leftover-worktree and unlanded-feature checks wait for it to settle (secrets and regressions never
 wait).
 
 **Architecture is enforced, not just written down.** `/craftsman:plan` cites the rules

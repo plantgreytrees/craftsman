@@ -157,6 +157,10 @@ Owner decision 2026-11-25 (Phase C): ARCH-STATE-04 is superseded by ARCH-STATE-2
 - R2-5 [Test-coverage] `stop-gate.mjs:116-121,145`: no test reaches `mainCheckout()`; add a no-remote fixture.
 - R2-6 [Test-coverage] `stop-gate.test.mjs:709`: rename the stale "skip only the acceptance block" test title.
 
+## Round 3 — /craftsman:scrutinise 2026-11-25 (isolated, main @f8759bd)
+
+0 Critical · 0 Warning · 0 UNMET (all criteria ticked; suite 2012/2012, arch-check lint PASS). 2 Suggestions fixed in the closing commit: craftsman-state.mjs:2 and its test re-cited to ARCH-STATE-15, ARCH-SAFETY-06 (the secrets re-scan and unpushed report, not the STATE-24 tree hash); README in-flight list adds the unlanded-feature check (ARCH-STATE-08). Out of range, flagged: superseded ids still cited elsewhere (ARCH-SAFETY-05, LAND-05, AUTO-06, DOCS-10, STATE-12, STATE-13) for a separate sweep.
+
 ## Verification background
 
 CONSUMERS:
