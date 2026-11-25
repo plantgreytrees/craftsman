@@ -55,7 +55,7 @@ export function defaultRunners(root) {
       const cfg = loadConfig({ root });
       const out = [];
       for (const cmd of cfg.security?.check || []) {
-        const [bin, ...args] = splitCmd(cmd);
+        const [bin, ...args] = splitCmd(cmd, { root: dir });
         if (!bin || !onPath(bin, process.env, dir)) continue;
         const r = spawnSync(bin, args, { cwd: dir, encoding: "utf8", timeout: cfg.stopGate?.testTimeoutMs });
         if (r.status !== 0) out.push({ file: "(security.check)", line: 0, rule: `${path.basename(bin)} exit ${r.status ?? "timeout"}` });
@@ -64,7 +64,7 @@ export function defaultRunners(root) {
     },
     docChecks: (dir = root) => {
       const cfg = loadConfig({ root });
-      return runDocChecks({ root: dir, checks: cfg.docs?.checks || [], verify: true, timeoutMs: cfg.stopGate?.testTimeoutMs });
+      return runDocChecks({ root: dir, checks: cfg.docs?.checks || [], verify: true, timeoutMs: cfg.stopGate?.testTimeoutMs, context: { root: dir } });
     },
   };
 }

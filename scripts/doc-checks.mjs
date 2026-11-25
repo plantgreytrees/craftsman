@@ -16,8 +16,8 @@ export function onPath(bin, env = process.env, cwd = process.cwd()) {
   return (env.PATH || "").split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, bin)));
 }
 
-function runOne(cmd, cwd, timeoutMs) {
-  const [bin, ...args] = splitCmd(cmd);
+function runOne(cmd, cwd, timeoutMs, context = null) {
+  const [bin, ...args] = splitCmd(cmd, context);
   if (!bin || !onPath(bin, process.env, cwd)) return { cmd, status: "skipped" };
   const r = spawnSync(bin, args, { cwd, encoding: "utf8", timeout: timeoutMs });
   if (r.error?.code === "ENOENT") return { cmd, status: "skipped" };
@@ -26,8 +26,9 @@ function runOne(cmd, cwd, timeoutMs) {
   return { cmd, status: "fail", output };
 }
 
-export function runDocChecks({ root, checks = [], verify = false, timeoutMs = 120000 }) {
-  const results = checks.map((cmd) => runOne(cmd, root, timeoutMs));
+// `context` (ARCH-STATE-19) names the checkout `{workspaceRoot}` expands for; without one it is the project root.
+export function runDocChecks({ root, checks = [], verify = false, timeoutMs = 120000, context = null }) {
+  const results = checks.map((cmd) => runOne(cmd, root, timeoutMs, context));
   if (verify) {
     if (fs.existsSync(path.join(root, ".pre-commit-config.yaml"))) results.push(runOne("pre-commit run --all-files", root, timeoutMs));
     else results.push({ cmd: "pre-commit run --all-files", status: "skipped" });
@@ -40,7 +41,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const verify = args.includes("--verify");
   const context = projectContext(args.find((a) => !a.startsWith("--")) || ".");
   const cfg = loadConfig(context);
-  const result = runDocChecks({ root: context.root, checks: cfg.docs?.checks || [], verify, timeoutMs: cfg.stopGate?.testTimeoutMs });
+  const result = runDocChecks({ root: context.root, checks: cfg.docs?.checks || [], verify, timeoutMs: cfg.stopGate?.testTimeoutMs, context });
   process.stdout.write(`${JSON.stringify(result)}\n`);
   process.exit(result.ok ? 0 : 1);
 }
