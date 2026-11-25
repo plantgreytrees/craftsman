@@ -152,7 +152,7 @@ test("gate-command: a scoped command with a nested marker is still skipped when 
   assert.equal(findGateCommand(dir, cfgOf("craftsman-no-such-program {changed}"), only("node")), null);
 });
 
-// ARCH-LAND-38: in a git checkout the marker lookup matches tracked files only, as Stop's markerPresent does.
+// ARCH-LAND-38: in a git checkout the marker lookup matches tracked and untracked-not-ignored files, as Stop's markerPresent does.
 function gitTree(tracked, ...others) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gate-cmd-git-")));
   gitIn(dir, "init", "-q");
@@ -163,11 +163,13 @@ function gitTree(tracked, ...others) {
 }
 const scoped = "node check.mjs {changed}";
 
-test("gate-command: a marker only in an untracked folder selects no scoped command", () => {
+test("gate-command: a marker only in an untracked, non-ignored folder selects the scoped command, as at Stop", () => {
   const dir = gitTree("src/app.js");
   nested(dir, "scratch/package.json");
-  assert.equal(findGateCommand(dir, cfgOf(scoped), only("node")), null);
-  assert.equal(findGateCommand(dir, cfgOf(scoped, "*.sln"), only("node")), null);
+  nested(dir, "scratch/App.sln");
+  assert.equal(findGateCommand(dir, cfgOf(scoped), only("node")), scoped);
+  assert.equal(findGateCommand(dir, cfgOf(scoped, "*.sln"), only("node")), scoped);
+  assert.equal(findGateCommand(dir, cfgOf(scoped, "go.mod"), only("node")), null);
 });
 
 test("gate-command: a marker only in a gitignored folder selects no scoped command", () => {
