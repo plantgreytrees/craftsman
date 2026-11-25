@@ -61,7 +61,7 @@ for (const command of [
 
 // The doc-guard refusal names the fix that applies: a session that already ran a doc-writing command is told to re-grant,
 // not to hand the change to /plan (ARCH-STATE-16: the exit code and the decision are unchanged).
-function runDocWrite(tool, toolInput, { recorded = null } = {}) {
+function runDocWrite(tool, toolInput, { recorded = null, unitScope = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-docguard-"));
   try {
     spawnSync("git", ["init", "-q"], { cwd: dir });
@@ -79,8 +79,28 @@ function runDocWrite(tool, toolInput, { recorded = null } = {}) {
         JSON.stringify({ [recorded]: { via: "skill", at: new Date().toISOString() } }) + "\n",
       );
     }
+    let cwd = dir;
+    if (unitScope) {
+      // A live unit scope: manifest in the session dir, worktree_path an existing directory holding the same
+      // guarded doc, the call running inside it (ARCH-STATE-18).
+      const wt = path.join(dir, ".worktrees", "unit");
+      fs.mkdirSync(path.join(wt, "docs"), { recursive: true });
+      fs.writeFileSync(path.join(wt, "docs", "notes.md"), "# notes\n");
+      fs.copyFileSync(path.join(dir, "craftsman.config.json"), path.join(wt, "craftsman.config.json"));
+      spawnSync("git", ["init", "-q"], { cwd: wt });
+      cwd = wt;
+      const sdir = path.join(dir, ".craftsman", "sessions", "docguardtest");
+      fs.mkdirSync(sdir, { recursive: true });
+      fs.writeFileSync(
+        path.join(sdir, "scope-aaaaaaaaaaaaaaaa.json"),
+        JSON.stringify({
+          plan: "docs/plans/p.md", unit: "unit", project: ".", project_root: wt, worktree_path: wt,
+          scope: { read: [], docs: [], write: ["docs/notes.md"] }, arch: [],
+        }) + "\n",
+      );
+    }
     const r = spawnSync(process.execPath, [GUARD], {
-      cwd: dir,
+      cwd,
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
       input: JSON.stringify({
@@ -116,6 +136,17 @@ test("Bash doc-guard ask after a recorded doc writer names the re-grant, not /pl
   assert.equal(r.status, 2);
   assert.match(r.stderr, /doc-write\.mjs" on/);
   assert.doesNotMatch(r.stderr, /Hand the change to/);
+});
+
+test("doc-guard deny with a recorded doc writer AND an active unit scope keeps the /plan redirect, not the re-grant", () => {
+  const w = docWrite({ recorded: "orchestrate", unitScope: true });
+  assert.equal(w.status, 2);
+  assert.match(w.stderr, /Hand the change to \/craftsman:plan/);
+  assert.doesNotMatch(w.stderr, /already ran a doc-writing command/);
+  const b = runDocWrite("Bash", { command: "rm docs/notes.md" }, { recorded: "plan", unitScope: true });
+  assert.equal(b.status, 2);
+  assert.match(b.stderr, /Hand the change to \/craftsman:plan/);
+  assert.doesNotMatch(b.stderr, /already ran a doc-writing command/);
 });
 
 test("Bash doc-guard ask with no recorded doc writer keeps the /craftsman:plan redirect", () => {
