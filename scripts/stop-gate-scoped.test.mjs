@@ -1,6 +1,6 @@
 // ARCH-STATE-21: Stop runs the placeholder commands of stopGate.commands and stopGate.extraChecks against the session
 // change list - only when dirty, with no green-at-start precondition, never unexpanded - and reports a failure or a
-// budget kill as scoped, never as a regression. ARCH-STATE-22: an empty or unknown change set is a logged skip reason.
+// budget kill as scoped, never as a regression. ARCH-STATE-24: an empty or unknown change set is a logged skip reason.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

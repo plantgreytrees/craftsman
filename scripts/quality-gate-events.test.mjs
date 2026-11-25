@@ -1,4 +1,4 @@
-// ARCH-STATE-22: every `gate` event the quality gate logs names the project it ran for ("." at the root, the scope's
+// ARCH-STATE-24: every `gate` event the quality gate logs names the project it ran for ("." at the root, the scope's
 // project id inside a unit scope), so a workspace's events say which service a gate result belongs to.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -59,7 +59,7 @@ function scopeUnit(dir, sid, unitRoot, project) {
   }));
 }
 
-test("quality-gate: a pass, then a cached hit, at the root log gate events with project \".\" (ARCH-STATE-22)", () => {
+test("quality-gate: a pass, then a cached hit, at the root log gate events with project \".\" (ARCH-STATE-24)", () => {
   const dir = makeRoot(PASS);
   try {
     assert.equal(edit(dir, "qg-root", "a.fx").status, 0);
@@ -70,7 +70,7 @@ test("quality-gate: a pass, then a cached hit, at the root log gate events with 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("quality-gate: a fail at the root logs its gate event with project \".\" (ARCH-STATE-22)", () => {
+test("quality-gate: a fail at the root logs its gate event with project \".\" (ARCH-STATE-24)", () => {
   const dir = makeRoot(FAIL);
   try {
     const r = edit(dir, "qg-fail", "a.fx");
@@ -81,7 +81,7 @@ test("quality-gate: a fail at the root logs its gate event with project \".\" (A
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("quality-gate: a crashed tool logs its tool-unavailable gate event with project \".\" (ARCH-STATE-22)", () => {
+test("quality-gate: a crashed tool logs its tool-unavailable gate event with project \".\" (ARCH-STATE-24)", () => {
   const dir = makeRoot(CRASH);
   try {
     edit(dir, "qg-crash", "a.fx");
@@ -91,7 +91,7 @@ test("quality-gate: a crashed tool logs its tool-unavailable gate event with pro
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("quality-gate: a baselined finding logs its pass-baselined gate event with project \".\" (ARCH-STATE-22)", () => {
+test("quality-gate: a baselined finding logs its pass-baselined gate event with project \".\" (ARCH-STATE-24)", () => {
   const dir = makeRoot(FAIL);
   try {
     const file = path.join(dir, "a.fx");
@@ -107,7 +107,7 @@ test("quality-gate: a baselined finding logs its pass-baselined gate event with 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("quality-gate: inside a unit scope the gate event carries the scope's project id (ARCH-STATE-22)", () => {
+test("quality-gate: inside a unit scope the gate event carries the scope's project id (ARCH-STATE-24)", () => {
   const dir = makeRoot(PASS);
   const unitRoot = makeRoot(PASS);
   try {

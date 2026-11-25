@@ -203,7 +203,7 @@ if (handoff?.plan) {
 
 // Kick the test-green snapshot into the BACKGROUND for THIS session (detached).
 fs.mkdirSync(sessionDir(sid, context), { recursive: true });
-// The marker belongs to the start that spawned a snapshot (ARCH-STATE-22): a resume that spawns none must not keep the earlier start's.
+// The marker belongs to the start that spawned a snapshot (ARCH-STATE-24): a resume that spawns none must not keep the earlier start's.
 try { fs.unlinkSync(path.join(sessionDir(sid, context), "snapshot-started")); } catch {}
 let anyStopCommandMarker = false;
 // With snapshots off nothing is spawned, so nothing is looked up either: gateUsable can run `just --summary` (ARCH-SAFETY-04).
@@ -221,7 +221,7 @@ if (anyStopCommandMarker) {
   try {
     spawn(process.execPath, [path.join(PLUGIN_ROOT, "scripts", "snapshot.mjs"), sid, context.id, startingTree],
       { detached: true, stdio: "ignore", windowsHide: true, cwd: context.root, env: process.env }).unref();
-    // The fact Stop reads when no session-start.json lands (ARCH-STATE-22): written only here, where a snapshot is spawned.
+    // The fact Stop reads when no session-start.json lands (ARCH-STATE-24): written only here, where a snapshot is spawned.
     fs.writeFileSync(path.join(sessionDir(sid, context), "snapshot-started"), String(Date.now()));
   } catch { /* snapshot is best-effort */ }
 }

@@ -344,7 +344,7 @@ test("session-context and account-switch both arm through handoffArmsScope, with
   }
 });
 
-// ARCH-STATE-22: SessionStart records whether it started a snapshot, so Stop never guesses that from config. The
+// ARCH-STATE-24: SessionStart records whether it started a snapshot, so Stop never guesses that from config. The
 // snapshot-started marker sits in the session directory and exists exactly when snapshot.mjs is spawned.
 // The result is JSON written in one call: wait until it parses, so a half-written file is never read.
 function waitFor(file, ms = 20000) {
@@ -396,7 +396,7 @@ const NODE_0 = { "package.json": "node -e 0" };
 // A `just` command no machine can run, whether or not `just` is installed (not on PATH, or the target is not in its summary).
 const UNUSABLE_JUST = `just nosuchtarget-${process.pid}-${Date.now()}`;
 
-test("session-context: the snapshot-started marker is written where the snapshot is spawned, and the snapshot lands beside it (ARCH-STATE-22)", () => {
+test("session-context: the snapshot-started marker is written where the snapshot is spawned, and the snapshot lands beside it (ARCH-STATE-24)", () => {
   withProject((dir) => {
     const { marker, result } = sessionStartAt(dir, { stopGate: { commands: NODE_0 }, files: { "package.json": "{}\n" } });
     assert.equal(fs.existsSync(marker), true, "a snapshot was spawned, so the marker exists");
@@ -405,7 +405,7 @@ test("session-context: the snapshot-started marker is written where the snapshot
   });
 });
 
-test("session-context: a marker under a sub-directory also starts the snapshot and writes the marker (ARCH-STATE-22)", () => {
+test("session-context: a marker under a sub-directory also starts the snapshot and writes the marker (ARCH-STATE-24)", () => {
   withProject((dir) => {
     const { marker, result } = sessionStartAt(dir, { stopGate: { commands: NODE_0 }, files: { "services/api/package.json": "{}\n" } });
     assert.equal(fs.existsSync(marker), true);
@@ -413,7 +413,7 @@ test("session-context: a marker under a sub-directory also starts the snapshot a
   });
 });
 
-test("session-context: a stale snapshot-started marker and result from an earlier start are cleared when the snapshot is spawned again (ARCH-STATE-22)", () => {
+test("session-context: a stale snapshot-started marker and result from an earlier start are cleared when the snapshot is spawned again (ARCH-STATE-24)", () => {
   withProject((dir) => {
     const { marker, result } = sessionStartAt(dir, {
       stopGate: { commands: NODE_0 }, files: { "package.json": "{}\n" },
@@ -438,7 +438,7 @@ const NO_SPAWN = [
 ];
 
 for (const [why, options] of NO_SPAWN) {
-  test(`session-context: no snapshot is spawned and no snapshot-started marker is written when ${why} (ARCH-STATE-22)`, () => {
+  test(`session-context: no snapshot is spawned and no snapshot-started marker is written when ${why} (ARCH-STATE-24)`, () => {
     withProject((dir) => {
       const { marker, result } = sessionStartAt(dir, options);
       assert.equal(fs.existsSync(marker), false, "nothing was spawned, so no marker");
@@ -450,7 +450,7 @@ for (const [why, options] of NO_SPAWN) {
 // A resume (the same session id started again) that spawns nothing must not keep the earlier start's marker: Stop would read
 // it as snapshot-pending for a snapshot that is not coming.
 for (const [why, options] of NO_SPAWN) {
-  test(`session-context: a resume that spawns no snapshot leaves no stale snapshot-started marker when ${why} (ARCH-STATE-22)`, () => {
+  test(`session-context: a resume that spawns no snapshot leaves no stale snapshot-started marker when ${why} (ARCH-STATE-24)`, () => {
     withProject((dir) => {
       const { marker } = sessionStartAt(dir, { ...options, before: (sessions) => fs.writeFileSync(path.join(sessions, "snapshot-started"), "stale") });
       assert.equal(fs.existsSync(marker), false, "the earlier start's marker was cleared");
@@ -465,7 +465,7 @@ for (const [why, stopGate, probed] of [
   ["stopGate.enabled is false", { enabled: false }, false],
   ["snapshots are on (the control)", {}, true],
 ]) {
-  test(`session-context: ${probed ? "probes" : "never runs"} just --summary when ${why} (ARCH-STATE-22, ARCH-SAFETY-04)`, () => {
+  test(`session-context: ${probed ? "probes" : "never runs"} just --summary when ${why} (ARCH-STATE-24, ARCH-SAFETY-04)`, () => {
     withProject((dir) => {
       const bin = `${dir}-bin`;
       const log = `${dir}-just.log`;

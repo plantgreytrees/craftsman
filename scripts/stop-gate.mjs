@@ -200,7 +200,7 @@ if (cfg.security?.enabled && shouldScan) {
 //    multi-minute suite on every question-answering turn.
 const dirtyPath = path.join(sdir, "dirty");
 const isDirty = fs.existsSync(dirtyPath);
-const baseline = baselineContext(), baselineDir = sessionDir(sid, baseline.context); // the root's, while the scope is of the same repository: SessionStart and snapshot.mjs write the baseline there (ARCH-STATE-22)
+const baseline = baselineContext(), baselineDir = sessionDir(sid, baseline.context); // the root's, while the scope is of the same repository: SessionStart and snapshot.mjs write the baseline there (ARCH-STATE-24)
 let start = null;
 try { start = JSON.parse(fs.readFileSync(path.join(baselineDir, "session-start.json"), "utf8")); } catch {}
 let results = [];
@@ -218,7 +218,7 @@ function sayOnce(name, text, sig) {
   try { atomicWrite(marker, signature); } catch { /* no state dir: the notice still goes out */ }
   scopedNotices.push(text);
 }
-// A baseline that could not be looked up is said once and is never a failure: the gate below runs without it (ARCH-STATE-22, ARCH-SAFETY-04).
+// A baseline that could not be looked up is said once and is never a failure: the gate below runs without it (ARCH-STATE-24, ARCH-SAFETY-04).
 if (baseline.error) sayOnce("baseline-notice-unavailable",
   `craftsman: stop-gate skipped the session-start baseline lookup (the workspace manifest could not be read: ${baseline.error.message}), advisory only`, baseline.error.message);
 
@@ -227,7 +227,7 @@ const markerTime = (file) => { try { const n = Number(fs.readFileSync(file, "utf
 const snapshotDropped = (dir) => { const started = markerTime(path.join(dir, "snapshot-started")), dropped = markerTime(path.join(dir, "snapshot-dropped")); return started !== null && dropped !== null && dropped >= started; };
 
 if (isDirty) {
-  // A dirty Stop that queues no test says why, once (ARCH-STATE-22). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: snapshot.mjs's snapshot-dropped marker (it dropped its result because the tree changed), when snapshot-started exists and the marker is no older than it, is snapshot-dropped, snapshot-started alone is snapshot-pending, neither is no-command; never config (ARCH-STATE-24).
+  // A dirty Stop that queues no test says why, once (ARCH-STATE-24). With no session-start.json, the marker session-context.mjs writes where it spawns the snapshot decides: snapshot.mjs's snapshot-dropped marker (it dropped its result because the tree changed), when snapshot-started exists and the marker is no older than it, is snapshot-dropped, snapshot-started alone is snapshot-pending, neither is no-command; never config.
   const before = tasks.length;
   for (const { cmd, green } of results) if (green && !isScoped(cmd)) tasks.push({ kind: "test", cmd, timeoutMs: cfg.stopGate?.testTimeoutMs ?? 250000 });
 
@@ -558,7 +558,7 @@ process.stdout.write(JSON.stringify({
   ...(notice ? { systemMessage: notice } : {}),
 }));
 
-// The baseline belongs to the repository SessionStart snapshotted (ARCH-STATE-22). Its session directory, the root context's, holds
+// The baseline belongs to the repository SessionStart snapshotted (ARCH-STATE-24). Its session directory, the root context's, holds
 // session-start.json and snapshot-started, and a scope of that same repository (a unit's worktree) reads them there. A workspace
 // sub-project scope is another repository, so its own session directory is read instead and holds neither: it has no baseline,
 // and the root's commands never run in it. `dirty`, the change list and the scoped-task state are the scope's in both cases.
