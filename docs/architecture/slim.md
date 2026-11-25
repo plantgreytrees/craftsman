@@ -3,7 +3,7 @@
 > and `/architect --update slim` should be run.
 
 # Slimness architecture
-_Last verified: 2026-11-25 at `365bca1` · Source idea: [feature-branch-plans](../ideas/feature-branch-plans.md)_
+_Last verified: 2026-11-25 at `5f41f3c` · Source idea: [feature-branch-plans](../ideas/feature-branch-plans.md)_
 
 ## In plain English
 Every craftsman file must be as small as it can be without losing capability.

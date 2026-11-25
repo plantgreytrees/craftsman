@@ -99,3 +99,6 @@ ARCH-LAND-37 lets the pre-merge gate use the same `{changed}` and `{changedDirs}
 
 ## Review fixes to the scoped pre-merge gate (2026-11-04)
 ARCH-LAND-37 now also fails the gate (rather than skipping it) for an embedded placeholder and for a branch that only deletes files; only an empty diff skips. Its test file is `scripts/repo-exec-scoped.test.mjs`. The retire-check cites of ARCH-LAND-26, 30 and 33 were off by about eight lines before this work and now point at the real sites (`afterUnitLand` and `afterLand`).
+
+## Scoped merge gate finds nested markers (2026-11-25)
+ARCH-LAND-38: the pre-merge gate picks a scoped `{changed}` command when its marker exists anywhere in the worktree, as Stop does, so a repository whose services live in sub-directories gets the same scoped gate at merge as at Stop. An unscoped command still needs its marker at the root. Rejected: keeping the root-only lookup, which left such repositories with no merge gate.

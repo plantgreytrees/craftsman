@@ -88,7 +88,7 @@ flowchart TB
 | Status | none (plans only) | event-sourced ledger, generated views |
 | Human checkpoint | finishing-a-development-branch asks merge/PR/keep/discard | one approval page with evidence, then Merge now / Open PR |
 | Versioning | pinned `version` | commit-tracked, `stable` branch for Gleam |
-| Taken from it | — | tiny bootstrap, TDD, systematic debugging, verification-before-completion |
+| Taken from it | — | tiny bootstrap (TDD, systematic-debugging and verification-before-completion were vendored, then removed on 2026-11-25 after failing ARCH-EVALS-09) |
 
 Not co-installed: its auto-triggering skills would dispatch agents root-only mode blocks and create worktrees outside repo-exec, and Loost-Gallery already carries 62 orphaned Superpowers plans from the last mix.
 
