@@ -64,6 +64,10 @@ export function expandChangePlaceholders(cmd, files, { cwd, root, maxBytes = MAX
   if (!files.length) return { skip: "no-changes" };
   const base = root || PROJECT_ROOT;
   const from = cwd || base;
+  // A path that is now a directory is not a file to hand a tool: it drops out like a gone path (a missing path stays, the caller filtered it).
+  const isDir = (f) => { try { return fs.statSync(path.resolve(base, f)).isDirectory(); } catch { return false; } };
+  files = files.filter((f) => !isDir(f));
+  if (!files.length) return { skip: "no-changes" };
   // A relative path that starts with `-` would be read by the tool as an option, so it gets `./` (`.` and every other path stay as they are).
   const rels = files.map((f) => path.relative(from, path.resolve(base, f)).split(path.sep).join("/") || ".").map((r) => (r.startsWith("-") ? "./" + r : r));
   const dirs = [...new Set(rels.map((r) => path.posix.dirname(r)))].sort();

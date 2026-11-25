@@ -397,3 +397,16 @@ test("merge: a {changed} list past the argv cap fails the gate naming the cap an
     assert.deepEqual(t.gateEvents(), []);
   } finally { cleanup(t); }
 });
+
+test("merge: a branch that adds -x.js lands with the gate receiving ./-x.js, never a bare -x.js an option parser would read", () => {
+  const t = fixture("{changed}");
+  try {
+    const u = unit(t, (wt) => { write(wt, "-x.js"); });
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    const runs = t.runs();
+    assert.equal(runs.length, 1);
+    assert.deepEqual(runs[0].argv, ["./-x.js"]);
+    assert.deepEqual(t.gateEvents(), []);
+  } finally { cleanup(t); }
+});

@@ -468,3 +468,25 @@ test("scoped: a tampered change list with ../outside.js and /etc/hosts expands t
     assert.deepEqual(runs(dir), [["src/a.js", "src/b.js"]]);
     assert.notEqual(r.out.decision, "block");
   }));
+
+// A listed path is only a command argument while it is still a file: one that became a directory is dropped like a gone
+// path, and a dangling symlink (its target is gone) is one too (ARCH-STATE-21).
+test("scoped: a change-list entry that is now a directory never reaches the command (ARCH-STATE-21)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    seed(dir, "s21d", { changed: ["src/a.js", "now-a-dir"], gone: ["now-a-dir"] });
+    fs.mkdirSync(path.join(dir, "now-a-dir"));
+    assert.ok(fs.statSync(path.join(dir, "now-a-dir")).isDirectory());
+    const r = await runStop(dir, "s21d");
+    assert.deepEqual(runs(dir), [["src/a.js"]]);
+    assert.notEqual(r.out.decision, "block");
+  }));
+
+test("scoped: a change-list entry that is a dangling symlink never reaches the command (ARCH-STATE-21)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    seed(dir, "s21l", { changed: ["src/a.js", "dangling.js"], gone: ["dangling.js"] });
+    fs.symlinkSync(path.join(dir, "no-such-target"), path.join(dir, "dangling.js"));
+    assert.ok(fs.lstatSync(path.join(dir, "dangling.js")).isSymbolicLink() && !fs.existsSync(path.join(dir, "dangling.js")));
+    const r = await runStop(dir, "s21l");
+    assert.deepEqual(runs(dir), [["src/a.js"]]);
+    assert.notEqual(r.out.decision, "block");
+  }));
