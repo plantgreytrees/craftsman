@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { binOnPath, findGateCommand, gateUsable } from "./gate-command.mjs";
-import { deepMerge } from "./core.mjs";
+import { deepMerge, programPresent } from "./core.mjs";
 
 const defaults = { stopGate: { commands: { justfile: "just check", "package.json": "npm test --silent", "go.mod": "go test ./..." } } };
 const tree = (...files) => {
@@ -196,4 +196,21 @@ test("gate-command: for a root that is PROJECT_ROOT, {workspaceRoot}/bin/x is pr
   fs.mkdirSync(path.join(ws, "bin"));
   fs.writeFileSync(path.join(ws, "bin", "x"), "#!/bin/sh\n", { mode: 0o755 });
   assert.equal(usableIn(ws, ws, cmd), true, "present");
+});
+
+test("gate-command: gateUsable agrees with core's programPresent for a bare name, a ./bin path and an absolute path", () => {
+  const dir = tree("package.json");
+  fs.mkdirSync(path.join(dir, "bin"));
+  const abs = path.join(dir, "bin", "x");
+  fs.writeFileSync(abs, "#!/bin/sh\n", { mode: 0o755 });
+  for (const onPath of [() => true, () => false, (bin) => bin === "tool"]) {
+    for (const bin of ["tool", "other", "./bin/x", "./bin/missing", abs, `${abs}-missing`]) {
+      assert.equal(gateUsable(dir, "package.json", `${bin} --flag`, { onPath }), programPresent(bin, dir, onPath), `${bin}`);
+    }
+  }
+  assert.equal(programPresent("tool", dir, () => true), true, "a bare name asks PATH");
+  assert.equal(programPresent("tool", dir, () => false), false);
+  assert.equal(programPresent("./bin/x", dir, () => false), true, "a ./bin path asks the directory, not PATH");
+  assert.equal(programPresent("./bin/missing", dir, () => true), false);
+  assert.equal(programPresent(abs, tree("package.json"), () => false), true, "an absolute path resolves to itself");
 });
