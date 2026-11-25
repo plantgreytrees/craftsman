@@ -8,6 +8,9 @@ import path from "node:path";
 import { splitCmd, PROJECT_ROOT } from "./core.mjs";
 
 const FILE = "changed";
+/** The most bytes a placeholder-expanded argv may hold (each token plus one separator). Past it the command is never spawned,
+ * so a long change list cannot reach the OS argv limit (E2BIG) (ARCH-STATE-25). */
+export const MAX_ARGV_BYTES = 128 * 1024;
 const WHOLE = new Set(["{changed}", "{changedDirs}"]);
 const isWhole = (tok) => WHOLE.has(tok);
 const isEmbedded = (tok) => !isWhole(tok) && [...WHOLE].some((p) => tok.includes(p));
@@ -50,8 +53,10 @@ export function isScoped(cmd) {
  * one entry per file and `{changedDirs}` the sorted unique directories, both POSIX and relative to `cwd` (default: `root`);
  * a relative path that starts with `-` is written `./-...` so a tool never reads it as an option.
  * `{ skip }` is an empty ("no-changes") or unknown ("changes-unknown", files is not an array) set; `{ warn }` is an
- * embedded placeholder, which stays literal and means the command must not run. A command with no placeholder is only split. */
-export function expandChangePlaceholders(cmd, files, { cwd, root } = {}) {
+ * embedded placeholder, which stays literal and means the command must not run. A command with no placeholder is only split.
+ * `{ overCap: { bytes, files } }` is an expansion whose argv passes `maxBytes` (default MAX_ARGV_BYTES): no argv is returned,
+ * `files` is the size of the change list (ARCH-STATE-25). */
+export function expandChangePlaceholders(cmd, files, { cwd, root, maxBytes = MAX_ARGV_BYTES } = {}) {
   const tokens = splitCmd(String(cmd), { root });
   if (tokens.some(isEmbedded)) return { warn: "embedded-placeholder" };
   if (!tokens.some(isWhole)) return { argv: tokens };
@@ -62,5 +67,7 @@ export function expandChangePlaceholders(cmd, files, { cwd, root } = {}) {
   // A relative path that starts with `-` would be read by the tool as an option, so it gets `./` (`.` and every other path stay as they are).
   const rels = files.map((f) => path.relative(from, path.resolve(base, f)).split(path.sep).join("/") || ".").map((r) => (r.startsWith("-") ? "./" + r : r));
   const dirs = [...new Set(rels.map((r) => path.posix.dirname(r)))].sort();
-  return { argv: tokens.flatMap((tok) => (tok === "{changed}" ? rels : tok === "{changedDirs}" ? dirs : [tok])) };
+  const argv = tokens.flatMap((tok) => (tok === "{changed}" ? rels : tok === "{changedDirs}" ? dirs : [tok]));
+  const bytes = argv.reduce((n, tok) => n + Buffer.byteLength(tok) + 1, 0);
+  return bytes > maxBytes ? { overCap: { bytes, files: files.length } } : { argv };
 }

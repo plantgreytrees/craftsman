@@ -15,7 +15,7 @@ import { formatReport, unpushedReport } from "./lib/unpushed.mjs";
 import { isCraftsmanStateLine } from "./lib/craftsman-state.mjs";
 import { docDrift, formatDocDrift, snapshotDocs, unseenDocChanges } from "./lib/doc-snapshot.mjs";
 import { ledgerPath, reconcileAcceptance, currentState } from "./tracker.mjs";
-import { expandChangePlaceholders, isScoped, readChanged } from "./lib/changed.mjs";
+import { expandChangePlaceholders, isScoped, MAX_ARGV_BYTES, readChanged } from "./lib/changed.mjs";
 import { gateUsable } from "./lib/gate-command.mjs";
 
 const T0 = Date.now();
@@ -230,6 +230,12 @@ if (isDirty) {
     for (const cmd of scoped) {
       const expanded = expandChangePlaceholders(cmd, changed, { cwd: context.root, root: context.root });
       if (expanded.warn) { embedded.push(cmd); continue; }
+      if (expanded.overCap) {
+        // Too long to spawn: a scoped failure that runs nothing, so no E2BIG reaches a spawn (ARCH-STATE-25).
+        problems.push(`SCOPED TESTS FAILED (not baselined): ${cmd}\n` +
+          `the change list (${expanded.overCap.files} files, ${expanded.overCap.bytes} bytes of arguments) is past the ${MAX_ARGV_BYTES}-byte argv cap, so the command was not run; run the suite unscoped instead.`);
+        continue;
+      }
       if (expanded.skip) {
         scopedSkipLogged = true;
         logEvent({ ev: "stop-tests-skipped", sid, project: context.id ?? ".", reason: expanded.skip, cmd });
