@@ -906,10 +906,13 @@ function splitTokens(str, context = null) {
 // `cwd` is a resolved tool cwd (resolveToolCwd): {file} and {dir} become POSIX
 // paths relative to it. Without one they are relative to the root, as ever.
 export function tokenize(cmdTemplate, file, context = null, cwd = null) {
-  const rel = cwd
+  const base = cwd
     ? path.relative(cwd, file).split(path.sep).join("/") || file
     : path.relative(context?.root || PROJECT_ROOT, file) || file;
-  const dir = path.dirname(rel);
+  // A relative value that starts with `-` would be read by the tool as an option, so it gets `./` (as changed.mjs does).
+  const safe = (p) => (p.startsWith("-") ? "./" + p : p);
+  const rel = safe(base);
+  const dir = safe(path.dirname(base));
   // Substitute per-token so a {file}/{dir} value containing a space still
   // becomes exactly one argument, instead of splitting the path in two.
   return splitTokens(cmdTemplate, context).map((tok) =>
