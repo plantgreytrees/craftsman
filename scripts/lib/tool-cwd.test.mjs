@@ -439,3 +439,29 @@ test("no code path of the tool cwd reads process.cwd()", () => {
     assert.doesNotMatch(m[0], /process\.cwd\(\)/, name);
   }
 });
+
+// ------------------------------------------------------------- programPresent ---
+
+test("programPresent: a bare name asks the injected PATH probe, a ./bin path and an absolute path ask the directory", async () => {
+  const dir = scratch();
+  const abs = put(dir, "bin/x", "#!/bin/sh\n", 0o755);
+  assert.equal(await core.programPresent("tool", dir, async () => true), true);
+  assert.equal(await core.programPresent("tool", dir, async () => false), false);
+  assert.equal(await core.programPresent("./bin/x", dir, async () => false), true);
+  assert.equal(await core.programPresent("./bin/missing", dir, async () => true), false);
+  assert.equal(await core.programPresent(abs, scratch(), async () => false), true);
+  assert.equal(await core.programPresent("bin/x", dir, async () => false), true);
+});
+
+test("runChecks: with no cwd key a ./bin is probed against the context root, as an absolute bin and a bare name are", async () => {
+  const { root, context } = services();
+  put(root, "tools/lint", "#!/bin/sh\necho \"lint got $*\"\nexit 1\n", 0o755);
+  const file = put(root, "a.fx");
+  const rel = await core.runChecks(file, lang(undefined, { check: ["./tools/lint {file}"] }), {}, context);
+  assert.deepEqual(rel.skipped, [], "the bin exists under the root, whatever the process's directory");
+  assert.equal(rel.failures.length, 1);
+  const abs = await core.runChecks(file, lang(undefined, { check: [`${path.join(root, "tools/lint")} {file}`] }), {}, context);
+  assert.deepEqual(abs.skipped, []);
+  const gone = await core.runChecks(file, lang(undefined, { check: ["./tools/none {file}"] }), {}, context);
+  assert.deepEqual(gone.skipped, ["./tools/none"]);
+});

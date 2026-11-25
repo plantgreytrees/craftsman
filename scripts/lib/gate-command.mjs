@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { splitCmd, globToRe } from "./core.mjs";
+import { splitCmd, globToRe, programPresent } from "./core.mjs";
 import { isScoped } from "./changed.mjs";
 
 export function binOnPath(bin) {
@@ -27,11 +27,11 @@ function present(worktree, marker) {
 }
 
 // A command's program is present when it is on PATH or, when it names a path (a slash), an existing file relative to the
-// worktree (an absolute path resolves to itself). The program is the first token as the runner splits it, quotes honoured.
-function programPresent(worktree, command, onPath) {
+// worktree (an absolute path resolves to itself): core's one probe. The program is the first token as the runner splits it,
+// quotes honoured.
+function commandProgramPresent(worktree, command, onPath) {
   const [bin] = splitCmd(command, { root: worktree });
-  if (!bin) return false;
-  return bin.includes("/") || bin.includes(path.sep) ? fs.existsSync(path.resolve(worktree, bin)) : onPath(bin);
+  return bin ? programPresent(bin, worktree, onPath) : false;
 }
 
 // Whether one marker/command pair is usable in the tree: a null or empty
@@ -40,7 +40,7 @@ function programPresent(worktree, command, onPath) {
 export function gateUsable(worktree, marker, command, { onPath = binOnPath, justTargets = justSummary, markerOk = false } = {}) {
   if (typeof command !== "string" || !command.trim() || (!markerOk && !present(worktree, marker))) return false;
   const [bin, target] = command.trim().split(/\s+/);
-  if (bin !== "just") return programPresent(worktree, command, onPath);
+  if (bin !== "just") return commandProgramPresent(worktree, command, onPath);
   return onPath("just") && justTargets(worktree).includes(target || "default");
 }
 

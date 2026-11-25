@@ -928,14 +928,20 @@ export function splitCmd(str, context = null) {
   return splitTokens(str, context);
 }
 
+/** The one program probe (ARCH-STATE-20, ARCH-LAND-37): a bin containing a slash is an existing file resolved against `cwd`
+ * (an absolute path resolves to itself) and never looked up on PATH; a bare name is asked of `onPath`, which the quality hook
+ * makes the cached `which` and the merge gate a synchronous PATH scan. Returns what `onPath` returns for a bare name, so an
+ * async probe gives a promise. */
+export function programPresent(bin, cwd, onPath) {
+  return bin.includes("/") || bin.includes(path.sep) ? fs.existsSync(path.resolve(cwd, bin)) : onPath(bin);
+}
+
 // `toolCwd` is the resolved cwd of a language that names one (null otherwise:
-// the root, with the PATH probe as ever). A bin containing "/" is then looked
-// for against that directory, not the process's, and the tool runs there.
+// the root). The tool runs there, and a bin containing "/" is looked for
+// against that directory, not the process's.
 async function runOne(cmdTemplate, file, timeoutMs, context = null, toolCwd = null) {
   const [bin, ...args] = tokenize(cmdTemplate, file, context, toolCwd);
-  const present = toolCwd && (bin.includes("/") || bin.includes(path.sep))
-    ? fs.existsSync(path.resolve(toolCwd, bin))
-    : await have(bin);
+  const present = await programPresent(bin, toolCwd || context?.root || PROJECT_ROOT, have);
   if (!present) return { skipped: true, bin };
   try {
     const { stdout, stderr } = await pexec(bin, args, {
