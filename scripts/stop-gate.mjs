@@ -240,8 +240,8 @@ if (isDirty) {
   const scoped = [...new Set([...fromCommands, ...(cfg.stopGate?.extraChecks || []).filter(isScoped)])];
   let scopedSkipLogged = false;
   if (scoped.length) {
-    // A path that no longer exists is dropped first, so no check is handed it; a missing or unreadable list stays unknown (null).
-    const changed = readChanged(sdir)?.filter((f) => fs.existsSync(path.resolve(context.root, f))) ?? null;
+    // A line that does not resolve inside the root (`../x`, an absolute path elsewhere) is dropped, then a path that no longer exists, so no check is handed either; a missing or unreadable list stays unknown (null).
+    const changed = readChanged(sdir)?.filter((f) => { const abs = path.resolve(context.root, f), rel = path.relative(context.root, abs); return rel !== "" && rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel) && fs.existsSync(abs); }) ?? null;
     const unknown = [];
     const embedded = [];
     for (const cmd of scoped) {
