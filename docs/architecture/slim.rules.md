@@ -3,7 +3,7 @@ area: slim
 governs: ["commands/**", "agents/**", "skills/**", "scripts/doc-size-policy.mjs", "scripts/descriptions.test.mjs", "CHANGELOG.md"]
 human: docs/architecture/slim.md
 source: docs/ideas/feature-branch-plans.md
-verified_at: 5f41f3cb25f68b404c286e81519091bf16087242
+verified_at: 024461e2b1474f1177a5e772b8c186b92cabd149
 updated: 2026-11-25
 ---
 # ARCH slim — enforced rules
@@ -12,7 +12,7 @@ updated: 2026-11-25
 - **ARCH-SLIM-02** [superseded by ARCH-SLIM-17]
 - **ARCH-SLIM-03** [decided] Load is also capped per invocation: a command's bytes plus every shared doc it reads unconditionally; doc-size-policy reports and caps the total per command — check: doc-size-policy per-invocation table — cite: scripts/doc-size-policy.mjs:103-140,164-193
 - **ARCH-SLIM-04** [decided] Detail that applies only under a config or plan condition lives in a reference doc read at the point of need, never in the always-read body — check: Read placement review — cite: commands/_shared-execution.md:6
-- **ARCH-SLIM-05** [decided] Duplicate prose is removed in this order: delete what a hook or script enforces; else move it into a doc the command already reads; never into a newly loaded doc. Call-site directives kept on purpose are asserted in a test — check: wiring.test.mjs prose assertions — cite: scripts/wiring.test.mjs:152-160
+- **ARCH-SLIM-05** [decided] Duplicate prose is removed in this order: delete what a hook or script enforces; else move it into a doc the command already reads; never into a newly loaded doc. Call-site directives kept on purpose are asserted in a test — check: wiring.test.mjs prose assertions — cite: scripts/wiring.test.mjs:150-162
 - **ARCH-SLIM-06** [superseded by ARCH-SLIM-18]
 - **ARCH-SLIM-07** [decided] Scripts have no hard byte cap: CI warns when the scripts/ source total grows, and hook latency (quality gate, pre-guard, stop-gate p50/p95 in stats.mjs) is the hard budget under hooks.json timeouts — check: stats latency section — cite: scripts/stats.mjs:34-51
 - **ARCH-SLIM-08** [decided] CHANGELOG.md [Unreleased] stays under 8 KB; a release is cut before it grows past that — check: changelog size test — cite: CHANGELOG.md:7
@@ -21,7 +21,7 @@ updated: 2026-11-25
 - **ARCH-SLIM-11** [superseded by ARCH-SLIM-13]
 - **ARCH-SLIM-12** [superseded by ARCH-SLIM-14]
 - **ARCH-SLIM-13** [superseded by ARCH-SLIM-15]
-- **ARCH-SLIM-14** [decided] The documented entry points are /idea, /architect, /auto, /investigate, /sync-docs, /merge, /init, /upgrade, /stats and /digest; the loop commands /auto drives through the Skill tool (/plan, /orchestrate, /scrutinise) stay model-invocable; a command carries disable-model-invocation only when it is user-only and no command, agent, workflow or hook invokes it (toggle, builtin-check and account-switch today), and further flags are added only after entry-surface.test.mjs proves nothing calls the command; a command is deleted only after 30 days with no invocation in telemetry; the reviewer agents listed in entry-surface.test.mjs carry maxTurns — check: entry-surface.test.mjs flagged-set and no-invoker checks — cite: scripts/entry-surface.test.mjs:1-59
+- **ARCH-SLIM-14** [decided] The documented entry points are /idea, /architect, /auto, /investigate, /sync-docs, /merge, /init, /upgrade, /stats and /digest; the loop commands /auto drives through the Skill tool (/plan, /orchestrate, /scrutinise) stay model-invocable; a command carries disable-model-invocation only when it is user-only and no command, agent, workflow or hook invokes it (toggle, builtin-check and account-switch today), and further flags are added only after entry-surface.test.mjs proves nothing calls the command; a command is deleted only after 30 days with no invocation in telemetry; the reviewer agents listed in entry-surface.test.mjs carry maxTurns — check: entry-surface.test.mjs flagged-set and no-invoker checks — cite: scripts/entry-surface.test.mjs:1-80
 - **ARCH-SLIM-15** [superseded by ARCH-SLIM-19]
 - **ARCH-SLIM-16** [superseded by ARCH-SLIM-17]
 - **ARCH-SLIM-17** [decided] Caps ratchet: each cap is the file's size when set and may only be lowered, except through a trade recorded in CAP_TRADES in scripts/doc-size-policy.mjs ({raise, lower, bytes, rule, decided}): the ratchet accepts a rise in a file's cap only when an entry names that file as `raise`, the rise is at most `bytes`, the `lower` file is one some invocation loads (a command, commands/*.md, or a doc in its INVOCATION_DOCS; not necessarily the invocation that loads the raised file) and its cap fell by at least `bytes` against the merge-base, and the entry cites the owner-approved rule; one fall pays one trade, and when several entries cover one raise the ratchet binds the one whose lower file is paid; trades decided under ARCH-SLIM-16 keep their rule id (owner decision 2026-11-04, followup-ratchet-lower-pairing) — check: doc-size-policy.test.mjs ratchet refuses an unrecorded rise, an over-sized rise, an unpaid trade and a lower file no invocation loads, and binds the paid trade when several cover one raise — cite: scripts/doc-size-policy.mjs:201-247
