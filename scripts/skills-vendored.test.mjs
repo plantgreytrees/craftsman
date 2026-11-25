@@ -1,7 +1,7 @@
-// ARCH-SLIM-19: no third-party plugin is a dependency, and a vendored skill
-// carries MIT attribution, a short description, and no call into the plugin it
-// came from. Vendored skills are found by their attribution line, so one added
-// later is checked without editing this file.
+// ARCH-SLIM-19: no third-party plugin is a dependency, and every skill vendored
+// from obra/superpowers (found by its MIT attribution line, so one added later is
+// checked without editing this file) keeps a short description and makes no call
+// into the plugin it came from.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -36,7 +36,6 @@ for (const name of vendoredSkills(ROOT)) {
     const text = fs.readFileSync(path.join(ROOT, "skills", name, "SKILL.md"), "utf8");
     const desc = text.match(/^description:\s*(.*)$/m)?.[1].trim();
     assert.ok(desc && desc.length <= 110, `description ${desc?.length} chars`);
-    assert.match(text, ATTRIBUTION);
     assert.doesNotMatch(text, /superpowers:|Skill\(|install/i);
   });
 }
