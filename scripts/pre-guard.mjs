@@ -1980,10 +1980,13 @@ if (tool === "Bash" && command) {
 
 // What a doc-guard refusal tells the model to do. A session that already ran a doc-writing command only lacks the grant
 // (it lapsed or was never taken), so the redirect to /craftsman:plan would send it round in a circle: lead with the re-grant.
+// A session with a live unit scope (worktree_path set) is an implementer: its doc-writer record is the root's, so the re-grant
+// is not its to run and the /craftsman:plan redirect stays.
 // Text only: the allow/deny decision and the exit code are not read from here (ARCH-STATE-16).
 function docGuardAdvice(sid, kind) {
   const grant = `node "\${CLAUDE_PLUGIN_ROOT}/scripts/doc-write.mjs" on`;
-  if (commandInvoked(sid, DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } }))
+  const inUnit = activeScopes(input).some((scope) => scope.worktree_path);
+  if (!inUnit && commandInvoked(sid, DOC_WRITER_COMMANDS, { context: { stateDir: STATE_DIR } }))
     return `this session already ran a doc-writing command; re-grant with: ${grant}`;
   return kind === "write"
     ? `Do NOT write it directly. Hand the change to /craftsman:plan (plan docs + tracker rows) — or whichever command this repo's config designates for this path. If you ARE that command, first run: ${grant}`
