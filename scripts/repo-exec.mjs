@@ -11,7 +11,7 @@ import { currentState, transition } from "./tracker.mjs";
 import { autoArchive } from "./lib/archive.mjs";
 import { afterLand, afterUnitLand, assertMergeAllowed, gateFeature, gatePark, noteUnenforced } from "./lib/approval-gate.mjs";
 import { findGateCommand } from "./lib/gate-command.mjs";
-import { embeddedChangePlaceholder, expandChangePlaceholders, hasChangePlaceholder } from "./lib/changed.mjs";
+import { MAX_ARGV_BYTES, embeddedChangePlaceholder, expandChangePlaceholders, hasChangePlaceholder } from "./lib/changed.mjs";
 import { NeedsNetwork, drainQueue, enqueueDelete, enqueuePush, isUnreachable, networkError, networkMode, readQueue, recordFetch, remote, requireFreshRef, scrub } from "./lib/network.mjs";
 
 function run(root, args, options = {}) {
@@ -348,6 +348,9 @@ function gateArgv(command, worktree, ref) {
   return expandChangePlaceholders(command, files, { cwd: worktree, root: worktree });
 }
 
+// A gate that produced no output (a program that cannot start, a timeout) still says why it failed.
+const spawnFailure = (error) => gateOutput(error) || `${error.code ?? error.name}: ${error.message}`;
+
 // Re-runs the tests in the worktree before merging; only config
 // (`repoExec.verifyTestsBeforeMerge` / `stopGate.enabled` false) skips it. `ref` is the branch the worktree lands onto.
 function verifyGateBeforeMerge(context, worktree, ref) {
@@ -361,12 +364,13 @@ function verifyGateBeforeMerge(context, worktree, ref) {
     logEvent({ ev: "pre_merge_gate", skipped: true, reason: expanded.skip, ref, worktree }, context);
     return;
   }
+  if (expanded.overCap) throw new Error(`pre-merge gate failed — "${command}" was not run: the change list (${expanded.overCap.files} files, ${expanded.overCap.bytes} bytes of arguments) is past the ${MAX_ARGV_BYTES}-byte argv cap; run the suite unscoped`);
   const [bin, ...args] = expanded.argv;
   const timeoutMs = cfg.stopGate?.testTimeoutMs ?? 250000;
   try {
     execFileSync(bin, args, { cwd: worktree, timeout: timeoutMs, stdio: ["ignore", "pipe", "pipe"] });
   } catch (error) {
-    throw new Error(`pre-merge gate failed — "${command}" did not pass in ${worktree}:\n${gateOutput(error)}`);
+    throw new Error(`pre-merge gate failed — "${command}" did not pass in ${worktree}:\n${spawnFailure(error)}`);
   }
 }
 
