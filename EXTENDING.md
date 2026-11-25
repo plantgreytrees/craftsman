@@ -205,8 +205,8 @@ folder as `cwd` (root-relative) whenever it is not the root.
   in the tree, not only at the top level, and the first usable match wins. A git
   checkout is matched over its tracked files and its untracked files that are not
   ignored, so a marker only in a gitignored folder selects the command at neither gate;
-  a tree that is not a git checkout is walked instead
-  (`.git` and `node_modules` are not entered and a symlink is not followed). In a repo whose only
+  a tree that is not a git checkout is walked instead (the pre-merge gate's walk does
+  not enter `.git` or `node_modules` and follows no symlink). In a repo whose only
   `package.json` is under `services/api/`, the scoped check runs at both. A
   command with no placeholder still needs its marker at the top level of the
   worktree, and when no command is usable the pre-merge gate lands without one (it
