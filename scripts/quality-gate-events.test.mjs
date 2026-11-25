@@ -193,3 +193,23 @@ test("quality-gate: a relative file_path that is not under the root is judged ag
     fs.rmSync(elsewhere, { recursive: true, force: true });
   }
 });
+
+// ARCH-STATE-21: the change list holds the in-root path of an edit, so a file_path spelled through a symlinked alias of the
+// root (path.relative would give "../...") still joins it.
+test("quality-gate: an edit through a symlinked root alias is recorded as the in-root path (ARCH-STATE-21)", () => {
+  const dir = fs.realpathSync(makeRoot(PASS));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "quality-gate-alias-"));
+  try {
+    const alias = path.join(scratch, "alias");
+    fs.symlinkSync(dir, alias, "dir");
+    fs.mkdirSync(path.join(dir, "svc"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "svc", "a.fx"), "x\n");
+    const r = runHook(dir, "qg-alias", path.join(alias, "svc", "a.fx"), dir);
+    assert.equal(r.status, 0, r.stderr);
+    const list = fs.readFileSync(path.join(dir, ".craftsman", "sessions", "qg-alias", "changed"), "utf8");
+    assert.equal(list, "svc/a.fx\n", "the aliased edit is recorded once, as the root-relative path");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
