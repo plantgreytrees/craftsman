@@ -106,6 +106,52 @@ test("gate-command: just behaves as before, its program being just and its targe
   assert.equal(gateUsable(dir, "justfile", "just check", { onPath: (b) => b !== "just", justTargets: () => ["check"] }), false);
 });
 
+// ARCH-LAND-38: a scoped command's marker is found anywhere in the worktree (Stop's nested lookup); an unscoped one's only at the root.
+const nested = (dir, file, text = "{}") => {
+  fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+  fs.writeFileSync(path.join(dir, file), text);
+};
+
+test("gate-command: a scoped command is found by a marker in a sub-directory", () => {
+  const dir = tree();
+  nested(dir, "services/api/package.json");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs {changed}"), only("node")), "node check.mjs {changed}");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs --dirs={changedDirs}"), only("node")), "node check.mjs --dirs={changedDirs}");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs {changedDirs}", "services/api/package.json"), only("node")), "node check.mjs {changedDirs}");
+});
+
+test("gate-command: a scoped command's glob marker matches at any depth, and a marker-less tree finds nothing", () => {
+  const dir = tree();
+  nested(dir, "src/App/App.sln");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs {changed}", "*.sln"), only("node")), "node check.mjs {changed}");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs {changed}", "go.mod"), only("node")), null);
+  // A marker that only ends the same way is not the marker: Stop matches whole path segments.
+  nested(dir, "src/x-go.mod");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs {changed}", "go.mod"), only("node")), null);
+});
+
+test("gate-command: the nested lookup skips .git and node_modules", () => {
+  const dir = tree();
+  nested(dir, "node_modules/dep/package.json");
+  nested(dir, ".git/hooks/package.json");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs {changed}"), only("node")), null);
+});
+
+test("gate-command: an unscoped command still needs its marker at the root", () => {
+  const dir = tree();
+  nested(dir, "services/api/package.json");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs"), only("node")), null);
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs --all"), only("node")), null);
+  nested(dir, "package.json");
+  assert.equal(findGateCommand(dir, cfgOf("node check.mjs"), only("node")), "node check.mjs");
+});
+
+test("gate-command: a scoped command with a nested marker is still skipped when its program is absent", () => {
+  const dir = tree();
+  nested(dir, "services/api/package.json");
+  assert.equal(findGateCommand(dir, cfgOf("craftsman-no-such-program {changed}"), only("node")), null);
+});
+
 // {workspaceRoot} follows the worktree (ARCH-STATE-19). PROJECT_ROOT is fixed when core loads, so these run gate-command
 // in a child node whose cwd is a scratch repository standing in for the workspace root.
 import { spawnSync } from "node:child_process";
