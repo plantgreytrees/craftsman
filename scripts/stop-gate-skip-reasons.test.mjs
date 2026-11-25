@@ -1,4 +1,4 @@
-// ARCH-STATE-22: a dirty Stop that queues no test says why (`stop-tests-skipped` with a reason), the clean path
+// ARCH-STATE-24: a dirty Stop that queues no test says why (`stop-tests-skipped` with a reason), the clean path
 // still says `clean`, and the `stop` / `stop-tests-skipped` events name the project they ran for.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -75,7 +75,7 @@ const REASONS = [
 test("stop-gate: the reason table has seven entries (ARCH-STATE-24)", () => assert.equal(REASONS.length, 7));
 
 for (const [reason, state, why] of REASONS) {
-  test(`stop-gate: ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-22)`, async () => {
+  test(`stop-gate: ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-24)`, async () => {
     const dir = makeFixture();
     try {
       seed(dir, "skip", state);
@@ -89,7 +89,7 @@ for (const [reason, state, why] of REASONS) {
 }
 
 // No session-start.json: Stop reads whether SessionStart started a snapshot (the snapshot-started marker session-context.mjs
-// writes where it spawns snapshot.mjs), never config (ARCH-STATE-22). Marker present: the snapshot has not produced a result
+// writes where it spawns snapshot.mjs), never config (ARCH-STATE-24). Marker present: the snapshot has not produced a result
 // (still running, or dropped because files changed while it ran) -> snapshot-pending. Marker absent: none was started -> no-command.
 const PKG = { "package.json": "{}\n" };
 const SESSION_CONTEXT_PATH = fileURLToPath(new URL("./session-context.mjs", import.meta.url));
@@ -148,7 +148,7 @@ const UNSEEDED = [
 ];
 
 for (const [reason, stopGate, files, before, why] of UNSEEDED) {
-  test(`stop-gate: no session-start.json and ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-22)`, async () => {
+  test(`stop-gate: no session-start.json and ${why} -> exactly one stop-tests-skipped with reason ${reason} (ARCH-STATE-24)`, async () => {
     const dir = makeFixture(stopGate, files);
     try {
       before(dir, "unseeded");
@@ -163,7 +163,7 @@ for (const [reason, stopGate, files, before, why] of UNSEEDED) {
   });
 }
 
-test("stop-gate: a markerless repo logs no-command on every dirty Stop of the session, never snapshot-pending (ARCH-STATE-22)", async () => {
+test("stop-gate: a markerless repo logs no-command on every dirty Stop of the session, never snapshot-pending (ARCH-STATE-24)", async () => {
   const dir = makeFixture();
   try {
     seed(dir, "twice", { dirty: true });
@@ -173,7 +173,7 @@ test("stop-gate: a markerless repo logs no-command on every dirty Stop of the se
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("stop-gate: a dirty Stop that runs a test logs no stop-tests-skipped, even beside a red command (ARCH-STATE-22)", async () => {
+test("stop-gate: a dirty Stop that runs a test logs no stop-tests-skipped, even beside a red command (ARCH-STATE-24)", async () => {
   const dir = makeFixture();
   try {
     seed(dir, "ran", { dirty: true, start: { results: [{ cmd: "node -e 1", green: false }, { cmd: "node -e 0", green: true }] } });
@@ -183,7 +183,7 @@ test("stop-gate: a dirty Stop that runs a test logs no stop-tests-skipped, even 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("stop-gate: the stop event carries project \".\" on both the pass and the block path (ARCH-STATE-22)", async () => {
+test("stop-gate: the stop event carries project \".\" on both the pass and the block path (ARCH-STATE-24)", async () => {
   const pass = makeFixture();
   const block = makeFixture({ extraChecks: ['node -e "process.exit(1)"'] });
   try {
@@ -203,11 +203,11 @@ test("stop-gate: the stop event carries project \".\" on both the pass and the b
   }
 });
 
-test("stop-gate: inside a unit scope the stop and skip events carry the scope's project id (ARCH-STATE-22)", async () => {
+test("stop-gate: inside a unit scope the stop and skip events carry the scope's project id (ARCH-STATE-24)", async () => {
   await underScope("scoped", async (dir, unitRoot) => {
     const sid = "scoped";
     seed(unitRoot, sid, { dirty: true });
-    seed(dir, sid, { start: { results: [] } }); // the baseline sits in the root context's directory (ARCH-STATE-22)
+    seed(dir, sid, { start: { results: [] } }); // the baseline sits in the root context's directory (ARCH-STATE-24)
     const { events } = await runStop(dir, sid);
     const [skip] = skipped(events);
     assert.equal(skip.reason, "no-command");
@@ -217,7 +217,7 @@ test("stop-gate: inside a unit scope the stop and skip events carry the scope's 
   });
 });
 
-// ARCH-STATE-22: SessionStart and snapshot.mjs write session-start.json and snapshot-started at the project ROOT's session directory.
+// ARCH-STATE-24: SessionStart and snapshot.mjs write session-start.json and snapshot-started at the project ROOT's session directory.
 // Stop reads those two from the root only when the scope's root belongs to the same repository (a unit's worktree does); a workspace
 // sub-project is a separate repository, so it has no baseline and reads neither. `dirty`, the change list and the scoped-task state
 // stay in the scope's own directory either way, where quality-gate.mjs writes them.
@@ -265,7 +265,7 @@ const subProjectScope = (sid, run) => withScope(sid, () => makeFixture(), run);
 // A scope root that is not a git repository.
 const plainDirScope = (sid, run) => withScope(sid, addPlainDir, run);
 
-test("stop-gate: under a unit scope a green session-start.json in the root's directory queues the regression command and logs no skip (ARCH-STATE-22)", async () => {
+test("stop-gate: under a unit scope a green session-start.json in the root's directory queues the regression command and logs no skip (ARCH-STATE-24)", async () => {
   await underScope("base", async (dir, unitRoot) => {
     seed(dir, "base", { start: RED_NOW });
     seed(unitRoot, "base", { dirty: true });
@@ -277,7 +277,7 @@ test("stop-gate: under a unit scope a green session-start.json in the root's dir
 });
 
 // The command is re-run in the scope's tree, which the baseline never measured: the block and its text stay, and the line names both trees.
-test("stop-gate: under a unit worktree scope the REGRESSION keeps its text and names the tree the baseline was taken in (ARCH-STATE-22)", async () => {
+test("stop-gate: under a unit worktree scope the REGRESSION keeps its text and names the tree the baseline was taken in (ARCH-STATE-24)", async () => {
   await underScope("tree", async (dir, unitRoot) => {
     seed(dir, "tree", { start: RED_NOW });
     seed(unitRoot, "tree", { dirty: true });
@@ -292,7 +292,7 @@ test("stop-gate: under a unit worktree scope the REGRESSION keeps its text and n
   });
 });
 
-test("stop-gate: under a scope whose root is the root's own the REGRESSION line has no tree note (ARCH-STATE-22)", async () => {
+test("stop-gate: under a scope whose root is the root's own the REGRESSION line has no tree note (ARCH-STATE-24)", async () => {
   await withScope("same", (dir) => dir, async (dir) => {
     seed(dir, "same", { dirty: true, start: RED_NOW });
     const { stdout, events } = await runStop(dir, "same");
@@ -303,7 +303,7 @@ test("stop-gate: under a scope whose root is the root's own the REGRESSION line 
   });
 });
 
-test("stop-gate: under a unit scope a snapshot-started marker in the root's directory makes a baseline-less dirty Stop snapshot-pending (ARCH-STATE-22)", async () => {
+test("stop-gate: under a unit scope a snapshot-started marker in the root's directory makes a baseline-less dirty Stop snapshot-pending (ARCH-STATE-24)", async () => {
   await underScope("pend", async (dir, unitRoot) => {
     markStarted(dir, "pend");
     seed(unitRoot, "pend", { dirty: true });
@@ -330,7 +330,7 @@ test("stop-gate: a snapshot-dropped marker beside a session-start.json is not a 
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("stop-gate: under a unit scope the baseline is the root's alone: one in the scope's own directory is not read (ARCH-STATE-22)", async () => {
+test("stop-gate: under a unit scope the baseline is the root's alone: one in the scope's own directory is not read (ARCH-STATE-24)", async () => {
   await underScope("own", async (dir, unitRoot) => {
     seed(unitRoot, "own", { dirty: true, start: RED_NOW });
     const { stdout, events } = await runStop(dir, "own");
@@ -339,7 +339,7 @@ test("stop-gate: under a unit scope the baseline is the root's alone: one in the
   });
 });
 
-test("stop-gate: under a unit scope `dirty` is the scope's: one in the root's directory does not make the Stop dirty (ARCH-STATE-22)", async () => {
+test("stop-gate: under a unit scope `dirty` is the scope's: one in the root's directory does not make the Stop dirty (ARCH-STATE-24)", async () => {
   await underScope("flag", async (dir, unitRoot) => {
     seed(dir, "flag", { dirty: true, start: RED_NOW });
     seed(unitRoot, "flag", {});
@@ -349,7 +349,7 @@ test("stop-gate: under a unit scope `dirty` is the scope's: one in the root's di
   });
 });
 
-test("stop-gate: without a scope the baseline and the dirty marker are read from the one session directory, as before (ARCH-STATE-22)", async () => {
+test("stop-gate: without a scope the baseline and the dirty marker are read from the one session directory, as before (ARCH-STATE-24)", async () => {
   const dir = makeFixture();
   try {
     seed(dir, "flat", { dirty: true, start: RED_NOW });
@@ -364,7 +364,7 @@ test("stop-gate: without a scope the baseline and the dirty marker are read from
 
 // A workspace sub-project (scope.mjs requires its root to be a Git root) is a separate repository: the root's session-start.json and
 // snapshot-started marker describe the root's repository, so Stop reads neither for it and never runs the root's commands in it.
-test("stop-gate: under a sub-project scope a green session-start.json in the root's directory queues nothing: no-command, no REGRESSION (ARCH-STATE-22)", async () => {
+test("stop-gate: under a sub-project scope a green session-start.json in the root's directory queues nothing: no-command, no REGRESSION (ARCH-STATE-24)", async () => {
   await subProjectScope("subbase", async (dir, svc) => {
     seed(dir, "subbase", { start: RED_NOW });
     seed(svc, "subbase", { dirty: true });
@@ -375,7 +375,7 @@ test("stop-gate: under a sub-project scope a green session-start.json in the roo
   });
 });
 
-test("stop-gate: under a sub-project scope a snapshot-started marker in the root's directory does not make a baseline-less dirty Stop snapshot-pending (ARCH-STATE-22)", async () => {
+test("stop-gate: under a sub-project scope a snapshot-started marker in the root's directory does not make a baseline-less dirty Stop snapshot-pending (ARCH-STATE-24)", async () => {
   await subProjectScope("subpend", async (dir, svc) => {
     markStarted(dir, "subpend");
     seed(svc, "subpend", { dirty: true });
@@ -384,7 +384,7 @@ test("stop-gate: under a sub-project scope a snapshot-started marker in the root
   });
 });
 
-test("stop-gate: a scope root that is not a git repository counts as a different repository: the root's baseline is not read (ARCH-STATE-22)", async () => {
+test("stop-gate: a scope root that is not a git repository counts as a different repository: the root's baseline is not read (ARCH-STATE-24)", async () => {
   await plainDirScope("plain", async (dir, plain) => {
     seed(dir, "plain", { start: RED_NOW });
     markStarted(dir, "plain");
@@ -400,7 +400,7 @@ test("stop-gate: a scope root that is not a git repository counts as a different
 const UNLOADABLE_MANIFEST = "{ not json\n";
 const NO_BASELINE_NOTICE = /craftsman: stop-gate skipped the session-start baseline lookup \(the workspace manifest could not be read: invalid workspace manifest .*craftsman\.workspace\.json: .*\), advisory only/;
 
-test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded exits 0, looks up no baseline and says so once (ARCH-STATE-22, ARCH-SAFETY-04)", async () => {
+test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded exits 0, looks up no baseline and says so once (ARCH-STATE-24, ARCH-SAFETY-04)", async () => {
   await underScope("nomanifest", async (dir, unitRoot) => {
     fs.writeFileSync(path.join(dir, "craftsman.workspace.json"), UNLOADABLE_MANIFEST);
     seed(dir, "nomanifest", { start: RED_NOW }); // a baseline exists at the root, but the lookup cannot reach it
@@ -424,7 +424,7 @@ test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded exits 0
   });
 });
 
-test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded still runs its gate: a failing guard blocks, the notice rides in the same document, once (ARCH-STATE-22, ARCH-SAFETY-04)", async () => {
+test("stop-gate: a scoped Stop whose workspace manifest cannot be loaded still runs its gate: a failing guard blocks, the notice rides in the same document, once (ARCH-STATE-24, ARCH-SAFETY-04)", async () => {
   await underScope("nomanifest-gate", async (dir, unitRoot) => {
     fs.writeFileSync(path.join(dir, "craftsman.workspace.json"), UNLOADABLE_MANIFEST);
     seed(unitRoot, "nomanifest-gate", { dirty: true });

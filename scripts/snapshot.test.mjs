@@ -68,7 +68,7 @@ function startingTree(root) {
   return createHash("sha1").update(`${git("rev-parse", "HEAD").trim()}\n${status}`).digest("hex");
 }
 
-// SessionStart writes snapshot-started after it takes the hash (ARCH-STATE-22): the state a real start adds to the tree.
+// SessionStart writes snapshot-started after it takes the hash (ARCH-STATE-24): the state a real start adds to the tree.
 const writeStarted = (root, sid) => put(root, `.craftsman/sessions/${sid}/snapshot-started`, String(Date.now()));
 const porcelain = (root) => spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: root, encoding: "utf8" }).stdout;
 
@@ -217,11 +217,11 @@ test("snapshot: a dropped snapshot makes the next dirty Stop log snapshot-droppe
   assert.deepEqual(dirtyStop(root, "snap-drop-stop"), ["snapshot-dropped"]);
 });
 
-// ARCH-STATE-22: a command whose program is not installed was never a red test, so it is skipped like a scoped command: no
+// ARCH-STATE-24: a command whose program is not installed was never a red test, so it is skipped like a scoped command: no
 // entry in session-start.json, and Stop has nothing to call red-at-start.
 const MISSING = `craftsman-no-such-program-${process.pid}-${Date.now()}`;
 
-test("snapshot: a command whose program is not installed leaves no entry in session-start.json (ARCH-STATE-22)", () => {
+test("snapshot: a command whose program is not installed leaves no entry in session-start.json (ARCH-STATE-24)", () => {
   const root = fixture({ "plain.fixture": "node QUIET plain", "missing.fixture": `${MISSING} --run` });
   const r = snapshot(root, "snap-enoent");
   assert.equal(r.status, 0, r.stderr);
@@ -230,14 +230,14 @@ test("snapshot: a command whose program is not installed leaves no entry in sess
   assert.equal(results[0].green, true);
 });
 
-test("snapshot: a command that is installed but exits non-zero is still recorded red (ARCH-STATE-22)", () => {
+test("snapshot: a command that is installed but exits non-zero is still recorded red (ARCH-STATE-24)", () => {
   const root = fixture({ "red.fixture": `node -e process.exit(1)` });
   assert.equal(snapshot(root, "snap-red").status, 0);
   assert.deepEqual(readStart(root, "snap-red").results.map((x) => x.green), [false]);
 });
 
 // ARCH-ENGINE-22: a missing program is no gate command at all (gateUsable), so no command is found to snapshot and no session-start.json is written.
-test("snapshot: with only a missing program no session-start.json is written and Stop logs no-command, never red-at-start (ARCH-STATE-22)", () => {
+test("snapshot: with only a missing program no session-start.json is written and Stop logs no-command, never red-at-start (ARCH-STATE-24)", () => {
   const root = fixture({ "missing.fixture": `${MISSING} --run` });
   assert.equal(snapshot(root, "snap-gone").status, 0);
   assert.equal(fs.existsSync(startFile(root, "snap-gone")), false, "no usable command, so no baseline file");

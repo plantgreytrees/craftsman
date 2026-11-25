@@ -34,7 +34,7 @@ for (const cmd of entries) {
   const [bin, ...args] = splitCmd(cmd, context);
   let green = false;
   try { await pexec(bin, args, { timeout: cfg.stopGate?.testTimeoutMs ?? 250000, maxBuffer: 8e6, cwd: context.root }); green = true; } catch (error) {
-    // A program that is not installed was never a red test: skipped like a scoped command, so Stop has no baseline entry to call red-at-start (ARCH-STATE-22).
+    // A program that is not installed was never a red test: skipped like a scoped command, so Stop has no baseline entry to call red-at-start (ARCH-STATE-24).
     if (error?.code === "ENOENT") continue;
   }
   results.push({ cmd, green });
