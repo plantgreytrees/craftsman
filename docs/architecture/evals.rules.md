@@ -3,12 +3,12 @@ area: evals
 governs: ["evals/**", "scripts/evals.test.mjs"]
 human: docs/architecture/evals.md
 source: docs/ideas/plugin-behaviour-evals.md
-verified_at: 365bca1d8961db78765e726f5ce32aa4eec16c7a
+verified_at: 658b347ca7fd2679a16f250949c7b945d0b655cc
 updated: 2026-11-25
 ---
 # ARCH evals — enforced rules
 
-- **ARCH-EVALS-01** [decided] Behaviour evals MUST run on first-party `claude plugin eval` with cases under evals/ as prompt.md plus graders/*.md; a case.yaml is allowed only for `context` fields and MUST NOT carry `graders`; no third-party harness, npm dependency or `experimental.evals` manifest key — check: evals.test.mjs walks evals/ for only those files and rejects a `graders:` key in case.yaml; plugin.json has no `experimental` or `dependencies` key — cite: scripts/evals.test.mjs:81-82,114-117
+- **ARCH-EVALS-01** [decided] Behaviour evals MUST run on first-party `claude plugin eval` with cases under evals/ as prompt.md plus graders/*.md; a case.yaml is allowed only for `context` fields and MUST NOT carry `graders`; no third-party harness, npm dependency or `experimental.evals` manifest key — check: evals.test.mjs walks evals/ for only those files and rejects a `graders:` key in case.yaml; plugin.json has no `experimental` or `dependencies` key — cite: scripts/evals.test.mjs:81-101,114-117
 - **ARCH-EVALS-02** [decided] Every grader MUST be deterministic: type tool_used, tool_order, file_exists or regex; no llm or baseline grader — check: evals.test.mjs fails on any other `type:` in graders/*.md frontmatter — cite: scripts/evals.test.mjs:15,109
 - **ARCH-EVALS-03** [superseded by ARCH-EVALS-08]
 - **ARCH-EVALS-04** [decided] The suite MUST hold exactly one hook smoke case, tagged `hook`: it asks Claude to quote the `craftsman guards:` line its SessionStart hook injects, graded by a regex on last_message, with no tool grants; guard behaviour itself stays covered by scripts/*.test.mjs and MUST NOT be re-tested in evals — check: evals.test.mjs counts cases tagged `hook` = 1 and finds no `allowed_tools` beyond read-only in it — cite: scripts/session-context.mjs:303

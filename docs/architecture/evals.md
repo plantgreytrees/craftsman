@@ -3,7 +3,7 @@
 > and `/architect --update evals` should be run.
 
 # Behaviour evals architecture
-_Last verified: 2026-11-25 at `365bca1` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
+_Last verified: 2026-11-25 at `658b347` · Source idea: [plugin-behaviour-evals](../ideas/plugin-behaviour-evals.md)_
 
 ## In plain English
 Craftsman's behaviour lives mostly in prose that the model reads. The unit tests
