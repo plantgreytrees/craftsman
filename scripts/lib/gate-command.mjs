@@ -6,7 +6,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { splitCmd } from "./core.mjs";
+import { splitCmd, globToRe } from "./core.mjs";
+import { isScoped } from "./changed.mjs";
 
 export function binOnPath(bin) {
   return (process.env.PATH || "").split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, bin)));
@@ -43,9 +44,32 @@ export function gateUsable(worktree, marker, command, { onPath = binOnPath, just
   return onPath("just") && justTargets(worktree).includes(target || "default");
 }
 
+// Whether `marker` exists anywhere in the worktree, with markerPresent's semantics (core.mjs) over a synchronous walk of the
+// tree: a bare name matches a path segment at any depth, a glob without a slash matches a file name at any depth, a glob
+// with a slash matches the relative path. `.git` and `node_modules` are not entered; a symlink is never followed.
+function presentAnywhere(worktree, marker) {
+  const re = marker.includes("*") ? globToRe(marker.includes("/") ? marker : "**/" + marker) : null;
+  const matches = (rel) => (re ? re.test(rel) : rel === marker || rel.endsWith("/" + marker));
+  const walk = (dir, prefix) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+    for (const entry of entries) {
+      const rel = prefix + entry.name;
+      if (matches(rel)) return true;
+      if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules" && walk(path.join(dir, entry.name), rel + "/")) return true;
+    }
+    return false;
+  };
+  return walk(worktree, "");
+}
+
+// A scoped command (`{changed}` / `{changedDirs}`, ARCH-STATE-21) is selected when its marker is anywhere in the worktree, as
+// Stop selects it; an unscoped command only when its marker is at the root (ARCH-LAND-38).
 export function findGateCommand(worktree, cfg, deps = {}) {
   for (const [marker, command] of Object.entries(cfg?.stopGate?.commands || {})) {
-    if (gateUsable(worktree, marker, command, deps)) return command;
+    if (isScoped(command)) {
+      if (presentAnywhere(worktree, marker) && gateUsable(worktree, marker, command, { ...deps, markerOk: true })) return command;
+    } else if (gateUsable(worktree, marker, command, deps)) return command;
   }
   return null;
 }

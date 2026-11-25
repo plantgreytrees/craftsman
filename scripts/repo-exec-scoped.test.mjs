@@ -410,3 +410,35 @@ test("merge: a branch that adds -x.js lands with the gate receiving ./-x.js, nev
     assert.deepEqual(t.gateEvents(), []);
   } finally { cleanup(t); }
 });
+
+// ARCH-LAND-38: a service in a sub-directory has no root marker, yet its scoped gate is selected and runs.
+test("merge: a branch under a nested service lands through the scoped gate, which runs", () => {
+  const t = fixture("");
+  try {
+    const log = path.join(t.root, ".craftsman", "gate.log");
+    write(t.root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": null, "service.json": `node gate.mjs ${log} {changed}` } } }));
+    commit(t.root, "scoped gate on a nested service marker");
+    const u = unit(t, (wt) => { write(wt, "services/api/service.json", "{}\n"); write(wt, "services/api/main.js"); });
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    const runs = t.runs();
+    assert.equal(runs.length, 1, "the nested-marker scoped gate ran");
+    assert.deepEqual(runs[0].argv, ["services/api/main.js", "services/api/service.json"]);
+    assert.deepEqual(t.gateEvents(), []);
+  } finally { cleanup(t); }
+});
+
+test("merge: an unscoped gate whose marker is only nested is still not selected, and the skip is logged", () => {
+  const t = fixture("");
+  try {
+    const log = path.join(t.root, ".craftsman", "gate.log");
+    write(t.root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": null, "service.json": `node gate.mjs ${log}` } } }));
+    commit(t.root, "unscoped gate on a nested service marker");
+    const u = unit(t, (wt) => { write(wt, "services/api/service.json", "{}\n"); });
+    const r = merge(t.context, u.input, t.info);
+    assert.equal(r.merged, true);
+    assert.equal(t.runs().length, 0);
+    assert.equal(t.gateEvents().length, 1);
+    assert.equal(t.gateEvents()[0].reason, "no-command");
+  } finally { cleanup(t); }
+});
