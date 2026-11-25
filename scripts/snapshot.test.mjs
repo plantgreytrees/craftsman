@@ -101,6 +101,29 @@ test("snapshot: only the plain command is in session-start.json; the placeholder
   assert.equal(fs.readFileSync(ranLog(root), "utf8"), "plain\n", "the placeholder command was never started");
 });
 
+// ARCH-STATE-19: `{workspaceRoot}` in a stopGate command is the checkout the snapshot runs in when that is a unit worktree of the
+// root's own repository, so the baseline runs the branch's copy of a script kept at the workspace root, not the main checkout's.
+test("snapshot: a {workspaceRoot} command in a worktree context runs the worktree's script, not the main checkout's", () => {
+  const root = fixture({ "gate.fixture": "node {workspaceRoot}/gate.cjs" });
+  const gate = (who) => `require("node:fs").appendFileSync(require("node:path").join(process.cwd(), "ran.log"), ${JSON.stringify(who)} + "\\n");\n`;
+  put(root, "gate.cjs", gate("main"));
+  spawnSync("git", ["add", "-A"], { cwd: root });
+  spawnSync("git", ["commit", "-q", "-m", "gate script"], { cwd: root });
+  // The worktree sits inside the directory the manifest lives in, as a workspace project, with its own copy of the script.
+  const holder = scratch("snapshot-holder-");
+  const wt = path.join(holder, "wt");
+  const added = spawnSync("git", ["worktree", "add", "-q", "--detach", wt], { cwd: root, encoding: "utf8" });
+  assert.equal(added.status, 0, added.stderr);
+  put(wt, "gate.cjs", gate("worktree"));
+  const manifest = put(holder, "craftsman.workspace.json", JSON.stringify({ version: 1, projects: { unit: { root: "wt" } } }));
+  const r = spawnSync(process.execPath, [SNAPSHOT, "snap-wt", "unit", ""], { cwd: root, encoding: "utf8", env: { ...envFor(root), CRAFTSMAN_WORKSPACE_MANIFEST: manifest } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(ranLog(wt), "utf8"), "worktree\n", "the worktree's own gate.cjs ran, in the worktree");
+  assert.equal(fs.existsSync(ranLog(root)), false, "the main checkout's gate.cjs was not run");
+  const start = JSON.parse(fs.readFileSync(path.join(wt, ".craftsman", "sessions", "snap-wt", "session-start.json"), "utf8"));
+  assert.deepEqual(start.results, [{ cmd: "node {workspaceRoot}/gate.cjs", green: true }]);
+});
+
 test("snapshot: {changedDirs} commands are left out as well", () => {
   const root = fixture({
     "plain.fixture": "node STUB plain",
