@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Run the real checks and read their output before claiming done.
+description: Use before claiming work is complete, fixed or passing: run the real checks, read output.
 ---
 
 Adapted from obra/superpowers (MIT License). Standalone: needs no other plugin.
