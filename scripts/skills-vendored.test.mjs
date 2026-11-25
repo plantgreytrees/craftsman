@@ -7,7 +7,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SKILLS = ["test-driven-development", "systematic-debugging", "verification-before-completion"];
+// None vendored today: the three superpowers skills failed ARCH-EVALS-09 and were
+// removed (ARCH-EVALS-10, 2026-11-25). Name a skill here when one is vendored.
+const SKILLS = [];
 
 for (const name of SKILLS) {
   test(`${name} is vendored with attribution and a short description`, () => {
