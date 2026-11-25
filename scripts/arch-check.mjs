@@ -23,11 +23,11 @@
 // `--root <dir>` overrides the project root (defaults to the current project).
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { buildIndex, parseFrontmatter as parsePlanFrontmatter } from "./lib/plan-index.mjs";
 import { lintNext } from "./lib/next-queue.mjs";
 import { currentState } from "./tracker.mjs";
-import { PROJECT_ROOT, globToRe, isMain, loadConfig, projectContext, readStdin } from "./lib/core.mjs";
+import { PROJECT_ROOT, globToRe, isMain, loadConfig, loadWorkspaceManifest, projectContext, readStdin } from "./lib/core.mjs";
 
 export const DEFAULT_DIR = "docs/architecture";
 const RULE_LINE = /^\s*-\s+\*\*(ARCH-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d+)\*\*\s+\[([^\]]+)\]/;
@@ -328,10 +328,35 @@ export function unmanagedDocs(root, docs, dir = DEFAULT_DIR) {
   return found.sort();
 }
 
+// ARCH-DOCS-19: a root that is neither inside this session's repository nor a registered workspace project is another
+// repository. loadConfig would layer this session's config under it (ARCH-STATE-19) and replace its own architecture.dir
+// and budgets with ours, so such a root is read on its own.
+export function isForeignRoot(root, { sessionRoot = PROJECT_ROOT, manifest } = {}) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const inside = (parent, child) => child === parent || child.startsWith(parent + path.sep);
+  const target = real(root);
+  const session = real(sessionRoot);
+  if (inside(session, target)) return false;
+  const common = (dir) => { const out = gitOut(dir, ["rev-parse", "--git-common-dir"]); return out ? real(path.resolve(dir, out)) : null; };
+  const here = common(session);
+  if (here && here === common(target)) return false;
+  let registered = manifest;
+  if (registered === undefined) { try { registered = loadWorkspaceManifest(); } catch { registered = null; } }
+  if (registered && Object.values(registered.projects).some((p) => inside(real(p.root), target))) return false;
+  return true;
+}
+
 if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const rootFlag = args.indexOf("--root");
   const root = rootFlag >= 0 ? path.resolve(args.splice(rootFlag, 2)[1]) : PROJECT_ROOT;
+  if (rootFlag >= 0 && isForeignRoot(root)) {
+    // Run as that repository's own session: its PROJECT_ROOT is itself, so loadConfig reads its config files alone over the defaults.
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: root };
+    delete env.CRAFTSMAN_WORKSPACE_MANIFEST;
+    const child = spawnSync(process.execPath, [process.argv[1], ...args, "--root", root], { stdio: "inherit", env });
+    process.exit(child.status ?? 1);
+  }
   const cfg = loadConfig({ ...projectContext("."), root });
   const dir = cfg?.architecture?.dir || DEFAULT_DIR;
   const docs = loadRules(root, dir);

@@ -380,3 +380,54 @@ test("9.2 budgets: growth fails lint, shrink passes, new files default, enforce:
     assert.equal(lintBudgets(dir, cfg({ enforce: false }), base2).enforce, false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("other-repository --root: reads that repository's config alone, never the session's (ARCH-DOCS-19)", () => {
+  const rules = (dirName) => ({
+    [`${dirName}/auth.rules.md`]: AUTH_RULES,
+  });
+  const none = { "docs/architecture/auth.rules.md": null };
+  const session = project({ ...none, ...rules("docs/arch-session"),
+    "craftsman.config.json": JSON.stringify({ architecture: { dir: "docs/arch-session" } }) });
+  const own = project({ ...none, ...rules("specs/arch"),
+    "craftsman.project.json": JSON.stringify({ architecture: { dir: "specs/arch" } }) });
+  const plain = project();
+  const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-arch-ws-"));
+  const lint = (root, extra = {}) => spawnSync(process.execPath, [path.join(ROOT, "arch-check.mjs"), "lint", "--root", root], {
+    encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: session, ...extra },
+  });
+  const ok = /1 rules doc\(s\), 3 rule\(s\) — PASS/;
+  try {
+    // another repository with its own architecture.dir finds its rules docs
+    const a = lint(own);
+    assert.equal(a.status, 0, a.stderr);
+    assert.match(a.stdout, ok);
+    // another repository with no architecture.dir does not inherit the session's: it reads the default dir
+    const b = lint(plain);
+    assert.equal(b.status, 0, b.stderr);
+    assert.match(b.stdout, ok);
+    // the session root is unchanged: its own dir
+    const c = lint(session);
+    assert.equal(c.status, 0, c.stderr);
+    assert.match(c.stdout, ok);
+    // a root inside the session repository keeps the session layering (ARCH-STATE-19)
+    const inner = path.join(session, "pkg");
+    fs.mkdirSync(path.join(inner, "docs", "arch-session"), { recursive: true });
+    fs.writeFileSync(path.join(inner, "docs", "arch-session", "auth.rules.md"), AUTH_RULES);
+    fs.mkdirSync(path.join(inner, "docs", "architecture"), { recursive: true });
+    fs.writeFileSync(path.join(inner, "docs", "architecture", "auth.md"), "# Auth\n");
+    fs.cpSync(path.join(session, "src"), path.join(inner, "src"), { recursive: true });
+    const d = lint(inner);
+    assert.match(d.stdout, /1 rules doc\(s\)/, d.stderr);
+    // a registered workspace project keeps the layering too
+    const svc = path.join(wsDir, "svc");
+    fs.mkdirSync(path.join(svc, "docs", "arch-session"), { recursive: true });
+    spawnSync("git", ["init", "-q"], { cwd: svc });
+    fs.writeFileSync(path.join(wsDir, "craftsman.workspace.json"), JSON.stringify({ version: 1, projects: { svc: { root: "svc" } } }));
+    fs.writeFileSync(path.join(svc, "docs", "arch-session", "auth.rules.md"), AUTH_RULES);
+    fs.mkdirSync(path.join(svc, "docs", "architecture"), { recursive: true });
+    fs.writeFileSync(path.join(svc, "docs", "architecture", "auth.md"), "# Auth\n");
+    fs.cpSync(path.join(session, "src"), path.join(svc, "src"), { recursive: true });
+    const e = lint(svc, { CRAFTSMAN_WORKSPACE_MANIFEST: path.join(wsDir, "craftsman.workspace.json") });
+    assert.match(e.stdout, /1 rules doc\(s\)/, e.stderr);
+  } finally { for (const d of [session, own, plain, wsDir]) fs.rmSync(d, { recursive: true, force: true }); }
+});
