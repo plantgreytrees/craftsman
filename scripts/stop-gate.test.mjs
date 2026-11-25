@@ -704,8 +704,8 @@ test("stop-gate: a [unit:<id>] criterion binds only the session that worked that
   }
 });
 
-// ARCH-STATE-04: a turn ending with its workflow still running defers only the
-// acceptance block; the secrets scan and regression checks still fire.
+// ARCH-STATE-23: a turn ending with its workflow still running defers the acceptance block, the binding block and
+// the leftover check; the secrets scan and regression checks still fire.
 test("stop-gate: in-flight background_tasks skip only the acceptance block; secrets and regressions still fire", async () => {
   const dir = makeFixture({
     security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
@@ -732,6 +732,77 @@ test("stop-gate: in-flight background_tasks skip only the acceptance block; secr
       const settled = await runStopGate(dir, sid, { background_tasks });
       assert.match(settled.stdout, /still open criterion/);
     }
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ARCH-STATE-23: work still in flight owns its worktree, so Stop names neither the binding nor the leftover.
+const RUNNING = [{ id: "w1", type: "local_workflow", status: "running" }];
+function liveBinding(dir, sid, unit) {
+  const { worktree } = addMergedWorktree(dir, unit);
+  fs.writeFileSync(path.join(worktree, "work.txt"), "wip\n");
+  for (const args of [["add", "-A"], ["commit", "-q", "-m", "wip"]]) {
+    const r = spawnSync("git", args, { cwd: worktree, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+  }
+  return { worktree, file: writeBinding(dir, sid, worktree, unit) };
+}
+
+test("stop-gate: a live binding with a workflow in flight does not block, logs stop-binding-deferred, and blocks once nothing is in flight", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  try {
+    const sid = "inflight-binding-session";
+    const { file } = liveBinding(dir, sid, "inflight-unit");
+    const running = await runStopGate(dir, sid, { background_tasks: RUNNING });
+    assert.equal(running.code, 0);
+    assert.doesNotMatch(running.stdout, /WORKTREE BINDING ACTIVE/);
+    assert.doesNotMatch(running.stdout, /"decision":"block"/);
+    const deferred = running.events.find((e) => e.ev === "stop-binding-deferred");
+    assert.equal(deferred?.sid, sid);
+    assert.equal(deferred?.tasks, 1);
+    assert.equal(fs.existsSync(file), true, "a deferred binding is kept, not cleared");
+    const settled = await runStopGate(dir, sid, { background_tasks: [{ id: "w1", type: "local_workflow", status: "completed" }] });
+    assert.match(settled.stdout, /WORKTREE BINDING ACTIVE/);
+    assert.equal(settled.events.filter((e) => e.ev === "stop-binding-deferred").length, 1, "only the in-flight Stop deferred");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: an owned leftover worktree with a workflow in flight is not NOT SWEPT, and is once nothing is in flight", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
+  try {
+    const sid = "inflight-leftover-session";
+    const mine = addMergedWorktree(dir, "my-inflight-unit");
+    fs.writeFileSync(path.join(mine.worktree, "scratch.txt"), "unsaved\n");
+    const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
+    const running = await runStopGate(dir, sid, { background_tasks: RUNNING });
+    assert.doesNotMatch(running.stdout, /WORKTREE NOT SWEPT/);
+    assert.doesNotMatch(running.stdout, /"decision":"block"/);
+    const settled = await runStopGate(dir, sid);
+    assert.match(settled.stdout, /WORKTREE NOT SWEPT/);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("stop-gate: a planted secret still blocks while a workflow is in flight beside a live binding", async () => {
+  const dir = makeFixture({
+    security: { enabled: true, check: ["craftsman-test-scanner-does-not-exist"] },
+    stopGate: { requireAcceptanceCriteria: false },
+  });
+  try {
+    const sid = "inflight-secret-session";
+    liveBinding(dir, sid, "secret-unit");
+    fs.writeFileSync(path.join(dir, ".env.local"), `aws_secret_access_key="${"A".repeat(40)}"\n`);
+    const running = await runStopGate(dir, sid, { background_tasks: RUNNING });
+    assert.match(running.stdout, /"decision":"block"/);
+    assert.match(running.stdout, /SECRETS/);
+    assert.doesNotMatch(running.stdout, /WORKTREE BINDING ACTIVE/);
   } finally {
     cleanup(dir);
   }
