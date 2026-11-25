@@ -453,3 +453,18 @@ test("scoped: an unknown change list stays unknown after the existence filter; i
     const r = await runStop(dir, "s13e");
     assert.deepEqual(skipped(r.events).map((e) => e.reason), ["changes-unknown"]);
   }));
+
+// A change list is a file a tampered or confused run can write to; a line that does not resolve inside the root never
+// reaches a check, even when it names a file that exists (ARCH-STATE-21).
+test("scoped: a tampered change list with ../outside.js and /etc/hosts expands to the in-root files only (16.1)", () =>
+  withFixture({ extraChecks: ["node check.mjs {changed}"] }, async (dir) => {
+    const outside = `outside-${path.basename(dir)}.js`;
+    const outsidePath = path.join(path.dirname(dir), outside);
+    fs.writeFileSync(outsidePath, "x\n");
+    assert.ok(fs.existsSync("/etc/hosts") && fs.existsSync(outsidePath), "both tampered lines name files that exist");
+    const tampered = ["src/a.js", `../${outside}`, "/etc/hosts", "src/b.js"];
+    seed(dir, "s161", { changed: tampered, gone: tampered.slice(1, 3) });
+    const r = await runStop(dir, "s161");
+    assert.deepEqual(runs(dir), [["src/a.js", "src/b.js"]]);
+    assert.notEqual(r.out.decision, "block");
+  }));
