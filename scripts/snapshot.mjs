@@ -40,7 +40,7 @@ for (const cmd of entries) {
   results.push({ cmd, green });
 }
 
-// Craftsman's own state is not the user's work: a repo that does not gitignore `.craftsman/` must not drop its baseline for it (ARCH-STATE-04).
+// Craftsman's own state is not the user's work: a repo that does not gitignore `.craftsman/` must not drop its baseline for it (ARCH-STATE-24).
 const endingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${withoutCraftsmanState(await git(["status", "--porcelain", "--untracked-files=all"], context))}`);
 if (startingTree && startingTree !== endingTree) process.exit(0);
 

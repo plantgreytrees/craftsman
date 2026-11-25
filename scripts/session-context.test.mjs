@@ -360,7 +360,7 @@ function sessionStartAt(dir, { stopGate = {}, files = {}, sid = "snap", before, 
   git("config", "user.email", "t@e.com");
   git("config", "user.name", "t");
   git("config", "commit.gpgsign", "false");
-  // as init sets it up, so state files never change the tree; `ignoreState: false` is a repo that does not gitignore .craftsman/ (ARCH-STATE-04)
+  // as init sets it up, so state files never change the tree; `ignoreState: false` is a repo that does not gitignore .craftsman/ (ARCH-STATE-24)
   if (ignoreState) fs.writeFileSync(path.join(dir, ".gitignore"), ".craftsman/\n");
   for (const [rel, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
@@ -490,12 +490,12 @@ for (const [why, stopGate, probed] of [
   });
 }
 
-// ARCH-STATE-04: in a repo that does not gitignore `.craftsman/`, the state SessionStart writes after it takes the starting hash
+// ARCH-STATE-24: in a repo that does not gitignore `.craftsman/`, the state SessionStart writes after it takes the starting hash
 // (snapshot-started above all) is in `git status`. The real SessionStart must still land the snapshot, and a real edit to a
 // tracked file while the snapshot runs must still drop it.
 const porcelain = (dir) => spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: dir, encoding: "utf8" }).stdout;
 
-test("session-context: where .craftsman/ is not gitignored the snapshot still lands session-start.json (ARCH-STATE-04)", () => {
+test("session-context: where .craftsman/ is not gitignored the snapshot still lands session-start.json (ARCH-STATE-24)", () => {
   withProject((dir) => {
     const { marker, result } = sessionStartAt(dir, { ignoreState: false, stopGate: { commands: NODE_0 }, files: { "package.json": "{}\n" } });
     assert.equal(fs.existsSync(marker), true, "a snapshot was spawned");
@@ -504,7 +504,7 @@ test("session-context: where .craftsman/ is not gitignored the snapshot still la
   });
 });
 
-test("session-context: where .craftsman/ is not gitignored an edit to a tracked file while the snapshot runs still drops it (ARCH-STATE-04)", () => {
+test("session-context: where .craftsman/ is not gitignored an edit to a tracked file while the snapshot runs still drops it (ARCH-STATE-24)", () => {
   withProject((dir) => {
     const pidFile = `${dir}-snapshot.pid`;
     // Edits a tracked file, then tells the test which process is running it: the snapshot, whose end is when the drop is decided.

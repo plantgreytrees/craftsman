@@ -215,7 +215,7 @@ if (cfg.stopGate?.enabled !== false && cfg.stopGate?.snapshotAtStart !== false) 
 }
 if (anyStopCommandMarker) {
   try { fs.unlinkSync(path.join(sessionDir(sid, context), "session-start.json")); } catch {}
-  // Craftsman's own state is not the user's work (ARCH-STATE-04): the hash ignores it, as snapshot.mjs's ending hash does, because
+  // Craftsman's own state is not the user's work (ARCH-STATE-24): the hash ignores it, as snapshot.mjs's ending hash does, because
   // snapshot-started below is written after this one and a repo that does not gitignore `.craftsman/` would count it as a change.
   const startingTree = sha1(`${(await git(["rev-parse", "HEAD"], context)).trim()}\n${withoutCraftsmanState(await git(["status", "--porcelain", "--untracked-files=all"], context))}`);
   try {
