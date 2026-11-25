@@ -193,6 +193,16 @@ test("tokenize: with a tool cwd {file} and {dir} are POSIX paths relative to it"
   assert.deepEqual(core.tokenize("tool {file}", path.join(svc, "my dir", "a b.fx"), { root }, svc), ["tool", "my dir/a b.fx"], "one argument still");
 });
 
+test("tokenize: a relative {file} or {dir} that starts with a dash gets ./ so a tool never reads it as an option", () => {
+  const root = scratch();
+  const svc = path.join(root, "services", "api");
+  assert.deepEqual(core.tokenize("tool {file} {dir}", path.join(svc, "-y.txt"), { root }, svc), ["tool", "./-y.txt", "."], "{dir} of a top-level file is still .");
+  assert.deepEqual(core.tokenize("tool {file}", path.join(svc, "-c.my"), { root }, svc), ["tool", "./-c.my"]);
+  assert.deepEqual(core.tokenize("tool {file} {dir}", path.join(svc, "-d", "a.fx"), { root }, svc), ["tool", "./-d/a.fx", "./-d"], "a dash-leading directory too");
+  assert.deepEqual(core.tokenize("tool {file} {dir}", path.join(svc, "src", "-y.txt"), { root }, svc), ["tool", "src/-y.txt", "src"], "a dash inside the path is not leading");
+  assert.deepEqual(core.tokenize("tool {file} {dir}", path.join(svc, "a-b.fx"), { root }, svc), ["tool", "a-b.fx", "."], "other paths are unchanged");
+});
+
 // ------------------------------------------------------------------- runChecks ---
 
 function services() {
