@@ -1,4 +1,4 @@
-// ARCH-SLIM-11: vendored workflow skills carry MIT attribution, a short
+// ARCH-SLIM-19: vendored workflow skills carry MIT attribution, a short
 // description, and no dependency on the third-party plugin.
 import { test } from "node:test";
 import assert from "node:assert/strict";

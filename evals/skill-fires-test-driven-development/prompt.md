@@ -1,6 +1,6 @@
 ---
 name: skill-fires-test-driven-development
-description: 'The test-driven-development skill fires on a request for new behaviour (ARCH-EVALS-03).'
+description: 'The test-driven-development skill fires on a request for new behaviour (ARCH-EVALS-08).'
 tags: [skill]
 runs: 3
 max_turns: 4

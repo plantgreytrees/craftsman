@@ -1,6 +1,6 @@
 ---
 name: skill-fires-deep-research
-description: 'The deep-research skill fires on a request for repository research (ARCH-EVALS-03).'
+description: 'The deep-research skill fires on a request for repository research (ARCH-EVALS-08).'
 tags: [skill]
 runs: 3
 max_turns: 4

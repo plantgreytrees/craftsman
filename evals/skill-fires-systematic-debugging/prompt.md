@@ -1,6 +1,6 @@
 ---
 name: skill-fires-systematic-debugging
-description: 'The systematic-debugging skill fires on a bug report (ARCH-EVALS-03).'
+description: 'The systematic-debugging skill fires on a bug report (ARCH-EVALS-08).'
 tags: [skill]
 runs: 3
 max_turns: 4

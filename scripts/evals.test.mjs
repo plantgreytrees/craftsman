@@ -1,4 +1,4 @@
-// ARCH-EVALS-01..05: the behaviour-eval suite under evals/ keeps the shape the
+// ARCH-EVALS-01,02,04,05,08: the behaviour-eval suite under evals/ keeps the shape the
 // rules decide — first-party `claude plugin eval` case files only, deterministic
 // graders, one firing case per skill, exactly one hook case, and a documented
 // run command with the cost and privacy flags. The suite itself is run by hand
@@ -13,7 +13,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const DETERMINISTIC = new Set(["tool_used", "tool_order", "file_exists", "regex"]);
-const NAMED_SKILLS = ["test-driven-development", "systematic-debugging", "verification-before-completion", "deep-research"];
 // Referenced by path from commands/plan.md, so it never relies on description-based firing.
 const EXEMPT_SKILLS = new Set(["language-aware-planning"]);
 const HOOK_TOOLS = new Set(["Read", "Glob", "Grep"]);
@@ -104,7 +103,7 @@ export function checkEvals(root) {
     if (!prompt) problems.push(`evals/${entry.name}: missing prompt.md (ARCH-EVALS-01)`);
     if (!graders.length) problems.push(`evals/${entry.name}: no graders/*.md grader (ARCH-EVALS-01)`);
     const fm = (prompt && frontmatter(prompt)) || {};
-    if (String(fm.runs) !== "3") problems.push(`evals/${entry.name}: runs must be 3, the sample ARCH-EVALS-07's "2 of 3 runs" reads (found ${fm.runs ?? "none"})`);
+    if (String(fm.runs) !== "3") problems.push(`evals/${entry.name}: runs must be 3, the sample ARCH-EVALS-09's "2 of 3 runs" reads (found ${fm.runs ?? "none"})`);
     // ARCH-EVALS-02: deterministic grader types only.
     for (const g of graders) {
       if (!DETERMINISTIC.has(g.fm.type)) problems.push(`evals/${entry.name}/${g.file}: grader type ${g.fm.type ?? "missing"} is not deterministic (ARCH-EVALS-02)`);
@@ -117,14 +116,14 @@ export function checkEvals(root) {
     if (key in plugin) problems.push(`.claude-plugin/plugin.json: has a ${key} key (ARCH-EVALS-01)`);
   }
 
-  // ARCH-EVALS-03: one skill-fires-<name> case per named or later-added skill.
-  const required = new Set([...NAMED_SKILLS, ...dirs(path.join(root, "skills")).filter((d) => !EXEMPT_SKILLS.has(d))]);
+  // ARCH-EVALS-08: one skill-fires-<name> case per skills/ directory except the exempt one.
+  const required = new Set(dirs(path.join(root, "skills")).filter((d) => !EXEMPT_SKILLS.has(d)));
   const expected = new Set();
   for (const skill of required) {
     const name = `skill-fires-${skill}`;
     expected.add(name);
     const c = cases.get(name);
-    if (!c) { problems.push(`evals/${name}: missing firing case for skill ${skill} (ARCH-EVALS-03)`); continue; }
+    if (!c) { problems.push(`evals/${name}: missing firing case for skill ${skill} (ARCH-EVALS-08)`); continue; }
     const fires = c.graders.some(({ fm }) => {
       if (fm.type !== "tool_used" || fm.tool !== "Skill" || !fm.input_match) return false;
       // It must match this skill's call and no other required skill's, or a wrong skill would score.
@@ -134,7 +133,7 @@ export function checkEvals(root) {
         return re.test(call(skill)) && [...required].every((other) => other === skill || !re.test(call(other)));
       } catch { return false; }
     });
-    if (!fires) problems.push(`evals/${name}: no tool_used grader on Skill whose input_match matches ${skill} (ARCH-EVALS-03)`);
+    if (!fires) problems.push(`evals/${name}: no tool_used grader on Skill whose input_match matches ${skill} (ARCH-EVALS-08)`);
   }
 
   // ARCH-EVALS-04: exactly one hook case, read-only grants, regex on the guards line.
@@ -148,7 +147,7 @@ export function checkEvals(root) {
     if (!quotes) problems.push(`evals/${name}: no regex grader on last_message for the "craftsman guards:" line (ARCH-EVALS-04)`);
   }
   for (const name of cases.keys()) {
-    if (!expected.has(name)) problems.push(`evals/${name}: not a case ARCH-EVALS-03 or ARCH-EVALS-04 names`);
+    if (!expected.has(name)) problems.push(`evals/${name}: not a case ARCH-EVALS-08 or ARCH-EVALS-04 names`);
   }
 
   // ARCH-EVALS-05: results git-ignored; every documented suite run carries the three flags.
@@ -171,6 +170,9 @@ export function checkEvals(root) {
 
 // ---------- fixtures ----------
 
+// Synthetic skills plus deep-research; never a loop-discipline skill, so removing one leaves no trace (ARCH-EVALS-10).
+const FIXTURE_SKILLS = ["deep-research", "alpha-skill", "beta-skill"];
+
 function write(root, rel, text) {
   const file = path.join(root, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -182,10 +184,10 @@ function validFixture() {
   write(root, ".claude-plugin/plugin.json", JSON.stringify({ name: "craftsman" }));
   write(root, ".gitignore", "node_modules/\nevals/results/\n");
   write(root, "README.md", "Run:\n\n    claude plugin eval . --ablation none --max-cost-usd 5 --no-publish\n");
-  for (const s of [...NAMED_SKILLS, ...EXEMPT_SKILLS]) write(root, `skills/${s}/SKILL.md`, "---\nname: x\n---\n");
+  for (const s of [...FIXTURE_SKILLS, ...EXEMPT_SKILLS]) write(root, `skills/${s}/SKILL.md`, "---\nname: x\n---\n");
   write(root, "evals/hook-guards-line/prompt.md", "---\nname: hook-guards-line\ntags: [hook]\nruns: 3\nallowed_tools: []\n---\nQuote it.\n");
   write(root, "evals/hook-guards-line/graders/guards-line.md", '---\ntype: regex\ntarget: last_message\npattern: "craftsman guards: on\\\\."\n---\n');
-  for (const s of NAMED_SKILLS) skillCase(root, s);
+  for (const s of FIXTURE_SKILLS) skillCase(root, s);
   return root;
 }
 
@@ -278,32 +280,39 @@ test("ARCH-EVALS-02: llm, baseline or untyped graders fail", () => {
   assertCaught((r) => write(r, "evals/hook-guards-line/graders/judge.md", "no frontmatter\n"), /judge\.md: grader type missing/);
 });
 
-// ---------- ARCH-EVALS-03 ----------
+// ---------- ARCH-EVALS-08 ----------
 
-test("ARCH-EVALS-03: each named skill needs its firing case", () => {
-  for (const s of NAMED_SKILLS) {
+test("ARCH-EVALS-08: each skill needs its firing case", () => {
+  for (const s of FIXTURE_SKILLS) {
     assertCaught((r) => fs.rmSync(path.join(r, `evals/skill-fires-${s}`), { recursive: true }), new RegExp(`skill-fires-${s}: missing firing case`));
   }
 });
 
-test("ARCH-EVALS-03: a skill added later needs a case; the exempt planner skill does not", () => {
+test("ARCH-EVALS-08: a skill added later needs a case; the exempt planner skill does not", () => {
   assertCaught((r) => write(r, "skills/new-skill/SKILL.md", "---\nname: new-skill\n---\n"), /skill-fires-new-skill: missing firing case/);
   assert.deepEqual(problemsAfter((r) => { write(r, "skills/new-skill/SKILL.md", "x"); skillCase(r, "new-skill"); }), []);
   assert.ok(!problemsAfter(() => {}).some((p) => /language-aware-planning/.test(p)));
 });
 
-test("ARCH-EVALS-03: the firing grader must be tool_used on Skill matching the skill", () => {
+test("ARCH-EVALS-08/10: a skill removed with its case leaves the suite clean", () => {
+  assert.deepEqual(problemsAfter((r) => {
+    fs.rmSync(path.join(r, "skills/deep-research"), { recursive: true });
+    fs.rmSync(path.join(r, "evals/skill-fires-deep-research"), { recursive: true });
+  }), []);
+});
+
+test("ARCH-EVALS-08: the firing grader must be tool_used on Skill matching the skill", () => {
   const grader = "evals/skill-fires-deep-research/graders/skill-fired.md";
   assertCaught((r) => write(r, grader, "---\ntype: tool_used\ntool: Bash\ninput_match: deep-research\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
-  assertCaught((r) => write(r, grader, "---\ntype: tool_used\ntool: Skill\ninput_match: systematic-debugging\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
+  assertCaught((r) => write(r, grader, "---\ntype: tool_used\ntool: Skill\ninput_match: alpha-skill\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
   assertCaught((r) => write(r, grader, "---\ntype: regex\npattern: deep-research\n---\n"), /skill-fires-deep-research: no tool_used grader on Skill/);
-  for (const loose of [".*", '"skill"', "research|debugging"]) {
+  for (const loose of [".*", '"skill"', "research|skill"]) {
     assertCaught((r) => write(r, grader, `---\ntype: tool_used\ntool: Skill\ninput_match: '${loose}'\n---\n`), /skill-fires-deep-research: no tool_used grader on Skill/);
   }
 });
 
-test("ARCH-EVALS-03/04: evals/ holds only the cases the rules name", () => {
-  assertCaught((r) => skillCase(r, "orchestrate"), /skill-fires-orchestrate: not a case ARCH-EVALS-03 or ARCH-EVALS-04 names/);
+test("ARCH-EVALS-08/04: evals/ holds only the cases the rules name", () => {
+  assertCaught((r) => skillCase(r, "orchestrate"), /skill-fires-orchestrate: not a case ARCH-EVALS-08 or ARCH-EVALS-04 names/);
 });
 
 // ---------- ARCH-EVALS-04 ----------
