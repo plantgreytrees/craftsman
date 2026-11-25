@@ -93,6 +93,14 @@ test("instruction.md: the goal template states the met-stop rule within its firs
   assert.match(head, /PARKED rows[^.\n]*blocker[^.\n]*met/);
 });
 
+test("instruction.md: /goal step 2 agrees with the met-stop rule: no \"left unresolved\", a printed blocker (ARCH-AUTO-04)", () => {
+  const goal = template();
+  assert.doesNotMatch(goal, /left unresolved/);
+  const step2 = /^2\. [^\n]*/m.exec(goal);
+  assert.ok(step2, "template has a step 2");
+  assert.match(step2[0], /none left without a printed blocker/);
+});
+
 test("instruction.md: a composed sample goal measures ≤ 4000 characters", () => {
   const ids = "ARCH-STATE-01..07, ENGINE-01..11, AUTO-01..07, MOD-01..05, TRACKER-01..05, LAND-01..06";
   const goal = template()
