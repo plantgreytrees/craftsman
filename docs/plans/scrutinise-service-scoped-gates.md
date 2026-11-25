@@ -6,7 +6,7 @@ parent: service-scoped-gates
 priority: P2
 idea: docs/ideas/service-scoped-gates.md
 classification: in-scope  # rounds 1-10 of /scrutinise service-scoped-gates; round 11 drives the flagged follow-ups (owner, 2026-11-25)
-tracker_rows: [fix-stop-snapshot, fix-merge-gate, fix-config-robustness, fix-extending-docs, fix-skip-reason, fix-snapshot-fact, fix-baseline-session, fix-gate-usable, fix-baseline-owner, fix-baseline-resilient, fix-workspaceroot-helper, fix-workspaceroot-callers, followup-changed-argv-cap, followup-gate-spawn-error-message, followup-snapshot-dropped-reason, followup-changelist-inside-root, followup-scoped-gate-tests, followup-premerge-marker-lookup, followup-land-unit-empty-diff, followup-land-feature-workspaceroot-test, followup-tokenize-leading-dash, followup-program-probe-helper, followup-workspaceroot-submodule-test, followup-same-repository-helper, followup-changelist-symlink-root, followup-approval-workspaceroot, followup-arch-check-root-layering, followup-instruction-scoped-command, followup-workspaceroot-trust-note, followup-state04-comment-cites]
+tracker_rows: [fix-stop-snapshot, fix-merge-gate, fix-config-robustness, fix-extending-docs, fix-skip-reason, fix-snapshot-fact, fix-baseline-session, fix-gate-usable, fix-baseline-owner, fix-baseline-resilient, fix-workspaceroot-helper, fix-workspaceroot-callers, followup-changed-argv-cap, followup-gate-spawn-error-message, followup-snapshot-dropped-reason, followup-changelist-inside-root, followup-scoped-gate-tests, followup-premerge-marker-lookup, followup-land-unit-empty-diff, followup-land-feature-workspaceroot-test, followup-tokenize-leading-dash, followup-program-probe-helper, followup-workspaceroot-submodule-test, followup-same-repository-helper, followup-changelist-symlink-root, followup-approval-workspaceroot, followup-arch-check-root-layering, followup-instruction-scoped-command, followup-workspaceroot-trust-note, followup-state04-comment-cites, fix-merge-marker-tracked]
 guards:
   blast_radius: done
   completeness_sweep: done
@@ -256,6 +256,19 @@ units:
       write: [scripts/lib/craftsman-state.mjs, scripts/session-context.mjs, scripts/snapshot.mjs, scripts/stop-gate.mjs, scripts/snapshot.test.mjs, scripts/session-context.test.mjs, scripts/lib/craftsman-state.test.mjs]
     arch: [ARCH-STATE-24]
     tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
+  - id: fix-merge-marker-tracked
+    scope_id: fix-merge-marker-tracked
+    project: .
+    depends_on: []
+    module: scripts/lib/gate-command.mjs presentAnywhere; EXTENDING.md scoped-command lookup
+    language: JavaScript (Node ESM)
+    security: normal
+    scope:
+      read: [scripts/lib/gate-command.mjs, scripts/lib/gate-command.test.mjs, EXTENDING.md]
+      docs: [docs/architecture/landing.rules.md]
+      write: [scripts/lib/gate-command.mjs, scripts/lib/gate-command.test.mjs, EXTENDING.md, docs/architecture/landing.rules.md]
+    arch: [ARCH-LAND-38, ARCH-LAND-37]
+    tooling: { implementer: implementer, gates: [], skills: [test-driven-development], guards: [], mcp: [] }
 ---
 
 # Plan: Fix round for the service-scoped gates review
@@ -344,6 +357,13 @@ Rule: EXTENDING.md only.
 Rule: ARCH-STATE-24. Comments and test names only.
 - [ ] 30.1 Comments and test names in `craftsman-state.mjs`, `session-context.mjs`, `snapshot.mjs`, `stop-gate.mjs` and their tests cite ARCH-STATE-04 (background tasks, now superseded) or ARCH-STATE-22 (superseded) for behaviour ARCH-STATE-24 records; re-point them → accept: `grep -n "ARCH-STATE-04\|ARCH-STATE-22"` over those files finds none; the tests pass.
 
+### Step 31 - fix-merge-marker-tracked (., JavaScript, normal)
+Rule: ARCH-LAND-38 (owner decision 2026-11-25, "Match Stop for scoped cmds"), ARCH-LAND-37. `presentAnywhere` (gate-command.mjs:50-64) walks the filesystem, skipping only `.git` and `node_modules`; Stop's `markerPresent` (core.mjs:790-799) matches git-tracked files and walks only a tree that is not a git checkout. So a marker that exists only in an untracked or ignored folder selects a scoped command at merge but not at Stop.
+- [ ] 31.1 In `presentAnywhere`, list the worktree's tracked files with a synchronous `git -C <worktree> ls-files -z` (execFileSync, no shell) and match them as `markerPresent` does (`f === marker || f.endsWith("/" + marker)`, a glob marker by the same rule); keep the existing walk only for a worktree that is not a git checkout or when ls-files fails → accept: gate-command.test.mjs cases: a marker only in an untracked folder, and one only in a gitignored folder, select no scoped command; a tracked nested marker still does (the existing nested-marker case stays green); a non-git directory still finds a nested marker through the walk.
+- [ ] 31.2 EXTENDING.md (~:204-210) says the two gates look in different places; restate it: both select a scoped command when a git-tracked marker exists anywhere in the tree, and a tree that is not a git checkout is walked → accept: the paragraph matches the code; doc-size-policy passes.
+- [ ] 31.3 Finish with `node --test scripts/lib/gate-command.test.mjs scripts/repo-exec-scoped.test.mjs scripts/safety-cites.test.mjs`; a cite of ARCH-LAND-37/38 that moved only because of this edit is re-pointed in its `cite:` field, nothing else in rules docs changes → accept: the command exits 0.
+Never run rm, rmdir, unlink or `find -delete`; use `mktemp -d` under the OS temp dir.
+
 ## Sequencing
 Units that share a file run one after another (`depends_on`): `changed.mjs` 13 → 14 → 17; `stop-gate.mjs` 13 → 15 → 16 → 24 → 30; `repo-exec.mjs` and its scoped test 14 → 17 → 18 → 19 → 20; `gate-command.mjs` and `core.mjs` 18 → 21 → 22 → 23; EXTENDING.md (29) after the behaviour it describes. 25, 26, 27 and 28 are independent.
 
@@ -365,3 +385,6 @@ The owner chose to drive every flagged follow-up and decided the open questions:
 - **Run notes (2026-11-25):** all 18 units MERGED (main 696bc22; suite 2012/2012). Three changes to the run, recorded here because the task text above predates them: (1) the Stop hook's sweep removed a fresh, commit-less unit worktree, so each runner locked its worktree after `prepare` and unlocked it before landing (the sweep itself is out of scope and reported to the owner); (2) a unit whose edit only moved a cited range re-pointed that `cite:` itself instead of parking, rule text untouched; (3) `followup-state04-comment-cites` also loaded `safety.rules.md` with ARCH-SAFETY-04 and wrote the three test files that carried ARCH-STATE-22, after its first run was refused scope.
 - **Round 11 result (isolated scrutineer, main cbadb0a):** 0 Critical, 0 Warning; all 39 round 11 criteria MET. One Architecture-class Suggestion (ARCH-LAND-37 and ARCH-STATE-25 cites left behind by 5c4e88c and 5053971) was fixed by root by re-pointing the cites. Eight Suggestions are flagged for the owner, not driven: an over-cap Stop also logs a fallback `stop-tests-skipped` reason (stop-gate.mjs:251-257, :274); a submodule-only branch skips the merge gate as `no-changes` (changed.mjs:67-70); quality-gate classifies doc/state paths before the realpath retry (quality-gate.mjs:34, :60-73); an over-cap change list blocks every later dirty Stop of the session; the merge gate's `presentAnywhere` walks ignored trees, unlike Stop's git-tracked `markerPresent` (gate-command.mjs:50-64); `arch-check` keeps its own common-dir test beside `same-repository.mjs` (arch-check.mjs:340-341); two inside-root tests (stop-gate.mjs:245, quality-gate.mjs:67); the 16.1 test leaves `outside-*.js` in the OS temp dir (stop-gate-scoped.test.mjs:460-463).
 - **Root, after the units:** re-point moved cites in `docs/architecture` by identifier check, stamp `verified_at`, and edit the CHANGELOG bullet (under 8 KB, ARCH-SLIM-08).
+
+## Round 12 (2026-11-25)
+- `/architect --update` found ARCH-LAND-38's merge-gate lookup partly unmet: it walks untracked and ignored folders that Stop never sees. Step 31 makes the merge gate match Stop's git-tracked lookup, as the owner decided.
