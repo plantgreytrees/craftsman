@@ -91,6 +91,15 @@ try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
 
 const problems = [];
 
+// Work the session launched and has not seen finish (ARCH-STATE-23): its binding and worktree are in use, not left
+// over, so those two checks, and acceptance and unlanded features below, wait for the first Stop with nothing in flight.
+const DONE = new Set(["completed", "complete", "done", "failed", "error", "killed", "stopped", "cancelled", "canceled"]);
+const inFlight = (Array.isArray(input?.background_tasks) ? input.background_tasks : []).filter((task) => {
+  const kind = String(task?.type ?? task?.kind ?? "").toLowerCase();
+  return /workflow|agent/.test(kind) && !DONE.has(String(task?.status ?? "").toLowerCase());
+});
+let bindingDeferred = false;
+
 // A session cannot finish while it still owns an implementation worktree.
 // This is session-local: another concurrent session's active binding is not
 // a reason to block this Stop hook.
@@ -99,6 +108,7 @@ for (const binding of readLiveWorktreeBindings(input, {
   stateDir: context.stateDir,
   worktreePath: active?.worktree_path || context.root,
 })) {
+  if (inFlight.length) { bindingDeferred = true; continue; }
   problems.push(
     `WORKTREE BINDING ACTIVE: unit ${binding.unit || "(unknown)"} still owns ` +
     `${binding.worktree_path || "an unknown worktree"} on branch ${binding.branch || "(unknown)"}. ` +
@@ -134,6 +144,7 @@ if (ownedWorktrees.size > 0) {
       const unmergedAgainstBase = entry.keep_reason === "not merged into the base branch" && baseRefs(context.root).length > 0;
       const mergedRef = entry.merged_into || (unmergedAgainstBase ? null : mergedInto(mainCheckout(context.root), entry.branch, ["HEAD"]));
       if (!mergedRef) continue;
+      if (inFlight.length) { bindingDeferred = true; continue; }
       problems.push(
         `WORKTREE NOT SWEPT: ${entry.path} (branch ${entry.branch}) was prepared by this session and is ` +
         `already fully merged into ${mergedRef} but could not be removed automatically ` +
@@ -143,6 +154,8 @@ if (ownedWorktrees.size > 0) {
     }
   } catch { /* not a git repo, git absent, or worktree list failed — fail safe, never block on this */ }
 }
+
+if (bindingDeferred) logEvent({ ev: "stop-binding-deferred", sid, tasks: inFlight.length });
 
 // 1. Secrets — always a hard block, never baselined — but re-scan only
 // when `git status --ignored` shows real changes (the PostToolUse "dirty"
@@ -412,13 +425,8 @@ try {
 } catch { /* bookkeeping — never block Stop on it */ }
 // A turn that ends while a workflow or subagent it launched is still running
 // is not "done" — the units are mid-flight, and their criteria are theirs to
-// meet. Skip only this block (ARCH-STATE-04); secrets and regressions above
+// meet. Skip only this block (ARCH-STATE-23); secrets and regressions above
 // stay armed, and the next Stop, once the work lands, checks acceptance again.
-const DONE = new Set(["completed", "complete", "done", "failed", "error", "killed", "stopped", "cancelled", "canceled"]);
-const inFlight = (Array.isArray(input?.background_tasks) ? input.background_tasks : []).filter((task) => {
-  const kind = String(task?.type ?? task?.kind ?? "").toLowerCase();
-  return /workflow|agent/.test(kind) && !DONE.has(String(task?.status ?? "").toLowerCase());
-});
 if (inFlight.length) logEvent({ ev: "stop-acceptance-deferred", sid, tasks: inFlight.length });
 if (!inFlight.length && cfg.stopGate?.requireAcceptanceCriteria && fs.existsSync(acPath)) {
   const ac = fs.readFileSync(acPath, "utf8");
