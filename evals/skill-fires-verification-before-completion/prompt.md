@@ -1,6 +1,6 @@
 ---
 name: skill-fires-verification-before-completion
-description: 'The verification-before-completion skill fires when work is about to be claimed done (ARCH-EVALS-03).'
+description: 'The verification-before-completion skill fires when work is about to be claimed done (ARCH-EVALS-08).'
 tags: [skill]
 runs: 3
 max_turns: 4
