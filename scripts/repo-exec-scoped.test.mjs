@@ -369,3 +369,31 @@ test("merge: a gate whose relative program exists is still run, and logs no skip
     assert.deepEqual(t.gateEvents(), []);
   } finally { cleanup(t); }
 });
+
+test("merge: a gate program that cannot start (EACCES) fails the gate naming the spawn error, and nothing lands", () => {
+  const t = fixture("");
+  try {
+    const log = path.join(t.root, ".craftsman", "gate.log");
+    write(t.root, "tools/gate.mjs", `#!/usr/bin/env node\n${STUB}`); // present but never made executable
+    fs.chmodSync(path.join(t.root, "tools", "gate.mjs"), 0o644);
+    write(t.root, "craftsman.config.json", JSON.stringify({ repoExec: { land: "direct" }, stopGate: { commands: { "package.json": `./tools/gate.mjs ${log}` } } }));
+    commit(t.root, "non-executable gate program");
+    const u = unit(t, (wt) => write(wt, "src/a.js", "a2\n"));
+    const before = git(t.root, "rev-parse", "main");
+    assert.throws(() => merge(t.context, u.input, t.info), (error) => /^pre-merge gate failed — "\.\/tools\/gate\.mjs [^"]*" did not pass in [^\n]*:\nEACCES: /.test(error.message));
+    assert.equal(t.runs().length, 0);
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+  } finally { cleanup(t); }
+});
+
+test("merge: a {changed} list past the argv cap fails the gate naming the cap and the file count, with no spawn, and nothing lands", () => {
+  const t = fixture("{changed}");
+  try {
+    const u = unit(t, (wt) => { for (let i = 0; i < 1200; i++) write(wt, `src/${String(i).padStart(4, "0")}-${"x".repeat(120)}.js`); });
+    const before = git(t.root, "rev-parse", "main");
+    assert.throws(() => merge(t.context, u.input, t.info), (error) => /^pre-merge gate failed — "node gate\.mjs [^"]*\{changed\}" was not run: the change list \(1200 files, \d+ bytes of arguments\) is past the 131072-byte argv cap; run the suite unscoped$/.test(error.message));
+    assert.equal(t.runs().length, 0, "no gate process was spawned");
+    assert.equal(git(t.root, "rev-parse", "main"), before);
+    assert.deepEqual(t.gateEvents(), []);
+  } finally { cleanup(t); }
+});
