@@ -5,7 +5,7 @@
 // command is found and the caller skips it rather than throw on a spawn that cannot start.
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { splitCmd, globToRe, programPresent } from "./core.mjs";
 import { isScoped } from "./changed.mjs";
 
@@ -44,12 +44,25 @@ export function gateUsable(worktree, marker, command, { onPath = binOnPath, just
   return onPath("just") && justTargets(worktree).includes(target || "default");
 }
 
-// Whether `marker` exists anywhere in the worktree, with markerPresent's semantics (core.mjs) over a synchronous walk of the
-// tree: a bare name matches a path segment at any depth, a glob without a slash matches a file name at any depth, a glob
-// with a slash matches the relative path. `.git` and `node_modules` are not entered; a symlink is never followed.
+// The worktree's tracked files plus untracked files that are not ignored (`git ls-files -z --cached --others --exclude-standard`,
+// no shell, the listing Stop's gitTrackedFiles reads), or null when it is not a git checkout or the listing fails.
+function trackedFiles(worktree) {
+  try {
+    const out = execFileSync("git", ["-C", worktree, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 28, timeout: 10000 });
+    return out.split("\0").filter(Boolean);
+  } catch { return null; }
+}
+
+// Whether `marker` exists anywhere in the worktree, with markerPresent's semantics (core.mjs): a bare name matches a path
+// segment at any depth, a glob without a slash matches a file name at any depth, a glob with a slash matches the relative
+// path. A git checkout is matched over its tracked and untracked-but-not-ignored files, so an ignored folder selects nothing, as at
+// Stop; a worktree that is not a git checkout (or whose listing fails or is empty) is walked, not entering `.git` or `node_modules` and never
+// following a symlink.
 function presentAnywhere(worktree, marker) {
   const re = marker.includes("*") ? globToRe(marker.includes("/") ? marker : "**/" + marker) : null;
   const matches = (rel) => (re ? re.test(rel) : rel === marker || rel.endsWith("/" + marker));
+  const tracked = trackedFiles(worktree);
+  if (tracked?.length) return tracked.some(matches);
   const walk = (dir, prefix) => {
     let entries = [];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
@@ -63,8 +76,8 @@ function presentAnywhere(worktree, marker) {
   return walk(worktree, "");
 }
 
-// A scoped command (`{changed}` / `{changedDirs}`, ARCH-STATE-21) is selected when its marker is anywhere in the worktree, as
-// Stop selects it; an unscoped command only when its marker is at the root (ARCH-LAND-38).
+// A scoped command (`{changed}` / `{changedDirs}`, ARCH-STATE-21) is selected when its marker is a non-ignored file in git's listing anywhere in
+// the worktree, as Stop selects it; an unscoped command only when its marker is at the root (ARCH-LAND-38).
 export function findGateCommand(worktree, cfg, deps = {}) {
   for (const [marker, command] of Object.entries(cfg?.stopGate?.commands || {})) {
     if (isScoped(command)) {
