@@ -116,6 +116,13 @@ function markDropped(dir, sid) {
   fs.writeFileSync(path.join(sessions, "snapshot-dropped"), String(Date.now()));
 }
 
+// A marker left by an earlier start of the same session: stamped before the start that is now current.
+function markDroppedEarlier(dir, sid) {
+  const sessions = path.join(dir, ".craftsman", "sessions", sid);
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, "snapshot-dropped"), String(Date.now() - 60000));
+}
+
 const addPackageJson = (dir) => {
   fs.writeFileSync(path.join(dir, "package.json"), "{}\n");
   spawnSync("git", ["add", "-A"], { cwd: dir });
@@ -136,6 +143,8 @@ const UNSEEDED = [
   ["snapshot-pending", { commands: NODE_0 }, { "services/api/package.json": "{}\n" }, markStarted, "a snapshot was started for a marker under a sub-directory and left no result file"],
   ["snapshot-pending", {}, {}, markStarted, "a snapshot was started and the marker file is gone from today's tree: the fact is recorded, not recomputed"],
   ["snapshot-dropped", { commands: NODE_0 }, PKG, (dir, sid) => { markStarted(dir, sid); markDropped(dir, sid); }, "a snapshot was started and snapshot.mjs recorded that it dropped its result: the dropped marker wins over the started one"],
+  ["no-command", {}, {}, markDroppedEarlier, "a dropped marker of an earlier start and no snapshot-started (a resume that spawned none): the stale marker is not read"],
+  ["snapshot-pending", { commands: NODE_0 }, PKG, (dir, sid) => { markDroppedEarlier(dir, sid); markStarted(dir, sid); }, "a dropped marker older than the current snapshot-started (a resume that spawned a snapshot again): the stale marker is not read"],
 ];
 
 for (const [reason, stopGate, files, before, why] of UNSEEDED) {
