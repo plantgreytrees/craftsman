@@ -326,3 +326,24 @@ test("scope: release on an unreadable worktree names git worktree prune, not a d
     assert.ok(evs.some((e) => e.ev === "scope_release_refused" && e.sid === "s8"), "refused event carries sid");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// followup-auto-flow-friction F-run3: a release path that is not itself a worktree root is never judged dirty by its parent.
+test("scope: release proceeds for a plain directory inside a dirty main checkout, still refuses real worktree changes and a non-git path", () => {
+  const { root, trees: [w] } = repoWithWorktrees("nonwt");
+  const release = (tree) => hook("scope.mjs", root, root, { action: "release", session_id: "s9", project: ".", worktree_path: tree });
+  const plain = path.join(root, ".worktrees", "not-a-worktree");
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-plain-"));
+  try {
+    fs.writeFileSync(path.join(root, "dirty-in-main.txt"), "x\n");
+    fs.mkdirSync(plain);
+    assert.equal(release(plain).status, 0, "plain directory under a dirty main checkout");
+    assert.equal(hook("scope.mjs", w, root, manifest("s9", "unit-a", ["a.txt"], w)).status, 0);
+    fs.writeFileSync(path.join(w, "new.txt"), "x\n");
+    const dirty = release(w);
+    assert.equal(dirty.status, 2, "registered worktree with an uncommitted file");
+    assert.match(dirty.stderr, /uncommitted changes/);
+    const nongit = release(outside);
+    assert.equal(nongit.status, 2, "path that is not a git directory");
+    assert.match(nongit.stderr, /is not a readable git worktree/);
+  } finally { fs.rmSync(outside, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true }); }
+});
