@@ -105,6 +105,25 @@ test("worktree-sweep: an explicitly named worktree that must be kept is skipped 
   } finally { cleanup(root); }
 });
 
+test("worktree-sweep: a worktree listed in keep is left in place with the in-use reason, the rest still sweep (ARCH-STATE-23)", () => {
+  const root = fixture();
+  try {
+    const busy = addWorktree(root, "busy");
+    const idle = addWorktree(root, "idle");
+    assert.equal(byName(listWorktrees(root))["busy"].removable, true, "precondition: merged, clean, unlocked");
+    const result = sweep(root, { all_merged: true, keep: [busy] });
+    assert.deepEqual(result.removed.map((r) => path.basename(r.path)), ["idle"]);
+    assert.equal(result.skipped.find((s) => s.path === busy)?.reason, "in use by this session");
+    assert.equal(fs.existsSync(busy), true, "a kept worktree is never removed");
+    assert.equal(fs.existsSync(idle), false);
+    assert.equal(git(root, ["branch", "--list", "worktree-busy"]).replace(/^[*+ ]+/, ""), "worktree-busy", "its branch survives too");
+    const named = sweep(root, { paths: [busy], keep: [busy] });
+    assert.deepEqual(named.removed, []);
+    assert.equal(fs.existsSync(busy), true, "keep also wins over an explicit path");
+    assert.equal(sweep(root, { all_merged: true }).removed.length, 1, "without keep it sweeps as before");
+  } finally { cleanup(root); }
+});
+
 test("worktree-sweep: a merged feature/ branch is never swept", () => {
   const root = fixture();
   try {

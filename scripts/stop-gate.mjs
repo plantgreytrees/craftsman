@@ -39,15 +39,24 @@ if (!enabled(cfg, context) || cfg.stopGate?.enabled === false) {
 const sid = sidOf(input);
 const sdir = sessionDir(sid, context);
 
-// Automatic worktree sweep — removal is the hook's job, not the model's
-// memory. Every Stop removes EVERY worktree in the repository that
-// worktree-sweep.mjs proves safe (merged into the base branch, clean, not the
-// session's cwd, not locked by a live session), whoever created it: a skipped
-// repo-exec cleanup, a hand-run `git merge`, an EnterWorktree/background-job
-// worktree whose session has ended. Runs before the loop guard so even a
-// second Stop in the same turn sweeps. Unsafe ones are never forced.
+// Work the session launched and has not seen finish (ARCH-STATE-23): its binding and worktree are in use, not left
+// over, so those two checks, and acceptance and unlanded features below, wait for the first Stop with nothing in flight.
+const DONE = new Set(["completed", "complete", "done", "failed", "error", "killed", "stopped", "cancelled", "canceled"]);
+const inFlight = (Array.isArray(input?.background_tasks) ? input.background_tasks : []).filter((task) => {
+  const kind = String(task?.type ?? task?.kind ?? "").toLowerCase();
+  return /workflow|agent/.test(kind) && !DONE.has(String(task?.status ?? "").toLowerCase());
+});
+let bindingDeferred = false;
+
+// Automatic worktree sweep: every Stop removes every worktree worktree-sweep.mjs proves safe (merged, clean, not the
+// cwd, not locked by a live session), whoever made it, so cleanup never rests on the model's memory. Runs before the
+// loop guard so a second Stop in a turn sweeps too. Unsafe ones are never forced, and a worktree
+// listed in `keep` is skipped, reversibly: it is swept on the first Stop with nothing in flight.
 try {
-  const swept = sweep(context.root, { all_merged: true });
+  // In flight, this session's own worktrees are in use, not left over (ARCH-STATE-23): a fresh branch equals base.
+  const keep = inFlight.length ? readSessionWorktrees(input, context) : [];
+  const swept = sweep(context.root, { all_merged: true, keep });
+  if (keep.length) logEvent({ ev: "stop-worktree-kept", sid, worktrees: keep }, context);
   for (const entry of swept.removed) forgetSessionWorktree(input, entry.path, context);
   if (swept.removed.length) logEvent({ ev: "stop-worktree-swept", sid, worktrees: swept.removed.map((e) => e.path) }, context);
 } catch { /* not a git repo or git absent — nothing to sweep */ }
@@ -91,15 +100,6 @@ if (input.stop_hook_active === true) {
 try { fs.unlinkSync(path.join(sdir, "doc-write")); } catch {}
 
 const problems = [];
-
-// Work the session launched and has not seen finish (ARCH-STATE-23): its binding and worktree are in use, not left
-// over, so those two checks, and acceptance and unlanded features below, wait for the first Stop with nothing in flight.
-const DONE = new Set(["completed", "complete", "done", "failed", "error", "killed", "stopped", "cancelled", "canceled"]);
-const inFlight = (Array.isArray(input?.background_tasks) ? input.background_tasks : []).filter((task) => {
-  const kind = String(task?.type ?? task?.kind ?? "").toLowerCase();
-  return /workflow|agent/.test(kind) && !DONE.has(String(task?.status ?? "").toLowerCase());
-});
-let bindingDeferred = false;
 
 // A session cannot finish while it still owns an implementation worktree.
 // This is session-local: another concurrent session's active binding is not

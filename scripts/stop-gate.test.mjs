@@ -749,6 +749,31 @@ function liveBinding(dir, sid, unit) {
   return { worktree, file: writeBinding(dir, sid, worktree, unit) };
 }
 
+test("stop-gate: with work in flight the sweep keeps the session's ledger worktrees; with nothing in flight it sweeps them as before (ARCH-STATE-23)", async () => {
+  const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
+  pushBase(dir);
+  try {
+    const sid = "inflight-sweep-session";
+    const mine = addMergedWorktree(dir, "starting-unit"); // merged (fresh branch == base), clean, unlocked
+    const theirs = addMergedWorktree(dir, "other-unit"); // not this session's: still swept
+    const sessionDir = path.join(dir, ".git", ".craftsman", "sessions", sid);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "worktrees.json"), JSON.stringify([mine.worktree]));
+    const running = await runStopGate(dir, sid, { background_tasks: RUNNING });
+    assert.doesNotMatch(running.stdout, /"decision":"block"/);
+    assert.equal(fs.existsSync(mine.worktree), true, "an implementer is only starting in it: nothing removed");
+    assert.equal(spawnSync("git", ["rev-parse", "--verify", "--quiet", mine.branch], { cwd: dir }).status, 0, "branch kept too");
+    assert.equal(fs.existsSync(theirs.worktree), false, "another session's merged worktree is still swept");
+    assert.ok(running.events.some((e) => e.ev === "stop-worktree-kept" && e.worktrees.includes(mine.worktree)), "kept paths are logged");
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sessionDir, "worktrees.json"), "utf8")), [mine.worktree], "still in the ledger");
+    const settled = await runStopGate(dir, sid, { background_tasks: [{ id: "w1", type: "local_workflow", status: "completed" }] });
+    assert.equal(fs.existsSync(mine.worktree), false, "nothing in flight: swept exactly as before");
+    assert.ok(settled.events.some((e) => e.ev === "stop-worktree-swept"));
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("stop-gate: a live binding with a workflow in flight does not block, logs stop-binding-deferred, and blocks once nothing is in flight", async () => {
   const dir = makeFixture({ security: { enabled: false }, stopGate: { requireAcceptanceCriteria: false } });
   try {
