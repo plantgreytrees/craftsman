@@ -216,7 +216,12 @@ function refuseDirtyWorktree(input) {
   const w = input.worktree_path;
   if (!w || !fs.existsSync(w)) return;
   let dirty;
-  try { dirty = execFileSync("git", ["-C", w, "status", "--porcelain"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
+  try {
+    // A directory that is not itself a worktree root (a plain dir inside the main checkout) must not read its parent's status.
+    const top = execFileSync("git", ["-C", w, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (fs.realpathSync(top) !== fs.realpathSync(w)) return;
+    dirty = execFileSync("git", ["-C", w, "status", "--porcelain"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {}
   if (dirty === "") return;
   logEvent({ ev: "scope_release_refused", sid: sidOf(input), worktree: w });
   process.stderr.write(dirty === undefined
