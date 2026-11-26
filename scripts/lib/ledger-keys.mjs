@@ -1,4 +1,4 @@
-// Committed-row-key guard shared by publish and sync (ARCH-TRACKER-13).
+// Committed-row-key guard shared by publish and sync (ARCH-TRACKER-19).
 import fs from "node:fs";
 import path from "node:path";
 
@@ -30,8 +30,13 @@ export function archivedPlans(context) {
     let ev;
     try { ev = JSON.parse(lines[i]); } catch { continue; }
     if (ev.ev === "tracker_published") break;
+    // ARCH-TRACKER-19: a purge excuses its own plan only; one without `plan` excuses nothing.
+    if (ev.ev === "tracker_purged") {
+      if (typeof ev.plan === "string" && ev.plan) out.plans.add(slug(ev.plan));
+      continue;
+    }
     if (ev.ev !== "tracker_archived" && ev.ev !== "doc_retired") continue;
-    // ARCH-TRACKER-13: an archive excuses only the plans it names (the plan, its siblings and
+    // ARCH-TRACKER-19: an archive excuses only the plans it names (the plan, its siblings and
     // descendants). Real events always carry `plan`; one without it archived the whole ledger.
     if (typeof ev.plan !== "string" || !ev.plan) { out.all = true; continue; }
     for (const plan of [ev.plan, ...(ev.siblings || []), ...(ev.descendants || [])]) if (typeof plan === "string" && plan) out.plans.add(slug(plan));
@@ -43,7 +48,7 @@ export function archivedPlans(context) {
 export const rowKey = (plan, unit) => `${path.posix.basename(String(plan).split(path.sep).join("/"), ".md")}|${unit}`;
 
 // Committed row keys: from TRACKER.jsonl when it holds rows, else from the committed
-// block's plan|unit pairs (ARCH-TRACKER-13).
+// block's plan|unit pairs (ARCH-TRACKER-19).
 export function committedKeys(doc, committedJsonl) {
   const keys = new Set();
   for (const line of committedJsonl.split("\n")) {

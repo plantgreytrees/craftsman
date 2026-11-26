@@ -172,7 +172,7 @@ test("tracker: sync restores a hand-tampered block and is a no-op when it alread
   assert.equal(trackerDoc(selected), rendered);
 });
 
-test("tracker: sync refuses a render that drops 50 committed rows for 5 local ones (ARCH-TRACKER-13)", () => {
+test("tracker: sync refuses a render that drops 50 committed rows for 5 local ones (ARCH-TRACKER-19)", () => {
   const selected = context();
   const plans = path.join(selected.root, "docs", "plans");
   fs.mkdirSync(plans, { recursive: true });

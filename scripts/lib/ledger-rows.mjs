@@ -1,4 +1,4 @@
-// Pure readers behind `tracker.mjs init --merge|--from-block` (ARCH-TRACKER-13/14): text in, rows out.
+// Pure readers behind `tracker.mjs init --merge|--from-block` (ARCH-TRACKER-19/14): text in, rows out.
 import path from "node:path";
 
 export const planSlug = (plan) => path.posix.basename(String(plan).split(path.sep).join("/"), ".md");
