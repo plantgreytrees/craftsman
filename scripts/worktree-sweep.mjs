@@ -158,14 +158,17 @@ export function listWorktrees(root, { cwd = process.cwd() } = {}) {
 
 // Remove the removable subset of `paths` (or every removable worktree when
 // `all_merged` is set). Never forces past a reason to keep; the branch is
-// deleted only because mergedInto() already proved the base contains it.
-export function sweep(root, { paths = [], all_merged = false, cwd = process.cwd() } = {}) {
+// deleted only because mergedInto() already proved the base contains it. `keep` lists absolute worktree paths the
+// caller is still building in (ARCH-STATE-23); each is skipped with an in-use reason, never removed, whatever else holds.
+export function sweep(root, { paths = [], all_merged = false, cwd = process.cwd(), keep = [] } = {}) {
   const inventory = listWorktrees(root, { cwd });
   const wanted = new Set(paths.map((p) => path.resolve(root, p)));
+  const inUse = new Set(keep.map((p) => path.resolve(root, p)));
   const targets = all_merged ? inventory.filter((e) => e.removable) : inventory.filter((e) => wanted.has(path.resolve(e.path)));
   const removed = [];
   const skipped = [];
   for (const entry of targets) {
+    if (inUse.has(path.resolve(entry.path))) { skipped.push({ path: entry.path, reason: "in use by this session" }); continue; }
     if (!entry.removable) { skipped.push({ path: entry.path, reason: entry.keep_reason || "missing — pruned instead" }); continue; }
     try {
       if (entry.locked) git(root, ["worktree", "unlock", entry.path]);
