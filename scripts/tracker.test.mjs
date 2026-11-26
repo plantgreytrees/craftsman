@@ -1,7 +1,7 @@
 import { afterEach, test } from "node:test";
+import { gitRootedTmp } from "./lib/fixture-root.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -11,7 +11,7 @@ import {
 
 const fixtures = new Set();
 function context() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-"));
+  const root = gitRootedTmp("craftsman-tracker-");
   fixtures.add(root);
   return { id: ".", root, stateDir: path.join(root, ".craftsman") };
 }
@@ -449,7 +449,7 @@ test("tracker: archivePlan writes the full heading when given goal, doc and land
 });
 
 test("tracker: a rows-less hierarchy parent archives with the full heading and lookup round-trips; others still refuse", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-vacuous-"));
+  const root = gitRootedTmp("craftsman-vacuous-");
   try {
     const stateDir = path.join(root, ".craftsman");
     const context = { id: ".", root, stateDir, grantStateDir: stateDir };
@@ -507,7 +507,7 @@ test("tracker: archive sha is appended only when given; headings without it are 
 });
 
 test("tracker: lookup returns archive and restoreCommand with the sha, archive null without it", () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-ws-"));
+  const ws = gitRootedTmp("craftsman-tracker-ws-");
   fixtures.add(ws);
   const real = fs.realpathSync(ws);
   for (const id of ["prod", "archive"]) {
@@ -539,7 +539,7 @@ test("tracker: lookup returns archive and restoreCommand with the sha, archive n
 });
 
 test("tracker: an option-shaped archive value yields no restore command (ARCH-TRACKER-02)", () => {
-  const ws = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-tracker-ws-"));
+  const ws = gitRootedTmp("craftsman-tracker-ws-");
   fixtures.add(ws);
   const real = fs.realpathSync(ws);
   for (const id of ["prod", "archive"]) {

@@ -1,14 +1,14 @@
 import { afterEach, test } from "node:test";
+import { gitRootedTmp } from "./lib/fixture-root.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { transition } from "./tracker.mjs";
 import { buildDigest } from "./digest.mjs";
 
 const fixtures = new Set();
 function context() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-digest-"));
+  const root = gitRootedTmp("craftsman-digest-");
   fixtures.add(root);
   return { id: ".", root, stateDir: path.join(root, ".craftsman") };
 }
