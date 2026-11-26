@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import {
   isMain, atomicWrite, logEvent, projectContext, readStdin, sidOf,
   loadConfig, enabled, acceptancePath, acceptanceCriteria, uncheckedAcceptance,
-  mainCheckoutRoot, loadWorkspaceManifest,
+  mainCheckoutRoot, loadWorkspaceManifest, autoActive,
 } from "./lib/core.mjs";
 import { syncRunManifest } from "./run-manifest.mjs";
 import { parseBlockRows, archivedSlugsOf, planSlug, slugKey } from "./lib/ledger-rows.mjs";
@@ -228,7 +228,7 @@ function archivedSlugs(context) {
   try { return archivedSlugsOf(fs.readFileSync(archivePath(context), "utf8"), parseArchiveHeading); } catch { return new Set(); }
 }
 
-// `init` (ARCH-TRACKER-13/14): rehydrate an absent ledger; `merge` adds jsonl rows of unarchived
+// `init` (ARCH-TRACKER-19/14): rehydrate an absent ledger; `merge` adds jsonl rows of unarchived
 // plans, `from_block` adds the committed block rows; neither overwrites a held key.
 export function initLedger(input, context = projectContext(".")) {
   const file = ledgerPath(context);
@@ -597,6 +597,32 @@ export function archivePlan(input, context = projectContext(".")) {
   return { plan: input.plan, archived, archive: archivePath(context) };
 }
 
+// Drop a plan's rows with no archive heading (ARCH-TRACKER-19): owner-run cleanup of a
+// plan whose doc and archive entry are both gone. Refuses an autonomous caller, an active
+// /auto run, a plan doc or archive heading that still exists, and a plan with no rows.
+export function purgePlan(input, context = projectContext(".")) {
+  if (typeof input.plan !== "string" || !input.plan.trim()) throw new Error("purge needs plan");
+  if (typeof input.reason !== "string" || !input.reason.trim()) throw new Error("purge refused: needs a reason");
+  if (input.autonomous === true) throw new Error("purge refused: autonomous callers may not purge; the owner runs it");
+  if (autoActive(sidOf(input), context)) throw new Error("purge refused: a /craftsman:auto run is active for this session");
+  const slug = planSlug(input.plan);
+  const doc = path.join(mainCheckoutRoot(context.root), "docs", "plans", `${slug}.md`);
+  if (fs.existsSync(doc)) throw new Error(`purge refused: plan doc docs/plans/${slug}.md exists; retire it with archive instead`);
+  if (archivedSlugs(context).has(slug)) throw new Error(`purge refused: TRACKER-archive.md already has a heading for ${slug}`);
+  const file = ledgerPath(context);
+  const units = withLock(file, () => {
+    const events = readEvents(file);
+    const rows = currentState(context).filter((row) => row.plan === input.plan);
+    if (!rows.length) throw new Error(`purge refused: no tracker rows for ${input.plan}`);
+    const kept = events.filter((event) => event.plan !== input.plan);
+    atomicWrite(file, kept.length ? kept.map((e) => JSON.stringify(e)).join("\n") + "\n" : "");
+    return rows.map((row) => row.unit);
+  });
+  logEvent({ ev: "tracker_purged", plan: input.plan, units: units.length, reason: input.reason.trim() }, context);
+  syncQuietly(context);
+  return { plan: input.plan, purged: units };
+}
+
 if (isMain(import.meta.url)) {
   try {
     const input = JSON.parse(await readStdin() || "{}");
@@ -610,9 +636,10 @@ if (isMain(import.meta.url)) {
     else if (input.action === "rollup") output = syncRollups(context);
     else if (input.action === "sync") output = syncTrackerDoc(context);
     else if (input.action === "archive") output = archivePlan(input, context);
+    else if (input.action === "purge") output = purgePlan(input, context);
     else if (input.action === "lookup") output = lookupArchive(input, context);
     else if (input.action === "publish") import("./tracker-publish.mjs").then((m) => process.stdout.write(JSON.stringify(m.publishTracker(input, context)) + "\n")).catch((e) => { process.stderr.write(`craftsman: tracker failed: ${e.message}\n`); process.exitCode = 2; });
-    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, lookup, or publish");
+    else throw new Error("action must be init, transition, status, list, compact, sync, rollup, archive, purge, lookup, or publish");
     if (input.action !== "publish") process.stdout.write(JSON.stringify(output ?? null) + "\n");
     const notice = acceptanceNotice(output?.acceptance);
     if (notice) process.stdout.write(notice + "\n");
