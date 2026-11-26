@@ -76,3 +76,10 @@ Terminology: its "feature" is the hierarchy's feature; the idea doc's "plan doc 
 ARCH-PLAN-07: "how the owner wants Claude to work" lives in three places that already have loading and enforcement. Mechanism goes in config keys, judgement in `.claude/rules/craftsman-loop.md`, and invariants in ARCH rules. Four machine-wide plugin settings sit on top: autonomy level, review depth, model tier and budgets enforcement. A separate profile file was rejected as a fourth place to drift. See [approval](./approval.md).
 
 ARCH-PLAN-05 -> 08: `execution.maxSessions` may be read by the queue script and the dashboard to size lanes (ARCH-VIEWS-07); still never by the mod or a hook. Rejected: keeping it unread, which left the dashboard with one lane.
+
+## Run-outcome amendment (2026-11-26, owner-approved)
+_Source idea: [run-outcome-clarity](../ideas/run-outcome-clarity.md)_
+
+**ARCH-PLAN-09.** plan-index becomes the only reader of `tracker_rows`. It normalises the three forms in use (`TRACKER#id`, `<slug>#id`, bare `id`) to the text after the last `#`, and unions them with the `units:` ids and scope_ids to give each plan's **planned ids**.
+
+Your choice was the union. `tracker_rows` alone mismatched the ledger in 4 of 17 live plans, and `units:` alone misses rows added in later scrutinise rounds; the union cuts unclassified rows from 79 to 53. Over-claiming planned rows only delays `delivered`, which is the safe direction. Legacy plans are never rewritten to backfill the field (ARCH-PLAN-04).

@@ -3,8 +3,8 @@ area: plan
 governs: ["scripts/lib/plan-index.mjs", "commands/plan.md", "commands/orchestrate.md", "commands/instruction.md", "skills/language-aware-planning/references/plan-template.md", "scripts/init.mjs"]
 human: docs/architecture/plan.md
 source: docs/ideas/plan-hierarchy.md
-verified_at: 6489683342b42273e63fef84b3a411d3bf048151
-updated: 2026-11-05
+verified_at: 5f6ac09f9030a3bf7bcb3ef36d831e10a807bafa
+updated: 2026-11-26
 ---
 # ARCH plan — enforced rules
 
@@ -16,3 +16,4 @@ updated: 2026-11-05
 - **ARCH-PLAN-06** [decided] Every command and hook that takes a slug (/plan, /orchestrate, /auto, /instruction, /digest, /focus, session-context, the auto stop rule and runner-grant sizing) resolves it through plan-index; /instruction's goal text names the level, the feature and the wave allowance (ARCH-ENGINE-16) — check: auto-command.test.mjs, core.test.mjs descendant rows — cite: commands/_features.md:29-32
 - **ARCH-PLAN-07** [decided] The owner's workflow profile has three homes and no fourth: mechanism in craftsman.config.json keys, judgement in .claude/rules/craftsman-loop.md (scaffolded empty by /init --update, stack sections carry paths:), invariants in docs/architecture/*.rules.md; four machine-wide plugin userConfig settings (autonomyLevel, reviewDepth, modelTier, budgetsEnforce) set defaults a project config overrides, read only when the platform supports userConfig; learnedRules and plan-memory feed the profile and /architect --backfill promotes it — check: init.test.mjs scaffold, user-config.test.mjs userConfig precedence, wiring.test.mjs no profile file — cite: scripts/lib/user-config.mjs:1-24
 - **ARCH-PLAN-08** [decided] `priority: P0|P1|P2|P3` (default P2) is a plan property inherited from `parent:`; `execution.maxSessions` (default 1) is read only by scripts/lib/next-queue.mjs and scripts/lib/dashboard.mjs to size the session-queue lanes (ARCH-VIEWS-07), never by the mod or any hook — check: plan-index.test.mjs; core.test.mjs maxSessions-reserved-to-queue-readers — cite: scripts/lib/plan-index.mjs:198-200, scripts/lib/next-queue.mjs:67, scripts/lib/dashboard.mjs:84
+- **ARCH-PLAN-09** [decided] plan-index MUST expose each plan's planned row ids: tracker_rows entries normalised to the text after the last `#` (so `TRACKER#id`, `<slug>#id` and a bare id are equal), unioned with the ids and scope_ids in `units:`. No other module parses tracker_rows, and no migration backfills it (ARCH-PLAN-04) — check: plan-index.test.mjs three forms, `[]`, absent field, trailing comment, an id containing `#` — cite: scripts/lib/plan-index.mjs:151
