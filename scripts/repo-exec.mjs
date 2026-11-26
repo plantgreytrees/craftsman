@@ -287,6 +287,26 @@ function prepareFeature(context, input, info) {
   return { ...info, worktree_path: worktree, branch, base_ref: baseRef, reattached, ...(pushed ? {} : { network_pending: true }) };
 }
 
+// An existing path is the unit's worktree only when git registers it (ARCH-LAND-13): a plain directory inside the checkout
+// resolves to the main repository and would otherwise pass for one.
+function isRegisteredWorktree(root, worktree) {
+  const real = fs.realpathSync(worktree);
+  return run(root, ["worktree", "list", "--porcelain"]).split("\n").some((line) => {
+    if (!line.startsWith("worktree ")) return false;
+    try { return fs.realpathSync(line.slice(9)) === real; } catch { return false; }
+  });
+}
+
+// An unregistered directory that is empty or holds only `.craftsman/` state is removed so the worktree can be added in its
+// place; any other is an error naming it, never reused and never deleted.
+function clearUnregistered(worktree) {
+  const stat = fs.lstatSync(worktree);
+  const entries = stat.isDirectory() ? fs.readdirSync(worktree) : null;
+  const stateOnly = entries && entries.every((name) => name === ".craftsman" && fs.lstatSync(path.join(worktree, name)).isDirectory());
+  if (!stateOnly) throw new Error(`path exists but is not a registered worktree: ${worktree}`);
+  fs.rmSync(worktree, { recursive: true });
+}
+
 function prepare(context, input, info) {
   if (input.feature && loadConfig(context).planning?.featureBranches) return prepareFeature(context, input, info);
   const slug = input.slug || input.unit;
@@ -295,6 +315,7 @@ function prepare(context, input, info) {
   const branch = input.branch || `feat/${slug}`;
   const baseRef = info.has_remote ? `origin/${info.base_branch}` : info.base_branch;
   fetchBase(context, context.root, input, info);
+  if (fs.existsSync(worktree) && !isRegisteredWorktree(context.root, worktree)) clearUnregistered(worktree);
   if (fs.existsSync(worktree)) {
     if (!sameRepository(worktree, context.root)) throw new Error(`worktree belongs to another repository: ${worktree}`);
     const current = run(worktree, ["branch", "--show-current"], { allowFailure: true });

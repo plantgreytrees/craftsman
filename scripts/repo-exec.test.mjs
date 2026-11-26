@@ -74,6 +74,77 @@ test("repo-exec: prepares, merges, and cleans a selected repository locally", ()
   } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
 });
 
+// An existing path is the unit's worktree only when git registers it; a plain directory inside the checkout is not.
+const registered = (root, dir) => git(root, ["worktree", "list", "--porcelain"]).split("\n")
+  .some((line) => line === `worktree ${fs.realpathSync(dir)}`);
+
+test("repo-exec: prepare replaces an empty unregistered directory with a registered worktree", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const dir = path.join(context.root, ".worktrees", "empty-dir");
+      fs.mkdirSync(dir, { recursive: true });
+      const prepared = prepare(context, { unit: "empty-dir", slug: "empty-dir" }, info);
+      assert.equal(prepared.reattached, false);
+      assert.equal(registered(context.root, dir), true);
+      assert.equal(git(dir, ["branch", "--show-current"]), "feat/empty-dir");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: prepare replaces a directory holding only .craftsman state with a registered worktree", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const dir = path.join(context.root, ".worktrees", "state-dir");
+      fs.mkdirSync(path.join(dir, ".craftsman", "sessions", "x"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".craftsman", "sessions", "x", "secrets-scanned"), "1\n");
+      const prepared = prepare(context, { unit: "state-dir", slug: "state-dir" }, info);
+      assert.equal(prepared.reattached, false);
+      assert.equal(registered(context.root, dir), true);
+      assert.equal(git(dir, ["branch", "--show-current"]), "feat/state-dir");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: prepare refuses an unregistered directory holding other files and leaves it untouched", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const dir = path.join(context.root, ".worktrees", "occupied");
+      fs.mkdirSync(path.join(dir, ".craftsman"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".craftsman", "state"), "keep\n");
+      fs.writeFileSync(path.join(dir, "notes.txt"), "mine\n");
+      assert.throws(() => prepare(context, { unit: "occupied", slug: "occupied" }, info), (error) => error.message.includes(dir));
+      assert.equal(fs.readFileSync(path.join(dir, "notes.txt"), "utf8"), "mine\n");
+      assert.equal(fs.readFileSync(path.join(dir, ".craftsman", "state"), "utf8"), "keep\n");
+      assert.equal(registered(context.root, dir), false);
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
+test("repo-exec: prepare still reattaches a registered worktree on the right branch", () => {
+  const data = fixture();
+  try {
+    withManifest(data.manifest, () => {
+      const context = projectContext("one");
+      const info = inspectRepo(context);
+      const first = prepare(context, { unit: "again", slug: "again" }, info);
+      fs.writeFileSync(path.join(first.worktree_path, "work.txt"), "wip\n");
+      const second = prepare(context, { unit: "again", slug: "again" }, info);
+      assert.equal(second.reattached, true);
+      assert.equal(second.worktree_path, first.worktree_path);
+      assert.equal(fs.readFileSync(path.join(second.worktree_path, "work.txt"), "utf8"), "wip\n");
+    });
+  } finally { fs.rmSync(data.workspace, { recursive: true, force: true }); }
+});
+
 // The ledger keeps Stop's sweep session-local; cleanup retracts the entry.
 test("repo-exec: prepare records the worktree in the session ledger and cleanup forgets it", () => {
   const data = fixture();
