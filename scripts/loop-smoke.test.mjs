@@ -1,7 +1,7 @@
 import { afterEach, test } from "node:test";
+import { gitRootedTmp } from "./lib/fixture-root.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { applyInitPlan, buildInitPlan } from "./init.mjs";
 import { buildDigest } from "./digest.mjs";
@@ -10,7 +10,7 @@ import { transition } from "./tracker.mjs";
 const fixtures = new Set();
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "craftsman-loop-smoke-"));
+  const root = gitRootedTmp("craftsman-loop-smoke-");
   const selected = { id: ".", root, stateDir: path.join(root, ".craftsman") };
   fixtures.add(root);
   fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }) + "\n");
