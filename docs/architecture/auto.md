@@ -68,3 +68,18 @@ _Verified at `a0cb8a2`. Source: [sandbox-auto-flow](../plans/sandbox-auto-flow.m
   - **Ending:** a craftsman command the user types (never a model Skill call) clears the session marker and the session scope. Unit scopes keyed to a worktree are left alone, and an active `/auto` run keeps everything (ARCH-AUTO-10).
   - **Why:** SessionStart re-armed the marker after compaction from a closing hand-off with nothing left to run, so a later `/architect` couldn't Read anything until it activated a scope. The sweep counted 126 blocks of this kind, mostly `/plan` and `/investigate` edits of `docs/plans/**` after an `/orchestrate`.
   - **Rejected:** limiting the marker to writes, which would let Reads in a unit skip the boundary analysis; leaving it as is.
+
+## Run-outcome amendment (2026-11-26, owner-approved)
+_Source idea: [run-outcome-clarity](../ideas/run-outcome-clarity.md)_
+
+**ARCH-AUTO-12 supersedes ARCH-AUTO-09.** `/auto` now loops until the slug's outcome is `delivered` (ARCH-TRACKER-17), instead of until every row is COMPLETE. Follow-up rows are reported on their own line and never keep the loop going.
+
+Finish, and the `/goal`'s final turn, print the outcome line from `tracker.mjs outcome <slug>` first, so "done" is read from the ledger and not claimed by the model. They then print the remaining rows (ARCH-AUTO-03 still holds).
+
+| decision | why | rejected |
+|---|---|---|
+| Outcome-driven loop end | Your choice. Follow-ups had made finished plans look unfinished forever | Keep every-row COMPLETE and print the outcome only as information |
+| Guards unchanged: autoActive, the force block and runner grants still read every row | Your choice. A reporting change must not loosen a guard | Release guards on `delivered` (a wrong planned set would drop the force block early) |
+| Byte-neutral wording in auto.md, instruction.md and _features.md | Their invocation caps equal their file caps and cannot rise (ARCH-SLIM-17; doc-size-policy.test.mjs) | Trading bytes (refused by the ratchet test) |
+
+Known limit: `/auto` can print `delivered` while the auto marker still holds grants for up to 24 h. The wording change waits until `scrutinise-investigate-auto-flow-friction` is COMPLETE, because it edits the same goal template.

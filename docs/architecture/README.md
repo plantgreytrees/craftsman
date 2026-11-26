@@ -7,7 +7,7 @@ Human index (the loop never reads this file). Each area is a pair:
 - [engine](./engine.md): unit execution engines (workflow by default, sub-agent fallback, root opt-in)
 - [auto](./auto.md): `/craftsman:auto`, the single entry with question phases before and after an unattended run
 - [mod](./mod.md): the launcher, telemetry and progress-band mod
-- [tracker](./tracker.md): the ledger, the derived run manifest, and parked decisions
+- [tracker](./tracker.md): the ledger, the derived run manifest, parked decisions, and each slug's derived run outcome (planned vs follow-up rows)
 - [landing](./landing.md): git authority, multi-repo landing order, and submodule bumps
 - [plan](./plan.md): epic > story > feature > unit, plan-index, rollups, `--level`, waves and progress publishing
 - [docs](./docs.md): plan-doc retirement, `/sync-docs --archive` / `--prune`, and the commit-id archive index
