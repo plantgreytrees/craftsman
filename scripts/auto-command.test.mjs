@@ -85,6 +85,15 @@ test("instruction.md: the goal template keeps the evidence clause, BLOCKED ON US
   assert.match(goal, /Parked rows whose decisions \/craftsman:auto's Phase C asked = met stop\./);
 });
 
+test("instruction.md: the (A) evidence clause counts a rule the owner superseded when its successor HOLDS (followup-auto-flow-friction 5.2)", () => {
+  const goal = template();
+  const clause = /\(A\) print the [^\n]*/.exec(goal);
+  assert.ok(clause, "template has the (A) evidence clause");
+  assert.match(clause[0], /superseded[^;]*successor[^;]*HOLDS/, "a superseded rule is met when its successor HOLDS");
+  assert.match(clause[0], /none VIOLATED/);
+  assert.match(goal, /never edit a rule to fit/);
+});
+
 test("instruction.md: the goal template states the met-stop rule within its first 3 lines (ARCH-AUTO-04)", () => {
   const head = template().split("\n").slice(0, 3).join("\n");
   assert.match(head, /BLOCKED ON USER/);
