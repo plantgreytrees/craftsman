@@ -146,8 +146,8 @@ async function park(result, u) {
   return { ...(parked || result), status: 'PARKED', parked: result.parked }
 }
 
-// Every other unfinished unit is recorded BLOCKED and its claim released,
-// so no row is left IN_PROGRESS behind a returned run.
+// Every other unfinished unit is recorded BLOCKED, its claim and scope released
+// (found by unit when no worktree_path came back), so nothing outlives a run.
 async function block(result, u) {
   const blocked = await run('block', u, 'Land',
     `reason: ${result.evidence}\nworktree_path: ${result.worktree_path || ''}`)

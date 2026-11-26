@@ -136,7 +136,7 @@ if (isMain(import.meta.url)) {
       process.exit(0);
     }
     if (input.action === "release") {
-      let binding;
+      let binding; input.worktree_path ||= unitWorktree(input); // a stopped unit may report no worktree_path (F-run1)
       try { binding = JSON.parse(fs.readFileSync(worktreeBindingPath(input, { ...selectedContext, worktreePath: input.worktree_path }), "utf8")); } catch {}
       if (binding && binding.session_id !== sidOf(input)) throw new Error("worktree is owned by another session");
       refuseDirtyWorktree(input); clearWorktreeBinding(input, selectedContext);
@@ -228,4 +228,17 @@ function refuseDirtyWorktree(input) {
     ? `craftsman: scope release refused: ${w} is not a readable git worktree — remove it, release again, then run \`git worktree prune\`.\n`
     : `craftsman: scope release refused: ${w} has uncommitted changes — commit them (wip: when parking or blocking), then release again.\n`);
   process.exit(2);
+}
+
+// The worktree a unit's scope was activated for, found by plan and unit in the session's manifests, so a unit that
+// stopped without reporting its worktree is still released. The session's own scope (no worktree) is never matched.
+function unitWorktree(input) {
+  if (!input.plan || !input.unit) return undefined;
+  try {
+    for (const name of fs.readdirSync(rootSessionDir(input)).filter((n) => SCOPE_NAME.test(n)).sort()) {
+      const scope = JSON.parse(fs.readFileSync(path.join(rootSessionDir(input), name), "utf8"));
+      if (scope.worktree_path && scope.unit === input.unit && scope.plan === input.plan && (scope.project || ".") === (input.project || ".")) return scope.worktree_path;
+    }
+  } catch {}
+  return undefined;
 }
