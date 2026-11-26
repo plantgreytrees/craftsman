@@ -406,3 +406,26 @@ test("the profile-file check fails on a temp repo holding one", () => {
   fs.rmSync(dir, { recursive: true, force: true });
   assert.equal(hits.length, 4);
 });
+
+// followup-auto-flow-friction F-run1: inside a workflow every unit shares the root session id, so a stopped unit's scope
+// must be released by the same calls the engine's briefs feed. A scope activated without its worktree_path is the session
+// scope every unit shares; a stop path with no release leaves the unit's scope to the next unit (ARCH-STATE-03).
+test("wiring: the unit-runner protocol and the engine use the same scope activation and release calls (F-run1)", () => {
+  const runner = read("agents/unit-runner.md");
+  const engine = read("workflows/run.js");
+  const calls = runner.split("\n").flatMap((line) => line.match(/`S scope` `\{[^`]*\}`/g) || []);
+  const activation = calls.filter((c) => !/action:/.test(c));
+  assert.equal(activation.length, 1, "one activation call");
+  assert.match(activation[0], /\{session_id, plan, unit, project, worktree_path, arch, scope\}/, "activation carries the worktree_path");
+  const release = calls.filter((c) => /action:"release"/.test(c));
+  assert.equal(release.length, 1, "one release call, named by every stop path");
+  assert.match(release[0], /\{action:"release", session_id, project, plan, unit, worktree_path\}/, "release names the unit and its worktree");
+  const section = (name) => runner.split(/^## /m).find((s) => s.startsWith(name)) || "";
+  for (const role of ["land", "block"]) assert.match(section(role), /as park step 2/i, `${role} releases as park does`);
+  // the engine feeds every stopping role the worktree_path and, through the common brief, plan and unit
+  assert.match(engine, /`plan: \$\{args\.plan\}`/);
+  assert.match(engine, /`unit: \$\{u\.unit\}`/);
+  for (const role of ["park", "block"]) assert.match(engine, new RegExp(`run\\('${role}', u, 'Land',\\s*\`reason: \\$\\{result\\.evidence\\}\\\\nworktree_path: \\$\\{result\\.worktree_path \\|\\| ''\\}`), `${role} brief names the worktree_path`);
+  assert.match(engine, /run\('land', u, 'Land', `worktree_path: \$\{out\.worktree_path\}`\)/);
+  assert.match(engine, /block\(dead\(u, 'pipeline'\), u\)/, "a runner that returned nothing still reaches block");
+});

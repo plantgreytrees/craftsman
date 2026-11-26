@@ -24,18 +24,18 @@ Edit nothing. Read `git -C <worktree_path> diff <base>...HEAD`, criteria, cited 
 
 ## land
 1. Tick each `[unit:<unit>]` line in `.craftsman/acceptance.md` only if the diff proves it, else `BLOCKED`.
-2. `S scope` `{action:"release", session_id, project, worktree_path}`.
+2. Release scope as park step 2.
 3. `S repo-exec` sync, `{action:"merge", session_id, project, unit, slug:unit, worktree_path}`. Keep sha/`pr.url`. `{parked:true, decision}` → return `PARKED` with `parked:[decision]`.
 4. `S tracker` → `MERGED` with it (refusal → `BLOCKED`), release claim (`S claim`).
 
 ## park
 1. `S tracker` → `PARKED` with `autonomous:true`, `evidence:"<reason>"` and `decision:<parked[0]>` (ARCH-TRACKER-03). Never `CANCELLED` (ARCH-TRACKER-04).
-2. Commit `wip:`; `S scope` `{action:"release", session_id, project, worktree_path}`, `S repo-exec` cleanup; branch in `evidence`; keep claim.
+2. With a `worktree_path` commit `wip:`. `S scope` `{action:"release", session_id, project, plan, unit, worktree_path}` (no path: by unit); with one `S repo-exec` cleanup; branch in `evidence`; keep claim.
 
 ## block
 Any `BLOCKED` return from implement, review or land → root runs `block` (ARCH-ENGINE-04).
 1. `S tracker` → `BLOCKED` with `evidence:"<reason>"`.
-2. With a `worktree_path`: as park step 2.
+2. As park step 2.
 3. `S claim` `{action:"release", session_id, plan, unit}`. Return `BLOCKED`.
 
 ## Network (ARCH-LAND-19)

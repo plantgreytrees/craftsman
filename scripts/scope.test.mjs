@@ -347,3 +347,57 @@ test("scope: release proceeds for a plain directory inside a dirty main checkout
     assert.match(nongit.stderr, /is not a readable git worktree/);
   } finally { fs.rmSync(outside, { recursive: true, force: true }); fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// followup-auto-flow-friction F-run1 (ARCH-STATE-03): inside a workflow every unit shares the root session id, so a unit
+// that stops (park, block, a runner that returned nothing) must release its own scope or the next independent unit
+// inherits it: two unit scopes and no session scope read as ambiguous, and a commit is refused as "outside the active worktree".
+// A stop result may carry no worktree_path, so release names the unit (plan, unit) and finds its worktree in its manifest.
+const stopPaths = {
+  "park with a known worktree": (tree) => ({ worktree_path: tree }),
+  "park whose result carries no worktree_path": () => ({}),
+  "block whose result carries no worktree_path": () => ({}),
+  "runner that returned nothing": () => ({}),
+};
+for (const [name, named] of Object.entries(stopPaths)) {
+  test(`scope: F-run1 a unit stopped by ${name} leaves no scope for the next independent unit`, () => {
+    const sid = `frun1-${Object.keys(stopPaths).indexOf(name)}`;
+    const { root, trees: [a, b] } = repoWithWorktrees("s1", "s4");
+    const dir = path.join(root, ".craftsman", "sessions", sid);
+    const scopes = () => fs.readdirSync(dir).filter((n) => /^scope(@[\w-]+)?(-[0-9a-f]{16})?\.json$/.test(n)).map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")).unit);
+    try {
+      assert.equal(hook("scope.mjs", root, root, { action: "require", session_id: sid, project: ".", worktree_path: a }).status, 0);
+      assert.equal(hook("scope.mjs", root, root, manifest(sid, "s1", ["a.txt"], a)).status, 0);
+      const released = hook("scope.mjs", root, root, { action: "release", session_id: sid, project: ".", plan: "docs/plans/p.md", unit: "s1", ...named(a) });
+      assert.equal(released.status, 0, released.stderr);
+      assert.deepEqual(scopes(), [], "the stopped unit's scope is gone before the next dispatch");
+      assert.equal(hook("scope.mjs", root, root, { action: "require", session_id: sid, project: ".", worktree_path: b }).status, 0);
+      assert.equal(hook("scope.mjs", root, root, manifest(sid, "s4", ["b.txt"], b)).status, 0);
+      assert.deepEqual(scopes(), ["s4"]);
+      const commit = hook("pre-guard.mjs", root, root, { session_id: sid, tool_name: "Bash", tool_input: { command: `git -C ${b} commit -m x` } });
+      assert.equal(commit.status, 0, `s4's commit is not judged against s1: ${commit.stderr}`);
+      assert.equal(hook("pre-guard.mjs", root, root, edit(sid, path.join(b, "b.txt"))).status, 0);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+test("scope: release by unit keeps another unit's scope and the session scope, and a dirty worktree still refuses", () => {
+  const { root, trees: [a, b] } = repoWithWorktrees("s1", "s4");
+  const dir = path.join(root, ".craftsman", "sessions", "frun1-by-unit");
+  const sid = "frun1-by-unit";
+  const live = () => fs.readdirSync(dir).filter((n) => /^scope(@[\w-]+)?(-[0-9a-f]{16})?\.json$/.test(n)).map((n) => JSON.parse(fs.readFileSync(path.join(dir, n), "utf8")).unit).sort();
+  const release = (unit) => hook("scope.mjs", root, root, { action: "release", session_id: sid, project: ".", plan: "docs/plans/p.md", unit });
+  try {
+    for (const [tree, unit] of [[a, "s1"], [b, "s4"]]) assert.equal(hook("scope.mjs", tree, root, manifest(sid, unit, [`${unit}.txt`], tree)).status, 0);
+    assert.equal(hook("scope.mjs", root, root, manifest(sid, "s1", ["s.txt"])).status, 0, "the session's own scope, same unit id");
+    fs.writeFileSync(path.join(a, "new.txt"), "x\n");
+    const refused = release("s1");
+    assert.equal(refused.status, 2, "uncommitted work is still not dropped");
+    assert.ok(refused.stderr.includes(a) && /uncommitted changes/.test(refused.stderr), refused.stderr);
+    assert.deepEqual(live(), ["s1", "s1", "s4"]);
+    fs.rmSync(path.join(a, "new.txt"));
+    assert.equal(release("s1").status, 0);
+    assert.deepEqual(live(), ["s1", "s4"], "s1's worktree scope only; s4 and the session scope stay");
+    assert.equal(release("nobody").status, 0, "a unit with no scope is a no-op");
+    assert.deepEqual(live(), ["s1", "s4"]);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
